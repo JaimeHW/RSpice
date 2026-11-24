@@ -15,7 +15,7 @@ pub use document::{
     NetlistDocument, NetlistDocumentId, SourceLocator, ValidationDiagnostic, content_digest,
 };
 pub use outline::{
-    NetlistSourceIndex, OutlineEntry, OutlineEntryKind, OutlineRow, OutlineSection,
+    NetlistSourceIndex, OutlineEntries, OutlineEntry, OutlineEntryKind, OutlineRow, OutlineSection,
     OutlineSectionKind, rows_by_scope,
 };
 pub use outline::{

@@ -93,9 +93,9 @@ pub use netlist_document::{
     BoundedFindMatches, DependencyMetadata, DependencyResolution, DependencySourceAuthority,
     DiagnosticSeverity, FindDirection, FindError, FindMatch, FindOptions, GeneratedArtifact,
     GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput, NetlistDocument,
-    NetlistDocumentId, NetlistSourceIndex, OutlineEntry, OutlineEntryKind, OutlineRow,
-    OutlineSection, OutlineSectionKind, SourceLocator, ValidationDiagnostic, content_digest,
-    find_all_in_source_bounded, replace_source_ranges, rows_by_scope,
+    NetlistDocumentId, NetlistSourceIndex, OutlineEntries, OutlineEntry, OutlineEntryKind,
+    OutlineRow, OutlineSection, OutlineSectionKind, SourceLocator, ValidationDiagnostic,
+    content_digest, find_all_in_source_bounded, replace_source_ranges, rows_by_scope,
 };
 pub use netlist_document::{
     card_tokens, find_all_in_source_range_bounded_filter, parse_include_directives,

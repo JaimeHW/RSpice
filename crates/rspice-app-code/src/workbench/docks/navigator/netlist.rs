@@ -141,7 +141,6 @@ pub(in crate::workbench) fn netlist(
         } else {
             index
                 .symbols()
-                .iter()
                 .enumerate()
                 .filter_map(|(position, symbol)| {
                     (symbol.name.to_ascii_lowercase().contains(&symbol_query)
@@ -162,8 +161,6 @@ pub(in crate::workbench) fn netlist(
         } else {
             index
                 .references()
-                .iter()
-                .enumerate()
                 .filter_map(|(position, reference)| {
                     reference
                         .name
@@ -174,8 +171,9 @@ pub(in crate::workbench) fn netlist(
                 .collect::<Vec<_>>()
         }
     });
-    let matching_hierarchy_indices = project_index.as_ref().map(|index| {
-        index
+    let tables = project_index.as_ref().map(|index| index.tables());
+    let matching_hierarchy_indices = tables.as_ref().map(|tables| {
+        tables
             .hierarchy()
             .iter()
             .enumerate()
@@ -395,7 +393,10 @@ pub(in crate::workbench) fn netlist(
                         },
                         &[("count", &hierarchy_count.to_string())],
                     );
-                    let hierarchy_meta = if project_index.hierarchy_truncated() {
+                    let hierarchy_meta = if tables
+                        .as_ref()
+                        .is_some_and(|tables| tables.hierarchy_truncated())
+                    {
                         format!(
                             "{} · {}",
                             count_text,
@@ -413,7 +414,7 @@ pub(in crate::workbench) fn netlist(
                         let Some(instance) = matching_hierarchy_indices
                             .as_ref()
                             .and_then(|matching| matching.get(position))
-                            .and_then(|index| project_index.hierarchy().get(*index))
+                            .and_then(|index| tables.as_ref()?.hierarchy().get(*index))
                         else {
                             return;
                         };
@@ -451,7 +452,7 @@ pub(in crate::workbench) fn netlist(
                 }
                 let symbol_count = matching_symbol_indices.as_ref().map_or(0, |matching| {
                     if symbol_query.is_empty() {
-                        project_index.symbols().len()
+                        project_index.symbol_count()
                     } else {
                         matching.len()
                     }
@@ -486,7 +487,7 @@ pub(in crate::workbench) fn netlist(
                                 .copied()
                                 .unwrap_or(position)
                         };
-                        let Some(symbol) = project_index.symbols().get(symbol_index) else {
+                        let Some(symbol) = project_index.symbol(symbol_index) else {
                             return;
                         };
                         let meta = format!(
@@ -534,7 +535,7 @@ pub(in crate::workbench) fn netlist(
                         let Some(reference) = matching_reference_indices
                             .as_ref()
                             .and_then(|matching| matching.get(position))
-                            .and_then(|index| project_index.references().get(*index))
+                            .and_then(|index| project_index.reference(*index))
                         else {
                             return;
                         };
@@ -1671,13 +1672,13 @@ impl NetlistOutlineGroup {
         match slot {
             OutlineRow::Declaration { entry, nested } => Some(NetlistOutlineChild {
                 nested,
-                ..outline_child(self.section, entries.get(entry)?)
+                ..outline_child(self.section, &entries.get(entry)?)
             }),
             OutlineRow::Subcircuit(entry) => {
                 let subcircuit = entries.get(entry)?;
                 Some(NetlistOutlineChild {
-                    label: subcircuit.name().to_owned(),
-                    meta: Some(subcircuit.keyword().to_owned()),
+                    label: subcircuit.name().into_owned(),
+                    meta: Some(subcircuit.keyword().into_owned()),
                     line: subcircuit.line(),
                     end_line: subcircuit.end_line(),
                     nested: false,
@@ -1810,7 +1811,7 @@ impl NetlistNavigatorProjection {
         let section_of = |kind: OutlineSectionKind| -> &[usize] {
             section(kind).map_or(&[][..], OutlineSection::entry_indices)
         };
-        let resolved = |indices: &[usize]| -> Vec<&OutlineEntry> {
+        let resolved = |indices: &[usize]| -> Vec<OutlineEntry<'_>> {
             indices
                 .iter()
                 .filter_map(|index| entries.get(*index))
@@ -1850,7 +1851,7 @@ impl NetlistNavigatorProjection {
             .into_iter()
             .filter(|entry| query.matches_entry(entry))
             .map(|entry| {
-                let label = include_entry_label(entry.label());
+                let label = include_entry_label(&entry.label());
                 let facts = include_states.iter().find(|facts| {
                     facts.locator == label && facts.line.is_none_or(|line| line == entry.line())
                 });
@@ -1880,7 +1881,7 @@ impl NetlistNavigatorProjection {
                 // says which one this deck takes.
                 let sections = (!facts.sections.is_empty()).then(|| IncludeSectionChoice {
                     line: entry.line(),
-                    selected: lib_sections::selected(index.card(entry.line())),
+                    selected: lib_sections::selected(&index.card(entry.line())),
                     available: facts.sections.clone(),
                 });
                 // The dock is 312 px wide and the include's own name is what
@@ -1972,7 +1973,7 @@ impl NetlistNavigatorProjection {
 fn outline_group(
     spec: &GroupSpec,
     section: &OutlineSection,
-    entries: &[OutlineEntry],
+    entries: crate::state::OutlineEntries<'_>,
     query: &NetlistNavigatorQuery,
     collapsed: &BTreeSet<OutlineSectionKind>,
     messages: MessageCatalog,
@@ -2002,7 +2003,7 @@ fn outline_group(
         let kept = declared
             .iter()
             .copied()
-            .filter(|position| entry_of(position).is_some_and(|entry| query.matches_entry(entry)))
+            .filter(|position| entry_of(position).is_some_and(|entry| query.matches_entry(&entry)))
             .collect::<Vec<_>>();
         let scoped = crate::state::rows_by_scope(&kept, entries).map(std::sync::Arc::from);
         (std::sync::Arc::from(kept), scoped)
@@ -2023,7 +2024,7 @@ fn outline_group(
             tooltip: None,
             shadowed: false,
             sections: None,
-            target_line: target.map(OutlineEntry::line),
+            target_line: target.map(|entry| entry.line()),
             // Containment is answered by the group from its own entries. A
             // span per declaration here would allocate the whole deck once a
             // frame to settle one question about one line.
@@ -2041,9 +2042,12 @@ fn outline_group(
 fn outline_child(section: OutlineSectionKind, entry: &OutlineEntry) -> NetlistOutlineChild {
     let (label, meta) = match section {
         OutlineSectionKind::Source | OutlineSectionKind::Dependencies => {
-            (entry.label().to_owned(), None)
+            (entry.label().into_owned(), None)
         }
-        _ => (entry.name().to_owned(), entry.detail().map(str::to_owned)),
+        _ => (
+            entry.name().into_owned(),
+            entry.detail().map(std::borrow::Cow::into_owned),
+        ),
     };
     NetlistOutlineChild {
         label,
@@ -2085,15 +2089,15 @@ impl NetlistNavigatorQuery {
             || self
                 .line
                 .is_some_and(|line| (entry.line()..=entry.end_line()).contains(&line))
-            || contains_folded(entry.label(), &self.text)
+            || contains_folded(&entry.label(), &self.text)
     }
 
     fn matches_group<'a>(
         &self,
         label: &str,
-        entries: impl IntoIterator<Item = &'a OutlineEntry>,
+        entries: impl IntoIterator<Item = OutlineEntry<'a>>,
     ) -> bool {
-        self.matches_text(label) || entries.into_iter().any(|entry| self.matches_entry(entry))
+        self.matches_text(label) || entries.into_iter().any(|entry| self.matches_entry(&entry))
     }
 
     fn matches_diff_hunk(&self, hunk: &DiffHunk) -> bool {
@@ -2125,8 +2129,8 @@ fn contains_folded(text: &str, needle: &str) -> bool {
 pub(super) fn navigator_root_row(
     kind: NetlistNavigatorRowKind,
     label: &str,
-    target: Option<&OutlineEntry>,
-    entries: &[&OutlineEntry],
+    target: Option<OutlineEntry<'_>>,
+    entries: &[OutlineEntry<'_>],
 ) -> NetlistNavigatorRow {
     NetlistNavigatorRow {
         meta: None,
@@ -2138,8 +2142,8 @@ pub(super) fn navigator_group_row(
     kind: NetlistNavigatorRowKind,
     label: &str,
     meta: String,
-    target: Option<&OutlineEntry>,
-    entries: &[&OutlineEntry],
+    target: Option<OutlineEntry<'_>>,
+    entries: &[OutlineEntry<'_>],
 ) -> NetlistNavigatorRow {
     NetlistNavigatorRow {
         kind,
@@ -2148,7 +2152,7 @@ pub(super) fn navigator_group_row(
         tooltip: None,
         shadowed: false,
         sections: None,
-        target_line: target.map(OutlineEntry::line),
+        target_line: target.map(|entry| entry.line()),
         source_ranges: if entries.is_empty() {
             target
                 .map(|entry| vec![(entry.line(), entry.end_line())])

@@ -102,7 +102,7 @@ pub fn setup_cards(index: &NetlistSourceIndex) -> Vec<SetupCard> {
             continue;
         }
         let lines = (entry.line()..=entry.end_line().max(entry.line()))
-            .map(|line| printable_card(index.card(line)))
+            .map(|line| printable_card(&index.card(line)))
             .collect();
         cards.push(SetupCard {
             section,

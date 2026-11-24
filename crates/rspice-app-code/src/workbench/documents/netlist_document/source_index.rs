@@ -47,16 +47,70 @@ fn latest_in(
         |built: &(Option<ShownSource>, u64)| built.1 == revision && built.0.as_ref() == shown;
     if slot.wants(is_current) {
         let (read, from) = (source.clone(), shown.cloned());
+        // The outline of the same source a moment ago, read again only where
+        // the edit since touched it.
+        let last = slot
+            .built()
+            .filter(|(built, _)| built.0.as_ref() == shown)
+            .map(|(_, index)| index);
         let wake = ctx.clone();
         slot.start(
             (shown.cloned(), revision),
-            move || NetlistSourceIndex::parse_as(&read, kind_of(from.as_ref(), &read)),
+            move || match last {
+                Some(last) => edited_from(&last, from.as_ref(), read),
+                None => index_of(from.as_ref(), read),
+            },
             move || wake.request_repaint(),
         );
     }
     let (key, index) = slot.built()?;
     let current = is_current(key);
     (current || typed).then_some((index, current))
+}
+
+/// The index of `text` shown from `shown`, which shares the text.
+fn index_of(shown: Option<&ShownSource>, text: RevisedText) -> NetlistSourceIndex {
+    let kind = kind_of(shown, &text);
+    NetlistSourceIndex::of_text(Arc::new(text), kind)
+}
+
+/// The index of `text`, built from `last`, the index of the same source
+/// before an edit: the part the edit touched read again, the rest shared.
+/// An edit that may change how the whole text is read, SPICE or Spectre,
+/// reads it all.
+fn edited_from(
+    last: &NetlistSourceIndex,
+    shown: Option<&ShownSource>,
+    text: RevisedText,
+) -> NetlistSourceIndex {
+    use rspice_core::netlist::DeckTextChange;
+    let Some(before) = last.deck().text(0) else {
+        return index_of(shown, text);
+    };
+    let Some(change) = DeckTextChange::between(&**before, &text) else {
+        return NetlistSourceIndex::clone(last);
+    };
+    // The lines the edit spans, before it and after it.
+    let deck = last.deck();
+    let line_span = |byte: usize| {
+        deck.line_of(0, byte)
+            .and_then(|line| deck.line_span(0, line))
+    };
+    let before_lines = line_span(change.start)
+        .zip(line_span(change.old_end))
+        .map_or_else(String::new, |(first, end)| {
+            before.slice(first.start..end.end).to_ascii_lowercase()
+        });
+    let after_lines = text
+        .slice(text.line_start_at(change.start)..text.line_end_at(change.new_end))
+        .to_ascii_lowercase();
+    if [before_lines, after_lines]
+        .iter()
+        .any(|written| written.contains("/*") || written.contains("*/") || written.contains("lang"))
+    {
+        return index_of(shown, text);
+    }
+    last.edited(change, Arc::new(text))
 }
 
 fn now_in(
@@ -66,12 +120,7 @@ fn now_in(
 ) -> Arc<NetlistSourceIndex> {
     let revision = source.revision();
     slot.wait_for(|built| built.1 == revision && built.0.as_ref() == shown)
-        .unwrap_or_else(|| {
-            slot.store(
-                (shown.cloned(), revision),
-                NetlistSourceIndex::parse_as(source, kind_of(shown, source)),
-            )
-        })
+        .unwrap_or_else(|| slot.store((shown.cloned(), revision), index_of(shown, source.clone())))
 }
 
 /// The file the deck is read from: the open deck's, else the project's first

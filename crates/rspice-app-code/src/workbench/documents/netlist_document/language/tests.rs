@@ -120,8 +120,8 @@ fn verilog_a_sources_stay_out_of_the_spice_project_index() {
 
     let index = NetlistProjectIndex::build(NetlistRoot::Generated, &document_texts(&document));
 
-    let instances = index
-        .hierarchy()
+    let hierarchy = index.hierarchy();
+    let instances = hierarchy
         .iter()
         .map(|instance| instance.path.as_str())
         .collect::<Vec<_>>();
@@ -134,7 +134,6 @@ fn verilog_a_sources_stay_out_of_the_spice_project_index() {
     assert!(
         index
             .symbols()
-            .iter()
             .all(|symbol| !symbol.definition.display_name.ends_with(".va")),
         "find-symbol must not reach Verilog-A text"
     );
@@ -202,41 +201,44 @@ S1 a b c d smod\n\
 
 #[test]
 fn expanded_hierarchy_stops_at_recursive_subcircuit_edges() {
-    let location = |line| ProjectSourceLocation {
-        root: NetlistRoot::Generated,
-        dependency_identity: None,
-        display_name: "recursive.sp".to_owned(),
-        line,
-        column: 1,
-    };
-    let mut index = NetlistProjectIndex::default();
-    index.raw_hierarchy = vec![
-        RawHierarchyInstance {
-            parent: None,
-            instance: "XTOP".to_owned(),
-            target: "A".to_owned(),
-            location: location(1),
-        },
-        RawHierarchyInstance {
-            parent: Some("A".to_owned()),
-            instance: "XB".to_owned(),
-            target: "B".to_owned(),
-            location: location(3),
-        },
-        RawHierarchyInstance {
-            parent: Some("B".to_owned()),
-            instance: "XA".to_owned(),
-            target: "A".to_owned(),
-            location: location(6),
-        },
-    ];
+    let source = "recursive\n\
+XTOP n A\n\
+.subckt A p\n\
+XB p B\n\
+.ends A\n\
+.subckt B p\n\
+XA p A\n\
+.ends B\n\
+.end\n";
+    let provenance = crate::state::GeneratedProvenance::try_new(
+        "language-recursive-hierarchy-test",
+        crate::state::GenerationInput::new(
+            crate::product::ObjectRevision::INITIAL,
+            crate::state::content_digest("language-recursive-hierarchy-input"),
+        ),
+    )
+    .unwrap();
+    let artifact = crate::state::GeneratedArtifact::try_from_utf8(
+        provenance,
+        source.as_bytes().to_vec(),
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let document = crate::state::NetlistDocument::from_generated(
+        crate::state::NetlistDocumentId::new(),
+        artifact,
+    )
+    .unwrap();
 
-    index.expand_hierarchy();
+    let index = NetlistProjectIndex::build(NetlistRoot::Generated, &document_texts(&document));
 
-    assert_eq!(index.hierarchy().len(), 3);
-    assert_eq!(index.hierarchy()[2].path, "XTOP/XB/XA");
-    assert!(index.hierarchy()[2].recursive);
-    assert!(!index.hierarchy_truncated());
+    let hierarchy = index.hierarchy();
+    assert_eq!(hierarchy.len(), 3);
+    assert_eq!(hierarchy[2].path, "XTOP/XB/XA");
+    assert_eq!(hierarchy[2].location.line, 7);
+    assert!(hierarchy[2].recursive);
+    assert!(!index.tables().hierarchy_truncated());
 }
 
 #[test]
@@ -277,7 +279,7 @@ B1 y 0 V={shape(V(out))*gain}\n\
         index.references_named("base").len(),
         1,
         "indexed references were {:?}",
-        index.references()
+        index.references().collect::<Vec<_>>()
     );
     assert_eq!(index.references_named("gain").len(), 3);
     assert_eq!(index.references_named("shape").len(), 1);

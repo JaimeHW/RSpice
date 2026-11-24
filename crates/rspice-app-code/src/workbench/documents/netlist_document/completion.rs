@@ -68,7 +68,7 @@ struct Offered {
 /// The nodes offered on a pin: the names the caret's scope sees that start
 /// with the token, less the token itself and the ports offered before them.
 struct NodeRows {
-    project: std::sync::Arc<super::language::NetlistProjectIndex>,
+    project: std::sync::Arc<super::language::ProjectTables>,
     scope: usize,
     /// The names' positions in the scope's, as the index orders them.
     starting: std::ops::Range<usize>,
@@ -97,10 +97,10 @@ impl NodeRows {
         let name = self.project.node_at(self.scope, position)?;
         Some(Candidate {
             kind: self.kind.clone(),
-            label: name.to_owned(),
+            label: name.to_string(),
             detail: self.detail.clone(),
             doc: self.doc.clone(),
-            insert: name.to_owned(),
+            insert: name.into_owned(),
         })
     }
 }
@@ -561,7 +561,7 @@ fn pin_help(
             .filter(|subcircuit| {
                 words
                     .iter()
-                    .any(|word| word.eq_ignore_ascii_case(&subcircuit.name))
+                    .any(|word| word.eq_ignore_ascii_case(&subcircuit.name()))
             })
             .copied()
             .collect::<Vec<_>>();
@@ -569,19 +569,22 @@ fn pin_help(
         let ports = masters
             .iter()
             .filter_map(|master| {
-                let port = project.ports_of(master).get(written)?;
-                Some((
-                    master.name.clone(),
-                    port.clone(),
-                    project.ports_of(master).len(),
-                ))
+                let ports = project.ports_of(master);
+                let port = ports.get(written)?.to_string();
+                Some((master.name().into_owned(), port, ports.len()))
             })
             .collect::<Vec<_>>();
         let (master, pin, _) = ports.first().cloned()?;
         let order = masters
             .iter()
-            .find(|candidate| candidate.name == master)
-            .map(|master| project.ports_of(master).to_vec())
+            .find(|candidate| *candidate.name() == *master)
+            .map(|master| {
+                project
+                    .ports_of(master)
+                    .into_iter()
+                    .map(std::borrow::Cow::into_owned)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         return Some(PinHelp {
             order: format!("{head} → {master}: {}", order.join(" ")),
@@ -745,7 +748,7 @@ fn parameter_site(
             words[1..].iter().any(|word| {
                 models
                     .iter()
-                    .any(|model| model.name.eq_ignore_ascii_case(word))
+                    .any(|model| model.name().eq_ignore_ascii_case(word))
             })
         })
     };
@@ -1043,6 +1046,7 @@ fn collect_candidates(
         // names: not the token itself, nor a port offered above.
         nodes = state.project_index.last_built().map(|project| {
             let scope = project.scope_at(state.front.include(), state.cursor_line + 1);
+            let project = project.tables();
             let starting = project.nodes_starting(scope, &lower);
             let mut skipped = seen
                 .iter()
@@ -1161,17 +1165,18 @@ fn collect_candidates(
         .as_ref()
         .map(|index| index.parameters_visible_at(state.front.include(), state.cursor_line + 1));
     for parameter in parameters.into_iter().flatten() {
-        let name_lower = parameter.name.to_ascii_lowercase();
+        let name = parameter.name();
+        let name_lower = name.to_ascii_lowercase();
         if name_lower.starts_with(&lower) && name_lower != lower {
             out.push(Candidate {
                 kind: messages.text(MessageId::NetlistCompletionParameter),
-                label: parameter.name.clone(),
-                detail: parameter.detail.clone(),
+                label: name.to_string(),
+                detail: parameter.detail().into_owned(),
                 doc: messages.format(
                     MessageId::NetlistCompletionParameterNote,
-                    &[("name", &parameter.name)],
+                    &[("name", &name)],
                 ),
-                insert: parameter.name.clone(),
+                insert: name.into_owned(),
             });
         }
     }
@@ -1627,15 +1632,13 @@ mod tests {
             let index = project.deck();
             let mut read = index
                 .nodes()
-                .iter()
                 .filter(|node| {
-                    node.scope == scope
-                        || index.cards()[node.card].kind
-                            == rspice_core::netlist::DeckCardKind::Global
-                        || node.name == "0"
+                    node.scope() == scope
+                        || node.card_kind() == rspice_core::netlist::DeckCardKind::Global
+                        || node.name() == "0"
                 })
-                .filter(|node| seen.insert(node.name.to_ascii_lowercase()))
-                .map(|node| node.name.clone())
+                .filter(|node| seen.insert(node.name().to_ascii_lowercase()))
+                .map(|node| node.name().into_owned())
                 .filter(|name| {
                     let name = name.to_ascii_lowercase();
                     name.starts_with(&lower) && name != lower

@@ -102,33 +102,31 @@ fn the_name_on_a_line_is_the_one_every_name_read_finds() {
         };
         if let Some(node) = deck_index
             .nodes()
-            .iter()
-            .find(|node| touches(&node.location, &node.name))
+            .find(|node| touches(&node.location(), &node.name()))
         {
             return Some(CaretName::Node {
-                name: node.name.clone(),
-                top_level: node.scope == 0,
+                name: node.name().into_owned(),
+                top_level: node.scope() == 0,
             });
         }
-        if let Some(symbol) = deck_index.symbols().iter().find(|symbol| {
-            symbol.kind == DeckSymbolKind::Instance && touches(&symbol.location, &symbol.name)
+        if let Some(symbol) = deck_index.symbols().find(|symbol| {
+            symbol.kind() == DeckSymbolKind::Instance && touches(&symbol.location(), &symbol.name())
         }) {
             return Some(CaretName::Element {
-                name: symbol.name.clone(),
-                top_level: symbol.scope == 0,
+                name: symbol.name().into_owned(),
+                top_level: symbol.scope() == 0,
                 head: true,
             });
         }
         deck_index
             .references()
-            .iter()
             .find(|reference| {
-                reference.kind == DeckSymbolKind::Instance
-                    && touches(&reference.location, &reference.name)
+                reference.kind() == DeckSymbolKind::Instance
+                    && touches(&reference.location(), &reference.name())
             })
             .map(|reference| CaretName::Element {
-                name: reference.name.clone(),
-                top_level: reference.scope == 0,
+                name: reference.name().into_owned(),
+                top_level: reference.scope() == 0,
                 head: false,
             })
     };

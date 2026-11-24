@@ -54,9 +54,9 @@ impl NameAtCaret {
     pub(crate) fn kind_words(&self) -> (MessageId, MessageId) {
         match &self.name {
             DeckName::Node { .. } => (MessageId::NetlistKindNode, MessageId::NetlistKindNodeLabel),
-            DeckName::Symbol(symbol) => self.index.deck().symbols().get(*symbol).map_or(
+            DeckName::Symbol(symbol) => self.index.deck().symbol(*symbol).map_or(
                 (MessageId::NetlistKindName, MessageId::NetlistKindNameLabel),
-                |symbol| kind_words(symbol.kind),
+                |symbol| kind_words(symbol.kind()),
             ),
         }
     }
@@ -161,32 +161,26 @@ pub(crate) fn name_at_caret(
     let name = match deck.name_at(file, byte) {
         Some(DeckNameAt::Definition(symbol)) => DeckName::Symbol(symbol),
         Some(DeckNameAt::Reference(reference)) => {
-            let read = &deck.references()[reference];
-            DeckName::Symbol(read.target.ok_or_else(|| {
-                messages.format(MessageId::NetlistFollowUndefined, &[("name", &read.name)])
+            let read = deck.reference(reference).ok_or_else(place_caret)?;
+            DeckName::Symbol(read.target().ok_or_else(|| {
+                messages.format(MessageId::NetlistFollowUndefined, &[("name", &read.name())])
             })?)
         }
         None => deck
-            .nodes()
-            .iter()
-            .find(|node| {
-                node.location.file == file
-                    && node.location.span.start <= byte
-                    && byte <= node.location.span.end
-            })
+            .node_at(file, byte)
             .map(|node| DeckName::Node {
-                name: node.name.clone(),
-                scope: node.scope,
+                name: node.name().into_owned(),
+                scope: node.scope(),
             })
             .ok_or_else(place_caret)?,
     };
     let written = match &name {
         DeckName::Symbol(symbol) => {
-            let symbol = &deck.symbols()[*symbol];
-            if symbol.kind == DeckSymbolKind::Instance {
+            let symbol = deck.symbol(*symbol).ok_or_else(place_caret)?;
+            if symbol.kind() == DeckSymbolKind::Instance {
                 return Err(place_caret());
             }
-            symbol.name.clone()
+            symbol.name().into_owned()
         }
         DeckName::Node { name, .. } => name.clone(),
     };
@@ -206,22 +200,21 @@ fn places(deck: &DeckIndex, texts: &[String], name: &DeckName) -> Vec<DeckPlace>
     let mut places = match name {
         DeckName::Node { name, scope } => deck
             .nodes()
-            .iter()
-            .filter(|node| node.scope == *scope && node.name.eq_ignore_ascii_case(name))
+            .filter(|node| node.scope() == *scope && node.name().eq_ignore_ascii_case(name))
             .map(|node| DeckPlace {
-                file: node.location.file,
-                span: node.location.span.clone(),
+                file: node.file(),
+                span: node.span(),
             })
             .collect::<Vec<_>>(),
         DeckName::Symbol(symbol) => {
-            let Some(definition) = deck.symbols().get(*symbol) else {
+            let Some(definition) = deck.symbol(*symbol) else {
                 return Vec::new();
             };
-            let mut places = std::iter::once(&definition.location)
-                .chain(deck.references_to(*symbol).map(|read| &read.location))
+            let mut places = std::iter::once(definition.location())
+                .chain(deck.references_to(*symbol).map(|read| read.location()))
                 .map(|location| DeckPlace {
                     file: location.file,
-                    span: location.span.clone(),
+                    span: location.span,
                 })
                 .collect::<Vec<_>>();
             places.extend(instance_assignments(deck, texts, *symbol));
@@ -237,24 +230,28 @@ fn places(deck: &DeckIndex, texts: &[String], name: &DeckName) -> Vec<DeckPlace>
 /// when `symbol` is one the subcircuit's header declares: `gain` in
 /// `X1 a b amp gain=3`.
 fn instance_assignments(deck: &DeckIndex, texts: &[String], symbol: usize) -> Vec<DeckPlace> {
-    let symbols = deck.symbols();
-    let parameter = &symbols[symbol];
-    let Some(subcircuit) = (parameter.kind == DeckSymbolKind::Parameter)
-        .then(|| deck.scopes().get(parameter.scope)?.symbol)
+    let Some(parameter) = deck.symbol(symbol) else {
+        return Vec::new();
+    };
+    let name = parameter.name();
+    let Some(subcircuit) = (parameter.kind() == DeckSymbolKind::Parameter)
+        .then(|| deck.scope(parameter.scope())?.symbol())
         .flatten()
-        .filter(|subcircuit| symbols[*subcircuit].card == parameter.card)
+        .filter(|subcircuit| {
+            deck.symbol(*subcircuit)
+                .is_some_and(|subcircuit| subcircuit.card() == parameter.card())
+        })
     else {
         return Vec::new();
     };
-    symbols
-        .iter()
+    deck.symbols()
         .filter(|instance| {
-            instance.kind == DeckSymbolKind::Instance && instance.target == Some(subcircuit)
+            instance.kind() == DeckSymbolKind::Instance && instance.target() == Some(subcircuit)
         })
         .flat_map(|instance| {
-            let file = instance.location.file;
+            let file = instance.file();
             let text = texts.get(file).map_or("", String::as_str);
-            let tokens = deck.card_tokens(instance.card, text);
+            let tokens = deck.card_tokens(instance.card());
             tokens
                 .windows(2)
                 .filter(|pair| {
@@ -262,7 +259,7 @@ fn instance_assignments(deck: &DeckIndex, texts: &[String], symbol: usize) -> Ve
                         && pair[1].kind == DeckTokenKind::Equals
                         && text
                             .get(pair[0].span.clone())
-                            .is_some_and(|name| name.eq_ignore_ascii_case(&parameter.name))
+                            .is_some_and(|written| written.eq_ignore_ascii_case(&name))
                 })
                 .map(|pair| DeckPlace {
                     file,
@@ -567,25 +564,17 @@ fn collision(
     match &caret.name {
         DeckName::Node { name, scope } => deck
             .nodes()
-            .iter()
             .find(|node| {
-                node.name.eq_ignore_ascii_case(new_name)
-                    && !node.name.eq_ignore_ascii_case(name)
-                    && (node.scope == *scope
-                        || deck.cards().get(node.card).map(|card| card.kind)
-                            == Some(DeckCardKind::Global))
+                let written = node.name();
+                written.eq_ignore_ascii_case(new_name)
+                    && !written.eq_ignore_ascii_case(name)
+                    && (node.scope() == *scope || node.card_kind() == DeckCardKind::Global)
             })
-            .map(|node| {
-                (
-                    node.location.file,
-                    node.location.span.start,
-                    MessageId::NetlistKindNode,
-                )
-            }),
+            .map(|node| (node.file(), node.span().start, MessageId::NetlistKindNode)),
         DeckName::Symbol(symbol) => {
-            let definition = &deck.symbols()[*symbol];
+            let definition = deck.symbol(*symbol)?;
             // An instance reads its master as a subcircuit, else a model.
-            let kinds: &[DeckSymbolKind] = match definition.kind {
+            let kinds: &[DeckSymbolKind] = match definition.kind() {
                 DeckSymbolKind::Subcircuit | DeckSymbolKind::Model => {
                     &[DeckSymbolKind::Subcircuit, DeckSymbolKind::Model]
                 }
@@ -593,25 +582,18 @@ fn collision(
                 DeckSymbolKind::Function => &[DeckSymbolKind::Function],
                 DeckSymbolKind::Instance => &[],
             };
-            let scopes = std::iter::once(definition.scope)
-                .chain(deck.references_to(*symbol).map(|read| read.scope))
+            let scopes = std::iter::once(definition.scope())
+                .chain(deck.references_to(*symbol).map(|read| read.scope()))
                 .chain(places.iter().filter_map(|place| {
-                    let text = caret.texts.get(place.file)?;
-                    let line = line_column(text, place.span.start).0;
+                    let line = deck.line_of(place.file, place.span.start)?;
                     Some(deck.scope_on_line(place.file, line))
                 }))
                 .collect::<std::collections::BTreeSet<_>>();
             scopes.into_iter().find_map(|scope| {
                 kinds.iter().find_map(|kind| {
                     let other = deck.resolve(*kind, new_name, scope)?;
-                    (other != *symbol).then(|| {
-                        let other = &deck.symbols()[other];
-                        (
-                            other.location.file,
-                            other.location.span.start,
-                            kind_words(other.kind).0,
-                        )
-                    })
+                    let other = deck.symbol(other).filter(|_| other != *symbol)?;
+                    Some((other.file(), other.span().start, kind_words(other.kind()).0))
                 })
             })
         }
@@ -627,28 +609,26 @@ fn unbound_read(
     name: &str,
     places: &[DeckPlace],
 ) -> Option<(usize, usize, MessageId)> {
+    // A word starts at `byte`, so a name the index knows covers it when one
+    // is written over it at all.
     let known = |file: usize, byte: usize| {
-        let covers = |location: &rspice_core::netlist::DeckLocation| {
-            location.file == file && location.span.start <= byte && byte < location.span.end
-        };
         places
             .iter()
             .any(|place| place.file == file && place.span.contains(&byte))
-            || deck.references().iter().any(|read| covers(&read.location))
-            || deck.nodes().iter().any(|node| covers(&node.location))
-            || deck.symbols().iter().any(|symbol| covers(&symbol.location))
+            || deck.name_at(file, byte).is_some()
+            || deck.node_at(file, byte).is_some()
     };
-    for (index, card) in deck.cards().iter().enumerate() {
-        let file = card.location.file;
+    for card in deck.cards() {
+        let file = card.file();
         let Some(text) = texts.get(file) else {
             continue;
         };
-        match card.kind {
+        match card.kind() {
             DeckCardKind::Title | DeckCardKind::Include | DeckCardKind::Library => {}
             DeckCardKind::Control => {
-                let (start, _) = line_holding(text, card.location.span.start);
+                let (start, _) = line_holding(text, card.location().span.start);
                 let mut end = start.start;
-                for _ in card.lines.clone() {
+                for _ in card.lines() {
                     end = text[end..].find('\n').map_or(text.len(), |at| end + at + 1);
                 }
                 if let Some(at) = words(&text[start.start..end], name).next() {
@@ -656,7 +636,7 @@ fn unbound_read(
                 }
             }
             _ => {
-                for token in deck.card_tokens(index, text) {
+                for token in card.tokens() {
                     // A string is text, whatever reads it: a word in it may
                     // be the name or only look like it.
                     let (inside, bound_counts) = match token.kind {

@@ -5,13 +5,14 @@
 //! filesystem path, so native and browser builds answer completion and
 //! navigation from the same exact source set.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rspice_core::netlist::{
     DeckIndex, DeckIndexSource, DeckLocation, DeckNameAt, DeckSymbol, DeckSymbolKind,
-    NetlistSourceMap, NetlistValueKind, NetlistValueSpan, SourceKind, UnreadSourceReason,
-    UnreadSourceRegion,
+    DeckTextChange, NetlistSourceMap, NetlistValueKind, NetlistValueSpan, SharedDeckText,
+    SourceKind, UnreadSourceReason, UnreadSourceRegion,
 };
 
 use super::index_worker::BackgroundIndex;
@@ -58,6 +59,8 @@ pub(crate) struct ProjectSourceLocation {
     pub(crate) column: usize,
 }
 
+/// A definition as the navigator lists it, read from the index when it is
+/// asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProjectSymbol {
     pub(crate) name: String,
@@ -66,6 +69,8 @@ pub(crate) struct ProjectSymbol {
     pub(crate) definition: ProjectSourceLocation,
 }
 
+/// A read as the navigator lists it, read from the index when it is asked
+/// for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProjectReference {
     pub(crate) name: String,
@@ -89,27 +94,27 @@ pub(crate) struct ProjectSymbolHover {
 
 /// The names the root and its SPICE includes define and read, as the
 /// engine's index of them binds each read under SPICE scoping.
+///
+/// It holds the engine's index, which shares the texts, and tables of
+/// positions into it; a name, a detail or a place is read from the index
+/// when it is asked for. What it lists of the whole deck, the instance
+/// hierarchy and the node names each scope sees, is its [`ProjectTables`],
+/// worked out apart and kept up to date behind the index as the deck is
+/// edited.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NetlistProjectIndex {
-    symbols: Vec<ProjectSymbol>,
-    references: Vec<ProjectReference>,
-    raw_hierarchy: Vec<RawHierarchyInstance>,
-    hierarchy: Vec<ProjectHierarchyInstance>,
-    hierarchy_truncated: bool,
-    source_count: usize,
     deck: DeckIndex,
     /// The files indexed, in the order the index numbers them: the root,
     /// then its SPICE includes.
     files: Vec<IndexedFile>,
-    /// The node names each scope sees, by the scope: the positions in the
-    /// deck's nodes of the first written of each name, in the order of the
-    /// names ignoring case, so the names a prefix starts are found by a
-    /// search.
-    nodes_by_name: Vec<Vec<usize>>,
+    /// The definitions, by their position among the deck's, in the order
+    /// the navigator lists them: by name ignoring case, then file and line.
+    symbols: Vec<u32>,
+    tables: Arc<TablesCell>,
 }
 
-/// The index of a large deck is millions of small allocations: whoever lets
-/// go of it last, it is freed away from that thread.
+/// The index of a large deck holds large tables: whoever lets go of it last,
+/// it is freed away from that thread.
 impl Drop for NetlistProjectIndex {
     fn drop(&mut self) {
         rspice_design::freed_away::free_away(self);
@@ -122,18 +127,228 @@ struct IndexedFile {
     root: NetlistRoot,
     dependency_identity: Option<String>,
     display_name: String,
-    digest: crate::product::ContentDigest,
-    /// The revision of the text indexed: a text at it is that text, told
+    kind: SourceKind,
+    /// The text indexed, and its revision: a text at it is that text, told
     /// without reading it.
-    revision: u64,
+    text: RevisedText,
 }
 
-#[derive(Debug, Clone)]
-struct RawHierarchyInstance {
-    parent: Option<String>,
-    instance: String,
-    target: String,
-    location: ProjectSourceLocation,
+/// The tables a project index lists of the whole deck, read from the index
+/// of one revision of it.
+#[derive(Debug, Default)]
+pub(crate) struct ProjectTables {
+    deck: DeckIndex,
+    files: Vec<IndexedFile>,
+    hierarchy: Vec<ProjectHierarchyInstance>,
+    hierarchy_truncated: bool,
+    /// The node names each scope sees, by the scope: the positions in the
+    /// deck's nodes of the first written of each name, in the order of the
+    /// names ignoring case, so the names a prefix starts are found by a
+    /// search.
+    nodes_by_name: Vec<Vec<u32>>,
+}
+
+/// The tables of the latest revision worked out, shared by the indexes of
+/// one root from one edit to the next, and the index whose tables are being
+/// worked out next.
+#[derive(Debug, Default)]
+struct TablesCell {
+    state: Mutex<TablesState>,
+}
+
+#[derive(Debug, Default)]
+struct TablesState {
+    latest: Option<Arc<ProjectTables>>,
+    building: bool,
+    /// The deck and files of the newest revision, when it came while
+    /// another's tables were being worked out.
+    pending: Option<(DeckIndex, Vec<IndexedFile>)>,
+}
+
+impl TablesCell {
+    /// A cell holding the tables of `deck`, worked out here.
+    fn worked_out(deck: &DeckIndex, files: &[IndexedFile]) -> Self {
+        Self {
+            state: Mutex::new(TablesState {
+                latest: Some(Arc::new(ProjectTables::of(deck.clone(), files.to_vec()))),
+                building: false,
+                pending: None,
+            }),
+        }
+    }
+
+    fn latest(&self) -> Option<Arc<ProjectTables>> {
+        self.state.lock().ok()?.latest.clone()
+    }
+
+    /// Work out the tables of `deck` away from this thread, after those
+    /// being worked out; `wake` once they are.
+    fn refresh(
+        self: &Arc<Self>,
+        deck: DeckIndex,
+        files: Vec<IndexedFile>,
+        wake: impl Fn() + Send + 'static,
+    ) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if state.building {
+            state.pending = Some((deck, files));
+            return;
+        }
+        state.building = true;
+        drop(state);
+        let cell = Arc::clone(self);
+        let mut next = Some((deck, files));
+        let spawned = std::thread::Builder::new()
+            .name("netlist-tables".to_owned())
+            .spawn(move || {
+                while let Some((deck, files)) = next.take() {
+                    let tables = Arc::new(ProjectTables::of(deck, files));
+                    let Ok(mut state) = cell.state.lock() else {
+                        return;
+                    };
+                    if let Some(old) = state.latest.replace(tables) {
+                        drop(state);
+                        drop(old);
+                        state = match cell.state.lock() {
+                            Ok(state) => state,
+                            Err(_) => return,
+                        };
+                    }
+                    next = state.pending.take();
+                    if next.is_none() {
+                        state.building = false;
+                    }
+                }
+                wake();
+            });
+        if spawned.is_err()
+            && let Ok(mut state) = self.state.lock()
+        {
+            state.building = false;
+        }
+    }
+}
+
+impl ProjectTables {
+    fn of(deck: DeckIndex, files: Vec<IndexedFile>) -> Self {
+        let mut tables = Self {
+            nodes_by_name: nodes_by_name(&deck),
+            deck,
+            files,
+            ..Self::default()
+        };
+        tables.expand_hierarchy();
+        tables
+    }
+
+    fn expand_hierarchy(&mut self) {
+        let deck = &self.deck;
+        let mut children = std::collections::HashMap::<String, Vec<usize>>::new();
+        let mut top = Vec::new();
+        for instance in deck.symbols() {
+            if instance.kind() != DeckSymbolKind::Instance
+                || !instance.name().starts_with(['X', 'x'])
+                || instance.detail().is_empty()
+            {
+                continue;
+            }
+            let parent = deck.scope(instance.scope()).and_then(|scope| scope.name());
+            match parent {
+                Some(parent) => children
+                    .entry(parent.to_ascii_lowercase())
+                    .or_default()
+                    .push(instance.id()),
+                None => top.push(instance.id()),
+            }
+        }
+        let mut pending = top
+            .into_iter()
+            .rev()
+            .filter_map(|instance| {
+                let path = deck.symbol(instance)?.name().into_owned();
+                Some((instance, path, Vec::<String>::new()))
+            })
+            .collect::<Vec<_>>();
+        let mut hierarchy = Vec::new();
+        while let Some((instance, path, mut ancestors)) = pending.pop() {
+            if hierarchy.len() >= MAX_EXPANDED_HIERARCHY_INSTANCES {
+                self.hierarchy_truncated = true;
+                break;
+            }
+            let Some(symbol) = deck.symbol(instance) else {
+                continue;
+            };
+            let target = symbol.detail().into_owned();
+            let target_key = target.to_ascii_lowercase();
+            let recursive = ancestors.iter().any(|ancestor| ancestor == &target_key);
+            hierarchy.push(ProjectHierarchyInstance {
+                path: path.clone(),
+                target,
+                location: location_in(&self.files, &symbol.location()),
+                recursive,
+            });
+            if recursive {
+                continue;
+            }
+            ancestors.push(target_key.clone());
+            if let Some(nested) = children.get(&target_key) {
+                pending.extend(nested.iter().rev().filter_map(|child| {
+                    let child_path = format!("{path}/{}", deck.symbol(*child)?.name());
+                    Some((*child, child_path, ancestors.clone()))
+                }));
+            }
+        }
+        self.hierarchy = hierarchy;
+    }
+
+    pub(crate) fn hierarchy(&self) -> &[ProjectHierarchyInstance] {
+        &self.hierarchy
+    }
+
+    pub(crate) const fn hierarchy_truncated(&self) -> bool {
+        self.hierarchy_truncated
+    }
+
+    /// The node name at `position` of those a reader in `scope` sees: the
+    /// names written in the scope, the deck's global ones and ground, each
+    /// once as first written, in the order of the names ignoring case.
+    pub(crate) fn node_at(&self, scope: usize, position: usize) -> Option<Cow<'_, str>> {
+        let node = *self.nodes_by_name.get(scope)?.get(position)?;
+        self.deck.node(node as usize).map(|node| node.name())
+    }
+
+    fn node_name(&self, node: u32) -> Cow<'_, str> {
+        self.deck
+            .node(node as usize)
+            .map_or(Cow::Borrowed(""), |node| node.name())
+    }
+
+    /// The positions, as [`Self::node_at`] reads them, of the node names a
+    /// reader in `scope` sees that start with `prefix`, ignoring case.
+    pub(crate) fn nodes_starting(&self, scope: usize, prefix: &str) -> std::ops::Range<usize> {
+        let Some(names) = self.nodes_by_name.get(scope) else {
+            return 0..0;
+        };
+        let start = names.partition_point(|&node| by_name(&self.node_name(node), prefix).is_lt());
+        let starting = names[start..].partition_point(|&node| {
+            self.node_name(node)
+                .as_bytes()
+                .get(..prefix.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+        });
+        start..start + starting
+    }
+
+    /// The position, as [`Self::node_at`] reads it, of the node `name` a
+    /// reader in `scope` sees, ignoring case.
+    pub(crate) fn node_named(&self, scope: usize, name: &str) -> Option<usize> {
+        self.nodes_by_name
+            .get(scope)?
+            .binary_search_by(|&node| by_name(&self.node_name(node), name))
+            .ok()
+    }
 }
 
 const MAX_EXPANDED_HIERARCHY_INSTANCES: usize = 100_000;
@@ -226,191 +441,226 @@ fn document_texts(document: &crate::state::NetlistDocument) -> Vec<IndexText> {
     texts
 }
 
+/// Whether an edit from `old` to `new` can change how the engine reads the
+/// text as a whole, SPICE or Spectre: whether the text it removes or puts in,
+/// or the bytes beside them, could open or close a block comment or write a
+/// `simulator lang=` switch.
+fn may_change_language(change: DeckTextChange, old: &RevisedText, new: &RevisedText) -> bool {
+    let lines = |text: &RevisedText, start: usize, end: usize| {
+        text.slice(text.line_start_at(start)..text.line_end_at(end))
+            .to_ascii_lowercase()
+    };
+    [
+        lines(old, change.start, change.old_end),
+        lines(new, change.start, change.new_end),
+    ]
+    .iter()
+    .any(|written| written.contains("/*") || written.contains("*/") || written.contains("lang"))
+}
+
 impl NetlistProjectIndex {
     /// The index of `texts`, the root `root` first, then the SPICE files it
     /// includes.
     fn build(root: NetlistRoot, texts: &[IndexText]) -> Self {
         let files = texts
             .iter()
-            .map(|text| IndexedFile {
+            .enumerate()
+            .map(|(position, text)| IndexedFile {
                 root,
                 dependency_identity: text.dependency_identity.clone(),
                 display_name: text.display_name.clone(),
-                digest: crate::state::content_digest(&text.text),
-                revision: text.text.revision(),
+                kind: SourceKind::of(&text.path, &text.text, position == 0),
+                text: text.text.clone(),
             })
             .collect::<Vec<_>>();
-        let sources = texts
+        let sources = files
             .iter()
-            .enumerate()
-            .map(|(position, text)| DeckIndexSource {
-                identity: text.dependency_identity.as_deref().unwrap_or(""),
-                text: &text.text,
-                kind: SourceKind::of(&text.path, &text.text, position == 0),
+            .map(|file| {
+                DeckIndexSource::new(
+                    file.dependency_identity.as_deref().unwrap_or(""),
+                    Arc::new(file.text.clone()) as SharedDeckText,
+                    file.kind,
+                )
             })
             .collect::<Vec<_>>();
         let deck = DeckIndex::build(&sources);
-
-        let symbols = deck
-            .symbols()
-            .iter()
-            .filter_map(|symbol| {
-                let kind = ProjectSymbolKind::of(symbol.kind)?;
-                let detail = match kind {
-                    ProjectSymbolKind::Parameter if symbol.detail.is_empty() => ".param".to_owned(),
-                    ProjectSymbolKind::Parameter => format!("= {}", symbol.detail),
-                    _ => symbol.detail.clone(),
-                };
-                Some(ProjectSymbol {
-                    name: symbol.name.clone(),
-                    kind,
-                    detail,
-                    definition: location_in(&files, &symbol.location),
-                })
-            })
-            .collect();
-        // A name nothing defines is still read where it can only be one
-        // thing: the subcircuit an instance is of, the model a device names.
-        // Elsewhere it may be a node or a keyword, and is no read.
-        let references = deck
-            .references()
-            .iter()
-            .filter_map(|reference| {
-                let kind = ProjectSymbolKind::of(reference.kind)?;
-                (reference.target.is_some()
-                    || matches!(
-                        kind,
-                        ProjectSymbolKind::Subcircuit | ProjectSymbolKind::Model
-                    ))
-                .then(|| ProjectReference {
-                    name: reference.name.clone(),
-                    kind,
-                    location: location_in(&files, &reference.location),
-                })
-            })
-            .collect();
-        let raw_hierarchy = deck
-            .symbols()
-            .iter()
-            .filter(|symbol| {
-                symbol.kind == DeckSymbolKind::Instance
-                    && symbol.name.starts_with(['X', 'x'])
-                    && !symbol.detail.is_empty()
-            })
-            .map(|instance| RawHierarchyInstance {
-                parent: deck
-                    .scopes()
-                    .get(instance.scope)
-                    .and_then(|scope| scope.name.clone()),
-                instance: instance.name.clone(),
-                target: instance.detail.clone(),
-                location: location_in(&files, &instance.location),
-            })
-            .collect();
-
-        let mut index = Self::default();
-        index.symbols = symbols;
-        index.references = references;
-        index.raw_hierarchy = raw_hierarchy;
-        index.source_count = files.len();
-        index.nodes_by_name = nodes_by_name(&deck);
-        index.deck = deck;
-        index.files = files;
-        index.expand_hierarchy();
-        index.symbols.sort_by(|left, right| {
-            left.name
-                .to_ascii_lowercase()
-                .cmp(&right.name.to_ascii_lowercase())
-                .then_with(|| {
-                    left.definition
-                        .display_name
-                        .cmp(&right.definition.display_name)
-                })
-                .then_with(|| left.definition.line.cmp(&right.definition.line))
-        });
-        index
+        let tables = Arc::new(TablesCell::worked_out(&deck, &files));
+        Self::of(deck, files, tables)
     }
 
-    fn expand_hierarchy(&mut self) {
-        let mut children = std::collections::HashMap::<String, Vec<RawHierarchyInstance>>::new();
-        let mut top = Vec::new();
-        for instance in &self.raw_hierarchy {
-            if let Some(parent) = instance.parent.as_deref() {
-                children
-                    .entry(parent.to_ascii_lowercase())
-                    .or_default()
-                    .push(instance.clone());
-            } else {
-                top.push(instance.clone());
-            }
+    fn of(deck: DeckIndex, files: Vec<IndexedFile>, tables: Arc<TablesCell>) -> Self {
+        let mut symbols = (0..deck.definition_count() as u32).collect::<Vec<_>>();
+        let definitions = deck.definitions().collect::<Vec<_>>();
+        symbols.sort_by(|left, right| {
+            let (left, right) = (&definitions[*left as usize], &definitions[*right as usize]);
+            by_name(&left.name(), &right.name())
+                .then_with(|| {
+                    file_name_of(&files, left.file()).cmp(file_name_of(&files, right.file()))
+                })
+                .then_with(|| left.line().cmp(&right.line()))
+        });
+        drop(definitions);
+        Self {
+            deck,
+            files,
+            symbols,
+            tables,
         }
-        let mut pending = top
-            .into_iter()
-            .rev()
-            .map(|instance| {
-                let path = instance.instance.clone();
-                (instance, path, Vec::<String>::new())
-            })
-            .collect::<Vec<_>>();
-        while let Some((instance, path, mut ancestors)) = pending.pop() {
-            if self.hierarchy.len() >= MAX_EXPANDED_HIERARCHY_INSTANCES {
-                self.hierarchy_truncated = true;
-                break;
-            }
-            let target_key = instance.target.to_ascii_lowercase();
-            let recursive = ancestors.iter().any(|ancestor| ancestor == &target_key);
-            self.hierarchy.push(ProjectHierarchyInstance {
-                path: path.clone(),
-                target: instance.target.clone(),
-                location: instance.location.clone(),
-                recursive,
+    }
+
+    /// The index of `texts` built from this one, the index of the same
+    /// files before an edit: when one file was edited and the edit leaves
+    /// what the deck defines as it was, the part of the engine's index it
+    /// touched is read again and the rest shared, the definitions keep their
+    /// order, and the tables follow away from this thread; else it is built
+    /// anew.
+    fn edited(
+        &self,
+        root: NetlistRoot,
+        texts: &[IndexText],
+        wake: impl Fn() + Send + 'static,
+    ) -> Self {
+        let same_files = self.files.len() == texts.len()
+            && self.files.iter().zip(texts).all(|(file, text)| {
+                file.root == root && file.dependency_identity == text.dependency_identity
             });
-            if recursive {
+        if !same_files {
+            return Self::build(root, texts);
+        }
+        let mut edited = None;
+        for (position, (file, text)) in self.files.iter().zip(texts).enumerate() {
+            if file.text.same_text(&text.text) {
                 continue;
             }
-            ancestors.push(target_key.clone());
-            if let Some(nested) = children.get(&target_key) {
-                pending.extend(nested.iter().rev().cloned().map(|child| {
-                    let child_path = format!("{path}/{}", child.instance);
-                    (child, child_path, ancestors.clone())
-                }));
+            let Some(change) = DeckTextChange::between(&file.text, &text.text) else {
+                continue;
+            };
+            if edited.is_some() || may_change_language(change, &file.text, &text.text) {
+                return Self::build(root, texts);
             }
+            edited = Some((position, change));
+        }
+        let mut files = self.files.clone();
+        for (file, text) in files.iter_mut().zip(texts) {
+            file.text = text.text.clone();
+        }
+        let deck = match edited {
+            None => self.deck.clone(),
+            Some((position, change)) => {
+                let text = Arc::new(files[position].text.clone()) as SharedDeckText;
+                match self.deck.edited(position, change, text) {
+                    Some(deck) => deck,
+                    None => return Self::build(root, texts),
+                }
+            }
+        };
+        self.tables.refresh(deck.clone(), files.clone(), wake);
+        Self {
+            deck,
+            files,
+            // The definitions are the same, in the same order: an edit that
+            // changes them is built anew.
+            symbols: self.symbols.clone(),
+            tables: Arc::clone(&self.tables),
         }
     }
 
-    pub(crate) fn symbols(&self) -> &[ProjectSymbol] {
-        &self.symbols
+    /// The tables of the latest revision worked out: this index's, or until
+    /// they are, an earlier one's.
+    pub(crate) fn tables(&self) -> Arc<ProjectTables> {
+        self.tables.latest().unwrap_or_default()
     }
 
-    pub(crate) fn references(&self) -> &[ProjectReference] {
-        &self.references
+    pub(crate) fn symbol_count(&self) -> usize {
+        self.symbols.len()
     }
 
-    pub(crate) fn hierarchy(&self) -> &[ProjectHierarchyInstance] {
-        &self.hierarchy
+    /// The definition at `position` of the order the navigator lists them
+    /// in.
+    pub(crate) fn symbol(&self, position: usize) -> Option<ProjectSymbol> {
+        let symbol = self
+            .deck
+            .nth_definition(*self.symbols.get(position)? as usize)?;
+        let kind = ProjectSymbolKind::of(symbol.kind())?;
+        let detail = symbol.detail();
+        let detail = match kind {
+            ProjectSymbolKind::Parameter if detail.is_empty() => ".param".to_owned(),
+            ProjectSymbolKind::Parameter => format!("= {detail}"),
+            _ => detail.into_owned(),
+        };
+        Some(ProjectSymbol {
+            name: symbol.name().into_owned(),
+            kind,
+            detail,
+            definition: location_in(&self.files, &symbol.location()),
+        })
     }
 
-    pub(crate) const fn hierarchy_truncated(&self) -> bool {
-        self.hierarchy_truncated
+    /// The definitions, in the order the navigator lists them.
+    pub(crate) fn symbols(&self) -> impl Iterator<Item = ProjectSymbol> + '_ {
+        (0..self.symbols.len()).filter_map(|position| self.symbol(position))
     }
 
-    pub(crate) const fn source_count(&self) -> usize {
-        self.source_count
+    /// The read at `position` among the deck's, as the navigator lists it:
+    /// one bound to a definition, or a name that can only be a subcircuit or
+    /// a model. Elsewhere a name nothing defines may be a node or a keyword,
+    /// and is no read.
+    pub(crate) fn reference(&self, position: usize) -> Option<ProjectReference> {
+        let reference = self.deck.reference(position)?;
+        let kind = ProjectSymbolKind::of(reference.kind())?;
+        (reference.target().is_some()
+            || matches!(
+                kind,
+                ProjectSymbolKind::Subcircuit | ProjectSymbolKind::Model
+            ))
+        .then(|| ProjectReference {
+            name: reference.name().into_owned(),
+            kind,
+            location: location_in(&self.files, &reference.location()),
+        })
     }
 
-    pub(crate) fn definitions_named(&self, name: &str) -> Vec<&ProjectSymbol> {
-        self.symbols
-            .iter()
-            .filter(|symbol| symbol.name.eq_ignore_ascii_case(name))
+    /// The reads the navigator lists, each with its position among the
+    /// deck's.
+    pub(crate) fn references(&self) -> impl Iterator<Item = (usize, ProjectReference)> + '_ {
+        (0..self.deck.reference_count())
+            .filter_map(|position| Some((position, self.reference(position)?)))
+    }
+
+    pub(crate) fn source_count(&self) -> usize {
+        self.files.len()
+    }
+
+    /// The definitions named `name`, ignoring case, found by a search of
+    /// the order the navigator lists them in.
+    pub(crate) fn definitions_named(&self, name: &str) -> Vec<ProjectSymbol> {
+        let name_of = |at: &u32| {
+            self.deck
+                .nth_definition(*at as usize)
+                .map(|symbol| symbol.name())
+                .unwrap_or_default()
+        };
+        let start = self
+            .symbols
+            .partition_point(|at| by_name(&name_of(at), name).is_lt());
+        let end =
+            start + self.symbols[start..].partition_point(|at| by_name(&name_of(at), name).is_eq());
+        (start..end)
+            .filter_map(|position| self.symbol(position))
             .collect()
     }
 
     #[cfg(test)]
-    pub(crate) fn references_named(&self, name: &str) -> Vec<&ProjectReference> {
-        self.references
-            .iter()
+    pub(crate) fn references_named(&self, name: &str) -> Vec<ProjectReference> {
+        self.references()
+            .map(|(_, reference)| reference)
             .filter(|reference| reference.name.eq_ignore_ascii_case(name))
             .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hierarchy(&self) -> Vec<ProjectHierarchyInstance> {
+        self.tables().hierarchy().to_vec()
     }
 
     /// The engine's index of the deck and its SPICE includes.
@@ -426,9 +676,7 @@ impl NetlistProjectIndex {
 
     /// The name the reader knows file `file` of the index by.
     pub(crate) fn file_name(&self, file: usize) -> &str {
-        self.files
-            .get(file)
-            .map_or("", |file| file.display_name.as_str())
+        file_name_of(&self.files, file)
     }
 
     /// The root the index was built for.
@@ -444,12 +692,12 @@ impl NetlistProjectIndex {
                 .files
                 .iter()
                 .zip(texts)
-                .all(|(file, text)| file.digest == crate::state::content_digest(text))
+                .all(|(file, text)| file.text == **text)
     }
 
     /// The file the index numbers the source `dependency_identity` names
     /// (the root for `None`), while `text` is still the text it indexed: at
-    /// once when it is at the revision indexed, else by its digest.
+    /// once when it is at the revision indexed, else by comparing the two.
     pub(crate) fn file_holding(
         &self,
         dependency_identity: Option<&str>,
@@ -459,10 +707,7 @@ impl NetlistProjectIndex {
             .files
             .iter()
             .position(|file| file.dependency_identity.as_deref() == dependency_identity)?;
-        let indexed = &self.files[file];
-        (indexed.revision == text.revision()
-            || indexed.digest == crate::state::content_digest(text))
-        .then_some(file)
+        self.files[file].text.same_text(text).then_some(file)
     }
 
     /// What the name at character `char_index` of `text`, the source
@@ -479,13 +724,13 @@ impl NetlistProjectIndex {
         let byte = text.byte_of_char(char_index).unwrap_or(text.len());
         let target = match self.deck.name_at(file, byte)? {
             DeckNameAt::Definition(symbol) => Some(symbol),
-            DeckNameAt::Reference(reference) => self.deck.references()[reference].target,
+            DeckNameAt::Reference(reference) => self.deck.reference(reference)?.target(),
         };
         Some(
             target
-                .and_then(|symbol| self.deck.symbols().get(symbol))
-                .filter(|symbol| symbol.kind != DeckSymbolKind::Instance)
-                .map(|symbol| location_in(&self.files, &symbol.location)),
+                .and_then(|symbol| self.deck.symbol(symbol))
+                .filter(|symbol| symbol.kind() != DeckSymbolKind::Instance)
+                .map(|symbol| location_in(&self.files, &symbol.location())),
         )
     }
 
@@ -507,46 +752,41 @@ impl NetlistProjectIndex {
         let symbol = match self.deck.name_at(file, byte)? {
             DeckNameAt::Definition(symbol) => symbol,
             DeckNameAt::Reference(reference) => {
-                let read = &self.deck.references()[reference];
-                let Some(symbol) = read.target else {
+                let read = self.deck.reference(reference)?;
+                let Some(symbol) = read.target() else {
+                    let name = read.name();
                     return Some(ProjectSymbolHover {
-                        title: read.name.clone(),
-                        detail: messages.format(
-                            MessageId::NetlistNothingInScopeDefines,
-                            &[("name", &read.name)],
-                        ),
+                        title: name.clone().into_owned(),
+                        detail: messages
+                            .format(MessageId::NetlistNothingInScopeDefines, &[("name", &name)]),
                     });
                 };
                 symbol
             }
         };
-        let definition = self.deck.symbols().get(symbol)?;
-        let (kind, what) = match definition.kind {
+        let definition = self.deck.symbol(symbol)?;
+        let detail = definition.detail();
+        let (kind, what) = match definition.kind() {
             DeckSymbolKind::Instance => return None,
-            DeckSymbolKind::Parameter if definition.detail.is_empty() => {
+            DeckSymbolKind::Parameter if detail.is_empty() => {
                 (MessageId::NetlistSymbolParameter, String::new())
             }
-            DeckSymbolKind::Parameter => (
-                MessageId::NetlistSymbolParameter,
-                format!("= {}", definition.detail),
-            ),
+            DeckSymbolKind::Parameter => (MessageId::NetlistSymbolParameter, format!("= {detail}")),
             DeckSymbolKind::Subcircuit => (
                 MessageId::NetlistSymbolSubcircuit,
                 definition
-                    .opens
-                    .and_then(|scope| self.deck.scopes().get(scope))
+                    .opens()
+                    .and_then(|scope| self.deck.scope(scope))
                     .map(|scope| {
                         messages.format(
                             MessageId::NetlistSymbolPorts,
-                            &[("ports", &scope.ports.join(" "))],
+                            &[("ports", &scope.ports().join(" "))],
                         )
                     })
                     .unwrap_or_default(),
             ),
-            DeckSymbolKind::Model => (MessageId::NetlistSymbolModel, definition.detail.clone()),
-            DeckSymbolKind::Function => {
-                (MessageId::NetlistSymbolFunction, definition.detail.clone())
-            }
+            DeckSymbolKind::Model => (MessageId::NetlistSymbolModel, detail.into_owned()),
+            DeckSymbolKind::Function => (MessageId::NetlistSymbolFunction, detail.into_owned()),
         };
         let read = match self.deck.references_to(symbol).count() {
             0 => messages.text(MessageId::NetlistNoReferences),
@@ -561,13 +801,13 @@ impl NetlistProjectIndex {
             messages.format(
                 MessageId::NetlistSymbolPlace,
                 &[
-                    ("file", self.file_name(definition.location.file)),
-                    ("line", &definition.location.line.to_string()),
+                    ("file", self.file_name(definition.file())),
+                    ("line", &definition.line().to_string()),
                 ],
             )
         );
         Some(ProjectSymbolHover {
-            title: messages.format(kind, &[("name", &definition.name)]),
+            title: messages.format(kind, &[("name", &definition.name())]),
             detail: if what.is_empty() {
                 place
             } else {
@@ -595,32 +835,40 @@ impl NetlistProjectIndex {
         let byte = text.byte_of_char(char_index).unwrap_or(text.len());
         let bound = match self.deck.name_at(file, byte) {
             Some(DeckNameAt::Definition(symbol))
-                if self.deck.symbols()[symbol].kind != DeckSymbolKind::Instance =>
+                if self
+                    .deck
+                    .symbol(symbol)
+                    .is_some_and(|symbol| symbol.kind() != DeckSymbolKind::Instance) =>
             {
                 Ok(symbol)
             }
             Some(DeckNameAt::Reference(reference)) => {
-                let read = &self.deck.references()[reference];
-                read.target.ok_or_else(|| read.name.clone())
+                let read = self.deck.reference(reference)?;
+                read.target().ok_or_else(|| read.name().into_owned())
             }
-            _ => self.call_on_line(file, text[..byte].matches('\n').count() + 1)?,
+            _ => {
+                let line = self.deck.line_of(file, byte)?;
+                self.call_on_line(file, line)?
+            }
         };
         let symbol = match bound {
-            Ok(symbol) => self.deck.symbols().get(symbol)?,
+            Ok(symbol) => self.deck.symbol(symbol)?,
             Err(name) => return Some(Err(name)),
         };
-        let name = [("name", symbol.name.as_str())];
+        let symbol_name = symbol.name();
+        let name = [("name", &*symbol_name)];
+        let detail = symbol.detail();
         let mut parts = Vec::new();
-        let title = match symbol.kind {
+        let title = match symbol.kind() {
             DeckSymbolKind::Instance => return None,
             DeckSymbolKind::Parameter => {
-                if !symbol.detail.is_empty() {
-                    parts.push(format!("= {}", symbol.detail));
+                if !detail.is_empty() {
+                    parts.push(format!("= {detail}"));
                 }
                 messages.format(MessageId::NetlistSymbolParameter, &name)
             }
             DeckSymbolKind::Subcircuit => {
-                let ports = self.ports_of(symbol);
+                let ports = self.ports_of(&symbol);
                 if !ports.is_empty() {
                     parts.push(messages.format(
                         MessageId::NetlistSymbolPorts,
@@ -628,20 +876,19 @@ impl NetlistProjectIndex {
                     ));
                 }
                 // Its formals: the parameters its own card defines.
-                let formals = self
-                    .deck
+                let formals = symbol
+                    .card_view()
                     .symbols()
-                    .iter()
                     .filter(|formal| {
-                        formal.kind == DeckSymbolKind::Parameter
-                            && formal.card == symbol.card
-                            && Some(formal.scope) == symbol.opens
+                        formal.kind() == DeckSymbolKind::Parameter
+                            && Some(formal.scope()) == symbol.opens()
                     })
                     .map(|formal| {
-                        if formal.detail.is_empty() {
-                            formal.name.clone()
+                        let value = formal.detail();
+                        if value.is_empty() {
+                            formal.name().into_owned()
                         } else {
-                            format!("{}={}", formal.name, formal.detail)
+                            format!("{}={value}", formal.name())
                         }
                     })
                     .collect::<Vec<_>>();
@@ -654,14 +901,14 @@ impl NetlistProjectIndex {
                 messages.format(MessageId::NetlistSymbolSubcircuit, &name)
             }
             DeckSymbolKind::Model => {
-                if !symbol.detail.is_empty() {
-                    parts.push(symbol.detail.clone());
+                if !detail.is_empty() {
+                    parts.push(detail.clone().into_owned());
                 }
                 messages.format(MessageId::NetlistSymbolModel, &name)
             }
             DeckSymbolKind::Function => {
-                if !symbol.detail.is_empty() {
-                    parts.push(symbol.detail.clone());
+                if !detail.is_empty() {
+                    parts.push(detail.clone().into_owned());
                 }
                 messages.format(MessageId::NetlistSymbolFunction, &name)
             }
@@ -669,8 +916,8 @@ impl NetlistProjectIndex {
         parts.push(messages.format(
             MessageId::NetlistSymbolPlace,
             &[
-                ("file", self.file_name(symbol.location.file)),
-                ("line", &symbol.location.line.to_string()),
+                ("file", self.file_name(symbol.file())),
+                ("line", &symbol.line().to_string()),
             ],
         ));
         Some(Ok(ProjectSymbolHover {
@@ -684,24 +931,21 @@ impl NetlistProjectIndex {
     /// when nothing in scope defines it. `None` when no instance that names
     /// one is written there.
     fn call_on_line(&self, file: usize, line: usize) -> Option<Result<usize, String>> {
-        let card = self.deck.card_on_line(file, line)?;
-        if let Some(target) = self
-            .deck
+        let card = self.deck.card(self.deck.card_on_line(file, line)?)?;
+        if let Some(target) = card
             .symbols()
-            .iter()
-            .find(|symbol| symbol.card == card && symbol.kind == DeckSymbolKind::Instance)
-            .and_then(|instance| instance.target)
+            .find(|symbol| symbol.kind() == DeckSymbolKind::Instance)
+            .and_then(|instance| instance.target())
         {
             return Some(Ok(target));
         }
-        let read = self.deck.references().iter().find(|read| {
-            read.card == card
-                && matches!(
-                    read.kind,
-                    DeckSymbolKind::Subcircuit | DeckSymbolKind::Model
-                )
+        let read = card.references().find(|read| {
+            matches!(
+                read.kind(),
+                DeckSymbolKind::Subcircuit | DeckSymbolKind::Model
+            )
         })?;
-        Some(read.target.ok_or_else(|| read.name.clone()))
+        Some(read.target().ok_or_else(|| read.name().into_owned()))
     }
 
     /// The parameters a reader on one-based `line` of the source
@@ -712,12 +956,12 @@ impl NetlistProjectIndex {
         &self,
         dependency_identity: Option<&str>,
         line: usize,
-    ) -> Vec<&DeckSymbol> {
+    ) -> Vec<DeckSymbol<'_>> {
         let scope = self.scope_at(dependency_identity, line);
         self.deck
             .parameters_visible_in(scope)
             .into_iter()
-            .filter_map(|symbol| self.deck.symbols().get(symbol))
+            .filter_map(|symbol| self.deck.symbol(symbol))
             .collect()
     }
 
@@ -737,60 +981,25 @@ impl NetlistProjectIndex {
         &self,
         scope: usize,
         kinds: &[DeckSymbolKind],
-    ) -> Vec<&DeckSymbol> {
+    ) -> Vec<DeckSymbol<'_>> {
         let reach = self.deck.scope_chain(scope).collect::<Vec<_>>();
-        let wanted =
-            |symbol: &&DeckSymbol| kinds.contains(&symbol.kind) && reach.contains(&symbol.scope);
+        let wanted = |symbol: &DeckSymbol<'_>| {
+            kinds.contains(&symbol.kind()) && reach.contains(&symbol.scope())
+        };
         // A deck's devices are read only when they are asked for.
         if kinds.contains(&DeckSymbolKind::Instance) {
-            self.deck.symbols().iter().filter(wanted).collect()
+            self.deck.symbols().filter(wanted).collect()
         } else {
             self.deck.definitions().filter(wanted).collect()
         }
     }
 
-    /// The node name at `position` of those a reader in `scope` sees: the
-    /// names written in the scope, the deck's global ones and ground, each
-    /// once as first written, in the order of the names ignoring case.
-    pub(crate) fn node_at(&self, scope: usize, position: usize) -> Option<&str> {
-        let node = *self.nodes_by_name.get(scope)?.get(position)?;
-        self.deck.nodes().get(node).map(|node| node.name.as_str())
-    }
-
-    /// The positions, as [`Self::node_at`] reads them, of the node names a
-    /// reader in `scope` sees that start with `prefix`, ignoring case.
-    pub(crate) fn nodes_starting(&self, scope: usize, prefix: &str) -> std::ops::Range<usize> {
-        let Some(names) = self.nodes_by_name.get(scope) else {
-            return 0..0;
-        };
-        let nodes = self.deck.nodes();
-        let start = names.partition_point(|&node| by_name(&nodes[node].name, prefix).is_lt());
-        let starting = names[start..].partition_point(|&node| {
-            nodes[node]
-                .name
-                .as_bytes()
-                .get(..prefix.len())
-                .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
-        });
-        start..start + starting
-    }
-
-    /// The position, as [`Self::node_at`] reads it, of the node `name` a
-    /// reader in `scope` sees, ignoring case.
-    pub(crate) fn node_named(&self, scope: usize, name: &str) -> Option<usize> {
-        let nodes = self.deck.nodes();
-        self.nodes_by_name
-            .get(scope)?
-            .binary_search_by(|&node| by_name(&nodes[node].name, name))
-            .ok()
-    }
-
     /// The ports of the subcircuit `symbol`, in order.
-    pub(crate) fn ports_of(&self, symbol: &DeckSymbol) -> &[String] {
+    pub(crate) fn ports_of<'a>(&'a self, symbol: &DeckSymbol<'_>) -> Vec<Cow<'a, str>> {
         symbol
-            .opens
-            .and_then(|scope| self.deck.scopes().get(scope))
-            .map_or(&[], |scope| scope.ports.as_slice())
+            .opens()
+            .and_then(|scope| self.deck.scope(scope))
+            .map_or_else(Vec::new, |scope| scope.ports())
     }
 
     /// The subcircuits, models and functions a reader in `scope` sees, for
@@ -810,14 +1019,14 @@ impl NetlistProjectIndex {
             ],
         )
         .into_iter()
-        .filter(|symbol| seen.insert((symbol.kind, symbol.name.to_ascii_lowercase())))
+        .filter(|symbol| seen.insert((symbol.kind(), symbol.name().to_ascii_lowercase())))
         .filter_map(|symbol| {
-            let kind = ProjectSymbolKind::of(symbol.kind)?;
-            let definition = location_in(&self.files, &symbol.location);
+            let kind = ProjectSymbolKind::of(symbol.kind())?;
+            let definition = location_in(&self.files, &symbol.location());
             Some(super::completion::SymbolEntry {
-                name: symbol.name.clone(),
+                name: symbol.name().into_owned(),
                 kind: kind.label(),
-                detail: symbol.detail.clone(),
+                detail: symbol.detail().into_owned(),
                 doc: messages.format(
                     MessageId::NetlistDefinedIn,
                     &[
@@ -832,6 +1041,12 @@ impl NetlistProjectIndex {
     }
 }
 
+fn file_name_of(files: &[IndexedFile], file: usize) -> &str {
+    files
+        .get(file)
+        .map_or("", |file| file.display_name.as_str())
+}
+
 /// `left` against `right`, ignoring ASCII case.
 fn by_name(left: &str, right: &str) -> std::cmp::Ordering {
     left.bytes()
@@ -840,43 +1055,32 @@ fn by_name(left: &str, right: &str) -> std::cmp::Ordering {
 }
 
 /// The node names each scope of `deck` sees, as
-/// [`NetlistProjectIndex::node_at`] reads them: those written in the scope,
-/// the global ones and ground, the first written of each name standing for
-/// it.
-fn nodes_by_name(deck: &DeckIndex) -> Vec<Vec<usize>> {
-    let nodes = deck.nodes();
-    let mut by_scope = vec![Vec::new(); deck.scopes().len().max(1)];
+/// [`ProjectTables::node_at`] reads them: those written in the scope, the
+/// global ones and ground, the first written of each name standing for it.
+fn nodes_by_name(deck: &DeckIndex) -> Vec<Vec<u32>> {
+    let mut by_scope = vec![Vec::<u32>::new(); deck.scope_count().max(1)];
     let mut everywhere = Vec::new();
-    for (position, node) in nodes.iter().enumerate() {
-        if node.name == "0"
-            || deck.cards().get(node.card).map(|card| card.kind)
-                == Some(rspice_core::netlist::DeckCardKind::Global)
-        {
+    for node in deck.nodes() {
+        let position = node.id() as u32;
+        if node.name() == "0" || node.card_kind() == rspice_core::netlist::DeckCardKind::Global {
             everywhere.push(position);
-        } else if let Some(names) = by_scope.get_mut(node.scope) {
+        } else if let Some(names) = by_scope.get_mut(node.scope()) {
             names.push(position);
         }
     }
+    let name_of = |position: u32| {
+        deck.node(position as usize)
+            .map_or(Cow::Borrowed(""), |node| node.name())
+    };
     for names in &mut by_scope {
-        // Sorted by each name in lower case, made only for a name written
-        // with capitals, and then by where it is written, so the first
-        // written of a name is the one kept.
-        let mut folded = names
-            .iter()
-            .chain(&everywhere)
-            .map(|&position| {
-                let name = nodes[position].name.as_str();
-                let folded = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
-                    std::borrow::Cow::Owned(name.to_ascii_lowercase())
-                } else {
-                    std::borrow::Cow::Borrowed(name)
-                };
-                (folded, position)
-            })
-            .collect::<Vec<_>>();
-        folded.sort_unstable();
-        folded.dedup_by(|later, kept| later.0 == kept.0);
-        *names = folded.into_iter().map(|(_, position)| position).collect();
+        // Sorted by each name ignoring case, and then by where it is
+        // written, so the first written of a name is the one kept.
+        names.extend_from_slice(&everywhere);
+        names.sort_unstable_by(|one, two| {
+            by_name(&name_of(*one), &name_of(*two)).then(one.cmp(two))
+        });
+        names.dedup_by(|later, kept| by_name(&name_of(*later), &name_of(*kept)).is_eq());
+        names.shrink_to_fit();
     }
     by_scope
 }
@@ -925,9 +1129,11 @@ fn shown_root_in(
 }
 
 /// The project index of the root the editor shows, for a frame, built away
-/// from it. While the writer types, the last index built stands in until
-/// the one of the root as it stands is built; a root changed any other way
-/// has none until its own is built. It reads the model.
+/// from it: from the last one built, reading again only what an edit
+/// touched, when it is of the same root. While the writer types, the last
+/// index built stands in until the one of the root as it stands is built; a
+/// root changed any other way has none until its own is built. It reads the
+/// model.
 pub(crate) fn project_index_in(
     ctx: &egui::Context,
     model: &Model,
@@ -941,10 +1147,19 @@ pub(crate) fn project_index_in(
     if netlist.project_index.wants(|built| *built == key)
         && let Some(texts) = index_texts_in(model, netlist, root)
     {
+        let last = netlist
+            .project_index
+            .built()
+            .filter(|(built, _)| built.0 == key.0)
+            .map(|(_, index)| index);
         let wake = ctx.clone();
+        let wake_tables = ctx.clone();
         netlist.project_index.start(
             key,
-            move || NetlistProjectIndex::build(root, &texts),
+            move || match last {
+                Some(last) => last.edited(root, &texts, move || wake_tables.request_repaint()),
+                None => NetlistProjectIndex::build(root, &texts),
+            },
             move || wake.request_repaint(),
         );
     }
@@ -1524,7 +1739,7 @@ pub(crate) fn open_workspace_symbols(
     let messages = workbench.messages();
     let index = project_index_now(model, netlist)
         .ok_or_else(|| messages.text(MessageId::NetlistSignatureNoIndex))?;
-    let count = index.symbols().len();
+    let count = index.symbol_count();
     workbench.navigator_visible = true;
     workbench.clear_navigator_filter();
     Ok(messages.counted(

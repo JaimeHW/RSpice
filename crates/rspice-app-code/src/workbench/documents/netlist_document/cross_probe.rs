@@ -154,36 +154,36 @@ fn name_on(deck: &DeckIndex, line: usize, column: usize) -> Option<CaretName> {
     };
     if let Some((_, node)) = deck
         .nodes_on_line(0, line)
-        .find(|(_, node)| touches(&node.location, &node.name))
+        .find(|(_, node)| touches(&node.location(), &node.name()))
     {
         return Some(CaretName::Node {
-            name: node.name.clone(),
-            top_level: node.scope == 0,
+            name: node.name().into_owned(),
+            top_level: node.scope() == 0,
         });
     }
     // The first the deck lists, as a read of every name would find.
     if let Some((_, symbol)) = deck
         .symbols_on_line(0, line)
         .filter(|(_, symbol)| {
-            symbol.kind == DeckSymbolKind::Instance && touches(&symbol.location, &symbol.name)
+            symbol.kind() == DeckSymbolKind::Instance && touches(&symbol.location(), &symbol.name())
         })
         .min_by_key(|(at, _)| *at)
     {
         return Some(CaretName::Element {
-            name: symbol.name.clone(),
-            top_level: symbol.scope == 0,
+            name: symbol.name().into_owned(),
+            top_level: symbol.scope() == 0,
             head: true,
         });
     }
     deck.references_on_line(0, line)
         .map(|(_, reference)| reference)
         .find(|reference| {
-            reference.kind == DeckSymbolKind::Instance
-                && touches(&reference.location, &reference.name)
+            reference.kind() == DeckSymbolKind::Instance
+                && touches(&reference.location(), &reference.name())
         })
         .map(|reference| CaretName::Element {
-            name: reference.name.clone(),
-            top_level: reference.scope == 0,
+            name: reference.name().into_owned(),
+            top_level: reference.scope() == 0,
             head: false,
         })
 }
@@ -439,20 +439,20 @@ pub fn mark_net_in_generated_netlist(
         return;
     };
     let index = NetlistSourceIndex::parse(artifact.source());
-    let mut spans = index
-        .deck()
-        .nodes()
+    let deck = index.deck();
+    let mut lines = lines.to_vec();
+    lines.sort_unstable();
+    lines.dedup();
+    let mut spans = lines
         .iter()
-        .filter(|node| {
-            node.location.file == 0
-                && lines.contains(&node.location.line)
-                && node.name.eq_ignore_ascii_case(net)
-        })
-        .map(|node| {
-            let start = node.location.column - 1;
+        .flat_map(|line| deck.nodes_on_line(0, *line))
+        .filter(|(_, node)| node.name().eq_ignore_ascii_case(net))
+        .map(|(_, node)| {
+            let location = node.location();
+            let start = location.column - 1;
             SourceSpan {
-                line: node.location.line - 1,
-                columns: start..start + node.name.chars().count(),
+                line: location.line - 1,
+                columns: start..start + node.name().chars().count(),
             }
         })
         .collect::<Vec<_>>();

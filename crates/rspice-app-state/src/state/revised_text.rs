@@ -330,6 +330,59 @@ impl RevisedText {
     }
 }
 
+/// The engine's index of a deck reads its names from the text it was built
+/// from, shared: a text held as a rope is read piece by piece, never put in
+/// one piece for it, and the pieces two revisions share are the same pieces.
+impl rspice_core::netlist::DeckText for RevisedText {
+    fn len(&self) -> usize {
+        self.body.len()
+    }
+
+    fn slice(&self, range: Range<usize>) -> Cow<'_, str> {
+        if let Some(text) = self.body.string.get() {
+            return Cow::Borrowed(text.get(range).unwrap_or_default());
+        }
+        let Some(slice) = self.body.held_rope().get_byte_slice(range) else {
+            return Cow::Borrowed("");
+        };
+        slice
+            .as_str()
+            .map_or_else(|| Cow::Owned(String::from(slice)), Cow::Borrowed)
+    }
+
+    fn pieces(&self, from: usize) -> Box<dyn Iterator<Item = &str> + '_> {
+        if let Some(text) = self.body.string.get() {
+            return Box::new(text.get(from..).into_iter());
+        }
+        let Some((chunks, start, _, _)) = self.body.held_rope().get_chunks_at_byte(from) else {
+            return Box::new(std::iter::empty());
+        };
+        let mut skip = from - start;
+        Box::new(chunks.map(move |chunk| {
+            let piece = chunk.get(skip..).unwrap_or_default();
+            skip = 0;
+            piece
+        }))
+    }
+
+    fn pieces_back(&self, to: usize) -> Box<dyn Iterator<Item = &str> + '_> {
+        if let Some(text) = self.body.string.get() {
+            return Box::new(text.get(..to).into_iter());
+        }
+        let rope = self.body.held_rope();
+        let Some((chunks, start, _, _)) = rope.get_chunks_at_byte(to) else {
+            return Box::new(std::iter::empty());
+        };
+        // The chunks before the one holding `to`, last first, after the part
+        // of that one before it; at the end, every chunk.
+        let head = (to < rope.len_bytes())
+            .then(|| rope.get_chunk_at_byte(to))
+            .flatten()
+            .and_then(|(chunk, ..)| chunk.get(..to - start));
+        Box::new(head.into_iter().chain(chunks.reversed()))
+    }
+}
+
 impl Deref for RevisedText {
     type Target = str;
 
@@ -532,6 +585,46 @@ mod tests {
             3,
             "a text ending in a break ends in an empty line"
         );
+    }
+
+    /// The deck index reads a text held as a rope as it reads one held in
+    /// one piece, without putting it in one piece, and finds where an edit
+    /// to it fell.
+    #[test]
+    fn the_deck_index_reads_a_rope_as_it_reads_the_text_in_one_piece() {
+        use rspice_core::netlist::{DeckText, DeckTextChange};
+        let text = "* deck\n".to_owned() + &"R1 a b 1k ; Ω load\n".repeat(400) + ".end\n";
+        let whole = RevisedText::from(text.as_str());
+        let roped = RevisedText::from_snapshot(&TextSnapshot::new(&text));
+        for at in (0..=text.len())
+            .step_by(97)
+            .filter(|at| text.is_char_boundary(*at))
+        {
+            for held in [&whole, &roped] {
+                assert_eq!(held.pieces(at).collect::<String>(), text[at..], "from {at}");
+                let mut back = held.pieces_back(at).collect::<Vec<_>>();
+                back.reverse();
+                assert_eq!(back.concat(), text[..at], "to {at}");
+                assert_eq!(
+                    DeckText::slice(held, at..(at + 40).min(text.len())),
+                    text.get(at..(at + 40).min(text.len())).unwrap_or_default()
+                );
+            }
+        }
+        let mut edited = roped.clone();
+        let at = text.len() / 2;
+        let at = (at..).find(|at| text.is_char_boundary(*at)).unwrap_or(at);
+        edited.replace_range(at..at, "C9 x 0 1p\n");
+        assert_eq!(
+            DeckTextChange::between(&roped, &edited),
+            Some(DeckTextChange {
+                start: at,
+                old_end: at,
+                new_end: at + 10
+            })
+        );
+        assert_eq!(DeckTextChange::between(&roped, &whole), None);
+        assert!(!roped.is_in_one_piece() && !edited.is_in_one_piece());
     }
 
     /// The memo compares two texts once per pair of revisions, and again

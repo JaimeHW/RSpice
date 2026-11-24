@@ -1500,6 +1500,27 @@ impl DeckIndex {
         })
     }
 
+    /// How many definitions but instances the deck writes.
+    #[must_use]
+    pub fn definition_count(&self) -> usize {
+        self.shared.definitions.len()
+    }
+
+    /// The definition at `position` of [`Self::definitions`]. A position
+    /// stays the definition's through an edit [`Self::edited`] reads.
+    #[must_use]
+    pub fn nth_definition(&self, position: usize) -> Option<DeckSymbol<'_>> {
+        (position < self.shared.definitions.len()).then(|| self.definition(position))
+    }
+
+    /// The one-based line of `file` holding byte `byte`.
+    #[must_use]
+    pub fn line_of(&self, file: usize, byte: usize) -> Option<usize> {
+        let slot = &self.pages[self.slot_at(file, byte)?];
+        let line = slot.page.line_of((byte - slot.start) as u32);
+        Some((slot.first_line + line + 1) as usize)
+    }
+
     /// Every definition but an instance, in source order: the subcircuits,
     /// models, parameters and functions a reader binds by scope, found
     /// without reading past the deck's devices.
