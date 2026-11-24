@@ -105,6 +105,17 @@ fn place_table_cursor(results: &mut ResultsState, analysis_index: usize, x: f64)
     }
 }
 
+/// The strip model of the analysis the data browser shows, which is the one
+/// the table shows.
+fn selected_model<'m>(
+    models: &'m [rspice_results_ui::waves::StripModel],
+    simulation: &crate::state::SimulationState,
+) -> Option<&'m rspice_results_ui::waves::StripModel> {
+    let analysis = super::shown_analysis(simulation)?;
+    let key = super::AnalysisPresentationKey::new(simulation.active_run()?.dataset_id, analysis);
+    models.iter().find(|model| model.analysis_key() == key)
+}
+
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if show_selected_result_artifact_table(ui, state) {
         return;
@@ -127,15 +138,19 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         return;
     }
 
-    let view = &state.results.session.table;
-    let Some(model) = models
-        .iter()
-        .find(|model| Some(model.analysis_key()) == view.analysis)
-        .or_else(|| models.first())
-    else {
-        well_hint(ui, "The active run has no tabular analyses");
+    let Some(model) = selected_model(&models, &state.model.simulation) else {
+        well_hint(ui, "The selected analysis has no signals to tabulate");
         return;
     };
+    // Chosen columns belong to the analysis they were chosen in; another
+    // analysis starts from its own signals.
+    let key = model.analysis_key();
+    let view = &mut state.results.session.table;
+    if view.analysis != Some(key) {
+        view.columns.clear();
+        view.analysis = Some(key);
+    }
+    let view = &state.results.session.table;
 
     // Around-cursor mode follows cursor A only when it belongs to this
     // analysis; a cursor on another strip is not a window into this one.
@@ -168,7 +183,6 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     if let Some(sample) = response.clicked_sample {
         place_table_cursor(state.results, model.analysis_index(), sample);
     }
-    state.results.session.table.analysis = Some(model.analysis_key());
     state.results.session.table_status = Some(response.status);
 }
 
@@ -197,7 +211,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     viewer::inline_actions(
         ui,
         viewer::TableControls {
-            models: &models,
+            model: selected_model(&models, &state.model.simulation),
             cursor_strip: state.results.session.cursor_strip,
             cursor_a: state.results.session.cursors.a,
             status: state.results.session.table_status.as_deref(),
@@ -313,6 +327,48 @@ mod tests {
         place_table_cursor(&mut state.results.results, 3, 4.0e-6);
         assert_eq!(state.results.results.session.cursors.a, Some(1.25e-6));
         assert_eq!(state.results.results.session.cursors.b, Some(8.5e-6));
+    }
+
+    /// The data browser picks the analysis the table shows; columns chosen
+    /// in one analysis are not carried into the next.
+    #[test]
+    fn the_table_shows_the_analysis_the_data_browser_picked() {
+        use crate::state::{RetainedTrace, SimulationRun};
+        let tran = |id, name: &str, signal: &str| {
+            AnalysisResult::new(id, AnalysisType::Transient, name).with_waveforms(vec![
+                RetainedTrace::new(signal, vec![0.0, 1.0], vec![1.0, 2.0], "#ffbd2e"),
+            ])
+        };
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(tran(1, "TRAN A", "V(a)"));
+        run.add_analysis(tran(2, "TRAN B", "V(b)"));
+        let keys =
+            [0, 1].map(|index| AnalysisPresentationKey::new(run.dataset_id, &run.analyses[index]));
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let draw = |state: &mut ResultsTestHost| {
+            state.quick_frame();
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
+            });
+        };
+
+        assert!(state.model.simulation.select_analysis(1));
+        draw(&mut state);
+        assert_eq!(state.results.results.session.table.analysis, Some(keys[1]));
+
+        state.results.results.session.table.columns = vec![super::super::TracePresentationKey {
+            source_name: "V(b)".to_owned(),
+            kind: 0,
+            family_group: 0,
+        }];
+        assert!(state.model.simulation.select_analysis(0));
+        draw(&mut state);
+        assert_eq!(state.results.results.session.table.analysis, Some(keys[0]));
+        assert!(state.results.results.session.table.columns.is_empty());
     }
 
     #[test]

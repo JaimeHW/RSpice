@@ -50,7 +50,8 @@ pub struct TableResponse {
 }
 
 pub struct TableControls<'a> {
-    pub models: &'a [StripModel],
+    /// The analysis the data browser selected, as the table draws it.
+    pub model: Option<&'a StripModel>,
     pub cursor_strip: Option<usize>,
     pub cursor_a: Option<f64>,
     pub status: Option<&'a str>,
@@ -447,8 +448,9 @@ pub const STRIDES: [usize; 5] = [1, 2, 5, 10, 100];
 /// avoid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableView {
-    /// Stable analysis the table reads. `None` follows the first available
-    /// analysis until the user explicitly chooses one.
+    /// The analysis the chosen columns belong to. The data browser picks
+    /// the analysis the table shows; when it picks another, the columns
+    /// return to that analysis' signals.
     pub analysis: Option<AnalysisPresentationKey>,
     /// Show every `stride`-th retained row.
     pub stride: usize,
@@ -912,37 +914,7 @@ pub fn inline_actions(
     display_name: impl for<'a> Fn(&'a str) -> Cow<'a, str>,
 ) {
     let t = Tokens::get(ui.ctx());
-    let models = source.models;
-    let analysis_key = view.analysis;
-    let model = models
-        .iter()
-        .find(|model| Some(model.analysis_key()) == analysis_key)
-        .or_else(|| models.first());
-
-    // Analysis picker — only when there is a choice to make.
-    if models.len() > 1
-        && let Some(active) = model
-    {
-        let label = active.table_label();
-        rspice_ui_kit::widgets::menu_button(ui, elide_label(&label), |ui| {
-            for candidate in models.iter() {
-                let selected = candidate.analysis_key() == active.analysis_key();
-                if ui
-                    .selectable_label(selected, candidate.table_label())
-                    .clicked()
-                {
-                    let table = &mut *view;
-                    if table.analysis != Some(candidate.analysis_key()) {
-                        // Columns index into the analysis they were chosen
-                        // for; carrying them over would rename the data.
-                        table.columns.clear();
-                    }
-                    table.analysis = Some(candidate.analysis_key());
-                    ui.close();
-                }
-            }
-        });
-    }
+    let model = source.model;
 
     let stride = view.stride;
     let response = chip(ui, &format!("1/{stride}"), stride > 1)
@@ -1085,14 +1057,6 @@ fn search_fields(ui: &mut Ui) {
 pub fn operating_point_controls(ui: &mut Ui) {
     chip(ui, "Typed OP", true)
         .on_hover_text("Virtualized exact operating-point values; right-click a row to copy");
-}
-
-fn elide_label(label: &str) -> String {
-    if label.chars().count() <= 22 {
-        return label.to_owned();
-    }
-    let kept: String = label.chars().take(21).collect();
-    format!("{kept}…")
 }
 
 fn status_line(shown: usize, retained: usize, view: &TableView, cursor: Option<f64>) -> String {
