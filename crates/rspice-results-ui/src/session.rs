@@ -565,8 +565,8 @@ impl VisibilityOverrides {
     }
 
     /// [`Self::set`] for what a view draws, not what the reader set.
-    pub fn project(&mut self, key: SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
-        self.put(&key, visible)
+    pub fn project(&mut self, key: &SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
+        self.put(key, visible)
     }
 
     /// Make `analysis`' overrides exactly `desired`, for what a view draws,
@@ -615,8 +615,15 @@ impl VisibilityOverrides {
     }
 
     fn put(&mut self, key: &SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
+        // The key is copied only for a signal not set before.
         let changed = match visible {
-            Some(visible) => self.overrides.insert(key.clone(), visible) != Some(visible),
+            Some(visible) => match self.overrides.get_mut(key) {
+                Some(held) => std::mem::replace(held, visible) != visible,
+                None => {
+                    self.overrides.insert(key.clone(), visible);
+                    true
+                }
+            },
             None => self.overrides.remove(key).is_some(),
         };
         if changed {

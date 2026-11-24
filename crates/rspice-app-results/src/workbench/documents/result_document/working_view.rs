@@ -560,7 +560,7 @@ fn keep(
         for (key, set, visible) in normalize {
             // A tick the reader set again since is theirs, kept next.
             if state.results.session.waveform_visibility.get(&key).copied() == set {
-                state.results.project_waveform_visible(key, visible);
+                state.results.project_waveform_visible(&key, visible);
             }
         }
         return;
@@ -1171,6 +1171,22 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         return;
     };
     let panes = bound_panes(document, run);
+    // Where each marker drawn from the view sits, while the view is drawn
+    // from what changed.
+    let anchors: HashMap<
+        crate::results::visualization_document::MarkerId,
+        (AnalysisPresentationKey, super::WaveformPresentationKey),
+    > = match again {
+        Some(_) => state
+            .results
+            .session
+            .document_markers
+            .iter()
+            .filter(|marker| marker.document_id == view)
+            .map(|marker| (marker.retained_id, (marker.analysis, marker.anchor.clone())))
+            .collect(),
+        None => HashMap::new(),
+    };
     let mut markers = Vec::new();
     for &(index, key, pane_id) in &panes {
         let analysis = &run.analyses[index];
@@ -1339,11 +1355,13 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
             if trace.pane_id != pane_id {
                 continue;
             }
+            let signal = trace_signal(trace);
             markers.push(MarkerAt {
                 index,
                 pane_id,
                 retained_id: marker.id,
-                signal: trace_signal(trace).to_owned(),
+                drawn: document.signal_drawn(pane_id, signal) == Some(true),
+                signal: signal.to_owned(),
                 trace_name: trace.label.clone(),
                 x: *x,
                 kind: marker.kind,
@@ -1353,12 +1371,19 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
     }
     // A marker's anchor is read through the strip models, which may be
     // built as it is read, once every pane is drawn. A marker on a trace
-    // that is not drawn has nothing to sit on.
+    // that is not drawn has nothing to sit on. One drawn before on the same
+    // signal sits where it sat while its signal is drawn, so a change of the
+    // view builds no models for the markers it left alone.
     let mut anchored = Vec::with_capacity(markers.len());
     for marker in markers {
-        let Some((analysis, anchor)) =
-            super::waves::source_waveform_anchor_in(state, marker.index, &marker.signal)
-        else {
+        let held = anchors
+            .get(&marker.retained_id)
+            .filter(|(_, anchor)| anchor.trace.source_name == marker.signal);
+        let sits = match held {
+            Some(held) => marker.drawn.then(|| held.clone()),
+            None => super::waves::source_waveform_anchor_in(state, marker.index, &marker.signal),
+        };
+        let Some((analysis, anchor)) = sits else {
             continue;
         };
         anchored.push(DocumentMarker {
@@ -1422,6 +1447,8 @@ struct MarkerAt {
     index: usize,
     pane_id: PaneId,
     retained_id: crate::results::visualization_document::MarkerId,
+    /// Whether the view draws its signal: every trace of it shown.
+    drawn: bool,
     signal: String,
     trace_name: String,
     x: f64,
@@ -1522,37 +1549,44 @@ fn project_signals(
     if signals.is_empty() {
         return;
     }
-    let index = results
+    let names: Vec<&str> = signals.iter().map(String::as_str).collect();
+    let columns = match results
         .session
         .signal_indices
-        .index(runs, key, &analysis.data);
-    for signal in signals {
+        .index(runs, key, &analysis.data)
+    {
+        Some(index) => index.first_columns(&analysis.data, &names),
+        None => {
+            let mut found: HashMap<&str, Option<usize>> =
+                names.iter().map(|name| (*name, None)).collect();
+            for (column, waveform) in analysis.waveforms.iter().enumerate() {
+                if let Some(first) = found.get_mut(waveform.name.as_str()) {
+                    first.get_or_insert(column);
+                }
+            }
+            names.iter().map(|name| found[name]).collect()
+        }
+    };
+    for (signal, column) in names.into_iter().zip(columns) {
         let traces = document.traces_reading(pane_id, signal);
-        let column = match &index {
-            Some(index) => index.columns_named(&analysis.data, signal).next(),
-            None => analysis
-                .waveforms
-                .iter()
-                .position(|waveform| waveform.name == *signal),
-        };
-        let presentation = SourceWaveformPresentationKey::new(key, signal.clone());
+        let presentation = SourceWaveformPresentationKey::new(key, signal);
         if let Some(column) = column {
             let dataset_default = analysis.waveforms[column].visible;
             let plotted = !traces.is_empty() && traces.iter().all(|trace| trace.visible);
             results.project_waveform_visible(
-                presentation.clone(),
+                &presentation,
                 (plotted != dataset_default).then_some(plotted),
             );
         }
         let color = traces.iter().rev().find_map(|trace| trace.color);
-        results.draw_waveform_color(presentation.clone(), color);
+        results.draw_waveform_color(&presentation, color);
         let look = traces
             .iter()
             .rev()
-            .map(|trace| super::trace_style::look_of(trace).1)
+            .map(|trace| super::trace_style::trace_look(trace))
             .find(|look| *look != rspice_results_ui::session::WaveformLook::default())
             .unwrap_or_default();
-        results.draw_waveform_look(presentation, look);
+        results.draw_waveform_look(&presentation, look);
     }
 }
 
@@ -1577,7 +1611,7 @@ fn project_history_nets(
     };
     for name in names.history_only() {
         results.project_waveform_visible(
-            SourceWaveformPresentationKey::new(key, name.clone()),
+            &SourceWaveformPresentationKey::new(key, name.clone()),
             listed.contains(name).then_some(true),
         );
     }

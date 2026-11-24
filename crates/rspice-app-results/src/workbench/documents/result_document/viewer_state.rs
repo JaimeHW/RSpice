@@ -204,7 +204,7 @@ impl ResultsState {
     /// its dataset draws it (`None`), as the view being drawn has it.
     pub(crate) fn project_waveform_visible(
         &mut self,
-        key: SourceWaveformPresentationKey,
+        key: &SourceWaveformPresentationKey,
         visible: Option<bool>,
     ) {
         // The strip models follow by the signal this changes.
@@ -274,13 +274,24 @@ impl ResultsState {
     /// keeps it was just given the style or the name.
     pub(super) fn draw_waveform_look(
         &mut self,
-        key: SourceWaveformPresentationKey,
+        key: &SourceWaveformPresentationKey,
         look: rspice_results_ui::session::WaveformLook,
     ) {
+        let looks = &mut self.session.waveform_looks;
         let changed = if look == rspice_results_ui::session::WaveformLook::default() {
-            self.session.waveform_looks.remove(&key).is_some()
+            looks.remove(key).is_some()
         } else {
-            self.session.waveform_looks.insert(key, look.clone()) != Some(look)
+            match looks.get_mut(key) {
+                Some(held) if *held == look => false,
+                Some(held) => {
+                    *held = look;
+                    true
+                }
+                None => {
+                    looks.insert(key.clone(), look);
+                    true
+                }
+            }
         };
         if changed {
             self.models.invalidate();
@@ -291,12 +302,19 @@ impl ResultsState {
     /// its own colour: the view that keeps it was just given the colour.
     pub(super) fn draw_waveform_color(
         &mut self,
-        key: SourceWaveformPresentationKey,
+        key: &SourceWaveformPresentationKey,
         color: Option<TraceColor>,
     ) {
+        let colors = &mut self.session.waveform_colors;
         let changed = match color {
-            Some(color) => self.session.waveform_colors.insert(key, color) != Some(color),
-            None => self.session.waveform_colors.remove(&key).is_some(),
+            Some(color) => match colors.get_mut(key) {
+                Some(held) => std::mem::replace(held, color) != color,
+                None => {
+                    colors.insert(key.clone(), color);
+                    true
+                }
+            },
+            None => colors.remove(key).is_some(),
         };
         if changed {
             self.models.invalidate();

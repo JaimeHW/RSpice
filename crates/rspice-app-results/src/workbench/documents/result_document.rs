@@ -1047,7 +1047,7 @@ pub fn set_trace_color(
     }
     state
         .results
-        .draw_waveform_color(SourceWaveformPresentationKey::new(analysis, signal), color);
+        .draw_waveform_color(&SourceWaveformPresentationKey::new(analysis, signal), color);
     Ok(())
 }
 

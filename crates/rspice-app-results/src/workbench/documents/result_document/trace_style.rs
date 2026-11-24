@@ -12,17 +12,23 @@ use crate::results::visualization_document::{DocumentEdit, EntityRef, Trace, Tra
 /// What `trace` gives its signal beyond its colour, by the signal's name: its
 /// style, and the name the reader gave it when they gave one.
 pub(super) fn look_of(trace: &Trace) -> (String, WaveformLook) {
-    let signal = trace.source_signal();
-    let name = signal
+    (
+        trace.source_signal().unwrap_or(&trace.label).to_owned(),
+        trace_look(trace),
+    )
+}
+
+/// How `trace` is drawn: its style, and the name it is given when that is
+/// not its signal's.
+pub(super) fn trace_look(trace: &Trace) -> WaveformLook {
+    let name = trace
+        .source_signal()
         .filter(|signal| *signal != trace.label)
         .map(|_| trace.label.clone());
-    (
-        signal.unwrap_or(&trace.label).to_owned(),
-        WaveformLook {
-            style: trace.style,
-            name,
-        },
-    )
+    WaveformLook {
+        style: trace.style,
+        name,
+    }
 }
 
 /// The view that keeps `analysis`' strip, and its traces that read `signal`
@@ -102,7 +108,7 @@ pub fn set_trace_style(
         .cloned()
         .unwrap_or_default();
     look.style = style;
-    state.results.draw_waveform_look(key, look);
+    state.results.draw_waveform_look(&key, look);
     Ok(())
 }
 
@@ -147,6 +153,6 @@ pub fn rename_trace(
         .cloned()
         .unwrap_or_default();
     look.name = (value != signal).then(|| value.to_owned());
-    state.results.draw_waveform_look(key, look);
+    state.results.draw_waveform_look(&key, look);
     Ok(())
 }
