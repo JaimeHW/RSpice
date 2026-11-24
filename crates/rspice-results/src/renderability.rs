@@ -668,5 +668,8 @@ pub fn viewer_can_render(
             analysis.family_metadata,
             Some(AnalysisResultFamilyMetadata::Optimization { ref iterations, .. }) if !iterations.is_empty()
         ),
+        // Whether the point's siblings make a sweep is the run's question,
+        // asked where the run is held.
+        ResultViewer::Sweep => crate::sweep_table::is_sweep_point(analysis),
     }
 }

@@ -24,6 +24,7 @@ mod retained_memo;
 mod runs;
 mod saved_documents;
 mod shown_analysis;
+mod sweep_sheet;
 mod two_windows;
 mod viewer_capabilities;
 mod waveform_export;

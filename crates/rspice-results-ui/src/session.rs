@@ -736,6 +736,9 @@ pub struct ResultViewerState {
     pub study: Box<crate::sensitivity::study::SensitivitySheetState>,
     /// Scatter sheet controls.
     pub scatter: Box<crate::scatter::ScatterSheetState>,
+    /// Sweep sheet controls: the value drawn, the swept quantity on X and
+    /// where a signal is read.
+    pub sweep: Box<crate::sweep::SweepSheetState>,
     /// The family members the reader picked, in any sheet that shows them.
     /// Boxed: the results slot is built by value and has a stack budget.
     pub members: Box<MemberSelection>,

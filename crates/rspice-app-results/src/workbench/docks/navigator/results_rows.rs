@@ -532,10 +532,10 @@ pub fn retained_result_artifacts(
     if let Some(metadata) = &analysis.family_metadata {
         let (name, count, viewer) = match metadata {
             AnalysisResultFamilyMetadata::Parametric { sweep_values, .. } => {
-                ("Sweep values", sweep_values.len(), ResultViewer::Waves)
+                ("Sweep values", sweep_values.len(), ResultViewer::Sweep)
             }
             AnalysisResultFamilyMetadata::Corner { x_values, .. } => {
-                ("Corner list", x_values.len(), ResultViewer::Waves)
+                ("Corner list", x_values.len(), ResultViewer::Sweep)
             }
             AnalysisResultFamilyMetadata::MonteCarlo { variables, .. } => (
                 "Monte Carlo source samples",

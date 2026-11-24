@@ -139,6 +139,7 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         | ResultViewer::Table
         | ResultViewer::Soa
         | ResultViewer::Optimization
+        | ResultViewer::Sweep
         | ResultViewer::Events
         | ResultViewer::Scatter
         | ResultViewer::BoxViolin

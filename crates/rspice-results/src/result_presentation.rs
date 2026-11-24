@@ -75,6 +75,9 @@ pub enum ResultViewer {
     Soa,
     /// Optimizer cost convergence and the candidate history behind it.
     Optimization,
+    /// A measured value of every point of a sweep, corner run or temperature
+    /// step, against a swept quantity.
+    Sweep,
     /// Exact single-ended and mixed-mode power-wave matrices.
     NetworkMatrix,
 }
@@ -108,10 +111,11 @@ impl ResultViewer {
             ResultViewer::Events => "EVENTS",
             ResultViewer::Soa => "SOA",
             ResultViewer::Optimization => "OPT",
+            ResultViewer::Sweep => "SWEEP",
         }
     }
 
-    const PRIMARY: [ResultViewer; 25] = [
+    const PRIMARY: [ResultViewer; 26] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -138,6 +142,7 @@ impl ResultViewer {
         // produce — XSPICE event nodes, or a whole campaign analysis kind — so
         // leading with them would push the everyday sheets rightward for the
         // sake of tabs that are usually dim.
+        ResultViewer::Sweep,
         ResultViewer::Events,
         ResultViewer::Soa,
         ResultViewer::Optimization,
@@ -175,6 +180,7 @@ impl ResultViewer {
             ResultViewer::Events => "Events",
             ResultViewer::Soa => "SOA",
             ResultViewer::Optimization => "Optimization",
+            ResultViewer::Sweep => "Sweep",
         }
     }
 
@@ -188,7 +194,7 @@ impl ResultViewer {
     /// document depended on which path asked.
     pub const fn viewer_document_id(self) -> &'static str {
         match self {
-            ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
+            ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::Sweep => "viewer-waveform",
             ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
                 "viewer-bode"
             }
@@ -281,9 +287,9 @@ impl ResultViewer {
                 V::Bode,
                 V::Table,
             ],
-            A::Parametric | A::Corner => {
-                &[V::Waves, V::DcSweep, V::Bode, V::NoiseContrib, V::Table]
-            }
+            // A sweep held in one analysis keeps one value per point: what it
+            // measured is read against what was swept.
+            A::Parametric | A::Corner => &[V::Sweep, V::Table],
             A::Optimization => &[V::Optimization, V::Table],
             A::SParameter | A::Hbsp | A::Psp => &[
                 V::SParameters,

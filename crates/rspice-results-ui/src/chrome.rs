@@ -39,7 +39,7 @@ const fn viewer_tab_icon(viewer: ResultViewer) -> WorkbenchIcon {
         | ResultViewer::Soa
         | ResultViewer::Events
         | ResultViewer::Table => WorkbenchIcon::Grid,
-        ResultViewer::Optimization => WorkbenchIcon::Results,
+        ResultViewer::Optimization | ResultViewer::Sweep => WorkbenchIcon::Results,
     }
 }
 

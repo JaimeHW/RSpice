@@ -158,7 +158,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 70] = [
+    pub const ALL: [Self; 71] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -200,6 +200,7 @@ impl ResultsCommand {
         Self::ResultViewer(ResultViewer::Events),
         Self::ResultViewer(ResultViewer::Soa),
         Self::ResultViewer(ResultViewer::Optimization),
+        Self::ResultViewer(ResultViewer::Sweep),
         Self::AddVisualizationPane,
         Self::VisualizationDocumentProperties,
         Self::CursorToMaximum,
@@ -590,6 +591,7 @@ const fn viewer_key(viewer: ResultViewer) -> CommandKey {
         ResultViewer::Events => CommandKey::new("result-events"),
         ResultViewer::Soa => ids::RESULT_SAFE_OPERATING_AREA,
         ResultViewer::Optimization => CommandKey::new("result-optimization"),
+        ResultViewer::Sweep => CommandKey::new("result-sweep"),
     }
 }
 
@@ -625,5 +627,6 @@ const fn viewer_label(viewer: ResultViewer) -> &'static str {
         ResultViewer::Events => "Open event history viewer",
         ResultViewer::Soa => "Open safe-operating-area viewer",
         ResultViewer::Optimization => "Open optimization viewer",
+        ResultViewer::Sweep => "Open sweep viewer",
     }
 }

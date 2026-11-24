@@ -915,6 +915,7 @@ pub fn quick_result_availability(
             Some(AnalysisResultFamilyMetadata::Optimization { iterations, .. })
                 if !iterations.is_empty()
         ),
+        ResultViewer::Sweep => rspice_results::sweep_table::is_sweep_point(analysis),
     };
     if available {
         RetainedHardcopySourceAvailability::Available

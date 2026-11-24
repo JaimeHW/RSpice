@@ -50,6 +50,8 @@ pub(super) struct ViewPlans {
     pub(super) study: Option<Arc<super::sensitivity::StudyPlan>>,
     /// Safe-operating-area per-rule stress facts; see [`super::soa`].
     pub(super) soa: Option<Arc<super::soa::SoaPlan>>,
+    /// The shown analysis's family as rows; see [`super::sweep`].
+    pub(super) sweep: Option<Arc<super::sweep::SweepPlan>>,
 }
 
 #[cfg(test)]
@@ -74,6 +76,7 @@ impl ViewPlans {
             mismatch,
             study,
             soa,
+            sweep,
         } = self;
         manifest.is_none()
             && artifact.is_none()
@@ -86,5 +89,6 @@ impl ViewPlans {
             && mismatch.is_none()
             && study.is_none()
             && soa.is_none()
+            && sweep.is_none()
     }
 }

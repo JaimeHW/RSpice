@@ -40,6 +40,7 @@ pub mod signal_index;
 pub mod smith_chart;
 pub mod soa;
 pub mod strip;
+pub mod sweep;
 pub mod table;
 pub mod transfer_function;
 pub mod virtual_rows;

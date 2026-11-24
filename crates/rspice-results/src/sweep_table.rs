@@ -156,16 +156,20 @@ pub struct SweepTable {
 }
 
 impl SweepTable {
-    /// The output named `name`.
+    /// The output named `name`, matched as SPICE matches names: in any case.
     #[must_use]
     pub fn output(&self, name: &str) -> Option<&SweepOutput> {
-        self.outputs.iter().find(|output| output.name == name)
+        self.outputs
+            .iter()
+            .find(|output| output.name.eq_ignore_ascii_case(name))
     }
 
-    /// The axis named `name`.
+    /// The axis named `name`, in any case.
     #[must_use]
     pub fn axis(&self, name: &str) -> Option<&SweptAxis> {
-        self.axes.iter().find(|axis| axis.name == name)
+        self.axes
+            .iter()
+            .find(|axis| axis.name.eq_ignore_ascii_case(name))
     }
 
     /// The quantities that can stand on X: those whose every value is a
@@ -242,11 +246,11 @@ pub struct SweepCurve {
 /// The family `analyses[index]` belongs to, as a table; `None` when it
 /// belongs to none or its points cannot be told apart.
 #[must_use]
-pub fn sweep_table<W: AsRef<RetainedWaveform>>(
-    analyses: &[AnalysisResult<W>],
+pub fn sweep_table<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
+    analyses: &[A],
     index: usize,
 ) -> Option<SweepTable> {
-    let analysis = analyses.get(index)?;
+    let analysis = analyses.get(index)?.as_ref();
     if let Some(table) = in_analysis_table(analysis, index) {
         return Some(table);
     }
@@ -255,11 +259,11 @@ pub fn sweep_table<W: AsRef<RetainedWaveform>>(
 
 /// Whether `analyses[index]` has a sweep table, without building one.
 #[must_use]
-pub fn has_sweep_table<W: AsRef<RetainedWaveform>>(
-    analyses: &[AnalysisResult<W>],
+pub fn has_sweep_table<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
+    analyses: &[A],
     index: usize,
 ) -> bool {
-    let Some(analysis) = analyses.get(index) else {
+    let Some(analysis) = analyses.get(index).map(AsRef::as_ref) else {
         return false;
     };
     if matches!(
@@ -272,6 +276,28 @@ pub fn has_sweep_table<W: AsRef<RetainedWaveform>>(
         return in_analysis_table(analysis, index).is_some();
     }
     expanded_members(analyses, index).len() >= 2
+}
+
+/// Whether `analysis` is a point of a sweep, alone: a sweep held in one
+/// analysis, a `.STEP` point, or a point solved at a PVT corner. Whether a
+/// point's siblings make a sweep of it is [`has_sweep_table`]'s question.
+#[must_use]
+pub fn is_sweep_point<W: AsRef<RetainedWaveform>>(analysis: &AnalysisResult<W>) -> bool {
+    if !analysis.success {
+        return false;
+    }
+    match &analysis.family_metadata {
+        Some(
+            AnalysisResultFamilyMetadata::Parametric { .. }
+            | AnalysisResultFamilyMetadata::Corner { .. },
+        ) => !analysis.waveforms.is_empty(),
+        _ => match analysis.family_member() {
+            Some(member) => matches!(member, AnalysisResultFamilyMember::StepPoint { .. }),
+            None => analysis
+                .provenance()
+                .is_some_and(|provenance| provenance.pvt_point().is_some()),
+        },
+    }
 }
 
 /// The swept quantity a `.STEP` family result names in its target: `PARAM
@@ -363,7 +389,7 @@ fn in_analysis_table<W: AsRef<RetainedWaveform>>(
                 },
             ]);
             let rows = (0..x_values.len())
-                .map(|row| row_name(&axes, row))
+                .map(|row| point_name(&axes, row))
                 .collect();
             (rows, axes)
         }
@@ -418,11 +444,11 @@ fn in_analysis_table<W: AsRef<RetainedWaveform>>(
 /// authored analysis expanded into, or that names a member of the same
 /// kind of `.STEP` family. Monte Carlo trials are a population, read by the
 /// statistics sheets, not a sweep.
-pub fn expanded_members<W: AsRef<RetainedWaveform>>(
-    analyses: &[AnalysisResult<W>],
+pub fn expanded_members<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
+    analyses: &[A],
     index: usize,
 ) -> Vec<usize> {
-    let Some(analysis) = analyses.get(index) else {
+    let Some(analysis) = analyses.get(index).map(AsRef::as_ref) else {
         return Vec::new();
     };
     let step = analysis
@@ -437,6 +463,7 @@ pub fn expanded_members<W: AsRef<RetainedWaveform>>(
     }
     let mut members: Vec<usize> = analyses
         .iter()
+        .map(AsRef::as_ref)
         .enumerate()
         .filter(|(_, sibling)| sibling.success && sibling.analysis_type == analysis.analysis_type)
         .filter(|(_, sibling)| match step {
@@ -457,6 +484,7 @@ pub fn expanded_members<W: AsRef<RetainedWaveform>>(
     if step.is_some() {
         members.sort_by_key(|position| {
             analyses[*position]
+                .as_ref()
                 .family_member()
                 .map_or(usize::MAX, AnalysisResultFamilyMember::index)
         });
@@ -464,25 +492,28 @@ pub fn expanded_members<W: AsRef<RetainedWaveform>>(
     members
 }
 
-fn expanded_table<W: AsRef<RetainedWaveform>>(
-    analyses: &[AnalysisResult<W>],
+fn expanded_table<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
+    analyses: &[A],
     index: usize,
 ) -> Option<SweepTable> {
     let members = expanded_members(analyses, index);
     if members.len() < 2 {
         return None;
     }
-    let axes = varying(match analyses[members[0]].family_member() {
-        Some(AnalysisResultFamilyMember::StepPoint { .. }) => step_axes(analyses, &members),
-        _ => pvt_axes(analyses, &members),
-    });
+    let points: Vec<&AnalysisResult<W>> = members
+        .iter()
+        .map(|&member| analyses[member].as_ref())
+        .collect();
+    let axes = point_axes(&points);
     if axes.is_empty() {
         return None;
     }
-    let rows = (0..members.len()).map(|row| row_name(&axes, row)).collect();
+    let rows = (0..members.len())
+        .map(|row| point_name(&axes, row))
+        .collect();
     let mut outputs: Vec<SweepOutput> = Vec::new();
     for (row, &member) in members.iter().enumerate() {
-        for measurement in &analyses[member].measurements {
+        for measurement in &analyses[member].as_ref().measurements {
             let position = output_slot(&mut outputs, &measurement.name, members.len(), || {
                 measurement
                     .units
@@ -496,7 +527,7 @@ fn expanded_table<W: AsRef<RetainedWaveform>>(
                 .filter(|value| value.is_finite() && measurement.error.is_none());
         }
     }
-    let first = &analyses[members[0]];
+    let first = analyses[members[0]].as_ref();
     for waveform in first.waveforms.iter().map(AsRef::as_ref) {
         if outputs.iter().any(|output| output.name == waveform.name) {
             continue;
@@ -523,8 +554,8 @@ fn expanded_table<W: AsRef<RetainedWaveform>>(
 /// stepped transient. A row whose member retained no such signal, or has no
 /// sample there, reads `None`.
 #[must_use]
-pub fn signal_values<W: AsRef<RetainedWaveform>>(
-    analyses: &[AnalysisResult<W>],
+pub fn signal_values<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
+    analyses: &[A],
     table: &SweepTable,
     name: &str,
     at: Option<f64>,
@@ -535,10 +566,11 @@ pub fn signal_values<W: AsRef<RetainedWaveform>>(
         .map(|&member| {
             let waveform = analyses
                 .get(member)?
+                .as_ref()
                 .waveforms
                 .iter()
                 .map(AsRef::as_ref)
-                .find(|waveform| waveform.name == name)?;
+                .find(|waveform| waveform.name.eq_ignore_ascii_case(name))?;
             let value = match at {
                 Some(at) => waveform
                     .y
@@ -550,16 +582,26 @@ pub fn signal_values<W: AsRef<RetainedWaveform>>(
         .collect()
 }
 
+/// The quantities that differ between the points of an expanded family, in
+/// the family's order: each `.STEP` coordinate, or a PVT point's process,
+/// temperature, supply and swept design values. One axis per quantity, one
+/// value per point.
+#[must_use]
+pub fn point_axes<W: AsRef<RetainedWaveform>>(points: &[&AnalysisResult<W>]) -> Vec<SweptAxis> {
+    varying(
+        match points.first().and_then(|point| point.family_member()) {
+            Some(AnalysisResultFamilyMember::StepPoint { .. }) => step_axes(points),
+            _ => pvt_axes(points),
+        },
+    )
+}
+
 /// A `.STEP` family's axes, one per coordinate name in the order the first
 /// member states them.
-fn step_axes<W: AsRef<RetainedWaveform>>(
-    analyses: &[AnalysisResult<W>],
-    members: &[usize],
-) -> Vec<SweptAxis> {
+fn step_axes<W: AsRef<RetainedWaveform>>(points: &[&AnalysisResult<W>]) -> Vec<SweptAxis> {
     let mut axes: Vec<SweptAxis> = Vec::new();
-    for (row, &member) in members.iter().enumerate() {
-        let Some(AnalysisResultFamilyMember::StepPoint { coordinate, .. }) =
-            analyses[member].family_member()
+    for (row, point) in points.iter().enumerate() {
+        let Some(AnalysisResultFamilyMember::StepPoint { coordinate, .. }) = point.family_member()
         else {
             continue;
         };
@@ -570,7 +612,7 @@ fn step_axes<W: AsRef<RetainedWaveform>>(
                     axes.push(SweptAxis {
                         name: value.name.clone(),
                         unit: value.unit.clone(),
-                        values: vec![SweptValue::Number(f64::NAN); members.len()],
+                        values: vec![SweptValue::Number(f64::NAN); points.len()],
                     });
                     axes.len() - 1
                 }
@@ -583,14 +625,11 @@ fn step_axes<W: AsRef<RetainedWaveform>>(
 
 /// A PVT family's axes: the process corner, the temperature, the supply and
 /// each swept design value.
-fn pvt_axes<W: AsRef<RetainedWaveform>>(
-    analyses: &[AnalysisResult<W>],
-    members: &[usize],
-) -> Vec<SweptAxis> {
+fn pvt_axes<W: AsRef<RetainedWaveform>>(members: &[&AnalysisResult<W>]) -> Vec<SweptAxis> {
     let points: Vec<Option<&AnalysisResultPvtPoint>> = members
         .iter()
         .map(|member| {
-            analyses[*member]
+            member
                 .provenance()
                 .and_then(|provenance| provenance.pvt_point())
         })
@@ -704,8 +743,10 @@ fn varying(axes: Vec<SweptAxis>) -> Vec<SweptAxis> {
         .collect()
 }
 
-/// A row named by every axis that varies, as a legend names the point.
-fn row_name(axes: &[SweptAxis], row: usize) -> String {
+/// A point named by every axis that varies, as a legend names it:
+/// `r=2k, C1=10pF`, `ff, temp=125°C`.
+#[must_use]
+pub fn point_name(axes: &[SweptAxis], row: usize) -> String {
     axes.iter()
         .map(|axis| axis.assignment(row))
         .collect::<Vec<_>>()

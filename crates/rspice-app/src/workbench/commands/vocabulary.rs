@@ -760,6 +760,10 @@ static COMMAND_ORDER: &[CommandKey] = &[
         rspice_app_results::workbench::documents::result_document::ResultViewer::Optimization,
     )
     .key(),
+    ResultsCommand::ResultViewer(
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Sweep,
+    )
+    .key(),
     SimulateCommand::Verify(VerificationPage::MonteCarlo).key(),
     SimulateCommand::Verify(VerificationPage::Checks).key(),
     SimulateCommand::Verify(VerificationPage::Reference).key(),

@@ -813,6 +813,7 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::Events), "Event history").access('E'),
     MenuEntry::offered(viewer(ResultViewer::Soa), "Safe operating area").access('A'),
     MenuEntry::offered(viewer(ResultViewer::Optimization), "Optimization").access('O'),
+    MenuEntry::offered(viewer(ResultViewer::Sweep), "Sweep").access('W'),
     MenuEntry::offered(viewer(ResultViewer::Table), "Sample table").access('L'),
 ];
 

@@ -321,3 +321,206 @@ fn runs_no_log_names_are_numbered_from_one_as_their_points() {
         .collect();
     assert_eq!(names, ["V(out) · point 1", "V(out) · point 2"]);
 }
+
+/// A stepped family's members are told apart on the strip as ADS sequences
+/// a swept dataset: each value of the swept quantity its own colour, and
+/// the legend names each by its point. A trial keeps its signal's hue.
+#[test]
+fn each_stepped_value_draws_in_its_own_colour() {
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    for (index, c) in [1e-9, 1e-8, 1e-7].into_iter().enumerate() {
+        run.analyses.push(point(
+            index as u64 + 1,
+            AnalysisType::Transient,
+            index,
+            c,
+            vec![RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                "",
+            )],
+        ));
+    }
+    let built = models(&run, &HashSet::new());
+    let colours: HashSet<_> = built[0]
+        .traces
+        .iter()
+        .map(|trace| trace.color.to_array())
+        .collect();
+    assert_eq!(colours.len(), 3, "one colour per stepped value");
+    let names: Vec<_> = built[0]
+        .traces
+        .iter()
+        .map(|trace| trace.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["V(out) · c=1n", "V(out) · c=10n", "V(out) · c=100n"]
+    );
+
+    let mut trials = SimulationRun::new(2, 0.0, ExecutionTarget::LocalDesktop);
+    for index in 0..3 {
+        trials.analyses.push(trial(
+            index as u64 + 1,
+            index,
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+        ));
+    }
+    let built = models(&trials, &HashSet::new());
+    let colours: HashSet<_> = built[0]
+        .traces
+        .iter()
+        .map(|trace| trace.color.to_array())
+        .collect();
+    assert_eq!(colours.len(), 1, "a population keeps its signal's hue");
+}
+
+/// Two swept quantities: the first picks the colour, the second the dash.
+#[test]
+fn a_second_stepped_quantity_picks_the_dash() {
+    use rspice_results::provenance::AnalysisResultStepCoordinate;
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    for (index, (r, c)) in [(1e3, 1e-9), (2e3, 1e-9), (1e3, 1e-8), (2e3, 1e-8)]
+        .into_iter()
+        .enumerate()
+    {
+        let member = AnalysisResultFamilyMember::StepPoint {
+            index,
+            coordinate: vec![
+                AnalysisResultStepCoordinate {
+                    name: "r".to_owned(),
+                    value: r,
+                    unit: String::new(),
+                },
+                AnalysisResultStepCoordinate {
+                    name: "c".to_owned(),
+                    value: c,
+                    unit: String::new(),
+                },
+            ],
+        };
+        let provenance = AnalysisResultProvenance::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([7; 32]),
+            Vec::new(),
+        )
+        .unwrap()
+        .with_family_member(Some(member.clone()))
+        .unwrap();
+        run.analyses.push(
+            AnalysisResult::new(
+                index as u64 + 1,
+                AnalysisType::Transient,
+                member.titled("Transient"),
+                0.0,
+            )
+            .with_waveforms(vec![RetainedTrace::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                "",
+            )])
+            .with_provenance(provenance),
+        );
+    }
+    let built = models(&run, &HashSet::new());
+    let styles: Vec<_> = built[0]
+        .traces
+        .iter()
+        .map(|trace| {
+            let style = trace.family_style.unwrap();
+            (style.color.map(|color| color.ordinal), style.dash_ordinal)
+        })
+        .collect();
+    assert_eq!(
+        styles,
+        [
+            (Some(0), Some(0)),
+            (Some(1), Some(0)),
+            (Some(0), Some(1)),
+            (Some(1), Some(1))
+        ]
+    );
+}
+
+/// One authored AC analysis solved at five PVT corners draws as one family
+/// of five named curves on one frequency strip.
+#[test]
+fn a_five_corner_ac_run_draws_five_named_curves_on_one_strip() {
+    use rspice_results::provenance::{AnalysisResultPvtPoint, AnalysisResultSourceDomain};
+    let authored = AnalysisInstanceId::new();
+    let corners = [
+        ("tt", 27.0, 1.0),
+        ("ff", -40.0, 1.2),
+        ("ss", 125.0, 0.8),
+        ("fs", 27.0, 1.1),
+        ("sf", 27.0, 0.9),
+    ];
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    for (index, (process, temperature, gain)) in corners.into_iter().enumerate() {
+        let provenance = AnalysisResultProvenance::new_with_authored_source_domain(
+            AnalysisResultSourceDomain::SimulationPlan,
+            AnalysisInstanceId::new(),
+            authored,
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([7; 32]),
+            Vec::new(),
+        )
+        .unwrap()
+        .with_pvt_point(Some(
+            AnalysisResultPvtPoint::new(process, None, temperature, None, index == 0).unwrap(),
+        ));
+        run.analyses.push(
+            AnalysisResult::new(index as u64 + 1, AnalysisType::Ac, "AC", 0.0)
+                .with_waveforms(vec![RetainedTrace::new(
+                    "|V(out)|",
+                    vec![1.0, 1e3],
+                    vec![gain, gain / 10.0],
+                    "",
+                )])
+                .with_provenance(provenance),
+        );
+    }
+    let built = models(&run, &HashSet::new());
+    let [strip] = built.as_slice() else {
+        panic!("one strip for the corners, got {}", built.len());
+    };
+    assert_eq!(strip.subtitle, "AC · 5 corners");
+    let decibels: Vec<_> = strip
+        .traces
+        .iter()
+        .filter(|trace| trace.kind == TraceKind::MagnitudeDb)
+        .map(|trace| {
+            (
+                trace.name.clone(),
+                format!("{:.2}", trace.y.in_memory().unwrap()[0]),
+            )
+        })
+        .collect();
+    let expected: Vec<(String, String)> = [
+        ("tt, temp=27°C", 1.0_f64),
+        ("ff, temp=\u{2212}40°C", 1.2),
+        ("ss, temp=125°C", 0.8),
+        ("fs, temp=27°C", 1.1),
+        ("sf, temp=27°C", 0.9),
+    ]
+    .into_iter()
+    .map(|(corner, gain)| {
+        (
+            format!("|V(out)| · {corner}"),
+            format!("{:.2}", 20.0 * gain.log10()),
+        )
+    })
+    .collect();
+    assert_eq!(decibels, expected);
+    let colours: HashSet<_> = strip
+        .traces
+        .iter()
+        .filter(|trace| trace.kind == TraceKind::MagnitudeDb)
+        .map(|trace| trace.color.to_array())
+        .collect();
+    assert_eq!(colours.len(), 5, "each corner its own colour");
+}

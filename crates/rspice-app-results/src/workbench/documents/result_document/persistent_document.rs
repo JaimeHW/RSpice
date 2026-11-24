@@ -1665,7 +1665,10 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
     match id {
         "viewer-waveform" => {
             (analysis.analysis_type.is_time_domain()
-                || analysis.analysis_type == AnalysisType::DcSweep)
+                || matches!(
+                    analysis.analysis_type,
+                    AnalysisType::DcSweep | AnalysisType::Parametric | AnalysisType::Corner
+                ))
                 && !analysis.waveforms.is_empty()
         }
         "viewer-bode" => {

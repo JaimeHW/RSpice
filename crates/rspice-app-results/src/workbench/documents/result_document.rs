@@ -44,6 +44,7 @@ mod sheet_settings;
 pub(crate) mod signal_sets;
 pub mod smith;
 mod soa;
+mod sweep;
 mod table;
 pub(crate) mod trace_statistics;
 mod trace_style;
@@ -2199,6 +2200,14 @@ pub(crate) fn project_viewer_for_analysis(
         ResultViewer::Waves if analysis.analysis_type == AnalysisType::DcSweep => {
             ResultViewer::DcSweep
         }
+        ResultViewer::Waves
+            if matches!(
+                analysis.analysis_type,
+                AnalysisType::Parametric | AnalysisType::Corner
+            ) =>
+        {
+            ResultViewer::Sweep
+        }
         ResultViewer::Fft | ResultViewer::HarmonicBalance
             if harmonic_balance_analysis_is_renderable(analysis) =>
         {
@@ -2702,6 +2711,7 @@ fn show_viewer_well(
         ResultViewer::Events => events::show(ui, state),
         ResultViewer::Soa => soa::show(ui, state),
         ResultViewer::Optimization => optimization::show(ui, state),
+        ResultViewer::Sweep => sweep::show(ui, &mut SheetContext::of(state)),
     }
 }
 
@@ -2809,6 +2819,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         ResultViewer::Scatter => scatter::domain_bar(ui, &mut context),
         ResultViewer::BoxViolin => box_violin::domain_bar(ui, &mut context),
         ResultViewer::NetworkMatrix => network_matrix::domain_bar(ui, &mut context),
+        ResultViewer::Sweep => sweep::domain_bar(ui, &mut context),
         _ => false,
     }
 }
@@ -3304,6 +3315,17 @@ fn run_viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> Vie
                 )
             }
         }
+        ResultViewer::Sweep => {
+            if sweep::shown_is_sweep(state) {
+                ViewerAvailability::available(
+                    "The shown analysis is a point of a sweep, corner run or temperature step",
+                )
+            } else {
+                ViewerAvailability::unavailable(
+                    "Requires a .STEP, corner or temperature sweep; pick one of its points in the data browser",
+                )
+            }
+        }
     }
 }
 
@@ -3434,6 +3456,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         ResultViewer::Events => events::right_panel(ui, state),
         ResultViewer::Soa => soa::right_panel(ui, state),
         ResultViewer::Optimization => optimization::right_panel(ui, state),
+        // The points' table on the sheet states every value the panel could.
+        ResultViewer::Sweep => {}
     }
 }
 

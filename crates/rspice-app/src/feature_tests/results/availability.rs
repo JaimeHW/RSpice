@@ -718,6 +718,22 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
         ResultViewer::Events => events_analysis(),
         ResultViewer::Soa => soa_analysis(),
         ResultViewer::Optimization => optimization_analysis(),
+        // A `.STEP` over an operating point keeps one value per point.
+        ResultViewer::Sweep => AnalysisResult::new(1, AnalysisType::Parametric, "STEP")
+            .with_waveforms(vec![RetainedTrace::new(
+                "V(out)",
+                vec![1e3, 2e3, 4e3],
+                vec![0.5, 1.0 / 3.0, 0.2],
+                "#00aaff",
+            )])
+            .with_family_metadata(
+                rspice_app_state::state::AnalysisResultFamilyMetadata::Parametric {
+                    target: "PARAM r".to_owned(),
+                    sweep_values: vec![1e3, 2e3, 4e3],
+                    failed_points: 0,
+                    member_measurements: Vec::new(),
+                },
+            ),
     };
 
     let mut run = SimulationRun::new(1);
