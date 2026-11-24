@@ -2476,6 +2476,10 @@ pub struct VisualizationDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     working_view: Option<WorkingViewSource>,
     next_serial: u64,
+    /// The number the next marker takes. Markers are numbered apart from
+    /// the view's other identities, so they read M1, M2, ... as they are
+    /// placed, and a number once given is never given again.
+    next_marker_number: u64,
     datasets: journal::SpliceList<SourceDataset>,
     pages: journal::EntityList<Page>,
     panes: journal::EntityList<Pane>,
@@ -2526,6 +2530,8 @@ struct VisualizationDocumentWire {
     #[serde(default)]
     working_view: Option<WorkingViewSource>,
     next_serial: u64,
+    #[serde(default)]
+    next_marker_number: u64,
     datasets: BoundedSourceDatasets,
     pages: Vec<Page>,
     panes: Vec<Pane>,
@@ -2570,6 +2576,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             presentation: wire.presentation,
             working_view: wire.working_view,
             next_serial: wire.next_serial,
+            next_marker_number: wire.next_marker_number,
             datasets: journal::SpliceList::new(wire.datasets.0),
             pages: journal::EntityList::new(wire.pages),
             panes: journal::EntityList::new(wire.panes),
@@ -2638,6 +2645,7 @@ impl VisualizationDocument {
             presentation: VisualizationPresentationPolicy::default(),
             working_view: None,
             next_serial: 3,
+            next_marker_number: 1,
             datasets: journal::SpliceList::new(datasets),
             pages: journal::EntityList::new(vec![Page {
                 id: page_id,
@@ -3353,6 +3361,35 @@ impl VisualizationDocument {
             .checked_add(1)
             .ok_or(VisualizationError::IdentitySpaceExhausted)?;
         Ok(serial)
+    }
+
+    /// A new marker's identity: the view's next marker number, past any
+    /// marker it holds or deleted, so a view's markers read M1, M2, ... in
+    /// the order they are placed however many panes and traces it holds,
+    /// and an expression naming a deleted or undone marker never reads a
+    /// newer one. A marker still takes a serial, and its number is never
+    /// above it: the view's identities stay below the next serial, and a
+    /// transaction tells what it made from what it found as it does for
+    /// every other entity.
+    fn allocate_marker_number(&mut self) -> Result<MarkerId, VisualizationError> {
+        let serial = self.allocate_serial()?;
+        let deleted = self
+            .tombstones
+            .iter()
+            .filter_map(|tombstone| match tombstone.entity {
+                EntityRef::Marker(id) => Some(id.get()),
+                _ => None,
+            });
+        let highest = self
+            .markers
+            .iter()
+            .map(|marker| marker.id.get())
+            .chain(deleted)
+            .max()
+            .unwrap_or(0);
+        let number = (highest + 1).max(self.next_marker_number).min(serial);
+        self.next_marker_number = number + 1;
+        MarkerId::allocate(number)
     }
 }
 

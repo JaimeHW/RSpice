@@ -23,6 +23,7 @@ pub(super) struct Began {
     pub(super) presentation: VisualizationPresentationPolicy,
     pub(super) working_view: Option<WorkingViewSource>,
     next_serial: u64,
+    next_marker_number: u64,
 }
 
 /// Apply one call to every list of a document that a transaction keeps.
@@ -62,6 +63,7 @@ impl VisualizationDocument {
             presentation: self.presentation,
             working_view: self.working_view,
             next_serial: self.next_serial,
+            next_marker_number: self.next_marker_number,
         }
     }
 
@@ -71,6 +73,7 @@ impl VisualizationDocument {
         self.presentation = began.presentation;
         self.working_view = began.working_view;
         self.next_serial = began.next_serial;
+        self.next_marker_number = began.next_marker_number;
         each_list!(&mut *self, roll_back(), roll_back());
         self.row_index.clear();
     }

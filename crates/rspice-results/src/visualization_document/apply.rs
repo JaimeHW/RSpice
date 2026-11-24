@@ -967,7 +967,7 @@ impl VisualizationDocument {
                 if !trace_contains_exact_coordinate(&*self, trace_id, &coordinate)? {
                     return Err(VisualizationError::InterpolationRequired);
                 }
-                let id = MarkerId::allocate(self.allocate_serial()?)?;
+                let id = self.allocate_marker_number()?;
                 self.markers.push(Marker {
                     id,
                     pane_id,
@@ -999,7 +999,7 @@ impl VisualizationDocument {
                 if !trace_contains_exact_coordinate(&*self, trace_id, &coordinate)? {
                     return Err(VisualizationError::InterpolationRequired);
                 }
-                let id = MarkerId::allocate(self.allocate_serial()?)?;
+                let id = self.allocate_marker_number()?;
                 self.markers.push(Marker {
                     id,
                     pane_id,

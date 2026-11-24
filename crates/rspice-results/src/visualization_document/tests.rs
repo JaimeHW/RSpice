@@ -425,6 +425,63 @@ fn content_digest_authenticates_the_exact_document_revision() {
     assert_ne!(document.content_digest().unwrap(), first);
 }
 
+/// A view's markers are numbered 1, 2, ... in the order they are placed,
+/// apart from its panes and traces, and a number a deleted or undone
+/// marker had is never given again, nor one a refused edit took.
+#[test]
+fn a_views_markers_are_numbered_from_one_and_never_renumbered() {
+    let (mut document, _, _) = provisioned_trace_document("V(out)");
+    let pane_id = document.panes()[0].id;
+    let trace_id = document.traces()[0].id;
+    let marker = |label: &str| DocumentEdit::AddMarker {
+        pane_id,
+        trace_id,
+        coordinate: TypedValue::Real(0.0),
+        label: label.to_owned(),
+    };
+    let add = |document: &mut VisualizationDocument| -> (MarkerId, ViewStep) {
+        let (receipt, undo) = document
+            .transact_with_undo(document.revision(), vec![marker("peak")])
+            .unwrap();
+        match receipt.created[0] {
+            EntityRef::Marker(id) => (id, undo),
+            other => panic!("a marker, not {other:?}"),
+        }
+    };
+    assert_eq!(add(&mut document).0.get(), 1);
+    let (second, _) = add(&mut document);
+    assert_eq!(second.get(), 2);
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::Remove(EntityRef::Marker(second))],
+        )
+        .unwrap();
+    assert_eq!(
+        add(&mut document).0.get(),
+        3,
+        "a deleted number is not given again"
+    );
+    let (fourth, undo) = add(&mut document);
+    document.take_step(document.revision(), undo).unwrap();
+    assert!(document.markers().iter().all(|kept| kept.id != fourth));
+    let refused = document.clone();
+    assert!(
+        document
+            .transact(document.revision(), vec![marker("peak"), marker(" ")])
+            .is_err()
+    );
+    assert_eq!(
+        document, refused,
+        "a refused edit leaves the view as it was"
+    );
+    assert_eq!(
+        add(&mut document).0.get(),
+        5,
+        "nor is an undone one, and a refused edit takes none"
+    );
+}
+
 /// A latest-bound document holding one trace provisioned from `trace_name`.
 fn provisioned_trace_document(
     trace_name: &str,
@@ -557,6 +614,7 @@ fn view_of(document: &VisualizationDocument) -> serde_json::Value {
     let fields = view.as_object_mut().unwrap();
     fields.remove("revision");
     fields.remove("next_serial");
+    fields.remove("next_marker_number");
     view
 }
 

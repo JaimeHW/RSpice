@@ -297,6 +297,7 @@ fn held(document: &VisualizationDocument) -> serde_json::Value {
     let object = value.as_object_mut().expect("a document is an object");
     object.remove("revision");
     object.remove("next_serial");
+    object.remove("next_marker_number");
     value
 }
 
