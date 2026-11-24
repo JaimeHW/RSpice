@@ -441,6 +441,9 @@ enum OnDisk {
     Touched(DiskStamp),
     /// Other text.
     Changed(DiskChange),
+    /// A file too large for this machine to read, as an open would refuse
+    /// it: why, in the words the open says it in.
+    Refused(String),
     /// No file there, or none that reads.
     Gone,
 }
@@ -450,7 +453,7 @@ enum OnDisk {
 enum ByMetadata<'a> {
     /// Enough: the file is as last read or written, or not there.
     Settled(OnDisk),
-    /// They moved since `stamp` was taken: the file's text decides.
+    /// They moved since the stamp was taken: the file's text decides.
     Moved(&'a DiskStamp),
 }
 
@@ -471,9 +474,13 @@ fn by_metadata(file: &OpenFile) -> ByMetadata<'_> {
 }
 
 /// Read the file at `path` and tell its text against `since`, what was
-/// last read from or written to it.
+/// last read from or written to it. A file grown past what this machine can
+/// hold is not read, as an open would not read it.
 #[cfg(not(target_arch = "wasm32"))]
 fn read_against(path: &Path, since: &DiskStamp, messages: MessageCatalog) -> OnDisk {
+    if let Some(refused) = super::deck_memory::refusal_before_reading(path, messages) {
+        return OnDisk::Refused(refused);
+    }
     let Ok(read) = read_file(path, messages) else {
         return OnDisk::Gone;
     };
@@ -680,7 +687,8 @@ pub fn land_disk_looks(
 /// Take what a look at the disk found for the file `include` names (the
 /// deck for `None`): the stamp of the same text written again; a change on
 /// disk read into a tab with no edits, or shown on one holding edits. The
-/// notice to show for a file read again.
+/// notice to show for a file read again, or for one grown past what this
+/// machine can read, whose tab keeps its text.
 #[cfg(not(target_arch = "wasm32"))]
 fn take_look(
     model: &mut Model,
@@ -695,6 +703,7 @@ fn take_look(
         .and_then(|deck| deck.file_mut(include))?;
     match found {
         OnDisk::Same | OnDisk::Gone => None,
+        OnDisk::Refused(why) => Some(why),
         OnDisk::Touched(stamp) => {
             file.disk = Some(stamp);
             None
@@ -768,6 +777,11 @@ fn take_disk_text(
         file.disk = Some(stamp);
         file.dirty = false;
         file.disk_change = None;
+    }
+    // The deck read again is weighed as an open weighs it: its language
+    // features are off when its indexes need more memory than is free.
+    if let Some(deck) = netlist.open_deck.as_ref() {
+        netlist.language_off = super::deck_memory::LanguageOff::as_opened(deck);
     }
 }
 
@@ -851,7 +865,8 @@ pub fn compare_with_disk(
 
 /// Write `file` to its path now: its text, with the separators it was read
 /// with, in its encoding, through a temporary file beside it renamed over
-/// it. A file something else changed since it was read is not overwritten.
+/// it. A file something else changed since it was read is not overwritten,
+/// nor one grown past what this machine can read to tell.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_file(file: &mut OpenFile, messages: MessageCatalog) -> Result<(), String> {
     let name = file.name();
@@ -867,6 +882,7 @@ pub fn save_file(file: &mut OpenFile, messages: MessageCatalog) -> Result<(), St
         match look_at_disk(file, messages) {
             OnDisk::Changed(change) => file.disk_change = Some(Box::new(change)),
             OnDisk::Touched(stamp) => file.disk = Some(stamp),
+            OnDisk::Refused(why) => return Err(why),
             OnDisk::Same | OnDisk::Gone => {}
         }
     }
@@ -3044,3 +3060,6 @@ pub fn resolve_include(model: &Model, deck: &OpenDeck, requested: &str) -> Optio
         .map(|directory| directory.join(requested))
         .find(|candidate| candidate.is_file())
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests;
