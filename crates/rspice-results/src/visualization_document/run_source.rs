@@ -665,7 +665,7 @@ impl SourceDataset {
 
 /// A signal name a trace or figure names: what the run calls it, one line of
 /// at most [`MAX_VISUALIZATION_LABEL_BYTES`] bytes, so it can be a label too.
-fn validate_signal_name(name: &str) -> Result<(), VisualizationError> {
+pub(super) fn validate_signal_name(name: &str) -> Result<(), VisualizationError> {
     if name.is_empty()
         || name.len() > MAX_VISUALIZATION_LABEL_BYTES
         || name.chars().any(char::is_control)
@@ -687,6 +687,15 @@ pub(super) fn run_signal_predicates(
     name: &str,
     component: SignalComponent,
 ) -> Vec<QueryCoordinate> {
+    run_signal_predicates_of(&analysis.to_string(), name, component)
+}
+
+/// [`run_signal_predicates`] with the analysis already spelled out.
+pub(super) fn run_signal_predicates_of(
+    analysis: &str,
+    name: &str,
+    component: SignalComponent,
+) -> Vec<QueryCoordinate> {
     vec![
         QueryCoordinate {
             column: TRACE_NAME_COLUMN.to_owned(),
@@ -698,7 +707,7 @@ pub(super) fn run_signal_predicates(
         },
         QueryCoordinate {
             column: ANALYSIS_ID_COLUMN.to_owned(),
-            value: TypedValue::Text(analysis.to_string()),
+            value: TypedValue::Text(analysis.to_owned()),
         },
     ]
 }

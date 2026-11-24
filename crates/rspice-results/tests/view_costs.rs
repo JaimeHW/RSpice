@@ -205,19 +205,27 @@ fn a_hundred_thousand_signals_plotted_at_once_are_one_step() {
     let names = |from: usize, to: usize| -> Vec<String> {
         (from..to).map(|index| format!("V(n{index})")).collect()
     };
+    // The traces are made away from the document, as a reader's gesture
+    // makes them off the frame, and taken in as one edit.
+    let preparation = document
+        .plot_preparation(pane_id)
+        .expect("the pane reads a run");
+    let signals = names(TRACES, 2 * TRACES);
+    let started = Instant::now();
+    let prepared = preparation.prepare(signals).expect("every signal is named");
+    println!(
+        "making {TRACES} traces away from the view: {:?}",
+        started.elapsed()
+    );
     let started = Instant::now();
     let (_, step) = document
         .transact_with_undo(
             document.revision(),
-            vec![DocumentEdit::SetSignalsPlotted {
-                pane_id,
-                signals: names(TRACES, 2 * TRACES),
-                plotted: true,
-            }],
+            vec![DocumentEdit::PlotPrepared(prepared)],
         )
         .expect("every signal plots");
     println!(
-        "plotting {TRACES} new signals on a view of {TRACES} traces: {:?}",
+        "taking {TRACES} new traces into a view of {TRACES} traces: {:?}",
         started.elapsed()
     );
     assert_eq!(document.traces().len(), 2 * TRACES);

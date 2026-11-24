@@ -197,6 +197,10 @@ impl VisualizationDocument {
         if !plotted || new.is_empty() {
             return Ok(());
         }
+        if let Some(preparation) = self.plot_preparation(pane_id) {
+            let prepared = preparation.prepare(new.into_iter().cloned().collect())?;
+            return self.plot_prepared(prepared, created);
+        }
         let binding = binding.ok_or_else(|| VisualizationError::InvalidValue {
             field: "pane.binding",
             message: "only a pane bound to an analysis plots its signals".to_owned(),
@@ -247,6 +251,101 @@ impl VisualizationDocument {
                 },
                 created,
             )?;
+        }
+        Ok(())
+    }
+
+    /// What making traces for `pane_id` away from the document needs: the
+    /// run and analysis the pane reads. `None` for a pane that reads no
+    /// run, whose traces are made from its table where it stands.
+    #[must_use]
+    pub fn plot_preparation(&self, pane_id: PaneId) -> Option<PlotPreparation> {
+        let binding = self.panes.iter().find(|pane| pane.id == pane_id)?.binding?;
+        self.datasets
+            .iter()
+            .find(|dataset| dataset.binding == binding.dataset)?
+            .run
+            .as_ref()?;
+        Some(PlotPreparation {
+            pane_id,
+            binding: binding.dataset,
+            analysis_id: binding.analysis_id,
+        })
+    }
+
+    /// Whether pane `pane_id` draws `signal`, and if so whether every
+    /// trace of it is shown; `None` when it has no trace of it.
+    #[must_use]
+    pub fn signal_drawn(&self, pane_id: PaneId, signal: &str) -> Option<bool> {
+        self.traces.drawn(pane_id, signal)
+    }
+
+    /// Take in traces made away from the document for one pane. What they
+    /// share is checked here, once; what each names was checked as it was
+    /// made. A signal the pane has drawn since is shown, not drawn twice.
+    pub(super) fn plot_prepared(
+        &mut self,
+        prepared: PreparedPlot,
+        created: &mut Vec<EntityRef>,
+    ) -> Result<(), VisualizationError> {
+        let PreparedPlot {
+            pane_id,
+            binding,
+            analysis_id,
+            traces,
+        } = prepared;
+        let pane = self
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(pane_id)))?;
+        if pane
+            .binding
+            .is_none_or(|bound| bound.dataset != binding || bound.analysis_id != analysis_id)
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "trace.binding",
+                message: "the pane reads another analysis than its traces were made for".to_owned(),
+            });
+        }
+        let Some(first) = traces.first() else {
+            return Ok(());
+        };
+        let viewer_id = pane.viewer_id.clone();
+        if let Some(policy) = &pane.family_policy {
+            apply::validate_family_source(&*self, binding, policy)?;
+        }
+        // Every trace reads the same columns of the same run's analysis by
+        // the same predicates but for the signal's name: checking the first
+        // checks them all.
+        validate_key("trace.signal-key", &first.signal_key)?;
+        validate_key("trace.coordinate-key", &first.coordinate_key)?;
+        let dataset = self.dataset_for_binding(binding)?;
+        if dataset.run.is_none()
+            || !trace_columns_are_drawable(dataset, &first.signal_key, &first.coordinate_key)?
+        {
+            return Err(VisualizationError::InvalidValue {
+                field: "trace.source-columns",
+                message: "invalid signal or coordinate column role".to_owned(),
+            });
+        }
+        validate_trace_row_predicates(dataset, &first.row_predicates, &self.row_index)?;
+        let (x_axis_id, y_axis_id) = self.provision_axes(pane_id, &viewer_id, created)?;
+        created.reserve(traces.len());
+        for mut trace in traces {
+            if self.traces.drawn(pane_id, &trace.label).is_some() {
+                for index in self.traces.reading(pane_id, &trace.label) {
+                    if !self.traces[index].visible {
+                        self.traces.update_at(index, |held| held.visible = true);
+                    }
+                }
+                continue;
+            }
+            trace.id = TraceId::allocate(self.allocate_serial()?)?;
+            trace.x_axis_id = x_axis_id;
+            trace.y_axis_id = y_axis_id;
+            created.push(EntityRef::Trace(trace.id));
+            self.traces.push_checked(trace);
         }
         Ok(())
     }
@@ -340,5 +439,87 @@ impl VisualizationDocument {
                 .expression_traces
                 .iter()
                 .any(|expression| expression.datasets.contains(&binding))
+    }
+}
+
+/// What making the traces of one pane that reads a run needs, held apart
+/// from the document so they can be made away from it.
+#[derive(Debug, Clone)]
+pub struct PlotPreparation {
+    pane_id: PaneId,
+    binding: DatasetBinding,
+    analysis_id: AnalysisInstanceId,
+}
+
+/// Traces made away from a document for one pane, each one's signal
+/// checked as it was made, for [`DocumentEdit::PlotPrepared`] to take in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedPlot {
+    pane_id: PaneId,
+    binding: DatasetBinding,
+    analysis_id: AnalysisInstanceId,
+    traces: Vec<Trace>,
+}
+
+impl PreparedPlot {
+    /// The pane the traces were made for.
+    #[must_use]
+    pub const fn pane_id(&self) -> PaneId {
+        self.pane_id
+    }
+
+    /// How many traces were made.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.traces.len()
+    }
+
+    /// Whether none was.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.traces.is_empty()
+    }
+}
+
+impl PlotPreparation {
+    /// Make a shown trace for each of `names`, reading the run as the pane
+    /// reads it. It reads nothing of the document, so it runs anywhere.
+    pub fn prepare(self, names: Vec<String>) -> Result<PreparedPlot, VisualizationError> {
+        let analysis = self.analysis_id.to_string();
+        let signal_key: Arc<str> = Arc::from("y");
+        let coordinate_key: Arc<str> = Arc::from("x");
+        // Stand-ins: the document gives each trace its identity and its
+        // pane's axes as it takes them in.
+        let trace_id = TraceId::allocate(1)?;
+        let axis_id = AxisId::allocate(1)?;
+        let mut traces = Vec::with_capacity(names.len());
+        for name in names {
+            validate_label("trace.signal", &name)?;
+            run_source::validate_signal_name(&name)?;
+            let row_predicates =
+                run_source::run_signal_predicates_of(&analysis, &name, SignalComponent::Display);
+            traces.push(Trace {
+                id: trace_id,
+                pane_id: self.pane_id,
+                binding: self.binding,
+                signal_key: Arc::clone(&signal_key),
+                coordinate_key: Arc::clone(&coordinate_key),
+                row_predicates: row_predicates.into(),
+                x_axis_id: axis_id,
+                y_axis_id: axis_id,
+                label: name,
+                visible: true,
+                color: None,
+                lane: TraceLane::default(),
+                style: TraceStyle::default(),
+                missing: false,
+            });
+        }
+        Ok(PreparedPlot {
+            pane_id: self.pane_id,
+            binding: self.binding,
+            analysis_id: self.analysis_id,
+            traces,
+        })
     }
 }

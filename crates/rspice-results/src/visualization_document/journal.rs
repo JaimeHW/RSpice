@@ -269,6 +269,9 @@ struct EntityJournal<T> {
     ascending: Vec<(u64, usize)>,
     /// Where `kept` holds each identity first touched out of that order.
     rest: HashMap<u64, usize>,
+    /// The identities of the entities the transaction made already checked,
+    /// one after another: the commit need not check them again.
+    checked: Range<u64>,
 }
 
 impl<T> EntityJournal<T> {
@@ -278,6 +281,7 @@ impl<T> EntityJournal<T> {
             kept: Vec::new(),
             ascending: Vec::new(),
             rest: HashMap::new(),
+            checked: 0..0,
         }
     }
 
@@ -403,6 +407,28 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
         let key = self.index.key(&item);
         self.index.insert(key, item.identity());
         self.items.push(item);
+    }
+
+    /// [`Self::push`] for an entity made already checked. Entities so made
+    /// one after another in a transaction are not checked again when it
+    /// commits.
+    pub(super) fn push_checked(&mut self, item: T) {
+        let identity = item.identity();
+        if let Some(journal) = &mut self.journal {
+            if journal.checked.is_empty() {
+                journal.checked = identity..identity + 1;
+            } else if journal.checked.end == identity {
+                journal.checked.end += 1;
+            }
+        }
+        self.push(item);
+    }
+
+    /// Whether the running transaction made `identity` already checked.
+    pub(super) fn made_checked(&self, identity: u64) -> bool {
+        self.journal
+            .as_ref()
+            .is_some_and(|journal| journal.checked.contains(&identity))
     }
 
     /// Change the entity at `index` with `change`, which keeps its identity.
@@ -665,6 +691,23 @@ impl<T: Identified + Clone + PartialEq> EntityList<T, Unindexed> {
 }
 
 impl EntityList<Trace, SignalIndex> {
+    /// Whether pane `pane_id` has a trace reading `signal`, and if so
+    /// whether every such trace is shown.
+    pub(super) fn drawn(&self, pane_id: PaneId, signal: &str) -> Option<bool> {
+        let key = (pane_id, self.index.hashing.hash_one(signal));
+        let mut drawn = None;
+        for identity in self.index.traces.get(&key)? {
+            let Some(index) = self.position(*identity) else {
+                continue;
+            };
+            let trace = &self.items[index];
+            if trace.pane_id == pane_id && signal_of(trace) == signal {
+                drawn = Some(drawn.unwrap_or(true) && trace.visible);
+            }
+        }
+        drawn
+    }
+
     /// Where each trace of `pane_id` reading `signal` stands, in order.
     pub(super) fn reading(&self, pane_id: PaneId, signal: &str) -> Vec<usize> {
         let key = (pane_id, self.index.hashing.hash_one(signal));

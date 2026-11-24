@@ -146,6 +146,12 @@ pub enum DocumentEdit {
     /// as one edit: one tick, or a whole group ticked at once. Plotting shows
     /// each signal's trace, or adds one where the pane has none; taking off
     /// hides every trace of each.
+    /// Traces made away from the document for one pane that reads a run,
+    /// as [`super::PlotPreparation::prepare`] made them: shown, as
+    /// `SetSignalsPlotted` makes them. Made in this process only, never
+    /// read from or written to a file.
+    #[serde(skip)]
+    PlotPrepared(super::PreparedPlot),
     SetSignalsPlotted {
         pane_id: PaneId,
         signals: Vec<String>,

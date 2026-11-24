@@ -40,7 +40,7 @@ fn reads_the_same(before: &Trace, now: &Trace) -> bool {
 
 /// A family policy's dimensions, each a coordinate of the dataset
 /// `binding` names, of the type the policy declares.
-fn validate_family_source(
+pub(super) fn validate_family_source(
     entities: &dyn Entities,
     binding: DatasetBinding,
     policy: &FamilyPresentationPolicy,
@@ -699,6 +699,7 @@ impl VisualizationDocument {
                 signals,
                 plotted,
             } => self.set_signals_plotted(pane_id, &signals, plotted, created),
+            DocumentEdit::PlotPrepared(prepared) => self.plot_prepared(prepared, created),
             DocumentEdit::SetPaneHidden { pane_id, hidden } => {
                 self.pane_mut(pane_id)?.hidden = hidden;
                 Ok(())
@@ -2203,7 +2204,9 @@ impl VisualizationDocument {
         let mut relaned = false;
         for (trace, before) in self.traces.touched_with_before() {
             relaned |= before.is_some_and(|before| before.lane.kind != trace.lane.kind);
-            if before.is_some_and(|before| reads_the_same(before, trace)) {
+            if before.is_some_and(|before| reads_the_same(before, trace))
+                || self.traces.made_checked(trace.id.get())
+            {
                 continue;
             }
             if before.is_some() {
