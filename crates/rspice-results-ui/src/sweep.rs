@@ -497,14 +497,8 @@ fn points_table(ui: &mut Ui, view: &SweepView<'_>, output: Option<usize>, height
         .iter()
         .map(|axis| Column::name(axis.name.clone(), 56.0))
         .collect();
-    let value_head = |index: usize| {
-        let column = &table.outputs[index];
-        if column.unit.is_empty() {
-            column.name.clone()
-        } else {
-            format!("{} ({})", column.name, column.unit)
-        }
-    };
+    // A head names the quantity; its cells carry the value and its unit.
+    let value_head = |index: usize| table.outputs[index].name.clone();
     columns.extend(
         listed
             .iter()
