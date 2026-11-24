@@ -171,7 +171,11 @@ pub(super) fn show_inspector(cx: &mut Cx<'_, SourceFeature>, ui: &mut egui::Ui) 
             model: cx.model,
             netlist: &cx.state.netlist,
             deck_facts: facts.as_ref(),
-            reading_deck: deck_in_front && facts.is_none(),
+            // A deck with its language features off has no index to read
+            // facts from: the band says so, and nothing is being read.
+            reading_deck: deck_in_front
+                && facts.is_none()
+                && !cx.state.netlist.shown_language_off(),
             messages: cx.wb.messages(),
         },
     );
