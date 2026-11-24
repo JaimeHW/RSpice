@@ -2925,7 +2925,12 @@ fn undo_disk_open(
     }
     netlist.run_the_plan();
     if let Some(previous) = from_disk.previous {
+        // The deck comes back with its language features as they were: on,
+        // should the reader have asked for them, though it opened with
+        // them off.
+        let language_off = netlist.language_off.take();
         install_open_deck(model, netlist, open_documents, runs, *previous);
+        netlist.language_off = language_off;
         return;
     }
     netlist.unreadable_deck = from_disk.unreadable;
