@@ -388,8 +388,7 @@ c1 out 0 100p
         asked.set(asked.get() + 1);
         false
     };
-    let read =
-        fill_span_unless_stopped(&run.reader, &run.targets, &mut run.shell, &never).unwrap();
+    let read = fill_span_unless_stopped(&run.reader, &run.targets, &mut run.shell, &never).unwrap();
     assert!(read);
     assert_eq!(asked.get(), columns);
 }
