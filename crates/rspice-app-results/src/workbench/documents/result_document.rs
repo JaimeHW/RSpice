@@ -296,14 +296,32 @@ fn signal_stable_path(
     analysis: &AnalysisResult,
     waveform: &RetainedTrace,
 ) -> String {
+    format!("{}{}", signal_path_start(run, analysis), waveform.name)
+}
+
+/// What the stable path of each signal of `analysis` starts with: the path
+/// is this and the signal's name.
+fn signal_path_start(run: &SimulationRun, analysis: &AnalysisResult) -> String {
     let analysis_id = analysis.provenance().map_or_else(
         || format!("legacy-{}", analysis.id),
         |provenance| provenance.source_instance_id().to_string(),
     );
     format!(
-        "dataset/{}/analysis/{analysis_id}/quantity/{}",
-        run.dataset_id, waveform.name
+        "dataset/{}/analysis/{analysis_id}/quantity/",
+        run.dataset_id
     )
+}
+
+/// Two stable paths, each given as a start and the rest, in the order of
+/// the strings they spell.
+fn stable_path_order(left: (&str, &str), right: (&str, &str)) -> std::cmp::Ordering {
+    if left.0 == right.0 {
+        return left.1.cmp(right.1);
+    }
+    left.0
+        .bytes()
+        .chain(left.1.bytes())
+        .cmp(right.0.bytes().chain(right.1.bytes()))
 }
 
 /// A browser selection's signal, as its run holds it.
@@ -313,7 +331,8 @@ pub(crate) type ResolvedSignal<'a> = (&'a SimulationRun, &'a AnalysisResult, &'a
 /// it resolves to one, as [`result_browser_selection_stable_path`] and the key's own resolution
 /// answer them. A key resolved on its own searches its whole analysis, so ordering a run's
 /// every column by comparing keys in pairs cost the square of its columns: here each analysis
-/// the selection names is indexed once.
+/// the selection names is indexed once, and a signal's path is read as its analysis's start and
+/// its name, never written out.
 pub(crate) fn resolve_result_browser_selection<'a>(
     keys: &std::collections::HashSet<ResultBrowserSelectionKey>,
     runs: &'a [SimulationRun],
@@ -329,24 +348,33 @@ pub(crate) fn resolve_result_browser_selection<'a>(
         Indexed(std::sync::Arc<rspice_results_ui::signal_index::SignalIndex>),
         Walked(std::collections::HashMap<&'a str, Option<usize>>),
     }
-    type NameIndex<'a> = (&'a SimulationRun, &'a AnalysisResult, Names<'a>);
+    /// An analysis's run, the analysis, its signals by name and what their
+    /// stable paths start with.
+    type NameIndex<'a> = (
+        &'a SimulationRun,
+        &'a AnalysisResult,
+        Names<'a>,
+        std::sync::Arc<str>,
+    );
     let mut analyses =
         std::collections::HashMap::<AnalysisPresentationKey, Option<NameIndex<'a>>>::new();
     let mut resolved = keys
         .iter()
         .map(|key| {
+            let mut start = None;
             let signal = key.waveform().and_then(|signal| {
-                let &(run, analysis, ref names) = analyses
+                let (run, analysis, names, path_start) = analyses
                     .entry(signal.analysis())
                     .or_insert_with(|| {
                         let run = runs
                             .iter()
                             .find(|run| run.dataset_id == signal.analysis().dataset_id())?;
                         let (_, analysis) = signal.analysis().resolve(&run.data)?;
+                        let path_start = signal_path_start(run, analysis).into();
                         if let Some(index) =
                             indices.index(revision, signal.analysis(), &analysis.data)
                         {
-                            return Some((run, analysis, Names::Indexed(index)));
+                            return Some((run, analysis, Names::Indexed(index), path_start));
                         }
                         let mut names = std::collections::HashMap::new();
                         for (index, waveform) in analysis.waveforms.iter().enumerate() {
@@ -355,32 +383,41 @@ pub(crate) fn resolve_result_browser_selection<'a>(
                                 .and_modify(|found: &mut Option<usize>| *found = None)
                                 .or_insert(Some(index));
                         }
-                        Some((run, analysis, Names::Walked(names)))
+                        Some((run, analysis, Names::Walked(names), path_start))
                     })
                     .as_ref()?;
-                let (run, analysis): ResolvedRun<'a> = (run, analysis);
+                let (run, analysis): ResolvedRun<'a> = (*run, *analysis);
                 let index = match names {
                     Names::Indexed(index) => index.column(&analysis.data, signal.source_name())?,
                     Names::Walked(names) => (*names.get(signal.source_name())?)?,
                 };
+                start = Some(std::sync::Arc::clone(path_start));
                 Some((run, analysis, &analysis.waveforms[index]))
             });
-            let path = match (key, signal) {
-                (ResultBrowserSelectionKey::Waveform(_), Some((run, analysis, waveform))) => {
-                    signal_stable_path(run, analysis, waveform)
+            // The key's stable path, as a start and the rest.
+            let rest: std::borrow::Cow<'a, str> = match (key, signal) {
+                (ResultBrowserSelectionKey::Waveform(_), Some((_, _, waveform))) => {
+                    waveform.name.as_str().into()
                 }
-                (ResultBrowserSelectionKey::Waveform(_), None) => String::new(),
+                (ResultBrowserSelectionKey::Waveform(_), None) => "".into(),
                 (ResultBrowserSelectionKey::Artifact(artifact), _) => {
-                    result_artifact_stable_path(artifact, runs).unwrap_or_default()
+                    result_artifact_stable_path(artifact, runs)
+                        .unwrap_or_default()
+                        .into()
                 }
             };
-            (path, key.clone(), signal)
+            (start, rest, key.clone(), signal)
         })
         .collect::<Vec<_>>();
-    resolved.sort_by(|left, right| left.0.cmp(&right.0));
+    resolved.sort_by(|left, right| {
+        stable_path_order(
+            (left.0.as_deref().unwrap_or(""), &left.1),
+            (right.0.as_deref().unwrap_or(""), &right.1),
+        )
+    });
     resolved
         .into_iter()
-        .map(|(_, key, signal)| (key, signal))
+        .map(|(_, _, key, signal)| (key, signal))
         .collect()
 }
 
