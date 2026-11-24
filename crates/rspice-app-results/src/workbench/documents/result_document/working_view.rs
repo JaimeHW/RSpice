@@ -1427,28 +1427,30 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         .and_then(|binding| binding.retake.take())
         .filter(|_| drawn.is_some())
         .unwrap_or_default();
-    // The signals each pane drawn before draws again; a pane it does not
-    // name is drawn whole.
-    let again: Option<HashMap<PaneId, HashSet<&str>>> = drawn.as_ref().and_then(|(drawn, keys)| {
-        let changed = document.signals_changed_since(*drawn)?;
-        let mut again: HashMap<PaneId, HashSet<&str>> = keys
-            .iter()
-            .map(|&(_, pane_id)| (pane_id, HashSet::new()))
-            .collect();
-        for (pane_id, signal) in changed {
-            if let Some(signals) = again.get_mut(&pane_id) {
-                signals.insert(signal);
+    // The signals each pane drawn before draws again, with their traces
+    // where the view's change read them; a pane it does not name is drawn
+    // whole.
+    let again: Option<HashMap<PaneId, Vec<DrawnAgain<'_>>>> =
+        drawn.as_ref().and_then(|(drawn, keys)| {
+            let changed = document.signal_traces_changed_since(*drawn)?;
+            let mut again: HashMap<PaneId, Vec<DrawnAgain<'_>>> = keys
+                .iter()
+                .map(|&(_, pane_id)| (pane_id, Vec::new()))
+                .collect();
+            for (pane_id, signal, traces) in changed {
+                if let Some(signals) = again.get_mut(&pane_id) {
+                    signals.push((signal, Some(traces)));
+                }
             }
-        }
-        for tick in &retake {
-            if let Some((_, pane_id)) = keys.iter().find(|(key, _)| *key == tick.analysis())
-                && let Some(signals) = again.get_mut(pane_id)
-            {
-                signals.insert(tick.source_name());
+            for tick in &retake {
+                if let Some((_, pane_id)) = keys.iter().find(|(key, _)| *key == tick.analysis())
+                    && let Some(signals) = again.get_mut(pane_id)
+                {
+                    signals.push((tick.source_name(), None));
+                }
             }
-        }
-        Some(again)
-    });
+            Some(again)
+        });
     // A pane of event lanes draws its lanes again where the view changed
     // them, or an event net they list, or the reader's change is retaken.
     let lanes_again = drawn
@@ -1500,7 +1502,7 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
                 let names = (events
                     && (lanes_again
                         || retaken.contains(&key)
-                        || signals.iter().any(|signal| is_event_net(signal))))
+                        || signals.iter().any(|(signal, _)| is_event_net(signal))))
                 .then(event_names)
                 .flatten();
                 project_signals(
@@ -1866,6 +1868,13 @@ fn project_traces(
     );
 }
 
+/// A signal a pane draws again, with every trace of the pane reading it
+/// when the view's change read them, or `None` for them to be looked up.
+type DrawnAgain<'a> = (
+    &'a str,
+    Option<Vec<&'a crate::results::visualization_document::Trace>>,
+);
+
 /// Draw `signals` of pane `pane_id` as the view holds them, as
 /// [`project_traces`] draws every signal of the pane: whether each is
 /// shown, its colour and its look, read from its own traces alone.
@@ -1876,12 +1885,12 @@ fn project_signals(
     key: AnalysisPresentationKey,
     pane_id: PaneId,
     analysis: &crate::state::AnalysisResult,
-    signals: &HashSet<&str>,
+    signals: &[DrawnAgain<'_>],
 ) {
     if signals.is_empty() {
         return;
     }
-    let names: Vec<&str> = signals.iter().copied().collect();
+    let names: Vec<&str> = signals.iter().map(|(signal, _)| *signal).collect();
     let columns = match results
         .session
         .signal_indices
@@ -1899,14 +1908,22 @@ fn project_signals(
             names.iter().map(|name| found[name]).collect()
         }
     };
-    for (signal, column) in names.into_iter().zip(columns) {
+    for (&(signal, ref traces), column) in signals.iter().zip(columns) {
+        let looked_up;
+        let traces = match traces {
+            Some(traces) => traces,
+            None => {
+                looked_up = document.traces_reading(pane_id, signal);
+                &looked_up
+            }
+        };
         // One pass over the signal's traces: whether each shows, and the
         // colour and look of the last that has one.
         let mut held = false;
         let mut shown = true;
         let mut color = None;
         let mut look = None;
-        for trace in document.traces_reading(pane_id, signal) {
+        for trace in traces {
             held = true;
             shown &= trace.visible;
             color = trace.color.or(color);

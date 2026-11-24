@@ -2728,6 +2728,51 @@ impl VisualizationDocument {
         })
     }
 
+    /// [`Self::signals_changed_since`], each signal with every trace of its
+    /// pane that reads it now, in the document's order. The traces are
+    /// taken from the change where it touched every one, as a bulk tick and
+    /// its steps touch the one trace of each signal, and looked up
+    /// otherwise.
+    #[must_use]
+    pub fn signal_traces_changed_since(
+        &self,
+        generation: u64,
+    ) -> Option<Vec<(PaneId, &str, Vec<&Trace>)>> {
+        let last = self.last_change_since(generation)?;
+        let Some(last) = last else {
+            return Some(Vec::new());
+        };
+        let mut changed = Vec::with_capacity(last.present.len() + last.gone.len());
+        // A signal read by more traces than the change touched, or by one
+        // the change took off and one it kept, is looked up, once.
+        let mut read = Vec::new();
+        for trace in last
+            .present
+            .iter()
+            .filter_map(|trace_id| self.trace(*trace_id))
+        {
+            let signal = journal::signal_of(trace);
+            if self.traces.held_for(trace.pane_id, signal) == 1 {
+                changed.push((trace.pane_id, signal, vec![trace]));
+            } else {
+                read.push((trace.pane_id, signal));
+            }
+        }
+        for (pane_id, signal) in &last.gone {
+            if self.traces.held_for(*pane_id, signal) == 0 {
+                changed.push((*pane_id, signal.as_str(), Vec::new()));
+            } else {
+                read.push((*pane_id, signal.as_str()));
+            }
+        }
+        read.sort_unstable();
+        read.dedup();
+        changed.extend(read.into_iter().map(|(pane_id, signal)| {
+            (pane_id, signal, self.traces.reading_items(pane_id, signal))
+        }));
+        Some(changed)
+    }
+
     /// Whether the document changed any pane's event-lane order or buses
     /// since it held the content `generation` named; `None` as for
     /// [`Self::signals_changed_since`].

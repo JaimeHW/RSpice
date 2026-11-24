@@ -835,6 +835,14 @@ impl EntityList<Trace, SignalIndex> {
         drawn
     }
 
+    /// How many traces the index holds under pane `pane_id` and the hash
+    /// of `signal`: every trace of the pane reading `signal`, and any other
+    /// whose signal shares its hash.
+    pub(super) fn held_for(&self, pane_id: PaneId, signal: &str) -> usize {
+        let key = (pane_id, self.index.hashing.hash_one(signal));
+        self.index.traces.get(&key).map_or(0, Vec::len)
+    }
+
     /// Where each trace of `pane_id` reading `signal` stands, in order.
     /// [`Self::reading`], the traces themselves, in the list's order.
     pub(super) fn reading_items(&self, pane_id: PaneId, signal: &str) -> Vec<&Trace> {
