@@ -733,7 +733,7 @@ impl VisualizationDocument {
         samples: &dyn SourceSamples,
     ) -> Result<Self, VisualizationError> {
         let mut copy = self.clone();
-        for dataset in &mut copy.datasets {
+        for dataset in copy.datasets.edit() {
             let binding = dataset.binding;
             let Some(run) = dataset.run.as_mut() else {
                 continue;

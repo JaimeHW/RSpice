@@ -8,6 +8,7 @@ mod apply;
 mod comparison;
 mod edits;
 mod family;
+mod journal;
 mod lookup;
 mod query;
 mod run_source;
@@ -916,19 +917,22 @@ impl<'de> Deserialize<'de> for BoundedSourceDatasets {
 // view of a hundred thousand reads a few of them, not all.
 impl VisualizationDocument {
     fn require_page(&self, id: PageId) -> Result<(), VisualizationError> {
-        lookup::position(&self.pages, id.get())
+        self.pages
+            .position(id.get())
             .map(|_| ())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Page(id)))
     }
 
     fn require_pane(&self, id: PaneId) -> Result<(), VisualizationError> {
-        lookup::position(&self.panes, id.get())
+        self.panes
+            .position(id.get())
             .map(|_| ())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(id)))
     }
 
     fn require_axis_in_pane(&self, id: AxisId, pane_id: PaneId) -> Result<(), VisualizationError> {
-        lookup::position(&self.axes, id.get())
+        self.axes
+            .position(id.get())
             .filter(|&index| self.axes[index].pane_id == pane_id)
             .map(|_| ())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Axis(id)))
@@ -939,7 +943,8 @@ impl VisualizationDocument {
         id: TraceId,
         pane_id: PaneId,
     ) -> Result<(), VisualizationError> {
-        lookup::position(&self.traces, id.get())
+        self.traces
+            .position(id.get())
             .filter(|&index| self.traces[index].pane_id == pane_id)
             .map(|_| ())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(id)))
@@ -947,15 +952,15 @@ impl VisualizationDocument {
 
     fn require_entity(&self, entity: EntityRef) -> Result<(), VisualizationError> {
         let exists = match entity {
-            EntityRef::Page(id) => lookup::position(&self.pages, id.get()).is_some(),
-            EntityRef::Pane(id) => lookup::position(&self.panes, id.get()).is_some(),
-            EntityRef::Trace(id) => lookup::position(&self.traces, id.get()).is_some(),
-            EntityRef::Axis(id) => lookup::position(&self.axes, id.get()).is_some(),
-            EntityRef::Cursor(id) => lookup::position(&self.cursors, id.get()).is_some(),
-            EntityRef::Marker(id) => lookup::position(&self.markers, id.get()).is_some(),
-            EntityRef::Measurement(id) => lookup::position(&self.measurements, id.get()).is_some(),
-            EntityRef::Annotation(id) => lookup::position(&self.annotations, id.get()).is_some(),
-            EntityRef::LinkGroup(id) => lookup::position(&self.link_groups, id.get()).is_some(),
+            EntityRef::Page(id) => self.pages.position(id.get()).is_some(),
+            EntityRef::Pane(id) => self.panes.position(id.get()).is_some(),
+            EntityRef::Trace(id) => self.traces.position(id.get()).is_some(),
+            EntityRef::Axis(id) => self.axes.position(id.get()).is_some(),
+            EntityRef::Cursor(id) => self.cursors.position(id.get()).is_some(),
+            EntityRef::Marker(id) => self.markers.position(id.get()).is_some(),
+            EntityRef::Measurement(id) => self.measurements.position(id.get()).is_some(),
+            EntityRef::Annotation(id) => self.annotations.position(id.get()).is_some(),
+            EntityRef::LinkGroup(id) => self.link_groups.position(id.get()).is_some(),
         };
         exists
             .then_some(())
@@ -963,38 +968,43 @@ impl VisualizationDocument {
     }
 
     fn page_mut(&mut self, id: PageId) -> Result<&mut Page, VisualizationError> {
-        lookup::position(&self.pages, id.get())
-            .map(|index| &mut self.pages[index])
+        self.pages
+            .get_mut(id.get())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Page(id)))
     }
 
     fn pane_mut(&mut self, id: PaneId) -> Result<&mut Pane, VisualizationError> {
-        lookup::position(&self.panes, id.get())
-            .map(|index| &mut self.panes[index])
+        self.panes
+            .get_mut(id.get())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Pane(id)))
     }
 
-    fn trace_mut(&mut self, id: TraceId) -> Result<&mut Trace, VisualizationError> {
-        lookup::position(&self.traces, id.get())
-            .map(|index| &mut self.traces[index])
+    /// Change the trace `id` with `change`.
+    fn update_trace<R>(
+        &mut self,
+        id: TraceId,
+        change: impl FnOnce(&mut Trace) -> R,
+    ) -> Result<R, VisualizationError> {
+        self.traces
+            .update(id.get(), change)
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Trace(id)))
     }
 
     fn axis_mut(&mut self, id: AxisId) -> Result<&mut Axis, VisualizationError> {
-        lookup::position(&self.axes, id.get())
-            .map(|index| &mut self.axes[index])
+        self.axes
+            .get_mut(id.get())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Axis(id)))
     }
 
     fn cursor_mut(&mut self, id: CursorId) -> Result<&mut Cursor, VisualizationError> {
-        lookup::position(&self.cursors, id.get())
-            .map(|index| &mut self.cursors[index])
+        self.cursors
+            .get_mut(id.get())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Cursor(id)))
     }
 
     fn marker_mut(&mut self, id: MarkerId) -> Result<&mut Marker, VisualizationError> {
-        lookup::position(&self.markers, id.get())
-            .map(|index| &mut self.markers[index])
+        self.markers
+            .get_mut(id.get())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Marker(id)))
     }
 
@@ -1002,24 +1012,24 @@ impl VisualizationDocument {
         &mut self,
         id: MeasurementId,
     ) -> Result<&mut Measurement, VisualizationError> {
-        lookup::position(&self.measurements, id.get())
-            .map(|index| &mut self.measurements[index])
+        self.measurements
+            .get_mut(id.get())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Measurement(
                 id,
             )))
     }
 
     fn annotation_mut(&mut self, id: AnnotationId) -> Result<&mut Annotation, VisualizationError> {
-        lookup::position(&self.annotations, id.get())
-            .map(|index| &mut self.annotations[index])
+        self.annotations
+            .get_mut(id.get())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::Annotation(
                 id,
             )))
     }
 
     fn link_group_mut(&mut self, id: LinkGroupId) -> Result<&mut LinkGroup, VisualizationError> {
-        lookup::position(&self.link_groups, id.get())
-            .map(|index| &mut self.link_groups[index])
+        self.link_groups
+            .get_mut(id.get())
             .ok_or(VisualizationError::EntityNotFound(EntityRef::LinkGroup(id)))
     }
 }
@@ -2319,33 +2329,33 @@ pub struct VisualizationDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     working_view: Option<WorkingViewSource>,
     next_serial: u64,
-    datasets: Vec<SourceDataset>,
-    pages: Vec<Page>,
-    panes: Vec<Pane>,
-    axes: Vec<Axis>,
-    traces: Vec<Trace>,
-    cursors: Vec<Cursor>,
-    markers: Vec<Marker>,
-    measurements: Vec<Measurement>,
-    annotations: Vec<Annotation>,
-    link_groups: Vec<LinkGroup>,
-    tombstones: Vec<Tombstone>,
-    comparisons: Vec<ComparisonReceipt>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    user_buses: Vec<UserBus>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    event_lane_orders: Vec<EventLaneOrder>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    expression_traces: Vec<ExpressionTrace>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    xy_plots: Vec<XyPlot>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    readout_pins: Vec<ReadoutPin>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    sheet_settings: Vec<SheetSetting>,
-    spectrum_settings: Vec<PaneSpectrumSettings>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    coefficient_settings: Vec<PaneCoefficientSettings>,
+    datasets: journal::SpliceList<SourceDataset>,
+    pages: journal::EntityList<Page>,
+    panes: journal::EntityList<Pane>,
+    axes: journal::EntityList<Axis>,
+    traces: journal::EntityList<Trace, journal::SignalIndex>,
+    cursors: journal::EntityList<Cursor>,
+    markers: journal::EntityList<Marker>,
+    measurements: journal::EntityList<Measurement>,
+    annotations: journal::EntityList<Annotation>,
+    link_groups: journal::EntityList<LinkGroup>,
+    tombstones: journal::SpliceList<Tombstone>,
+    comparisons: journal::SpliceList<ComparisonReceipt>,
+    #[serde(skip_serializing_if = "journal::SpliceList::is_empty")]
+    user_buses: journal::SpliceList<UserBus>,
+    #[serde(skip_serializing_if = "journal::SpliceList::is_empty")]
+    event_lane_orders: journal::SpliceList<EventLaneOrder>,
+    #[serde(skip_serializing_if = "journal::SpliceList::is_empty")]
+    expression_traces: journal::SpliceList<ExpressionTrace>,
+    #[serde(skip_serializing_if = "journal::SpliceList::is_empty")]
+    xy_plots: journal::SpliceList<XyPlot>,
+    #[serde(skip_serializing_if = "journal::SpliceList::is_empty")]
+    readout_pins: journal::SpliceList<ReadoutPin>,
+    #[serde(skip_serializing_if = "journal::SpliceList::is_empty")]
+    sheet_settings: journal::SpliceList<SheetSetting>,
+    spectrum_settings: journal::SpliceList<PaneSpectrumSettings>,
+    #[serde(skip_serializing_if = "journal::SpliceList::is_empty")]
+    coefficient_settings: journal::SpliceList<PaneCoefficientSettings>,
     /// The rows of embedded tables a check is reading, while it reads them.
     #[serde(skip)]
     row_index: query::RowIndex,
@@ -2407,26 +2417,28 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             presentation: wire.presentation,
             working_view: wire.working_view,
             next_serial: wire.next_serial,
-            datasets: wire.datasets.0,
-            pages: wire.pages,
-            panes: wire.panes,
-            axes: wire.axes,
-            traces: wire.traces,
-            cursors: wire.cursors,
-            markers: wire.markers,
-            measurements: wire.measurements,
-            annotations: wire.annotations,
-            link_groups: wire.link_groups,
-            tombstones: wire.tombstones,
-            comparisons: wire.comparisons,
-            user_buses: wire.user_buses.unwrap_or_default(),
-            event_lane_orders: wire.event_lane_orders.unwrap_or_default(),
-            expression_traces: wire.expression_traces.unwrap_or_default(),
-            xy_plots: wire.xy_plots.unwrap_or_default(),
-            readout_pins: wire.readout_pins.unwrap_or_default(),
-            sheet_settings: wire.sheet_settings.unwrap_or_default(),
-            spectrum_settings: wire.spectrum_settings.unwrap_or_default(),
-            coefficient_settings: wire.coefficient_settings.unwrap_or_default(),
+            datasets: journal::SpliceList::new(wire.datasets.0),
+            pages: journal::EntityList::new(wire.pages),
+            panes: journal::EntityList::new(wire.panes),
+            axes: journal::EntityList::new(wire.axes),
+            traces: journal::EntityList::new(wire.traces),
+            cursors: journal::EntityList::new(wire.cursors),
+            markers: journal::EntityList::new(wire.markers),
+            measurements: journal::EntityList::new(wire.measurements),
+            annotations: journal::EntityList::new(wire.annotations),
+            link_groups: journal::EntityList::new(wire.link_groups),
+            tombstones: journal::SpliceList::new(wire.tombstones),
+            comparisons: journal::SpliceList::new(wire.comparisons),
+            user_buses: journal::SpliceList::new(wire.user_buses.unwrap_or_default()),
+            event_lane_orders: journal::SpliceList::new(wire.event_lane_orders.unwrap_or_default()),
+            expression_traces: journal::SpliceList::new(wire.expression_traces.unwrap_or_default()),
+            xy_plots: journal::SpliceList::new(wire.xy_plots.unwrap_or_default()),
+            readout_pins: journal::SpliceList::new(wire.readout_pins.unwrap_or_default()),
+            sheet_settings: journal::SpliceList::new(wire.sheet_settings.unwrap_or_default()),
+            spectrum_settings: journal::SpliceList::new(wire.spectrum_settings.unwrap_or_default()),
+            coefficient_settings: journal::SpliceList::new(
+                wire.coefficient_settings.unwrap_or_default(),
+            ),
             row_index: query::RowIndex::default(),
         };
         if document.schema_version != Self::SCHEMA_VERSION {
@@ -2471,15 +2483,15 @@ impl VisualizationDocument {
             presentation: VisualizationPresentationPolicy::default(),
             working_view: None,
             next_serial: 3,
-            datasets,
-            pages: vec![Page {
+            datasets: journal::SpliceList::new(datasets),
+            pages: journal::EntityList::new(vec![Page {
                 id: page_id,
                 title: "Page 1".to_owned(),
                 layout: PageLayout::default(),
                 template_id: default_page_template_id(),
                 update_policy: PageUpdatePolicy::default(),
-            }],
-            panes: vec![Pane {
+            }]),
+            panes: journal::EntityList::new(vec![Pane {
                 id: pane_id,
                 page_id,
                 title: "Plot 1".to_owned(),
@@ -2493,24 +2505,24 @@ impl VisualizationDocument {
                 strips: Vec::new(),
                 maximized: false,
                 shown: false,
-            }],
-            axes: Vec::new(),
-            traces: Vec::new(),
-            cursors: Vec::new(),
-            markers: Vec::new(),
-            measurements: Vec::new(),
-            annotations: Vec::new(),
-            link_groups: Vec::new(),
-            tombstones: Vec::new(),
-            comparisons: Vec::new(),
-            user_buses: Vec::new(),
-            event_lane_orders: Vec::new(),
-            expression_traces: Vec::new(),
-            xy_plots: Vec::new(),
-            readout_pins: Vec::new(),
-            sheet_settings: Vec::new(),
-            spectrum_settings: Vec::new(),
-            coefficient_settings: Vec::new(),
+            }]),
+            axes: journal::EntityList::new(Vec::new()),
+            traces: journal::EntityList::new(Vec::new()),
+            cursors: journal::EntityList::new(Vec::new()),
+            markers: journal::EntityList::new(Vec::new()),
+            measurements: journal::EntityList::new(Vec::new()),
+            annotations: journal::EntityList::new(Vec::new()),
+            link_groups: journal::EntityList::new(Vec::new()),
+            tombstones: journal::SpliceList::new(Vec::new()),
+            comparisons: journal::SpliceList::new(Vec::new()),
+            user_buses: journal::SpliceList::new(Vec::new()),
+            event_lane_orders: journal::SpliceList::new(Vec::new()),
+            expression_traces: journal::SpliceList::new(Vec::new()),
+            xy_plots: journal::SpliceList::new(Vec::new()),
+            readout_pins: journal::SpliceList::new(Vec::new()),
+            sheet_settings: journal::SpliceList::new(Vec::new()),
+            spectrum_settings: journal::SpliceList::new(Vec::new()),
+            coefficient_settings: journal::SpliceList::new(Vec::new()),
             row_index: query::RowIndex::default(),
         };
         document.validate()?;
@@ -2534,7 +2546,7 @@ impl VisualizationDocument {
         validate_label("pane.title", &pane.title)?;
         let pane_id = document.panes[0].id;
         {
-            let initial = &mut document.panes[0];
+            let initial = document.panes.at_mut(0);
             initial.title = pane.title;
             initial.kind = pane.kind;
             initial.viewer_id = pane.viewer_id.clone();
@@ -2767,6 +2779,7 @@ impl VisualizationDocument {
             let mut document = self.clone();
             for run in document
                 .datasets
+                .edit()
                 .iter_mut()
                 .filter_map(|dataset| dataset.run.as_mut())
             {
@@ -2781,8 +2794,9 @@ impl VisualizationDocument {
         Ok(writer.finish())
     }
 
-    /// Applies all edits to a candidate clone, validates the complete graph,
-    /// and commits once. Any error leaves `self` byte-for-byte unchanged.
+    /// Applies the edits to the document in place, checks what they
+    /// changed, and commits once. Any error puts back what the edits
+    /// changed, so it leaves `self` byte-for-byte unchanged.
     pub fn transact(
         &mut self,
         expected_revision: ObjectRevision,
@@ -2824,16 +2838,20 @@ impl VisualizationDocument {
         let previous_revision = self.revision;
         let committed_revision = previous_revision.next()?;
         let edit_count = edits.len();
-        let mut candidate = self.clone();
         let mut created = Vec::new();
         let mut tombstoned = Vec::new();
-        for edit in edits {
-            candidate.apply_edit(edit, committed_revision, &mut created, &mut tombstoned)?;
+        let began = self.begin();
+        let applied = self
+            .apply_edits(edits, committed_revision, &mut created, &mut tombstoned)
+            .and_then(|()| self.check_changes());
+        if let Err(error) = applied {
+            self.roll_back(began);
+            return Err(error);
         }
-        candidate.revision = committed_revision;
-        candidate.validate()?;
-        let step = undo.then(|| ViewStep::back_to(self, &candidate));
-        *self = candidate;
+        self.assert_whole();
+        let step = undo.then(|| ViewStep::back_to(self, &began));
+        self.end();
+        self.revision = committed_revision;
         Ok((
             VisualizationTransactionReceipt {
                 document_id: self.id,
@@ -2845,6 +2863,16 @@ impl VisualizationDocument {
             },
             step,
         ))
+    }
+
+    /// In a debug build, a whole check of the document after a check of
+    /// what an edit changed passed: the two agree, or the narrower one
+    /// missed an invariant the edit can break.
+    fn assert_whole(&self) {
+        #[cfg(debug_assertions)]
+        if let Err(error) = self.validate() {
+            panic!("an edit the document accepted left it invalid: {error}");
+        }
     }
 
     /// Put back what `step` holds, over the datasets this document reads
@@ -2873,13 +2901,33 @@ impl VisualizationDocument {
         }
         let previous_revision = self.revision;
         let committed_revision = previous_revision.next()?;
-        let mut candidate = self.clone();
-        step.put_back(&mut candidate);
-        candidate.revision = committed_revision;
-        self.follow_into(&mut candidate)?;
-        candidate.validate()?;
-        let reverse = ViewStep::back_to(self, &candidate);
-        *self = candidate;
+        let shown: Vec<(PaneId, PaneDataBinding)> = self
+            .panes
+            .iter()
+            .filter_map(|pane| Some((pane.id, pane.binding?)))
+            .collect();
+        let stale: Vec<DatasetBinding> = step
+            .bindings()
+            .filter(|binding| {
+                !self
+                    .datasets
+                    .iter()
+                    .any(|dataset| dataset.binding.dataset_id == binding.dataset_id)
+            })
+            .collect();
+        let began = self.begin();
+        step.put_back(self);
+        let followed = self
+            .follow_into(stale, &shown)
+            .and_then(|()| self.check_changes());
+        if let Err(error) = followed {
+            self.roll_back(began);
+            return Err(error);
+        }
+        self.assert_whole();
+        let reverse = ViewStep::back_to(self, &began);
+        self.end();
+        self.revision = committed_revision;
         Ok((
             VisualizationTransactionReceipt {
                 document_id: self.id,
@@ -2893,43 +2941,30 @@ impl VisualizationDocument {
         ))
     }
 
-    /// Move what `candidate`, an earlier view of this document, read from a
-    /// run this document no longer holds onto the run it reads now: each
-    /// pane onto the binding the same pane has now, and each trace onto the
-    /// signal of the same name there. A view followed a newer run between
-    /// the two, so the earlier view is restored on the run now shown.
-    fn follow_into(&self, candidate: &mut Self) -> Result<(), VisualizationError> {
-        let held = |binding: &DatasetBinding| {
-            self.datasets
-                .iter()
-                .any(|dataset| dataset.binding.dataset_id == binding.dataset_id)
-        };
-        let mut stale = candidate
-            .panes
-            .iter()
-            .filter_map(|pane| pane.binding.map(|binding| binding.dataset))
-            .chain(candidate.traces.iter().map(|trace| trace.binding))
-            .chain(
-                candidate
-                    .expression_traces
-                    .iter()
-                    .flat_map(|expression| expression.datasets.iter().copied()),
-            )
-            .filter(|binding| !held(binding))
-            .collect::<Vec<_>>();
+    /// Move what a step just put back read from a run this document no
+    /// longer holds, the `stale` bindings, onto the run it reads now: each
+    /// pane onto the binding the same pane had before the step, in `shown`,
+    /// and each trace onto the signal of the same name there. A view
+    /// followed a newer run between the two, so the earlier view is restored
+    /// on the run now shown.
+    fn follow_into(
+        &mut self,
+        mut stale: Vec<DatasetBinding>,
+        shown: &[(PaneId, PaneDataBinding)],
+    ) -> Result<(), VisualizationError> {
         stale.sort_by_key(|binding| binding.dataset_id.as_uuid());
         stale.dedup();
-        let Some(shown) = self.panes.iter().find_map(|pane| pane.binding) else {
+        let Some(&(_, first)) = shown.first() else {
             return Ok(());
         };
+        let now = |pane_id: PaneId| {
+            shown
+                .iter()
+                .find(|(shown_id, _)| *shown_id == pane_id)
+                .map(|(_, binding)| *binding)
+        };
         for previous in stale {
-            let now = |pane_id: PaneId| {
-                self.panes
-                    .iter()
-                    .find(|pane| pane.id == pane_id)
-                    .and_then(|pane| pane.binding)
-            };
-            let pairs = candidate
+            let pairs = self
                 .panes
                 .iter()
                 .filter_map(|pane| {
@@ -2937,7 +2972,7 @@ impl VisualizationDocument {
                     Some((before.analysis_id, now(pane.id)?))
                 })
                 .collect::<Vec<_>>();
-            let next = pairs.first().map_or(shown.dataset, |(_, now)| now.dataset);
+            let next = pairs.first().map_or(first.dataset, |(_, now)| now.dataset);
             let analyses = pairs
                 .iter()
                 .filter(|(_, now)| now.dataset == next)
@@ -2946,8 +2981,8 @@ impl VisualizationDocument {
             let fallback = pairs
                 .iter()
                 .find(|(_, now)| now.dataset == next)
-                .map_or(shown.analysis_id, |(_, now)| now.analysis_id);
-            candidate.rebind_consumers(
+                .map_or(first.analysis_id, |(_, now)| now.analysis_id);
+            self.rebind_consumers(
                 previous,
                 next,
                 |from| {

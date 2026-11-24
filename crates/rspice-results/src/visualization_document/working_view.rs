@@ -59,7 +59,7 @@ impl VisualizationDocument {
         let page_id = document.pages[0].id;
         // The generic constructor's unbound placeholder is not one of the
         // view's analyses.
-        document.panes.clear();
+        document.panes.retain(|_| false);
         let mut created = Vec::new();
         let mut previous = None;
         for pane in panes {
@@ -155,9 +155,9 @@ impl VisualizationDocument {
 
     /// Plot or take off the signals `names` of the analysis `pane_id` draws.
     /// Plotting shows each one's traces, or adds a trace for a signal the
-    /// pane has none of; taking off hides every trace of each. The pane's
-    /// traces and its dataset's signals are each read once, however many
-    /// signals the edit names.
+    /// pane has none of; taking off hides every trace of each. Each signal's
+    /// traces are looked up, not searched for, and its dataset's signals are
+    /// read once, so the edit costs what it names, not what the view holds.
     pub(super) fn set_signals_plotted(
         &mut self,
         pane_id: PaneId,
@@ -174,13 +174,18 @@ impl VisualizationDocument {
         for name in names {
             validate_label("trace.signal", name)?;
         }
-        let named: HashSet<&str> = names.iter().map(String::as_str).collect();
+        let mut looked = HashSet::new();
         let mut held = HashSet::new();
-        for trace in &mut self.traces {
-            let signal = trace.source_signal().unwrap_or(&trace.label);
-            if trace.pane_id == pane_id && named.contains(signal) {
-                held.insert(signal.to_owned());
-                trace.visible = plotted;
+        for name in names {
+            if !looked.insert(name.as_str()) {
+                continue;
+            }
+            for index in self.traces.reading(pane_id, name) {
+                held.insert(name.as_str());
+                if self.traces[index].visible != plotted {
+                    self.traces
+                        .update_at(index, |trace| trace.visible = plotted);
+                }
             }
         }
         let mut added = HashSet::new();
@@ -265,7 +270,7 @@ impl VisualizationDocument {
                 });
             }
             let grown_from = self.datasets[held].binding;
-            self.datasets[held] = next;
+            self.datasets.edit()[held] = next;
             return self.rebind_consumers(
                 grown_from,
                 next_binding,

@@ -1,13 +1,77 @@
 //! Applying an edit, and what an application is allowed to leave behind.
 //!
-//! A transaction validates every edit against the document it would produce
-//! before any of it is kept, so a rejected edit changes nothing — there is no
+//! A transaction applies its edits in place, keeping what each changed, and
+//! checks what they changed before it commits; a refused edit puts back
+//! what the transaction changed, so it changes nothing — there is no
 //! partially-applied state. Removal cascades through the entities that depend
 //! on the removed one and records a tombstone for each, which is why a page
 //! can never keep a pane, axis, or trace whose parent is gone.
 
 use super::lookup::{Entities, Lookup, require_made_in_order};
 use super::*;
+
+/// What one run of removals has gathered so far.
+#[derive(Default)]
+struct Removal {
+    /// The entities removed, in order.
+    order: Vec<EntityRef>,
+    gone: HashSet<EntityRef>,
+    /// What draws on each axis and what reads each trace, read once when a
+    /// removal first asks.
+    axis_dependents: Option<HashMap<AxisId, Vec<EntityRef>>>,
+    trace_dependents: Option<HashMap<TraceId, Vec<EntityRef>>>,
+}
+
+/// Whether `now` reads what `before` read: the same rows of the same
+/// dataset, on the same pane and axes, under the same name. A change of
+/// anything else (whether it shows, its colour, style or lane) leaves what
+/// a check of it found as it was.
+fn reads_the_same(before: &Trace, now: &Trace) -> bool {
+    before.pane_id == now.pane_id
+        && before.binding == now.binding
+        && before.signal_key == now.signal_key
+        && before.coordinate_key == now.coordinate_key
+        && before.row_predicates == now.row_predicates
+        && before.x_axis_id == now.x_axis_id
+        && before.y_axis_id == now.y_axis_id
+        && before.label == now.label
+        && before.missing == now.missing
+}
+
+/// A family policy's dimensions, each a coordinate of the dataset
+/// `binding` names, of the type the policy declares.
+fn validate_family_source(
+    entities: &dyn Entities,
+    binding: DatasetBinding,
+    policy: &FamilyPresentationPolicy,
+) -> Result<(), VisualizationError> {
+    let dataset = entities.dataset(binding)?;
+    for dimension in
+        std::iter::once(&policy.x_dimension.dimension).chain(policy.family_dimensions.iter())
+    {
+        let column = dataset
+            .columns
+            .iter()
+            .find(|column| column.key == dimension.key)
+            .ok_or_else(|| VisualizationError::InvalidValue {
+                field: "pane.family-policy.dimension",
+                message: format!(
+                    "source dataset {} has no declared dimension '{}'",
+                    binding.dataset_id, dimension.key
+                ),
+            })?;
+        if column.role != ColumnRole::Coordinate || column.value_type != dimension.value_type {
+            return Err(VisualizationError::InvalidValue {
+                field: "pane.family-policy.dimension",
+                message: format!(
+                    "source dimension '{}' must be a {:?} coordinate, received {:?} {:?}",
+                    dimension.key, dimension.value_type, column.value_type, column.role
+                ),
+            });
+        }
+    }
+    Ok(())
+}
 
 /// What moving a document's consumers from one run onto another asks of
 /// the run moved onto.
@@ -91,33 +155,7 @@ impl VisualizationDocument {
             });
         }
         for binding in bindings {
-            let dataset = entities.dataset(binding)?;
-            for dimension in std::iter::once(&policy.x_dimension.dimension)
-                .chain(policy.family_dimensions.iter())
-            {
-                let column = dataset
-                    .columns
-                    .iter()
-                    .find(|column| column.key == dimension.key)
-                    .ok_or_else(|| VisualizationError::InvalidValue {
-                        field: "pane.family-policy.dimension",
-                        message: format!(
-                            "source dataset {} has no declared dimension '{}'",
-                            binding.dataset_id, dimension.key
-                        ),
-                    })?;
-                if column.role != ColumnRole::Coordinate
-                    || column.value_type != dimension.value_type
-                {
-                    return Err(VisualizationError::InvalidValue {
-                        field: "pane.family-policy.dimension",
-                        message: format!(
-                            "source dimension '{}' must be a {:?} coordinate, received {:?} {:?}",
-                            dimension.key, dimension.value_type, column.value_type, column.role
-                        ),
-                    });
-                }
-            }
+            validate_family_source(entities, binding, policy)?;
         }
         Ok(())
     }
@@ -185,13 +223,14 @@ impl VisualizationDocument {
         validate_label("pane.title", &pane.title)?;
         self.validate_pane_source(&*self, pane.kind, &pane.viewer_id, pane.binding)?;
         let order = self.placement_order(pane.page_id, pane.placement, None)?;
-        for existing in &mut self.panes {
-            if existing.page_id == pane.page_id && existing.order >= order {
-                existing.order = existing
-                    .order
-                    .checked_add(1)
-                    .ok_or(VisualizationError::IdentitySpaceExhausted)?;
-            }
+        for existing in self
+            .panes
+            .iter_mut_where(|existing| existing.page_id == pane.page_id && existing.order >= order)
+        {
+            existing.order = existing
+                .order
+                .checked_add(1)
+                .ok_or(VisualizationError::IdentitySpaceExhausted)?;
         }
         let id = PaneId::allocate(self.allocate_serial()?)?;
         self.panes.push(Pane {
@@ -410,7 +449,7 @@ impl VisualizationDocument {
             })
             .collect::<Vec<_>>();
         for (anchor_axis, new_axis, orientation) in axis_pairs {
-            for group in &mut self.link_groups {
+            for group in self.link_groups.iter_mut_where(|group| {
                 let compatible = matches!(
                     (group.kind, orientation),
                     (LinkKind::HorizontalViewport, AxisOrientation::Horizontal)
@@ -419,12 +458,11 @@ impl VisualizationDocument {
                             AxisOrientation::VerticalLeft | AxisOrientation::VerticalRight
                         )
                 );
-                if compatible
+                compatible
                     && group.members.contains(&EntityRef::Axis(anchor_axis))
                     && !group.members.contains(&EntityRef::Axis(new_axis))
-                {
-                    group.members.push(EntityRef::Axis(new_axis));
-                }
+            }) {
+                group.members.push(EntityRef::Axis(new_axis));
             }
         }
         Ok(())
@@ -472,8 +510,7 @@ impl VisualizationDocument {
             };
             let pane = self
                 .panes
-                .iter_mut()
-                .find(|pane| pane.id == pane_id)
+                .get_mut(pane_id.get())
                 .expect("pane identity was projected from this document");
             pane.order = u32::try_from(order).expect("pane count exceeds u32 address space");
             pane.placement = normalized_placement;
@@ -497,13 +534,13 @@ impl VisualizationDocument {
         self.require_page(page_id)?;
         self.normalize_page_pane_layout(source_page_id, Some(pane_id));
         let order = self.placement_order(page_id, placement, Some(pane_id))?;
-        for pane in &mut self.panes {
-            if pane.id != pane_id && pane.page_id == page_id && pane.order >= order {
-                pane.order = pane
-                    .order
-                    .checked_add(1)
-                    .ok_or(VisualizationError::IdentitySpaceExhausted)?;
-            }
+        for pane in self.panes.iter_mut_where(|pane| {
+            pane.id != pane_id && pane.page_id == page_id && pane.order >= order
+        }) {
+            pane.order = pane
+                .order
+                .checked_add(1)
+                .ok_or(VisualizationError::IdentitySpaceExhausted)?;
         }
         let pane = self.pane_mut(pane_id)?;
         pane.page_id = page_id;
@@ -554,6 +591,31 @@ impl VisualizationDocument {
         Ok(())
     }
 
+    /// Apply `edits` in order; a run of removals is taken out together.
+    pub(super) fn apply_edits(
+        &mut self,
+        edits: Vec<DocumentEdit>,
+        revision: ObjectRevision,
+        created: &mut Vec<EntityRef>,
+        tombstoned: &mut Vec<EntityRef>,
+    ) -> Result<(), VisualizationError> {
+        let mut removals = Vec::new();
+        for edit in edits {
+            if let DocumentEdit::Remove(entity) = edit {
+                removals.push(entity);
+                continue;
+            }
+            if !removals.is_empty() {
+                self.remove_all(std::mem::take(&mut removals), revision, tombstoned)?;
+            }
+            self.apply_edit(edit, revision, created, tombstoned)?;
+        }
+        if !removals.is_empty() {
+            self.remove_all(removals, revision, tombstoned)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn apply_edit(
         &mut self,
         edit: DocumentEdit,
@@ -577,6 +639,7 @@ impl VisualizationDocument {
             DocumentEdit::ArchiveDataset { binding, archive } => {
                 self.dataset_for_binding(binding)?;
                 self.datasets
+                    .edit()
                     .iter_mut()
                     .find(|dataset| dataset.binding == binding)
                     .and_then(|dataset| dataset.run.as_mut())
@@ -651,7 +714,10 @@ impl VisualizationDocument {
             }
             DocumentEdit::ShowPaneAnalysis { pane_id } => {
                 self.pane_mut(pane_id)?;
-                for pane in &mut self.panes {
+                for pane in self
+                    .panes
+                    .iter_mut_where(|pane| pane.shown != (pane.id == pane_id))
+                {
                     pane.shown = pane.id == pane_id;
                 }
                 Ok(())
@@ -797,7 +863,7 @@ impl VisualizationDocument {
                 if target_page_id != source_page_id
                     && !self.panes.iter().any(|pane| pane.page_id == source_page_id)
                 {
-                    self.remove(EntityRef::Page(source_page_id), revision, tombstoned)?;
+                    self.remove_all(vec![EntityRef::Page(source_page_id)], revision, tombstoned)?;
                 }
                 Ok(())
             }
@@ -1028,29 +1094,25 @@ impl VisualizationDocument {
                 Ok(())
             }
             DocumentEdit::SetTraceVisibility { trace_id, visible } => {
-                self.trace_mut(trace_id)?.visible = visible;
-                Ok(())
+                self.update_trace(trace_id, |trace| trace.visible = visible)
             }
             DocumentEdit::SetTraceColor { trace_id, color } => {
-                self.trace_mut(trace_id)?.color = color;
-                Ok(())
+                self.update_trace(trace_id, |trace| trace.color = color)
             }
             DocumentEdit::SetTraceStyle { trace_id, style } => {
-                self.trace_mut(trace_id)?.style = style;
-                Ok(())
+                self.update_trace(trace_id, |trace| trace.style = style)
             }
             DocumentEdit::SetTraceLane { trace_id, lane } => {
-                self.trace_mut(trace_id)?.lane = lane;
-                Ok(())
+                self.update_trace(trace_id, |trace| trace.lane = lane)
             }
             DocumentEdit::DefineUserBus(bus) => {
                 self.validate_user_bus(&*self, &bus)?;
                 match self
                     .user_buses
-                    .iter_mut()
-                    .find(|held| held.pane_id == bus.pane_id && held.name == bus.name)
+                    .iter()
+                    .position(|held| held.pane_id == bus.pane_id && held.name == bus.name)
                 {
-                    Some(held) => *held = bus,
+                    Some(index) => self.user_buses.splice(index..index + 1, vec![bus]),
                     None => self.user_buses.push(bus),
                 }
                 Ok(())
@@ -1075,13 +1137,11 @@ impl VisualizationDocument {
                 self.validate_expression_trace(&*self, &trace)?;
                 match self
                     .expression_traces
-                    .iter_mut()
-                    .find(|held| held.pane_id == trace.pane_id && held.text == trace.text)
+                    .iter()
+                    .position(|held| held.pane_id == trace.pane_id && held.text == trace.text)
                 {
-                    Some(held) => *held = trace,
-                    None => {
-                        self.expression_traces.push(trace);
-                    }
+                    Some(index) => self.expression_traces.splice(index..index + 1, vec![trace]),
+                    None => self.expression_traces.push(trace),
                 }
                 Ok(())
             }
@@ -1116,7 +1176,7 @@ impl VisualizationDocument {
                     }
                 }
                 self.xy_plots.retain(|held| held.pane_id != pane_id);
-                self.xy_plots.extend(plots);
+                self.xy_plots.edit().extend(plots);
                 Ok(())
             }
             DocumentEdit::SetReadoutPin { pane_id, sheet, x } => {
@@ -1280,18 +1340,15 @@ impl VisualizationDocument {
                 if let Some(pane_id) = pane_id {
                     self.require_pane(pane_id)?;
                 }
-                let marker_ids = self
+                let markers = self
                     .markers
                     .iter()
                     .filter(|marker| pane_id.is_none_or(|pane_id| marker.pane_id == pane_id))
-                    .map(|marker| marker.id)
+                    .map(|marker| EntityRef::Marker(marker.id))
                     .collect::<Vec<_>>();
-                for marker_id in marker_ids {
-                    self.remove(EntityRef::Marker(marker_id), revision, tombstoned)?;
-                }
-                Ok(())
+                self.remove_all(markers, revision, tombstoned)
             }
-            DocumentEdit::Remove(entity) => self.remove(entity, revision, tombstoned),
+            DocumentEdit::Remove(entity) => self.remove_all(vec![entity], revision, tombstoned),
             DocumentEdit::RecordComparison(receipt) => {
                 self.validate_comparison_receipt(&*self, &receipt)?;
                 self.comparisons.push(receipt);
@@ -1331,13 +1388,14 @@ impl VisualizationDocument {
         projection: SourceDataset,
     ) -> Result<(), VisualizationError> {
         projection.validate()?;
-        let existing = self
+        let index = self
             .datasets
-            .iter_mut()
-            .find(|dataset| dataset.binding.dataset_id == projection.binding.dataset_id)
+            .iter()
+            .position(|dataset| dataset.binding.dataset_id == projection.binding.dataset_id)
             .ok_or(VisualizationError::DatasetNotFound(
                 projection.binding.dataset_id,
             ))?;
+        let existing = &self.datasets[index];
         if existing.binding.content_digest != projection.binding.content_digest {
             return Err(VisualizationError::SourceDigestMismatch {
                 dataset_id: projection.binding.dataset_id,
@@ -1345,9 +1403,15 @@ impl VisualizationDocument {
                 requested: projection.binding.content_digest,
             });
         }
-        match (existing.run.as_mut(), projection.run) {
-            (Some(run), Some(projected)) => return run.merge(projected),
-            (None, None) => {}
+        match (existing.run.is_some(), projection.run) {
+            (true, Some(projected)) => {
+                return self.datasets.edit()[index]
+                    .run
+                    .as_mut()
+                    .expect("the dataset references its run")
+                    .merge(projected);
+            }
+            (false, None) => {}
             _ => {
                 return Err(VisualizationError::InvalidValue {
                     field: "visualization-document.datasets",
@@ -1430,7 +1494,7 @@ impl VisualizationDocument {
         let mut merged = existing.clone();
         merged.rows.extend(projection.rows);
         merged.validate()?;
-        *existing = merged;
+        self.datasets.splice(index..index + 1, vec![merged]);
         Ok(())
     }
 
@@ -1634,12 +1698,12 @@ impl VisualizationDocument {
             .map(|(index, _)| self.panes[*index].id)
             .collect();
         for (index, to) in panes {
-            if let Some(binding) = self.panes[index].binding.as_mut() {
+            if let Some(binding) = self.panes.at_mut(index).binding.as_mut() {
                 binding.dataset = next;
                 binding.analysis_id = to;
             }
         }
-        for expression in &mut self.expression_traces {
+        for expression in self.expression_traces.edit().iter_mut() {
             // Following moves only the panes of the analyses the new run
             // solves, and an expression reads the run its pane does.
             if follow && !moved.contains(&expression.pane_id) {
@@ -1653,14 +1717,15 @@ impl VisualizationDocument {
             expression.datasets.dedup();
         }
         for (index, predicates) in traces {
-            let trace = &mut self.traces[index];
-            if let Some((predicates, missing)) = predicates {
-                trace.row_predicates = predicates;
-                trace.signal_key = "y".to_owned();
-                trace.coordinate_key = "x".to_owned();
-                trace.missing = missing;
-            }
-            trace.binding = next;
+            self.traces.update_at(index, |trace| {
+                if let Some((predicates, missing)) = predicates {
+                    trace.row_predicates = predicates;
+                    trace.signal_key = "y".to_owned();
+                    trace.coordinate_key = "x".to_owned();
+                    trace.missing = missing;
+                }
+                trace.binding = next;
+            });
         }
         Ok(())
     }
@@ -1712,7 +1777,7 @@ impl VisualizationDocument {
         match entity {
             EntityRef::Page(id) => self.page_mut(id)?.title = value,
             EntityRef::Pane(id) => self.pane_mut(id)?.title = value,
-            EntityRef::Trace(id) => self.trace_mut(id)?.label = value,
+            EntityRef::Trace(id) => self.update_trace(id, |trace| trace.label = value)?,
             EntityRef::Axis(id) => self.axis_mut(id)?.label = value,
             EntityRef::Cursor(id) => self.cursor_mut(id)?.label = value,
             EntityRef::Marker(id) => self.marker_mut(id)?.label = value,
@@ -1728,120 +1793,237 @@ impl VisualizationDocument {
         Ok(())
     }
 
-    fn remove(
+    /// Take out each of `entities` in order, as removing each on its own
+    /// would, refusing the first that cannot go: one in use, or one not
+    /// there. Each list is passed once for all the entities it loses, and
+    /// what depends on traces and axes is read once, so removing k entities
+    /// costs about k look-ups, not k passes of the view. A page or a pane
+    /// takes out everything on it.
+    pub(super) fn remove_all(
         &mut self,
-        entity: EntityRef,
+        entities: Vec<EntityRef>,
         revision: ObjectRevision,
         tombstoned: &mut Vec<EntityRef>,
     ) -> Result<(), VisualizationError> {
-        if let Some(group) = self
-            .link_groups
-            .iter()
-            .find(|group| group.members.contains(&entity))
-        {
-            return Err(VisualizationError::EntityInUse {
-                entity,
-                dependent: EntityRef::LinkGroup(group.id),
-            });
-        }
-        match entity {
-            EntityRef::Page(id) => {
-                self.require_page(id)?;
-                let pane_ids: Vec<_> = self
-                    .panes
-                    .iter()
-                    .filter_map(|pane| (pane.page_id == id).then_some(pane.id))
-                    .collect();
-                for pane_id in pane_ids {
-                    self.remove_pane_cascade(pane_id, revision, tombstoned);
+        let mut removal = Removal::default();
+        for entity in entities {
+            if let Some(group) = self.link_groups.iter().find(|group| {
+                group.members.contains(&entity)
+                    && !removal.gone.contains(&EntityRef::LinkGroup(group.id))
+            }) {
+                return Err(VisualizationError::EntityInUse {
+                    entity,
+                    dependent: EntityRef::LinkGroup(group.id),
+                });
+            }
+            match entity {
+                EntityRef::Page(id) => {
+                    self.take_out(std::mem::take(&mut removal), revision, tombstoned);
+                    self.require_page(id)?;
+                    let pane_ids: Vec<_> = self
+                        .panes
+                        .iter()
+                        .filter_map(|pane| (pane.page_id == id).then_some(pane.id))
+                        .collect();
+                    for pane_id in pane_ids {
+                        self.remove_pane_cascade(pane_id, revision, tombstoned);
+                    }
+                    self.pages.retain(|page| page.id != id);
+                    self.record_tombstone(entity, revision, tombstoned);
                 }
-                self.pages.retain(|page| page.id != id);
-            }
-            EntityRef::Pane(id) => {
-                self.require_pane(id)?;
-                self.remove_pane_cascade(id, revision, tombstoned);
-                return Ok(());
-            }
-            EntityRef::Axis(id) => {
-                self.require_entity(entity)?;
-                if let Some(trace) = self
-                    .traces
-                    .iter()
-                    .find(|trace| trace.x_axis_id == id || trace.y_axis_id == id)
-                {
-                    return Err(VisualizationError::EntityInUse {
-                        entity,
-                        dependent: EntityRef::Trace(trace.id),
-                    });
+                EntityRef::Pane(id) => {
+                    self.take_out(std::mem::take(&mut removal), revision, tombstoned);
+                    self.require_pane(id)?;
+                    self.remove_pane_cascade(id, revision, tombstoned);
                 }
-                if let Some(cursor) = self.cursors.iter().find(|cursor| cursor.axis_id == id) {
-                    return Err(VisualizationError::EntityInUse {
-                        entity,
-                        dependent: EntityRef::Cursor(cursor.id),
-                    });
+                _ => {
+                    if removal.gone.contains(&entity) {
+                        return Err(VisualizationError::EntityNotFound(entity));
+                    }
+                    self.require_entity(entity)?;
+                    if let Some(dependent) = self.dependent(entity, &mut removal) {
+                        return Err(VisualizationError::EntityInUse { entity, dependent });
+                    }
+                    removal.gone.insert(entity);
+                    removal.order.push(entity);
                 }
-                self.axes.retain(|axis| axis.id != id);
-            }
-            EntityRef::Trace(id) => {
-                self.require_entity(entity)?;
-                let dependent = self
-                    .markers
-                    .iter()
-                    .find(|marker| marker.trace_id == id)
-                    .map(|marker| EntityRef::Marker(marker.id))
-                    .or_else(|| {
-                        self.measurements
-                            .iter()
-                            .find(|measurement| measurement.trace_ids.contains(&id))
-                            .map(|measurement| EntityRef::Measurement(measurement.id))
-                    })
-                    .or_else(|| {
-                        self.annotations
-                            .iter()
-                            .find_map(|annotation| match &annotation.anchor {
-                                AnnotationAnchor::Trace { trace_id, .. } if *trace_id == id => {
-                                    Some(EntityRef::Annotation(annotation.id))
-                                }
-                                _ => None,
-                            })
-                    });
-                if let Some(dependent) = dependent {
-                    return Err(VisualizationError::EntityInUse { entity, dependent });
-                }
-                self.traces.retain(|trace| trace.id != id);
-                // A user bus is a grouping of lanes, not a dependent of
-                // them: removing a member narrows the word, and a bus left
-                // with no member is no bus.
-                for bus in &mut self.user_buses {
-                    bus.members.retain(|member| *member != id);
-                }
-                self.user_buses.retain(|bus| !bus.members.is_empty());
-                let removed = EventLaneRef::Trace { trace_id: id };
-                self.retain_event_lanes(|_, lane| *lane != removed);
-            }
-            EntityRef::Cursor(id) => {
-                self.require_entity(entity)?;
-                self.cursors.retain(|cursor| cursor.id != id);
-            }
-            EntityRef::Marker(id) => {
-                self.require_entity(entity)?;
-                self.markers.retain(|marker| marker.id != id);
-            }
-            EntityRef::Measurement(id) => {
-                self.require_entity(entity)?;
-                self.measurements.retain(|measurement| measurement.id != id);
-            }
-            EntityRef::Annotation(id) => {
-                self.require_entity(entity)?;
-                self.annotations.retain(|annotation| annotation.id != id);
-            }
-            EntityRef::LinkGroup(id) => {
-                self.require_entity(entity)?;
-                self.link_groups.retain(|group| group.id != id);
             }
         }
-        self.record_tombstone(entity, revision, tombstoned);
+        self.take_out(removal, revision, tombstoned);
         Ok(())
+    }
+
+    /// The first entity still in the view that keeps `entity` from going:
+    /// a trace or a cursor on an axis; a marker, a measurement or an
+    /// annotation on a trace.
+    fn dependent(&self, entity: EntityRef, removal: &mut Removal) -> Option<EntityRef> {
+        let dependents = match entity {
+            EntityRef::Axis(id) => removal
+                .axis_dependents
+                .get_or_insert_with(|| self.axis_dependents())
+                .get(&id),
+            EntityRef::Trace(id) => removal
+                .trace_dependents
+                .get_or_insert_with(|| self.trace_dependents())
+                .get(&id),
+            _ => None,
+        }?;
+        dependents
+            .iter()
+            .find(|dependent| !removal.gone.contains(dependent))
+            .copied()
+    }
+
+    /// What draws on each axis: its traces, then its cursors, each in the
+    /// document's order.
+    fn axis_dependents(&self) -> HashMap<AxisId, Vec<EntityRef>> {
+        let mut dependents: HashMap<AxisId, Vec<EntityRef>> = HashMap::new();
+        for trace in &self.traces {
+            dependents
+                .entry(trace.x_axis_id)
+                .or_default()
+                .push(EntityRef::Trace(trace.id));
+            if trace.y_axis_id != trace.x_axis_id {
+                dependents
+                    .entry(trace.y_axis_id)
+                    .or_default()
+                    .push(EntityRef::Trace(trace.id));
+            }
+        }
+        for cursor in &self.cursors {
+            dependents
+                .entry(cursor.axis_id)
+                .or_default()
+                .push(EntityRef::Cursor(cursor.id));
+        }
+        dependents
+    }
+
+    /// What reads each trace: its markers, then its measurements, then the
+    /// annotations anchored on it, each in the document's order.
+    fn trace_dependents(&self) -> HashMap<TraceId, Vec<EntityRef>> {
+        let mut dependents: HashMap<TraceId, Vec<EntityRef>> = HashMap::new();
+        for marker in &self.markers {
+            dependents
+                .entry(marker.trace_id)
+                .or_default()
+                .push(EntityRef::Marker(marker.id));
+        }
+        for measurement in &self.measurements {
+            for trace_id in &measurement.trace_ids {
+                dependents
+                    .entry(*trace_id)
+                    .or_default()
+                    .push(EntityRef::Measurement(measurement.id));
+            }
+        }
+        for annotation in &self.annotations {
+            if let AnnotationAnchor::Trace { trace_id, .. } = &annotation.anchor {
+                dependents
+                    .entry(*trace_id)
+                    .or_default()
+                    .push(EntityRef::Annotation(annotation.id));
+            }
+        }
+        dependents
+    }
+
+    /// Take out what `removal` gathered, each list in one pass, and
+    /// tombstone each entity in the order it was removed. A user bus is a
+    /// grouping of lanes, not a dependent of them: removing a member
+    /// narrows the word, and a bus left with no member is no bus.
+    fn take_out(
+        &mut self,
+        removal: Removal,
+        revision: ObjectRevision,
+        tombstoned: &mut Vec<EntityRef>,
+    ) {
+        if removal.order.is_empty() {
+            return;
+        }
+        let gone = |kind: fn(&EntityRef) -> Option<u64>| -> HashSet<u64> {
+            removal.order.iter().filter_map(kind).collect()
+        };
+        let traces = gone(|entity| match entity {
+            EntityRef::Trace(id) => Some(id.get()),
+            _ => None,
+        });
+        let axes = gone(|entity| match entity {
+            EntityRef::Axis(id) => Some(id.get()),
+            _ => None,
+        });
+        let cursors = gone(|entity| match entity {
+            EntityRef::Cursor(id) => Some(id.get()),
+            _ => None,
+        });
+        let markers = gone(|entity| match entity {
+            EntityRef::Marker(id) => Some(id.get()),
+            _ => None,
+        });
+        let measurements = gone(|entity| match entity {
+            EntityRef::Measurement(id) => Some(id.get()),
+            _ => None,
+        });
+        let annotations = gone(|entity| match entity {
+            EntityRef::Annotation(id) => Some(id.get()),
+            _ => None,
+        });
+        let link_groups = gone(|entity| match entity {
+            EntityRef::LinkGroup(id) => Some(id.get()),
+            _ => None,
+        });
+        if !axes.is_empty() {
+            self.axes.retain(|axis| !axes.contains(&axis.id.get()));
+        }
+        if !cursors.is_empty() {
+            self.cursors
+                .retain(|cursor| !cursors.contains(&cursor.id.get()));
+        }
+        if !markers.is_empty() {
+            self.markers
+                .retain(|marker| !markers.contains(&marker.id.get()));
+        }
+        if !measurements.is_empty() {
+            self.measurements
+                .retain(|measurement| !measurements.contains(&measurement.id.get()));
+        }
+        if !annotations.is_empty() {
+            self.annotations
+                .retain(|annotation| !annotations.contains(&annotation.id.get()));
+        }
+        if !link_groups.is_empty() {
+            self.link_groups
+                .retain(|group| !link_groups.contains(&group.id.get()));
+        }
+        if !traces.is_empty() {
+            self.traces
+                .retain(|trace| !traces.contains(&trace.id.get()));
+            let removed = |trace_id: &TraceId| traces.contains(&trace_id.get());
+            if self
+                .user_buses
+                .iter()
+                .any(|bus| bus.members.iter().any(removed))
+            {
+                self.user_buses.edit().retain_mut(|bus| {
+                    if !bus.members.iter().any(removed) {
+                        return true;
+                    }
+                    bus.members.retain(|member| !removed(member));
+                    !bus.members.is_empty()
+                });
+            }
+            let removed_lane = |lane: &EventLaneRef| matches!(lane, EventLaneRef::Trace { trace_id } if removed(trace_id));
+            if self
+                .event_lane_orders
+                .iter()
+                .any(|order| order.lanes.iter().any(removed_lane))
+            {
+                self.retain_event_lanes(|_, lane| !removed_lane(lane));
+            }
+        }
+        for entity in removal.order {
+            self.record_tombstone(entity, revision, tombstoned);
+        }
     }
 
     fn remove_pane_cascade(
@@ -1932,6 +2114,501 @@ impl VisualizationDocument {
         receipt.validate_structure()
     }
 
+    /// Check what the running transaction changed. The rows a check reads
+    /// of its embedded tables are let go once it ends, whatever it finds.
+    pub(super) fn check_changes(&self) -> Result<(), VisualizationError> {
+        let checked = self.check_touched();
+        self.row_index.clear();
+        checked
+    }
+
+    /// Check each entity the running transaction made or changed, the
+    /// groups those belong to (the panes of a page, the settings of a
+    /// pane's sheets), and what reads anything it took out or changed the
+    /// reading of. Every other entity held before the transaction and still
+    /// holds: nothing it reads changed. A transaction that changes the
+    /// datasets the view reads changes what every consumer reads, so the
+    /// whole document is checked.
+    fn check_touched(&self) -> Result<(), VisualizationError> {
+        if self.datasets.is_touched() {
+            return self.check_whole();
+        }
+        self.tracking.validate()?;
+        self.presentation.validate()?;
+        if self.pages.is_empty() {
+            return Err(VisualizationError::InvalidValue {
+                field: "visualization-document.pages",
+                message: "at least one page is required".to_owned(),
+            });
+        }
+        let entities: &dyn Entities = self;
+        let mut pages = HashSet::new();
+        for page in self.pages.touched() {
+            validate_label("page.title", &page.title)?;
+            page.layout.validate()?;
+            validate_key("page.template-id", &page.template_id)?;
+            pages.insert(page.id);
+        }
+        let panes = self.panes.touched();
+        for pane in &panes {
+            pages.insert(pane.page_id);
+            if let Some(before) = self.panes.before(pane.id.get()) {
+                pages.insert(before.page_id);
+            }
+        }
+        for identity in self.panes.taken_out() {
+            if let Some(before) = self.panes.before(identity) {
+                pages.insert(before.page_id);
+            }
+        }
+        let mut pages: Vec<&Page> = pages
+            .into_iter()
+            .filter_map(|page_id| {
+                self.pages
+                    .position(page_id.get())
+                    .map(|index| &self.pages[index])
+            })
+            .collect();
+        pages.sort_by_key(|page| page.id);
+        for page in pages {
+            let on_page = self
+                .panes
+                .iter()
+                .filter(|pane| pane.page_id == page.id)
+                .collect();
+            Self::check_page_panes(page, on_page)?;
+        }
+        for pane in panes {
+            validate_label("pane.title", &pane.title)?;
+            entities.require_page(pane.page_id)?;
+            self.validate_pane_source(entities, pane.kind, &pane.viewer_id, pane.binding)?;
+            super::strips::validate_strips(&pane.strips)?;
+            if let Some(policy) = &pane.family_policy
+                && self.panes.before(pane.id.get()).is_none_or(|before| {
+                    before.family_policy != pane.family_policy || before.binding != pane.binding
+                })
+            {
+                self.validate_pane_family_policy(entities, pane.id, policy)?;
+            }
+        }
+        for axis in self.axes.touched() {
+            validate_label("axis.label", &axis.label)?;
+            validate_optional_unit("axis.unit", axis.unit.as_deref())?;
+            entities.require_pane(axis.pane_id)?;
+        }
+        // A trace whose reading did not change holds as it held; one made,
+        // or one that reads something else now, is checked, and so is what
+        // reads it.
+        let mut reread = HashSet::new();
+        let mut relaned = false;
+        for trace in self.traces.touched() {
+            let before = self.traces.before(trace.id.get());
+            relaned |= before.is_some_and(|before| before.lane.kind != trace.lane.kind);
+            if before.is_some_and(|before| reads_the_same(before, trace)) {
+                continue;
+            }
+            if before.is_some() {
+                reread.insert(trace.id);
+            }
+            Self::validate_trace(entities, trace)?;
+            if let Some(policy) = &entities.pane(trace.pane_id)?.family_policy {
+                validate_family_source(entities, trace.binding, policy)?;
+            }
+        }
+        for cursor in self.cursors.touched() {
+            validate_label("cursor.label", &cursor.label)?;
+            cursor.position.validate("cursor.position")?;
+            entities.require_axis_in_pane(cursor.axis_id, cursor.pane_id)?;
+        }
+        let markers = self.markers.touched();
+        let markers = if reread.is_empty() {
+            markers
+        } else {
+            let touched: HashSet<MarkerId> = markers.iter().map(|marker| marker.id).collect();
+            self.markers
+                .iter()
+                .filter(|marker| touched.contains(&marker.id) || reread.contains(&marker.trace_id))
+                .collect()
+        };
+        for marker in markers {
+            Self::validate_marker(entities, marker)?;
+        }
+        for measurement in self.measurements.touched() {
+            Self::validate_measurement(entities, measurement)?;
+        }
+        let taken = self.taken_out();
+        let annotations = self.annotations.touched();
+        let annotations = if reread.is_empty() && taken.is_empty() {
+            annotations
+        } else {
+            let touched: HashSet<AnnotationId> =
+                annotations.iter().map(|annotation| annotation.id).collect();
+            self.annotations
+                .iter()
+                .filter(|annotation| {
+                    touched.contains(&annotation.id)
+                        || taken.contains(&EntityRef::Pane(annotation.pane_id))
+                        || matches!(&annotation.anchor, AnnotationAnchor::Trace { trace_id, .. }
+                            if reread.contains(trace_id) || taken.contains(&EntityRef::Trace(*trace_id)))
+                })
+                .collect()
+        };
+        for annotation in annotations {
+            validate_annotation(
+                entities,
+                annotation.pane_id,
+                &annotation.anchor,
+                &annotation.text,
+            )?;
+        }
+        let groups = if taken.is_empty() {
+            self.link_groups.touched()
+        } else {
+            self.link_groups.iter().collect()
+        };
+        for group in groups {
+            validate_label("link-group.label", &group.label)?;
+            validate_link_members(entities, group.kind, &group.members)?;
+        }
+        let mut deleted = HashSet::new();
+        for tombstone in self.tombstones.added() {
+            if !deleted.insert(tombstone.entity)
+                || entities.require_entity(tombstone.entity).is_ok()
+            {
+                return Err(VisualizationError::InvalidValue {
+                    field: "visualization-document.tombstones",
+                    message: "tombstones must be unique and must not identify live entities"
+                        .to_owned(),
+                });
+            }
+        }
+        if self.comparisons.is_touched() {
+            for receipt in &self.comparisons {
+                self.validate_comparison_receipt(entities, receipt)?;
+            }
+        }
+        if self.event_lane_orders.is_touched() || relaned {
+            self.check_event_lane_orders(entities)?;
+        }
+        if self.expression_traces.is_touched() {
+            self.check_expression_traces(entities)?;
+        }
+        if self.xy_plots.is_touched() {
+            self.check_xy_plots(entities)?;
+        }
+        if self.readout_pins.is_touched() {
+            self.check_readout_pins(entities)?;
+        }
+        if self.sheet_settings.is_touched() {
+            self.check_sheet_settings(entities)?;
+        }
+        if self.spectrum_settings.is_touched() {
+            self.check_spectrum_settings(entities)?;
+        }
+        if self.coefficient_settings.is_touched() {
+            self.check_coefficient_settings(entities)?;
+        }
+        if self.user_buses.is_touched() || relaned {
+            self.check_user_buses(entities)?;
+        }
+        Ok(())
+    }
+
+    /// Every entity the running transaction took out.
+    fn taken_out(&self) -> HashSet<EntityRef> {
+        let mut taken = HashSet::new();
+        let mut take = |identities: Vec<u64>, entity: fn(u64) -> Option<EntityRef>| {
+            taken.extend(identities.into_iter().filter_map(entity));
+        };
+        take(self.pages.taken_out(), |id| {
+            PageId::allocate(id).ok().map(EntityRef::Page)
+        });
+        take(self.panes.taken_out(), |id| {
+            PaneId::allocate(id).ok().map(EntityRef::Pane)
+        });
+        take(self.axes.taken_out(), |id| {
+            AxisId::allocate(id).ok().map(EntityRef::Axis)
+        });
+        take(self.traces.taken_out(), |id| {
+            TraceId::allocate(id).ok().map(EntityRef::Trace)
+        });
+        take(self.cursors.taken_out(), |id| {
+            CursorId::allocate(id).ok().map(EntityRef::Cursor)
+        });
+        take(self.markers.taken_out(), |id| {
+            MarkerId::allocate(id).ok().map(EntityRef::Marker)
+        });
+        take(self.measurements.taken_out(), |id| {
+            MeasurementId::allocate(id).ok().map(EntityRef::Measurement)
+        });
+        take(self.annotations.taken_out(), |id| {
+            AnnotationId::allocate(id).ok().map(EntityRef::Annotation)
+        });
+        take(self.link_groups.taken_out(), |id| {
+            LinkGroupId::allocate(id).ok().map(EntityRef::LinkGroup)
+        });
+        taken
+    }
+
+    /// The panes of one page: one at most on a single-pane page, their
+    /// orders contiguous from zero, the first primary and each other placed
+    /// against an earlier one.
+    fn check_page_panes(page: &Page, mut panes: Vec<&Pane>) -> Result<(), VisualizationError> {
+        if page.layout == PageLayout::SinglePane && panes.len() > 1 {
+            return Err(VisualizationError::InvalidValue {
+                field: "page.layout",
+                message: "single-pane layout cannot contain more than one pane".to_owned(),
+            });
+        }
+        panes.sort_by_key(|pane| (pane.order, pane.id));
+        let mut preceding = HashSet::new();
+        for (expected_order, pane) in panes.into_iter().enumerate() {
+            if pane.order != u32::try_from(expected_order).unwrap_or(u32::MAX) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "pane.order",
+                    message: format!(
+                        "pane orders on page {} must be unique and contiguous from zero",
+                        page.id.get()
+                    ),
+                });
+            }
+            match pane.placement {
+                PanePlacement::Primary if expected_order == 0 => {}
+                PanePlacement::Primary => {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "pane.placement",
+                        message: "only the first pane on a page may be primary".to_owned(),
+                    });
+                }
+                PanePlacement::Below { anchor_pane_id }
+                | PanePlacement::RightOf { anchor_pane_id }
+                    if preceding.contains(&anchor_pane_id) => {}
+                PanePlacement::Below { .. } | PanePlacement::RightOf { .. } => {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "pane.placement",
+                        message: "pane placement must reference an earlier pane on the same page"
+                            .to_owned(),
+                    });
+                }
+            }
+            preceding.insert(pane.id);
+        }
+        Ok(())
+    }
+
+    /// One trace on its own: its names, its pane and axes, and the rows it
+    /// reads of its dataset.
+    fn validate_trace(entities: &dyn Entities, trace: &Trace) -> Result<(), VisualizationError> {
+        validate_label("trace.label", &trace.label)?;
+        validate_key("trace.signal-key", &trace.signal_key)?;
+        validate_key("trace.coordinate-key", &trace.coordinate_key)?;
+        entities.require_pane(trace.pane_id)?;
+        entities.require_axis_in_pane(trace.x_axis_id, trace.pane_id)?;
+        entities.require_axis_in_pane(trace.y_axis_id, trace.pane_id)?;
+        let dataset = entities.dataset(trace.binding)?;
+        if !trace_columns_are_drawable(dataset, &trace.signal_key, &trace.coordinate_key)? {
+            return Err(VisualizationError::InvalidValue {
+                field: "trace.source-columns",
+                message: "invalid signal or coordinate column role".to_owned(),
+            });
+        }
+        if !trace.missing {
+            validate_trace_row_predicates(dataset, &trace.row_predicates, entities.rows())?;
+        }
+        Ok(())
+    }
+
+    /// One marker on its own: its names, and a coordinate its trace holds.
+    fn validate_marker(entities: &dyn Entities, marker: &Marker) -> Result<(), VisualizationError> {
+        validate_label("marker.label", &marker.label)?;
+        if let Some(source) = marker.source_specification.as_deref() {
+            validate_label("marker.source-specification", source)?;
+        }
+        marker.coordinate.validate("marker.coordinate")?;
+        entities.require_trace_in_pane(marker.trace_id, marker.pane_id)?;
+        if !trace_contains_exact_coordinate(entities, marker.trace_id, &marker.coordinate)? {
+            return Err(VisualizationError::InterpolationRequired);
+        }
+        Ok(())
+    }
+
+    /// One measurement on its own: what it evaluates, on its pane's traces.
+    fn validate_measurement(
+        entities: &dyn Entities,
+        measurement: &Measurement,
+    ) -> Result<(), VisualizationError> {
+        validate_label("measurement.label", &measurement.label)?;
+        match (measurement.expression.as_deref(), measurement.value) {
+            (Some(expression), Some(value))
+                if !expression.trim().is_empty()
+                    && expression.len() <= MAX_SOURCE_TEXT_BYTES
+                    && !expression.chars().any(char::is_control)
+                    && value.is_finite() => {}
+            (None, None) => {}
+            _ => {
+                return Err(VisualizationError::InvalidValue {
+                    field: "measurement.expression",
+                    message: format!(
+                        "an authored scalar measurement requires both a finite value and 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
+                    ),
+                });
+            }
+        }
+        if let Some(family) = &measurement.family {
+            family.validate(measurement.value)?;
+        }
+        validate_measurement_traces(
+            measurement.trace_ids.len(),
+            measurement.expression.is_some(),
+        )?;
+        entities.require_pane(measurement.pane_id)?;
+        for trace in &measurement.trace_ids {
+            entities.require_trace_in_pane(*trace, measurement.pane_id)?;
+        }
+        Ok(())
+    }
+
+    fn check_event_lane_orders(&self, entities: &dyn Entities) -> Result<(), VisualizationError> {
+        let mut ordered_panes = HashSet::new();
+        for order in &self.event_lane_orders {
+            self.validate_event_lane_order(entities, order)?;
+            if order.lanes.is_empty() || !ordered_panes.insert(order.pane_id) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "visualization-document.event-lane-orders",
+                    message: format!(
+                        "pane {} holds an empty or second event-lane order",
+                        order.pane_id.get()
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn check_expression_traces(&self, entities: &dyn Entities) -> Result<(), VisualizationError> {
+        let mut expressions = HashSet::new();
+        for trace in &self.expression_traces {
+            self.validate_expression_trace(entities, trace)?;
+            if !expressions.insert((trace.pane_id, trace.text.as_str())) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "expression-trace.text",
+                    message: format!(
+                        "pane {} plots the expression {:?} twice",
+                        trace.pane_id.get(),
+                        trace.text
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn check_xy_plots(&self, entities: &dyn Entities) -> Result<(), VisualizationError> {
+        let mut plots = HashSet::new();
+        for plot in &self.xy_plots {
+            self.validate_xy_plot(entities, plot)?;
+            if !plots.insert((plot.pane_id, plot.unit.as_str(), &plot.abscissa)) {
+                return Err(duplicate_xy_plot(plot));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_readout_pins(&self, entities: &dyn Entities) -> Result<(), VisualizationError> {
+        let mut pins = HashSet::new();
+        for pin in &self.readout_pins {
+            entities.require_pane(pin.pane_id)?;
+            validate_readout_pin(pin)?;
+            if !pins.insert((pin.pane_id, pin.sheet)) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "readout-pin.sheet",
+                    message: format!(
+                        "pane {} pins its {:?} readout twice",
+                        pin.pane_id.get(),
+                        pin.sheet
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn check_sheet_settings(&self, entities: &dyn Entities) -> Result<(), VisualizationError> {
+        let mut settings = HashSet::new();
+        for setting in &self.sheet_settings {
+            entities.require_pane(setting.pane_id)?;
+            validate_sheet_setting(setting)?;
+            if !settings.insert((setting.pane_id, setting.setting.sheet())) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "sheet-setting.sheet",
+                    message: format!(
+                        "pane {} keeps its {:?} settings twice",
+                        setting.pane_id.get(),
+                        setting.setting.sheet()
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn check_spectrum_settings(&self, entities: &dyn Entities) -> Result<(), VisualizationError> {
+        let mut spectra = HashSet::new();
+        for held in &self.spectrum_settings {
+            entities.require_pane(held.pane_id)?;
+            validate_spectrum_settings(&held.settings)?;
+            if !spectra.insert(held.pane_id) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "spectrum-settings.pane-id",
+                    message: format!(
+                        "pane {} keeps its spectrum settings twice",
+                        held.pane_id.get()
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn check_coefficient_settings(
+        &self,
+        entities: &dyn Entities,
+    ) -> Result<(), VisualizationError> {
+        let mut coefficients = HashSet::new();
+        for held in &self.coefficient_settings {
+            entities.require_pane(held.pane_id)?;
+            validate_coefficient_settings(&held.settings)?;
+            if !coefficients.insert(held.pane_id) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "coefficient-settings.pane-id",
+                    message: format!(
+                        "pane {} keeps its coefficient settings twice",
+                        held.pane_id.get()
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn check_user_buses(&self, entities: &dyn Entities) -> Result<(), VisualizationError> {
+        let mut bus_names = HashSet::new();
+        for bus in &self.user_buses {
+            self.validate_user_bus(entities, bus)?;
+            if !bus_names.insert((bus.pane_id, bus.name.as_str())) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "user-bus.name",
+                    message: format!(
+                        "pane {} groups two buses named {:?}",
+                        bus.pane_id.get(),
+                        bus.name
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Check the whole document. The rows a check reads of its embedded
     /// tables are let go once it ends, whatever it finds.
     pub(super) fn validate(&self) -> Result<(), VisualizationError> {
@@ -1989,16 +2666,6 @@ impl VisualizationDocument {
             validate_label("page.title", &page.title)?;
             page.layout.validate()?;
             validate_key("page.template-id", &page.template_id)?;
-            if page.layout == PageLayout::SinglePane
-                && panes_by_page
-                    .get(&page.id)
-                    .is_some_and(|panes| panes.len() > 1)
-            {
-                return Err(VisualizationError::InvalidValue {
-                    field: "page.layout",
-                    message: "single-pane layout cannot contain more than one pane".to_owned(),
-                });
-            }
             ensure_identity(&mut identities, EntityRef::Page(page.id))?;
         }
         for pane in &self.panes {
@@ -2012,41 +2679,7 @@ impl VisualizationDocument {
             ensure_identity(&mut identities, EntityRef::Pane(pane.id))?;
         }
         for page in &self.pages {
-            let mut panes = panes_by_page.remove(&page.id).unwrap_or_default();
-            panes.sort_by_key(|pane| (pane.order, pane.id));
-            let mut preceding = HashSet::new();
-            for (expected_order, pane) in panes.into_iter().enumerate() {
-                if pane.order != u32::try_from(expected_order).unwrap_or(u32::MAX) {
-                    return Err(VisualizationError::InvalidValue {
-                        field: "pane.order",
-                        message: format!(
-                            "pane orders on page {} must be unique and contiguous from zero",
-                            page.id.get()
-                        ),
-                    });
-                }
-                match pane.placement {
-                    PanePlacement::Primary if expected_order == 0 => {}
-                    PanePlacement::Primary => {
-                        return Err(VisualizationError::InvalidValue {
-                            field: "pane.placement",
-                            message: "only the first pane on a page may be primary".to_owned(),
-                        });
-                    }
-                    PanePlacement::Below { anchor_pane_id }
-                    | PanePlacement::RightOf { anchor_pane_id }
-                        if preceding.contains(&anchor_pane_id) => {}
-                    PanePlacement::Below { .. } | PanePlacement::RightOf { .. } => {
-                        return Err(VisualizationError::InvalidValue {
-                            field: "pane.placement",
-                            message:
-                                "pane placement must reference an earlier pane on the same page"
-                                    .to_owned(),
-                        });
-                    }
-                }
-                preceding.insert(pane.id);
-            }
+            Self::check_page_panes(page, panes_by_page.remove(&page.id).unwrap_or_default())?;
         }
         for axis in &self.axes {
             validate_label("axis.label", &axis.label)?;
@@ -2055,22 +2688,7 @@ impl VisualizationDocument {
             ensure_identity(&mut identities, EntityRef::Axis(axis.id))?;
         }
         for trace in &self.traces {
-            validate_label("trace.label", &trace.label)?;
-            validate_key("trace.signal-key", &trace.signal_key)?;
-            validate_key("trace.coordinate-key", &trace.coordinate_key)?;
-            lookup.require_pane(trace.pane_id)?;
-            lookup.require_axis_in_pane(trace.x_axis_id, trace.pane_id)?;
-            lookup.require_axis_in_pane(trace.y_axis_id, trace.pane_id)?;
-            let dataset = lookup.dataset(trace.binding)?;
-            if !trace_columns_are_drawable(dataset, &trace.signal_key, &trace.coordinate_key)? {
-                return Err(VisualizationError::InvalidValue {
-                    field: "trace.source-columns",
-                    message: "invalid signal or coordinate column role".to_owned(),
-                });
-            }
-            if !trace.missing {
-                validate_trace_row_predicates(dataset, &trace.row_predicates, lookup.rows())?;
-            }
+            Self::validate_trace(&lookup, trace)?;
             ensure_identity(&mut identities, EntityRef::Trace(trace.id))?;
         }
         for cursor in &self.cursors {
@@ -2080,46 +2698,11 @@ impl VisualizationDocument {
             ensure_identity(&mut identities, EntityRef::Cursor(cursor.id))?;
         }
         for marker in &self.markers {
-            validate_label("marker.label", &marker.label)?;
-            if let Some(source) = marker.source_specification.as_deref() {
-                validate_label("marker.source-specification", source)?;
-            }
-            marker.coordinate.validate("marker.coordinate")?;
-            lookup.require_trace_in_pane(marker.trace_id, marker.pane_id)?;
-            if !trace_contains_exact_coordinate(&lookup, marker.trace_id, &marker.coordinate)? {
-                return Err(VisualizationError::InterpolationRequired);
-            }
+            Self::validate_marker(&lookup, marker)?;
             ensure_identity(&mut identities, EntityRef::Marker(marker.id))?;
         }
         for measurement in &self.measurements {
-            validate_label("measurement.label", &measurement.label)?;
-            match (measurement.expression.as_deref(), measurement.value) {
-                (Some(expression), Some(value))
-                    if !expression.trim().is_empty()
-                        && expression.len() <= MAX_SOURCE_TEXT_BYTES
-                        && !expression.chars().any(char::is_control)
-                        && value.is_finite() => {}
-                (None, None) => {}
-                _ => {
-                    return Err(VisualizationError::InvalidValue {
-                        field: "measurement.expression",
-                        message: format!(
-                            "an authored scalar measurement requires both a finite value and 1 to {MAX_SOURCE_TEXT_BYTES} non-control UTF-8 expression bytes"
-                        ),
-                    });
-                }
-            }
-            if let Some(family) = &measurement.family {
-                family.validate(measurement.value)?;
-            }
-            validate_measurement_traces(
-                measurement.trace_ids.len(),
-                measurement.expression.is_some(),
-            )?;
-            lookup.require_pane(measurement.pane_id)?;
-            for trace in &measurement.trace_ids {
-                lookup.require_trace_in_pane(*trace, measurement.pane_id)?;
-            }
+            Self::validate_measurement(&lookup, measurement)?;
             ensure_identity(&mut identities, EntityRef::Measurement(measurement.id))?;
         }
         for annotation in &self.annotations {
@@ -2149,118 +2732,19 @@ impl VisualizationDocument {
         for receipt in &self.comparisons {
             self.validate_comparison_receipt(&lookup, receipt)?;
         }
-        let mut ordered_panes = HashSet::new();
-        for order in &self.event_lane_orders {
-            self.validate_event_lane_order(&lookup, order)?;
-            if order.lanes.is_empty() || !ordered_panes.insert(order.pane_id) {
-                return Err(VisualizationError::InvalidValue {
-                    field: "visualization-document.event-lane-orders",
-                    message: format!(
-                        "pane {} holds an empty or second event-lane order",
-                        order.pane_id.get()
-                    ),
-                });
-            }
-        }
-        let mut expressions = HashSet::new();
-        for trace in &self.expression_traces {
-            self.validate_expression_trace(&lookup, trace)?;
-            if !expressions.insert((trace.pane_id, trace.text.as_str())) {
-                return Err(VisualizationError::InvalidValue {
-                    field: "expression-trace.text",
-                    message: format!(
-                        "pane {} plots the expression {:?} twice",
-                        trace.pane_id.get(),
-                        trace.text
-                    ),
-                });
-            }
-        }
-        let mut plots = HashSet::new();
-        for plot in &self.xy_plots {
-            self.validate_xy_plot(&lookup, plot)?;
-            if !plots.insert((plot.pane_id, plot.unit.as_str(), &plot.abscissa)) {
-                return Err(duplicate_xy_plot(plot));
-            }
-        }
-        let mut pins = HashSet::new();
-        for pin in &self.readout_pins {
-            lookup.require_pane(pin.pane_id)?;
-            validate_readout_pin(pin)?;
-            if !pins.insert((pin.pane_id, pin.sheet)) {
-                return Err(VisualizationError::InvalidValue {
-                    field: "readout-pin.sheet",
-                    message: format!(
-                        "pane {} pins its {:?} readout twice",
-                        pin.pane_id.get(),
-                        pin.sheet
-                    ),
-                });
-            }
-        }
-        let mut settings = HashSet::new();
-        for setting in &self.sheet_settings {
-            lookup.require_pane(setting.pane_id)?;
-            validate_sheet_setting(setting)?;
-            if !settings.insert((setting.pane_id, setting.setting.sheet())) {
-                return Err(VisualizationError::InvalidValue {
-                    field: "sheet-setting.sheet",
-                    message: format!(
-                        "pane {} keeps its {:?} settings twice",
-                        setting.pane_id.get(),
-                        setting.setting.sheet()
-                    ),
-                });
-            }
-        }
-        let mut spectra = HashSet::new();
-        for held in &self.spectrum_settings {
-            lookup.require_pane(held.pane_id)?;
-            validate_spectrum_settings(&held.settings)?;
-            if !spectra.insert(held.pane_id) {
-                return Err(VisualizationError::InvalidValue {
-                    field: "spectrum-settings.pane-id",
-                    message: format!(
-                        "pane {} keeps its spectrum settings twice",
-                        held.pane_id.get()
-                    ),
-                });
-            }
-        }
-        let mut coefficients = HashSet::new();
-        for held in &self.coefficient_settings {
-            lookup.require_pane(held.pane_id)?;
-            validate_coefficient_settings(&held.settings)?;
-            if !coefficients.insert(held.pane_id) {
-                return Err(VisualizationError::InvalidValue {
-                    field: "coefficient-settings.pane-id",
-                    message: format!(
-                        "pane {} keeps its coefficient settings twice",
-                        held.pane_id.get()
-                    ),
-                });
-            }
-        }
-        let mut bus_names = HashSet::new();
-        for bus in &self.user_buses {
-            self.validate_user_bus(&lookup, bus)?;
-            if !bus_names.insert((bus.pane_id, bus.name.as_str())) {
-                return Err(VisualizationError::InvalidValue {
-                    field: "user-bus.name",
-                    message: format!(
-                        "pane {} groups two buses named {:?}",
-                        bus.pane_id.get(),
-                        bus.name
-                    ),
-                });
-            }
-        }
-        Ok(())
+        self.check_event_lane_orders(&lookup)?;
+        self.check_expression_traces(&lookup)?;
+        self.check_xy_plots(&lookup)?;
+        self.check_readout_pins(&lookup)?;
+        self.check_sheet_settings(&lookup)?;
+        self.check_spectrum_settings(&lookup)?;
+        self.check_coefficient_settings(&lookup)?;
+        self.check_user_buses(&lookup)
     }
 
     /// Drop the event-lane rows `keep` rejects, and any order left empty.
     fn retain_event_lanes(&mut self, keep: impl Fn(&EventLaneOrder, &EventLaneRef) -> bool) {
-        for order in &mut self.event_lane_orders {
+        for order in self.event_lane_orders.edit().iter_mut() {
             let held = std::mem::take(&mut order.lanes);
             order.lanes = held.into_iter().filter(|lane| keep(order, lane)).collect();
         }

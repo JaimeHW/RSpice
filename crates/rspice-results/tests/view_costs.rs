@@ -8,9 +8,9 @@ use std::time::Instant;
 
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::visualization_document::{
-    AxisOrientation, AxisScale, ColumnRole, DocumentEdit, EntityRef, NewAxis, NewTrace, PaneKind,
-    ResultDocumentTracking, RunSourceAnalysis, SourceColumn, SourceDataset, SourceRow, TraceColor,
-    TypedValue, ValueType, VisualizationDocument, WorkingPane, WorkingViewSource,
+    AxisOrientation, AxisScale, ColumnRole, CursorId, DocumentEdit, EntityRef, NewAxis, NewTrace,
+    PaneKind, ResultDocumentTracking, RunSourceAnalysis, SourceColumn, SourceDataset, SourceRow,
+    TraceColor, TypedValue, ValueType, VisualizationDocument, WorkingPane, WorkingViewSource,
 };
 use rspice_vocabulary::product::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, SimulationPlanId,
@@ -192,6 +192,190 @@ fn one_transaction_of_a_hundred_thousand_edits_commits_them_all() {
     let traces = document.traces();
     assert!(traces.iter().step_by(2).all(|trace| trace.color.is_some()));
     assert!(traces.iter().skip(1).step_by(2).all(|trace| !trace.visible));
+}
+
+/// A view of a hundred thousand traces with a cursor on its pane, and the
+/// cursor.
+fn view_with_cursor(signals: usize) -> (VisualizationDocument, CursorId) {
+    let mut document = view(signals);
+    let pane_id = document.panes()[0].id;
+    let axis_id = document
+        .axes()
+        .iter()
+        .find(|axis| axis.pane_id == pane_id && axis.orientation == AxisOrientation::Horizontal)
+        .expect("the pane's time axis")
+        .id;
+    let receipt = document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::AddCursor {
+                pane_id,
+                axis_id,
+                position: TypedValue::Real(0.0),
+                label: "C1".to_owned(),
+            }],
+        )
+        .expect("a cursor");
+    let cursor_id = receipt
+        .created
+        .iter()
+        .find_map(|entity| match entity {
+            EntityRef::Cursor(id) => Some(*id),
+            _ => None,
+        })
+        .expect("the cursor");
+    (document, cursor_id)
+}
+
+/// One small edit of a view of a hundred thousand traces, with the step
+/// that undoes it, costs what it changes: a cursor move, a tick of a new
+/// signal, an untick, a colour and a removal each leave the rest of the
+/// view as it was.
+#[test]
+fn a_small_edit_of_a_large_view_costs_what_it_changes() {
+    const TRACES: usize = 100_000;
+    let (mut document, cursor_id) = view_with_cursor(TRACES);
+    let pane_id = document.panes()[0].id;
+    let seventh = document.traces()[7].id;
+    let last = document.traces()[TRACES - 1].id;
+    let first = document.traces()[0].id;
+    let edits = [
+        (
+            "a cursor move",
+            DocumentEdit::MoveCursor {
+                cursor_id,
+                position: TypedValue::Real(1e-9),
+            },
+        ),
+        (
+            "a tick of a new signal",
+            DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals: vec!["V(added)".to_owned()],
+                plotted: true,
+            },
+        ),
+        (
+            "an untick",
+            DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals: vec!["V(n7)".to_owned()],
+                plotted: false,
+            },
+        ),
+        (
+            "a colour",
+            DocumentEdit::SetTraceColor {
+                trace_id: last,
+                color: Some(TraceColor::from_rgb(9, 9, 9)),
+            },
+        ),
+        ("a removal", DocumentEdit::Remove(EntityRef::Trace(first))),
+    ];
+    for (what, edit) in edits {
+        let started = Instant::now();
+        document
+            .transact_with_undo(document.revision(), vec![edit])
+            .expect("a small edit commits");
+        println!(
+            "{what} on a view of {TRACES} traces: {:?}",
+            started.elapsed()
+        );
+    }
+    assert_eq!(
+        document.cursors()[0].position,
+        TypedValue::Real(1e-9),
+        "the cursor moved"
+    );
+    let traces = document.traces();
+    assert_eq!(traces.len(), TRACES, "one trace added, one removed");
+    assert_eq!(traces[TRACES - 1].label, "V(added)");
+    assert!(
+        traces
+            .iter()
+            .all(|trace| trace.visible == (trace.id != seventh)),
+        "only the unticked signal is hidden"
+    );
+    assert!(traces.iter().all(|trace| trace.id != first));
+}
+
+/// Removing half the traces of a view of a hundred thousand in one
+/// transaction keeps the other half in their order, and tombstones each
+/// removed trace in the order it was removed.
+#[test]
+fn removing_half_of_a_large_view_in_one_transaction_keeps_the_rest_in_order() {
+    const TRACES: usize = 100_000;
+    let mut document = view(TRACES);
+    let removed: Vec<_> = document
+        .traces()
+        .iter()
+        .step_by(2)
+        .map(|trace| trace.id)
+        .collect();
+    let kept: Vec<_> = document
+        .traces()
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .map(|trace| trace.id)
+        .collect();
+    let edits = removed
+        .iter()
+        .map(|id| DocumentEdit::Remove(EntityRef::Trace(*id)))
+        .collect();
+    let started = Instant::now();
+    let receipt = document
+        .transact(document.revision(), edits)
+        .expect("the removals commit");
+    println!(
+        "removing {} of {TRACES} traces in one transaction: {:?}",
+        removed.len(),
+        started.elapsed()
+    );
+    let left: Vec<_> = document.traces().iter().map(|trace| trace.id).collect();
+    assert_eq!(left, kept, "what is left keeps its order");
+    let tombstoned: Vec<_> = receipt
+        .tombstoned
+        .iter()
+        .map(|entity| match entity {
+            EntityRef::Trace(id) => *id,
+            other => panic!("only traces were removed, not {other:?}"),
+        })
+        .collect();
+    assert_eq!(tombstoned, removed, "each removal is tombstoned in order");
+}
+
+/// A transaction refused at its last edit, after editing every trace of a
+/// view of a hundred thousand, leaves the view byte-identical.
+#[test]
+fn a_refused_transaction_leaves_a_large_view_as_it_was() {
+    const TRACES: usize = 100_000;
+    let (mut document, cursor_id) = view_with_cursor(TRACES);
+    let saved = serde_json::to_vec(&document).expect("the view serializes");
+    let revision = document.revision();
+    let gone = document.traces()[3].id;
+    let mut edits = vec![
+        DocumentEdit::MoveCursor {
+            cursor_id,
+            position: TypedValue::Real(2e-9),
+        },
+        DocumentEdit::Remove(EntityRef::Trace(gone)),
+    ];
+    edits.extend((0..TRACES).map(|index| small_edit(&document, index)));
+    let started = Instant::now();
+    let refused = document.transact(revision, edits);
+    println!(
+        "a transaction of {} edits refused at its last: {:?}",
+        TRACES + 2,
+        started.elapsed()
+    );
+    assert!(refused.is_err(), "an edit of a removed trace is refused");
+    assert_eq!(document.revision(), revision);
+    assert_eq!(
+        serde_json::to_vec(&document).expect("the view serializes"),
+        saved,
+        "a refused transaction changes nothing"
+    );
 }
 
 /// Ten thousand markers on a table of a hundred thousand rows are each

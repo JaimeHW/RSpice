@@ -6,12 +6,14 @@
 //! not a hundred views: the memory of undo grows with the edits made, not
 //! with the size of the view times the steps.
 //!
-//! A document lists each kind of entity in the order its entities were made,
-//! by ascending identity, so a step addresses each entity by identity and
-//! puts it back in its place in one pass. The few lists without identities
-//! (per-pane settings, tombstones, comparison receipts) keep the one stretch
-//! of the list the step changed.
+//! A step is read off what its transaction kept while it ran, so making it
+//! costs what the transaction changed. A document lists each kind of entity
+//! in the order its entities were made, by ascending identity, so a step
+//! addresses each entity by identity and puts it back in its place. The few
+//! lists without identities (per-pane settings, tombstones, comparison
+//! receipts) keep the one stretch of the list the step changed.
 
+use super::journal::{Began, SpliceList};
 use super::*;
 
 /// What putting a view back as it stood holds: the entities and settings
@@ -45,37 +47,35 @@ pub struct ViewStep {
 }
 
 impl ViewStep {
-    /// The step that puts the view `now` back as `then`, an earlier view of
-    /// the same document, held it. The datasets a view reads are not its
-    /// own and the title is the project's name for it, so neither is held.
-    pub(super) fn back_to(then: &VisualizationDocument, now: &VisualizationDocument) -> Self {
+    /// The step that puts `document` back as it stood when the transaction
+    /// ending now `began`, read off what the transaction kept. The datasets
+    /// a view reads are not its own and the title is the project's name for
+    /// it, so neither is held.
+    pub(super) fn back_to(document: &mut VisualizationDocument, began: &Began) -> Self {
         Self {
-            document_id: now.id,
-            tracking: changed(then.tracking, now.tracking),
-            presentation: changed(then.presentation, now.presentation),
-            working_view: changed(then.working_view, now.working_view),
-            pages: Changed::back_to(&then.pages, &now.pages),
-            panes: Changed::back_to(&then.panes, &now.panes),
-            axes: Changed::back_to(&then.axes, &now.axes),
-            traces: Changed::back_to(&then.traces, &now.traces),
-            cursors: Changed::back_to(&then.cursors, &now.cursors),
-            markers: Changed::back_to(&then.markers, &now.markers),
-            measurements: Changed::back_to(&then.measurements, &now.measurements),
-            annotations: Changed::back_to(&then.annotations, &now.annotations),
-            link_groups: Changed::back_to(&then.link_groups, &now.link_groups),
-            tombstones: Splice::back_to(&then.tombstones, &now.tombstones),
-            comparisons: Splice::back_to(&then.comparisons, &now.comparisons),
-            user_buses: Splice::back_to(&then.user_buses, &now.user_buses),
-            event_lane_orders: Splice::back_to(&then.event_lane_orders, &now.event_lane_orders),
-            expression_traces: Splice::back_to(&then.expression_traces, &now.expression_traces),
-            xy_plots: Splice::back_to(&then.xy_plots, &now.xy_plots),
-            readout_pins: Splice::back_to(&then.readout_pins, &now.readout_pins),
-            sheet_settings: Splice::back_to(&then.sheet_settings, &now.sheet_settings),
-            spectrum_settings: Splice::back_to(&then.spectrum_settings, &now.spectrum_settings),
-            coefficient_settings: Splice::back_to(
-                &then.coefficient_settings,
-                &now.coefficient_settings,
-            ),
+            document_id: document.id,
+            tracking: changed(began.tracking, document.tracking),
+            presentation: changed(began.presentation, document.presentation),
+            working_view: changed(began.working_view, document.working_view),
+            pages: document.pages.finish(),
+            panes: document.panes.finish(),
+            axes: document.axes.finish(),
+            traces: document.traces.finish(),
+            cursors: document.cursors.finish(),
+            markers: document.markers.finish(),
+            measurements: document.measurements.finish(),
+            annotations: document.annotations.finish(),
+            link_groups: document.link_groups.finish(),
+            tombstones: document.tombstones.finish(),
+            comparisons: document.comparisons.finish(),
+            user_buses: document.user_buses.finish(),
+            event_lane_orders: document.event_lane_orders.finish(),
+            expression_traces: document.expression_traces.finish(),
+            xy_plots: document.xy_plots.finish(),
+            readout_pins: document.readout_pins.finish(),
+            sheet_settings: document.sheet_settings.finish(),
+            spectrum_settings: document.spectrum_settings.finish(),
+            coefficient_settings: document.coefficient_settings.finish(),
         }
     }
 
@@ -91,6 +91,22 @@ impl ViewStep {
         self.document_id
     }
 
+    /// The dataset bindings the panes, traces and expressions the step puts
+    /// back read.
+    pub(super) fn bindings(&self) -> impl Iterator<Item = DatasetBinding> + '_ {
+        self.panes
+            .back
+            .iter()
+            .filter_map(|pane| pane.binding.map(|binding| binding.dataset))
+            .chain(self.traces.back.iter().map(|trace| trace.binding))
+            .chain(
+                self.expression_traces
+                    .back
+                    .iter()
+                    .flat_map(|expression| expression.datasets.iter().copied()),
+            )
+    }
+
     /// Put back on `document` what the step holds.
     pub(super) fn put_back(self, document: &mut VisualizationDocument) {
         if let Some(tracking) = self.tracking {
@@ -102,15 +118,15 @@ impl ViewStep {
         if let Some(working_view) = self.working_view {
             document.working_view = working_view;
         }
-        self.pages.put_back(&mut document.pages);
-        self.panes.put_back(&mut document.panes);
-        self.axes.put_back(&mut document.axes);
-        self.traces.put_back(&mut document.traces);
-        self.cursors.put_back(&mut document.cursors);
-        self.markers.put_back(&mut document.markers);
-        self.measurements.put_back(&mut document.measurements);
-        self.annotations.put_back(&mut document.annotations);
-        self.link_groups.put_back(&mut document.link_groups);
+        document.pages.put_back(self.pages);
+        document.panes.put_back(self.panes);
+        document.axes.put_back(self.axes);
+        document.traces.put_back(self.traces);
+        document.cursors.put_back(self.cursors);
+        document.markers.put_back(self.markers);
+        document.measurements.put_back(self.measurements);
+        document.annotations.put_back(self.annotations);
+        document.link_groups.put_back(self.link_groups);
         self.tombstones.put_back(&mut document.tombstones);
         self.comparisons.put_back(&mut document.comparisons);
         self.user_buses.put_back(&mut document.user_buses);
@@ -164,84 +180,43 @@ identified!(
 /// (those the edit made or changed) and the entities it puts back as they
 /// stood (those the edit changed or took away), each in ascending identity.
 #[derive(Debug, Clone, PartialEq)]
-struct Changed<T> {
-    out: Vec<u64>,
-    back: Vec<T>,
+pub(super) struct Changed<T> {
+    pub(super) out: Vec<u64>,
+    pub(super) back: Vec<T>,
 }
 
-impl<T: Identified + Clone + PartialEq> Changed<T> {
-    /// What puts `now` back as `then`: both in ascending identity, read
-    /// once each.
-    fn back_to(then: &[T], now: &[T]) -> Self {
-        let (mut out, mut back) = (Vec::new(), Vec::new());
-        let (mut before, mut after) = (then.iter().peekable(), now.iter().peekable());
-        loop {
-            match (before.peek(), after.peek()) {
-                (Some(was), Some(is)) if was.identity() == is.identity() => {
-                    if was != is {
-                        out.push(is.identity());
-                        back.push((*was).clone());
-                    }
-                    before.next();
-                    after.next();
-                }
-                (Some(was), Some(is)) if was.identity() < is.identity() => {
-                    back.push((*was).clone());
-                    before.next();
-                }
-                (Some(was), None) => {
-                    back.push((*was).clone());
-                    before.next();
-                }
-                (_, Some(is)) => {
-                    out.push(is.identity());
-                    after.next();
-                }
-                (None, None) => break,
-            }
+impl<T> Default for Changed<T> {
+    fn default() -> Self {
+        Self {
+            out: Vec::new(),
+            back: Vec::new(),
         }
-        Self { out, back }
-    }
-
-    /// Take out of `list` what the step takes out and put back what it
-    /// holds, each in its place by identity. An entity another edit took
-    /// out since is not missed; one another edit made since stays.
-    fn put_back(self, list: &mut Vec<T>) {
-        if self.out.is_empty() && self.back.is_empty() {
-            return;
-        }
-        let mut out = self.out.into_iter().peekable();
-        let mut back = self.back.into_iter().peekable();
-        let mut kept = Vec::with_capacity(list.len() + back.len());
-        for item in list.drain(..) {
-            let identity = item.identity();
-            while out.next_if(|taken| *taken < identity).is_some() {}
-            while let Some(earlier) = back.next_if(|held| held.identity() < identity) {
-                kept.push(earlier);
-            }
-            let taken = out.next_if_eq(&identity).is_some();
-            match back.next_if(|held| held.identity() == identity) {
-                Some(held) => kept.push(held),
-                None if taken => {}
-                None => kept.push(item),
-            }
-        }
-        kept.extend(back);
-        *list = kept;
     }
 }
 
 /// The one stretch of a list without identities that a step changed: the
 /// items now at `at..at + out`, and what stood there before.
 #[derive(Debug, Clone, PartialEq)]
-struct Splice<T> {
-    at: usize,
-    out: usize,
-    back: Vec<T>,
+pub(super) struct Splice<T> {
+    pub(super) at: usize,
+    pub(super) out: usize,
+    pub(super) back: Vec<T>,
+}
+
+impl<T> Default for Splice<T> {
+    fn default() -> Self {
+        Self {
+            at: 0,
+            out: 0,
+            back: Vec::new(),
+        }
+    }
 }
 
 impl<T: Clone + PartialEq> Splice<T> {
-    fn back_to(then: &[T], now: &[T]) -> Self {
+    /// What puts `now` back as `then`: the stretch between the longest
+    /// common head and tail.
+    pub(super) fn back_to(then: &[T], now: &[T]) -> Self {
         let same = |(was, is): (&T, &T)| was == is;
         let head = then.iter().zip(now).take_while(|pair| same(*pair)).count();
         let tail = then[head..]
@@ -257,12 +232,10 @@ impl<T: Clone + PartialEq> Splice<T> {
         }
     }
 
-    fn put_back(self, list: &mut Vec<T>) {
+    fn put_back(self, list: &mut SpliceList<T>) {
         if self.out == 0 && self.back.is_empty() {
             return;
         }
-        let at = self.at.min(list.len());
-        let end = at.saturating_add(self.out).min(list.len());
-        list.splice(at..end, self.back);
+        list.splice(self.at..self.at.saturating_add(self.out), self.back);
     }
 }
