@@ -1926,6 +1926,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/routing.rs", "navigation"),
             ("workbench/routing.rs", "surface_catalog"),
             ("workbench/routing.rs", "surface_route"),
+            ("workbench/surfaces.rs", "memory_bands"),
         ],
     ),
 ];
