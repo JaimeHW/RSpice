@@ -245,15 +245,21 @@ impl DeckTextChange {
 }
 
 /// How many bytes the two runs of pieces hold the same from their first, at
-/// most `most`; `backward` when the pieces run last first.
+/// most `most`; `backward` when the pieces run last first. The run ends
+/// where a character starts: a character the two write differently is not
+/// split.
 fn common_run<'a>(
     mut one: impl Iterator<Item = &'a str>,
     mut two: impl Iterator<Item = &'a str>,
     most: usize,
     backward: bool,
 ) -> usize {
+    let continues = |byte: u8| byte & 0xC0 == 0x80;
     let (mut left, mut right): (&[u8], &[u8]) = (&[], &[]);
     let mut same = 0usize;
+    // The three bytes of the run nearest where it has got to, nearest last
+    // forward and first backward.
+    let mut near = [0u8; 3];
     while same < most {
         if left.is_empty() {
             match one.next() {
@@ -278,20 +284,47 @@ fn common_run<'a>(
         if std::ptr::eq(a, b) || a == b {
             same += length;
             if backward {
+                for byte in a.iter().take(3).rev() {
+                    near.rotate_right(1);
+                    near[0] = *byte;
+                }
                 left = &left[..left.len() - length];
                 right = &right[..right.len() - length];
             } else {
+                for byte in a.iter().rev().take(3).rev() {
+                    near.rotate_left(1);
+                    near[2] = *byte;
+                }
                 left = &left[length..];
                 right = &right[length..];
             }
             continue;
         }
         let pairs = a.iter().zip(b);
-        same += if backward {
-            pairs.rev().take_while(|(x, y)| x == y).count()
+        if backward {
+            let mut run = pairs.rev().take_while(|(x, y)| x == y).count();
+            while run > 0 && continues(a[a.len() - run]) {
+                run -= 1;
+            }
+            if run == 0 {
+                same -= near.iter().take_while(|byte| continues(**byte)).count();
+            }
+            same += run;
         } else {
-            pairs.take_while(|(x, y)| x == y).count()
-        };
+            let mut run = pairs.take_while(|(x, y)| x == y).count();
+            while run > 0 && continues(a[run]) {
+                run -= 1;
+            }
+            if run == 0 && continues(a[0]) {
+                same -= near
+                    .iter()
+                    .rev()
+                    .take_while(|byte| continues(**byte))
+                    .count()
+                    + 1;
+            }
+            same += run;
+        }
         break;
     }
     same.min(most)
@@ -3564,7 +3597,28 @@ impl DeckIndex {
 // ---------------------------------------------------------------------------
 // An edit.
 
+/// The cards and symbols of one page of an index, by their positions among
+/// the index's: what [`DeckIndex::edited`] reads again for an edit that
+/// starts in the page. Every card and symbol after them moves by as many as
+/// the edit adds to the page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeckPageSpan {
+    pub cards: Range<usize>,
+    pub symbols: Range<usize>,
+}
+
 impl DeckIndex {
+    /// The cards and symbols of the page holding byte `byte` of file `file`.
+    #[must_use]
+    pub fn page_at(&self, file: usize, byte: usize) -> Option<DeckPageSpan> {
+        let slot = &self.pages[self.slot_at(file, byte)?];
+        let (cards, symbols) = (slot.card_base as usize, slot.symbol_base as usize);
+        Some(DeckPageSpan {
+            cards: cards..cards + slot.page.cards.len(),
+            symbols: symbols..symbols + slot.page.symbols.len(),
+        })
+    }
+
     /// The index of the deck after `change` to file `file`, whose text is
     /// then `text`: the page the edit falls in read again, every other one
     /// shared with this index. `None` when the edit reaches past its page,

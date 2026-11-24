@@ -26,8 +26,8 @@ mod data_table;
 pub mod deck_index;
 pub use deck_index::{
     DeckCard, DeckCardKind, DeckInclude, DeckIncludeKind, DeckIndex, DeckIndexSource, DeckLocation,
-    DeckNameAt, DeckNode, DeckReference, DeckScope, DeckSymbol, DeckSymbolKind, DeckText,
-    DeckTextChange, DeckToken, DeckTokenKind, SharedDeckText,
+    DeckNameAt, DeckNode, DeckPageSpan, DeckReference, DeckScope, DeckSymbol, DeckSymbolKind,
+    DeckText, DeckTextChange, DeckToken, DeckTokenKind, SharedDeckText,
 };
 mod exp_train;
 pub mod expr;

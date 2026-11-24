@@ -4,8 +4,8 @@
 //! includes — for the outline pane.
 
 use rspice_core_netlist::netlist::{
-    DeckCard, DeckCardKind, DeckIndex, DeckIndexSource, DeckSymbol, DeckSymbolKind, DeckTextChange,
-    DeckTokenKind, SharedDeckText, SourceKind, comment_start,
+    DeckCard, DeckCardKind, DeckIndex, DeckIndexSource, DeckPageSpan, DeckSymbol, DeckSymbolKind,
+    DeckTextChange, DeckTokenKind, SharedDeckText, SourceKind, comment_start,
 };
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -520,6 +520,8 @@ pub struct NetlistOutline {
     deck: DeckIndex,
     entries: Vec<EntryRec>,
     sections: Vec<OutlineSection>,
+    /// The entry each `.subckt` card became, by the scope it opens.
+    scope_entries: Vec<u32>,
 }
 
 impl PartialEq for NetlistOutline {
@@ -546,106 +548,9 @@ impl NetlistOutline {
     #[must_use]
     pub fn from_deck(deck: DeckIndex) -> Self {
         let mut entries = Vec::<EntryRec>::new();
-        // The entry each `.subckt` card became, by the scope it opens.
         let mut scope_entries = vec![NONE; deck.scope_count()];
-        let entry_of_scope =
-            |scope: usize, scope_entries: &[u32]| scope_entries.get(scope).copied().unwrap_or(NONE);
         for card in deck.cards_of(0) {
-            let kind = card.kind();
-            // `.end`, `.endl` and a `simulator lang=` switch declare nothing
-            // a reader goes to.
-            if matches!(kind, DeckCardKind::End | DeckCardKind::EndLibrarySection)
-                || (kind == DeckCardKind::Directive
-                    && card.head().eq_ignore_ascii_case("simulator"))
-            {
-                continue;
-            }
-            let id = card.id() as u32;
-            // A parameter card gives a row to every name it assigns, each
-            // with its value, as Spectre's `parameters` lists them.
-            if kind == DeckCardKind::Parameter {
-                let before = entries.len();
-                for parameter in card
-                    .symbols()
-                    .filter(|symbol| symbol.kind() == DeckSymbolKind::Parameter)
-                {
-                    entries.push(EntryRec {
-                        kind: OutlineEntryKind::Parameter,
-                        keyword: Keyword::Head,
-                        card: id,
-                        symbol: parameter.id() as u32,
-                        scope: entry_of_scope(parameter.scope(), &scope_entries),
-                    });
-                }
-                if entries.len() > before {
-                    continue;
-                }
-            }
-            let entry_kind = match kind {
-                DeckCardKind::Title => OutlineEntryKind::Title,
-                DeckCardKind::Include => OutlineEntryKind::Include,
-                DeckCardKind::Library => OutlineEntryKind::Library,
-                DeckCardKind::Parameter => OutlineEntryKind::Parameter,
-                DeckCardKind::Model => OutlineEntryKind::Model,
-                DeckCardKind::Subcircuit => OutlineEntryKind::Subcircuit,
-                DeckCardKind::Function => OutlineEntryKind::Function,
-                DeckCardKind::Instance => OutlineEntryKind::Device,
-                DeckCardKind::Analysis => OutlineEntryKind::Analysis,
-                DeckCardKind::Measurement => OutlineEntryKind::Measurement,
-                DeckCardKind::Global => OutlineEntryKind::Global,
-                DeckCardKind::Option => OutlineEntryKind::Option,
-                DeckCardKind::Output => OutlineEntryKind::Output,
-                DeckCardKind::Conditional => OutlineEntryKind::Conditional,
-                DeckCardKind::EndSubcircuit => OutlineEntryKind::EndSubcircuit,
-                _ => OutlineEntryKind::Control,
-            };
-            // A `.subckt` card is written in the scope around it, and so is
-            // its `.ends`, which closes the scope it is read in.
-            let mut scope = card.scope();
-            if kind == DeckCardKind::EndSubcircuit {
-                scope = deck
-                    .scope(scope)
-                    .and_then(|scope| scope.parent())
-                    .unwrap_or(0);
-            }
-            let keyword =
-                if kind == DeckCardKind::Subcircuit && card.head().eq_ignore_ascii_case("inline") {
-                    Keyword::InlineSubckt
-                } else {
-                    Keyword::Head
-                };
-            let position = entries.len() as u32;
-            entries.push(EntryRec {
-                kind: entry_kind,
-                keyword,
-                card: id,
-                symbol: NONE,
-                scope: entry_of_scope(scope, &scope_entries),
-            });
-            // A subcircuit's `params:` formals are its parameters, listed
-            // under it like a `parameters` statement written inside it.
-            if kind == DeckCardKind::Subcircuit {
-                for symbol in card.symbols() {
-                    match symbol.kind() {
-                        DeckSymbolKind::Subcircuit => {
-                            if let Some(slot) = symbol
-                                .opens()
-                                .and_then(|opens| scope_entries.get_mut(opens))
-                            {
-                                *slot = position;
-                            }
-                        }
-                        DeckSymbolKind::Parameter => entries.push(EntryRec {
-                            kind: OutlineEntryKind::Parameter,
-                            keyword: Keyword::Params,
-                            card: id,
-                            symbol: symbol.id() as u32,
-                            scope: position,
-                        }),
-                        _ => {}
-                    }
-                }
-            }
+            push_card(&deck, &card, &mut entries, &mut scope_entries);
         }
         entries.shrink_to_fit();
         let sections = sections_of(&entries);
@@ -653,6 +558,76 @@ impl NetlistOutline {
             deck,
             entries,
             sections,
+            scope_entries,
+        }
+    }
+
+    /// The outline of `deck`, this outline's deck after an edit read one
+    /// page of it again: the page's cards, `before` in this outline's deck
+    /// and `after` in `deck`, read again, and every entry after them kept,
+    /// moved by as many cards, symbols and entries as the edit added.
+    fn edited(&self, deck: DeckIndex, before: &DeckPageSpan, after: &DeckPageSpan) -> Self {
+        let first = self
+            .entries
+            .partition_point(|entry| (entry.card as usize) < before.cards.start);
+        let end = self
+            .entries
+            .partition_point(|entry| (entry.card as usize) < before.cards.end);
+        let mut entries = Vec::with_capacity(self.entries.len() + after.cards.len());
+        entries.extend_from_slice(&self.entries[..first]);
+        let mut scope_entries = self.scope_entries.clone();
+        for id in after.cards.clone() {
+            if let Some(card) = deck.card(id) {
+                push_card(&deck, &card, &mut entries, &mut scope_entries);
+            }
+        }
+        let moved = |position: u32, by: isize| position.wrapping_add_signed(by as i32);
+        let entry_shift = entries.len() as isize - end as isize;
+        let card_shift = after.cards.len() as isize - before.cards.len() as isize;
+        let symbol_shift = after.symbols.len() as isize - before.symbols.len() as isize;
+        // A `.subckt` card the page holds became the entry its scope says
+        // now; one after the page moved with the entries.
+        let mut page_scopes = Vec::<(u32, u32)>::new();
+        for (scope, position) in self.scope_entries.iter().enumerate() {
+            let at = *position as usize;
+            if *position == NONE || at < first {
+                continue;
+            }
+            if at < end {
+                page_scopes.push((*position, scope_entries[scope]));
+            } else {
+                scope_entries[scope] = moved(*position, entry_shift);
+            }
+        }
+        let scope_of = |position: u32| {
+            if position == NONE || (position as usize) < first {
+                position
+            } else if (position as usize) < end {
+                page_scopes
+                    .iter()
+                    .find(|(old, _)| *old == position)
+                    .map_or(NONE, |(_, new)| *new)
+            } else {
+                moved(position, entry_shift)
+            }
+        };
+        entries.extend(self.entries[end..].iter().map(|entry| EntryRec {
+            card: moved(entry.card, card_shift),
+            symbol: if entry.symbol == NONE {
+                NONE
+            } else {
+                moved(entry.symbol, symbol_shift)
+            },
+            scope: scope_of(entry.scope),
+            ..*entry
+        }));
+        entries.shrink_to_fit();
+        let sections = sections_of(&entries);
+        Self {
+            deck,
+            entries,
+            sections,
+            scope_entries,
         }
     }
 
@@ -690,6 +665,113 @@ impl NetlistOutline {
             .iter()
             .filter(|entry| query.is_empty() || entry.label().to_lowercase().contains(&query))
             .collect()
+    }
+}
+
+/// The entries of `card`, a card of `deck`'s first file, pushed onto
+/// `entries`; a `.subckt` card's entry is noted in `scope_entries` under
+/// the scope it opens.
+fn push_card(
+    deck: &DeckIndex,
+    card: &DeckCard<'_>,
+    entries: &mut Vec<EntryRec>,
+    scope_entries: &mut [u32],
+) {
+    let entry_of_scope =
+        |scope: usize, scope_entries: &[u32]| scope_entries.get(scope).copied().unwrap_or(NONE);
+    let kind = card.kind();
+    // `.end`, `.endl` and a `simulator lang=` switch declare nothing
+    // a reader goes to.
+    if matches!(kind, DeckCardKind::End | DeckCardKind::EndLibrarySection)
+        || (kind == DeckCardKind::Directive && card.head().eq_ignore_ascii_case("simulator"))
+    {
+        return;
+    }
+    let id = card.id() as u32;
+    // A parameter card gives a row to every name it assigns, each
+    // with its value, as Spectre's `parameters` lists them.
+    if kind == DeckCardKind::Parameter {
+        let before = entries.len();
+        for parameter in card
+            .symbols()
+            .filter(|symbol| symbol.kind() == DeckSymbolKind::Parameter)
+        {
+            entries.push(EntryRec {
+                kind: OutlineEntryKind::Parameter,
+                keyword: Keyword::Head,
+                card: id,
+                symbol: parameter.id() as u32,
+                scope: entry_of_scope(parameter.scope(), scope_entries),
+            });
+        }
+        if entries.len() > before {
+            return;
+        }
+    }
+    let entry_kind = match kind {
+        DeckCardKind::Title => OutlineEntryKind::Title,
+        DeckCardKind::Include => OutlineEntryKind::Include,
+        DeckCardKind::Library => OutlineEntryKind::Library,
+        DeckCardKind::Parameter => OutlineEntryKind::Parameter,
+        DeckCardKind::Model => OutlineEntryKind::Model,
+        DeckCardKind::Subcircuit => OutlineEntryKind::Subcircuit,
+        DeckCardKind::Function => OutlineEntryKind::Function,
+        DeckCardKind::Instance => OutlineEntryKind::Device,
+        DeckCardKind::Analysis => OutlineEntryKind::Analysis,
+        DeckCardKind::Measurement => OutlineEntryKind::Measurement,
+        DeckCardKind::Global => OutlineEntryKind::Global,
+        DeckCardKind::Option => OutlineEntryKind::Option,
+        DeckCardKind::Output => OutlineEntryKind::Output,
+        DeckCardKind::Conditional => OutlineEntryKind::Conditional,
+        DeckCardKind::EndSubcircuit => OutlineEntryKind::EndSubcircuit,
+        _ => OutlineEntryKind::Control,
+    };
+    // A `.subckt` card is written in the scope around it, and so is
+    // its `.ends`, which closes the scope it is read in.
+    let mut scope = card.scope();
+    if kind == DeckCardKind::EndSubcircuit {
+        scope = deck
+            .scope(scope)
+            .and_then(|scope| scope.parent())
+            .unwrap_or(0);
+    }
+    let keyword = if kind == DeckCardKind::Subcircuit && card.head().eq_ignore_ascii_case("inline")
+    {
+        Keyword::InlineSubckt
+    } else {
+        Keyword::Head
+    };
+    let position = entries.len() as u32;
+    entries.push(EntryRec {
+        kind: entry_kind,
+        keyword,
+        card: id,
+        symbol: NONE,
+        scope: entry_of_scope(scope, scope_entries),
+    });
+    // A subcircuit's `params:` formals are its parameters, listed
+    // under it like a `parameters` statement written inside it.
+    if kind == DeckCardKind::Subcircuit {
+        for symbol in card.symbols() {
+            match symbol.kind() {
+                DeckSymbolKind::Subcircuit => {
+                    if let Some(slot) = symbol
+                        .opens()
+                        .and_then(|opens| scope_entries.get_mut(opens))
+                    {
+                        *slot = position;
+                    }
+                }
+                DeckSymbolKind::Parameter => entries.push(EntryRec {
+                    kind: OutlineEntryKind::Parameter,
+                    keyword: Keyword::Params,
+                    card: id,
+                    symbol: symbol.id() as u32,
+                    scope: position,
+                }),
+                _ => {}
+            }
+        }
     }
 }
 
@@ -849,9 +931,19 @@ impl NetlistSourceIndex {
     /// defines.
     #[must_use]
     pub fn edited(&self, change: DeckTextChange, text: SharedDeckText) -> Self {
-        match self.deck().edited(0, change, Arc::clone(&text)) {
-            Some(deck) => Self::of_deck(deck, self.kind),
-            None => Self::of_text(text, self.kind),
+        let before = self.deck();
+        let Some(deck) = before.edited(0, change, Arc::clone(&text)) else {
+            return Self::of_text(text, self.kind);
+        };
+        match (
+            before.page_at(0, change.start),
+            deck.page_at(0, change.start),
+        ) {
+            (Some(read), Some(read_again)) => Self {
+                outline: self.outline.edited(deck, &read, &read_again),
+                kind: self.kind,
+            },
+            _ => Self::of_deck(deck, self.kind),
         }
     }
 
@@ -1327,5 +1419,66 @@ mod tests {
             (gain.detail().as_deref(), gain.scope()),
             (Some("2"), Some(0))
         );
+    }
+
+    /// An outline updated through an edit, the edited page read again and
+    /// every entry after it kept, answers as the outline built from the
+    /// edited text: each entry with its scope, and each section and row.
+    #[test]
+    fn an_outline_updated_through_an_edit_answers_as_one_built_from_the_edited_text() {
+        use std::fmt::Write as _;
+        let mut deck =
+            String::from("long deck\n.param w=1 l={w*2}\n.global vdd\n.model dm d is=1e-14\n");
+        for block in 0..1500 {
+            let _ = write!(
+                deck,
+                ".subckt cell{block} a b k=1\nR1 a b {{k*w}}\n.param p{block}=1 q{block}=2\nD1 a vdd dm\n.ends cell{block}\nX{block} n{block} n{} cell{block} k={{l}}\n",
+                block + 1
+            );
+        }
+        deck.push_str(".end\n");
+        let anchor = deck.find(".subckt cell700 ").expect("block 700");
+        let old: SharedDeckText = Arc::new(deck.clone());
+        let index = NetlistSourceIndex::of_text(Arc::clone(&old), SourceKind::DeckRoot);
+        // What is edited, the text after block 700 opens it replaces, the
+        // replacement, and whether the edit reads its own page again.
+        let cases: &[(&str, &str, &str, bool)] = &[
+            ("a value inside a statement", "{k*w}", "{k*w*2}", true),
+            ("a device inserted", "R1 a b", "R9 a b {l}\nR1 a b", true),
+            ("a device deleted", "D1 a vdd dm\n", "", true),
+            ("a parameter's value", "q700=2", "q700=5", true),
+            ("a port added", "cell700 a b", "cell700 a b c", true),
+            ("a subcircuit renamed", "cell700 a b", "cellx a b", false),
+        ];
+        for (what, replaced, replacement, incremental) in cases {
+            let at = anchor + deck[anchor..].find(replaced).expect("the text to replace");
+            let edited = format!(
+                "{}{replacement}{}",
+                &deck[..at],
+                &deck[at + replaced.len()..]
+            );
+            let new: SharedDeckText = Arc::new(edited.clone());
+            let change = DeckTextChange::between(&*old, &*new).expect("the texts differ");
+            assert_eq!(
+                index.deck().edited(0, change, Arc::clone(&new)).is_some(),
+                *incremental,
+                "{what}"
+            );
+            let updated = index.edited(change, Arc::clone(&new));
+            let built = NetlistSourceIndex::of_text(new, SourceKind::DeckRoot);
+            let difference = updated
+                .outline()
+                .entries()
+                .iter()
+                .zip(built.outline().entries().iter())
+                .position(|(one, two)| one != two);
+            assert_eq!(difference, None, "{what}");
+            assert_eq!(
+                updated.outline().sections(),
+                built.outline().sections(),
+                "{what}"
+            );
+            assert!(updated == built, "{what}");
+        }
     }
 }

@@ -916,3 +916,39 @@ fn the_change_between_two_texts_spans_from_the_first_difference_to_the_last() {
         None
     );
 }
+
+/// Two texts that write a character differently differ from its first byte
+/// to its last: the change never splits a character, however the texts are
+/// cut into pieces.
+#[test]
+fn the_change_between_two_texts_never_splits_a_character() {
+    let pieces = |text: &str, size: usize| {
+        let characters = text.chars().collect::<Vec<_>>();
+        Pieces(
+            characters
+                .chunks(size)
+                .map(|chunk| chunk.iter().collect())
+                .collect(),
+        )
+    };
+    for (old, new, start, old_end, new_end) in [
+        ("a é b\n", "a è b\n", 2, 4, 4),
+        ("x€y", "x₤y", 1, 4, 4),
+        ("aéz", "a©z", 1, 3, 3),
+        ("é€", "é₤", 2, 5, 5),
+    ] {
+        for size in [1, 2, 3, 64] {
+            for other in [1, 2, 64] {
+                assert_eq!(
+                    DeckTextChange::between(&pieces(old, size), &pieces(new, other)),
+                    Some(DeckTextChange {
+                        start,
+                        old_end,
+                        new_end
+                    }),
+                    "{old:?} to {new:?} in pieces of {size} and {other}"
+                );
+            }
+        }
+    }
+}
