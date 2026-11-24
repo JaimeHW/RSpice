@@ -37,13 +37,20 @@ pub(super) fn list(
             crate::workbench::documents::netlist_document::NetlistTab::Deck(id) => Some(id),
             _ => None,
         });
+    // The deck being read is on disk, since its read is reading it: a look
+    // at its file on the frame would wait as long as that read holds it.
+    let reading = parts.netlist.reading_deck.as_ref().map(|read| read.id);
     let rows = decks
         .iter()
         .map(|deck| {
             let path = deck.file_path(folder);
             let meta = match &path {
                 None => Some(messages.text(MessageId::NetlistNavigatorDeckStored)),
-                Some(path) if cfg!(not(target_arch = "wasm32")) && !path.exists() => {
+                Some(path)
+                    if cfg!(not(target_arch = "wasm32"))
+                        && reading != Some(deck.id)
+                        && !path.exists() =>
+                {
                     Some(messages.text(MessageId::NetlistNavigatorDeckMissing))
                 }
                 Some(_) => None,
