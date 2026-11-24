@@ -286,6 +286,43 @@ fn run_saves_the_deck_away_from_the_press() {
     assert_eq!(text_run(&app).as_deref(), Some(EDITED));
 }
 
+/// A save the reader makes while the run's preparation waits to save the
+/// deck is not undone by it: the file keeps what the reader saved, the tab
+/// is clean, and the run runs what the press took.
+#[test]
+fn a_save_made_while_the_run_waits_to_save_is_kept() {
+    const SAVED: &str = "standalone\nV1 out 0 1\nR1 out 0 3k\n.op\n.end\n";
+    let folder = Folder::new();
+    let (mut app, path) = edited_file_session(&folder);
+    let hold = app.simulation_controller.hold_next_deck_run_preparation();
+    let ctx = themed_context();
+
+    app.execute_command_key(ids::RUN_SIMULATION);
+    assert!(edit_deck_file(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        SAVED.to_owned()
+    ));
+    let messages = app.state.workbench.messages();
+    deck_files::save_shown_file(&mut app.state.code.netlist, messages).expect("the save");
+    assert_eq!(std::fs::read_to_string(&path).expect("the deck"), SAVED);
+
+    release(hold);
+    frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("the deck"),
+        SAVED,
+        "the text the press took is not written over the reader's save"
+    );
+    assert_eq!(
+        deck_files::unsaved_before_run(&app.state.code.netlist),
+        0,
+        "the tab is clean"
+    );
+    assert!(deck_run_started(&app));
+    assert_eq!(text_run(&app).as_deref(), Some(EDITED));
+}
+
 /// What a press of Run on a deck whose save fails comes to: the notice says
 /// why as a save says it, nothing runs, the file is as it was and the tab
 /// keeps its edits.

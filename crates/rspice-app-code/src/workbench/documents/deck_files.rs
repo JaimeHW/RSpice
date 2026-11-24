@@ -672,6 +672,7 @@ pub fn save_file(file: &mut OpenFile, messages: MessageCatalog) -> Result<(), St
     if file.disk_change.is_some() {
         return Err(messages.format(MessageId::NetlistSaveChangedOnDisk, &[("name", &name)]));
     }
+    ask_to_save(&file.path);
     {
         let _files = hold_deck_files();
         write_through_temporary(&file.path, &name, &bytes, messages)?;
@@ -1275,6 +1276,7 @@ pub fn sync_before_run(
             .filter(|(_, file)| file.dirty)
             .map(|(include, file)| EditedFile {
                 include,
+                save: ask_to_save(&file.path),
                 path: file.path.clone(),
                 text: file.text.clone(),
                 encoding: file.encoding,
@@ -1302,6 +1304,8 @@ pub struct BeforeRun {
 pub struct EditedFile {
     /// The include it is, or `None` for the deck.
     include: Option<String>,
+    /// Which save of the file the press asked for ([`ask_to_save`]).
+    save: u64,
     path: PathBuf,
     text: RevisedText,
     encoding: TextEncoding,
@@ -1334,6 +1338,35 @@ impl SavedBeforeRun {
 #[cfg(not(target_arch = "wasm32"))]
 static DECK_FILE_WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// The saves asked of each deck file, counted as they are asked: a save a
+/// press asked for writes only while no later save of the same file was
+/// asked, so the text a press took never overwrites a newer one the reader
+/// saved meanwhile.
+#[cfg(not(target_arch = "wasm32"))]
+static DECK_FILE_SAVES_ASKED: std::sync::Mutex<std::collections::BTreeMap<PathBuf, u64>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// Ask to save the file at `path`: which save of it this is.
+#[cfg(not(target_arch = "wasm32"))]
+fn ask_to_save(path: &Path) -> u64 {
+    let mut asked = DECK_FILE_SAVES_ASKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let count = asked.entry(path.to_path_buf()).or_default();
+    *count += 1;
+    *count
+}
+
+/// Whether `save`, a save of the file at `path`, is the last asked of it.
+#[cfg(not(target_arch = "wasm32"))]
+fn last_save_asked(path: &Path, save: u64) -> bool {
+    DECK_FILE_SAVES_ASKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(path)
+        == Some(&save)
+}
+
 /// Hold the deck's files for writing, or for reading as a run reads them,
 /// until the guard drops.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1346,13 +1379,15 @@ fn hold_deck_files() -> std::sync::MutexGuard<'static, ()> {
 /// Save `edited`, the files of a deck a press took with edits, in order,
 /// away from the frame; the first that does not write stops the save. Holds
 /// the deck's files while it writes, so a run pressed again meanwhile reads
-/// them once they are written.
+/// them once they are written. A file saved again since the press, as the
+/// reader's Save saves it, keeps that save: the press's older text is not
+/// written over it.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_edited_files(edited: Vec<EditedFile>, messages: MessageCatalog) -> SavedBeforeRun {
     let _files = hold_deck_files();
     let mut saved = SavedBeforeRun::default();
     for file in edited {
-        let written = if saved.refusal.is_none() {
+        let written = if saved.refusal.is_none() && last_save_asked(&file.path, file.save) {
             match write_edited_file(&file, messages) {
                 Ok(written) => Some(written),
                 Err(why) => {
