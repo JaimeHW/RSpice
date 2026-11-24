@@ -164,6 +164,11 @@ impl RunHost for RunView<'_, '_> {
         self.wb.show_problem_findings();
     }
 
+    fn show_held_run(&mut self) {
+        self.wb
+            .activate(rspice_app_state::workbench::workspace::Workspace::Simulate);
+    }
+
     fn queue_run_set(&mut self) {
         request_run_set(self.model);
     }
@@ -295,6 +300,8 @@ impl RunHost for FrozenRun {
 
     /// Nobody reads a frozen copy's Problems page.
     fn show_problem_findings(&mut self) {}
+
+    fn show_held_run(&mut self) {}
 
     /// The run set is queued on the copy's model; the reader's workspace
     /// stays where it is.

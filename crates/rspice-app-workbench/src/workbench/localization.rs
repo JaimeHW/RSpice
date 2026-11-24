@@ -171,6 +171,7 @@ define_messages! {
     NetlistMemoryStop => "Stop",
     NetlistMemoryStopTooltip => "Drop the prepared run. Nothing runs.",
     NetlistMemoryRunningAnyway => "Running {name} though it needs more memory than is free.",
+    SimulateMemoryRunAnywayTooltip => "Run the plan though it needs more memory than is free; other programs slow while it runs. The project's unsaved work is kept as an autosave first.",
     NetlistRunStripOpenTaskDeck => OPEN_TASK_DECK,
     NetlistRunStripOpenTaskDeckTooltip => "Opens the input Run {id} executed for its first point, read-only.",
     NetlistRunStripNextTask => "Point {index}/{count}",

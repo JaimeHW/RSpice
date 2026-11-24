@@ -48,6 +48,7 @@ fn prepared_contract(task_count: usize) -> PreparedPreflightContract {
         target: "Desktop background thread",
         save_policy: "Retain engine-produced results",
         model_identity_count: 1,
+        memory_warning: None,
     }
 }
 

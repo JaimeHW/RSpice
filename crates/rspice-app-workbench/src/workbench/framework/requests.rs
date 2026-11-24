@@ -295,6 +295,17 @@ impl Request for RevealExecutedDeck {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Run anyway on the plan's run held for more memory than is free: start it,
+/// the project's unsaved work kept as an autosave first. Raised by the band
+/// above the plan, and taken straight after the call that raised it, because
+/// the autosave is the application's.
+#[derive(Clone, Copy, Debug)]
+pub struct RunPlanAnyway;
+
+impl Request for RunPlanAnyway {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Open Component Properties on placed instance `component_id`, once the
 /// design shows it selected and centred at `occurrence` (the top sheet when
 /// `None`). Raised by the Simulation Studio's Excitations rows, and taken

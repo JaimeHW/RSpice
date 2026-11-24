@@ -343,4 +343,8 @@ pub struct PreparedPreflightContract {
     pub target: &'static str,
     pub save_policy: &'static str,
     pub model_identity_count: usize,
+    /// What the run needs beyond the memory free, when it needs more than
+    /// the machine has free and fits what it has installed: Run holds it
+    /// for Run anyway.
+    pub memory_warning: Option<rspice_simulation::execution::run_memory::MemoryWarning>,
 }

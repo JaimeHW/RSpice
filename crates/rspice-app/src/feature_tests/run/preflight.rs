@@ -22,6 +22,7 @@ mod block_cross_probe;
 mod connect_rules;
 mod directive_note;
 mod engine;
+mod memory;
 mod pipeline;
 mod rule_deck;
 mod saved_currents;
@@ -63,6 +64,7 @@ fn prepared_contract() -> PreparedPreflightContract {
         target: "Desktop background thread",
         save_policy: "Retain engine-produced results",
         model_identity_count: 1,
+        memory_warning: None,
     }
 }
 

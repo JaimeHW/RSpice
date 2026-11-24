@@ -19,6 +19,7 @@ pub fn mark_response_disabled(response: &mut egui::Response) {
     response.flags.remove(egui::response::Flags::ENABLED);
 }
 
+mod advisory_band;
 mod button;
 mod canvas_entry;
 mod chip;
@@ -48,6 +49,7 @@ mod toast;
 mod tree;
 mod view_switch;
 
+pub use advisory_band::{HeldRunAnswer, HeldRunBand, advisory_band, held_run_band};
 pub use button::{Button, IconButton, compact_height, control_height};
 pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
 pub use chip::{chip, chip_width, compact_chip};

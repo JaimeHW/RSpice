@@ -56,6 +56,9 @@ pub trait RunHost: ViewerHost {
     fn manual_deck(&self) -> Option<ManualDeck<'_>>;
     /// A run gate filed findings that stop the run: bring the reader to them.
     fn show_problem_findings(&mut self);
+    /// The run the gate authorized waits for the reader to run it anyway:
+    /// bring the reader to where it asks.
+    fn show_held_run(&mut self);
     /// The run gate authorized the retained run set: queue it. The reader
     /// stays on the page they are on.
     fn queue_run_set(&mut self);

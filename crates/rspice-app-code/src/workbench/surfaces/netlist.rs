@@ -25,6 +25,7 @@ use egui::Ui;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{HeldRunAnswer, HeldRunBand, advisory_band, held_run_band};
 use crate::workbench::MessageId;
 use crate::workbench::code::SourceFeature;
 use crate::workbench::code::commands::SourceRequest;
@@ -288,8 +289,8 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
     // run's band speaks: Run anyway, or Stop, which Stop's command carries
     // out as it stops any run.
     match memory_band(ui, cx.runs, cx.wb.messages()) {
-        Some(MemoryAnswer::RunAnyway) => cx.wb.outbox.push(SourceRequest::RunAnyway),
-        Some(MemoryAnswer::Stop) => {
+        Some(HeldRunAnswer::RunAnyway) => cx.wb.outbox.push(SourceRequest::RunAnyway),
+        Some(HeldRunAnswer::Stop) => {
             cx.execute(crate::workbench::framework::command_registry::ids::STOP_SIMULATION);
         }
         None => {}
@@ -968,48 +969,25 @@ const fn verification_chip(
     }
 }
 
-/// What the reader answered a run held for memory.
-#[derive(Clone, Copy)]
-enum MemoryAnswer {
-    RunAnyway,
-    Stop,
-}
-
 /// The band of a deck's run held because it needs more memory than the
-/// machine has free: the warning's mark, what the run needs against what is
-/// free and installed, and the answers at its far end, Run anyway before
-/// Stop. Nothing while no run is held.
+/// machine has free, in the page's words. Nothing while no run is held.
 fn memory_band(
     ui: &mut Ui,
     runs: &rspice_app_runs::workbench::slots::runs::RunsState,
     messages: crate::workbench::MessageCatalog,
-) -> Option<MemoryAnswer> {
+) -> Option<HeldRunAnswer> {
     let warning = runs.memory_warning()?;
-    let words = warning.numbers();
-    let mut answer = None;
-    advisory_band(ui, Some(Problem::Warning), |ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
-            let stop = messages.text(MessageId::NetlistMemoryStop);
-            let stop_hint = messages.text(MessageId::NetlistMemoryStopTooltip);
-            if band_button(ui, &stop, Some(&stop_hint)).clicked() {
-                answer = Some(MemoryAnswer::Stop);
-            }
-            let run = messages.text(MessageId::NetlistMemoryRunAnyway);
-            let run_hint = messages.text(MessageId::NetlistMemoryRunAnywayTooltip);
-            if band_button(ui, &run, Some(&run_hint)).clicked() {
-                answer = Some(MemoryAnswer::RunAnyway);
-            }
-            ui.add_space(RUN_STRIP_GAP);
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                // The mark keeps the gap from the words a run band's dot does.
-                ui.add_space(RUN_STRIP_DOT_GAP);
-                ui.add(egui::Label::new(&words).truncate())
-                    .on_hover_text(warning.message());
-            });
-        });
-    });
-    answer
+    held_run_band(
+        ui,
+        &HeldRunBand {
+            numbers: &warning.numbers(),
+            message: &warning.message(),
+            run_anyway: &messages.text(MessageId::NetlistMemoryRunAnyway),
+            run_anyway_hint: &messages.text(MessageId::NetlistMemoryRunAnywayTooltip),
+            stop: &messages.text(MessageId::NetlistMemoryStop),
+            stop_hint: &messages.text(MessageId::NetlistMemoryStopTooltip),
+        },
+    )
 }
 
 /// One of the band's routes: the kit's compact button, with what it does on
@@ -1021,34 +999,6 @@ fn band_button(ui: &mut Ui, label: &str, hint: Option<&str>) -> egui::Response {
     } else {
         response
     }
-}
-
-/// The banner recipe every advisory band above the editor shares: one inset
-/// row that states a condition of the document, with a problem's mark as the
-/// only colour on it. It is one row of the header's height: its buttons are
-/// the kit's compact ones, with the same gap above and below them as in the
-/// header, so the band and the header read as one family.
-fn advisory_band(ui: &mut Ui, problem: Option<Problem>, contents: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .fill(t.color.bg_inset)
-        .stroke(egui::Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::symmetric(8, 3))
-        .show(ui, |ui| {
-            // A frame shrinks to its content: the band runs the page's whole
-            // width however short its words are.
-            ui.set_min_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                if let Some(problem) = problem {
-                    let (mark, _) = ui.allocate_exact_size(
-                        egui::vec2(RUN_STRIP_MARK_SIDE, RUN_STRIP_MARK_SIDE),
-                        egui::Sense::hover(),
-                    );
-                    paint_problem_mark(ui.painter(), mark, problem);
-                }
-                contents(ui);
-            });
-        });
 }
 
 /// What became of the active document's `.control` region, stated once above

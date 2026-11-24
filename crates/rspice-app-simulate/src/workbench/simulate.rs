@@ -107,12 +107,14 @@ impl CommandSet for SimulateCommand {
             Self::Run => (
                 !simulation.execution.has_active_execution()
                     && !simulation.execution.trigger_simulation
-                    && reads.runs.preparing_deck.is_none(),
+                    && reads.runs.preparing_deck.is_none()
+                    && reads.runs.preflight.held_for_memory.is_none(),
                 "a run is already in progress",
             ),
             Self::Stop => (
                 reads.runs.preflight.checking.is_some()
                     || reads.runs.preparing_deck.is_some()
+                    || reads.runs.preflight.held_for_memory.is_some()
                     || !reads.runs.waiting.is_empty()
                     || simulation.can_request_abort_active_run(),
                 if simulation.cancellation_is_pending() {
@@ -155,6 +157,13 @@ impl CommandSet for SimulateCommand {
                 } else if let Some(deck) = cx.runs.stop_preparing_deck(cx.handles.run_controller) {
                     // Nothing of a run still being prepared has started.
                     let message = deck.stopped();
+                    cx.model
+                        .record(LogSeverity::Info, LogSource::Run, message.clone());
+                    cx.wb.prompt(message);
+                } else if cx.runs.preflight.held_for_memory.take().is_some() {
+                    // Nothing of the plan's run held for memory has started.
+                    let plan = cx.model.sim_setup.active_plan_name().as_str();
+                    let message = format!("Stopped {plan} before it ran.");
                     cx.model
                         .record(LogSeverity::Info, LogSource::Run, message.clone());
                     cx.wb.prompt(message);

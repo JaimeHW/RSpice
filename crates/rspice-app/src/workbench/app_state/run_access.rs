@@ -84,6 +84,11 @@ impl RunHost for AppState {
         AppState::show_problem_findings(self);
     }
 
+    fn show_held_run(&mut self) {
+        self.workbench
+            .activate(rspice_app_state::workbench::workspace::Workspace::Simulate);
+    }
+
     fn queue_run_set(&mut self) {
         self.request_run_set_simulation();
     }

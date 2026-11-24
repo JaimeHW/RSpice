@@ -133,6 +133,8 @@ pub fn run_design_check(
 }
 
 pub fn start(state: &mut impl RunHost, controller: &mut SimulationController, queue: bool) {
+    // A pass replaces the run a hold kept, and a Run press asks again.
+    state.runs_mut().preflight.held_for_memory = None;
     if queue {
         let execution = &state.model().simulation.execution;
         if execution.has_active_execution() || execution.trigger_simulation {
@@ -285,6 +287,7 @@ fn contract_of(
         target: metadata.target,
         save_policy: metadata.save_policy,
         model_identity_count: metadata.model_identity_count,
+        memory_warning: metadata.memory_warning,
     }
 }
 
@@ -528,14 +531,71 @@ fn conclude(
 }
 
 /// Queue a retained authorized report only while every revision it names is
-/// still current.
+/// still current. A run that needs more memory than the machine has free is
+/// held instead, for the reader to run anyway or stop.
 pub fn queue_retained_run(state: &mut impl RunHost) -> bool {
+    if !retained_run_is_runnable(&*state) {
+        return false;
+    }
+    let needs = state
+        .runs()
+        .preflight
+        .report
+        .as_ref()
+        .and_then(|report| report.prepared.as_ref()?.memory_warning);
+    match needs {
+        Some(warning) => hold_for_memory(state, warning),
+        None => state.queue_run_set(),
+    }
+    true
+}
+
+/// Run anyway: queue the run held for memory, the run the retained report
+/// authorizes, as Run queues it. Whether one was held and is still
+/// authorized; the caller keeps the project's unsaved work as an autosave
+/// before the run dispatches.
+pub fn run_held_run_anyway(state: &mut impl RunHost) -> bool {
+    if state.runs_mut().preflight.held_for_memory.take().is_none()
+        || !retained_run_is_runnable(&*state)
+    {
+        return false;
+    }
+    state.queue_run_set();
+    true
+}
+
+/// Hold the run the retained report authorizes, which needs more memory
+/// than the machine has free (`warning`): nothing of it dispatches until the
+/// reader runs it anyway or stops it. The reader is brought to where the
+/// band above the plan asks; the log keeps what it said.
+fn hold_for_memory(
+    state: &mut impl RunHost,
+    warning: rspice_simulation::execution::run_memory::MemoryWarning,
+) {
+    let plan = state
+        .model()
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
+    state.model_mut().record(
+        LogSeverity::Warning,
+        LogSource::Run,
+        format!("{plan}: {}", warning.message()),
+    );
+    state.runs_mut().preflight.held_for_memory = Some(warning);
+    state.show_held_run();
+}
+
+/// Whether the retained report authorizes a run while every revision it
+/// names is still current.
+fn retained_run_is_runnable(state: &impl RunHost) -> bool {
     let project_revision = state.model().workspace.content.project.revision().get();
     let (topology_root, topology_revision, topology_closure) =
         state.model().configured_topology_revision();
     let current_plan = state.model().active_plan_revision();
-    let runnable = state
-        .runs_mut()
+    state
+        .runs()
         .preflight
         .report
         .as_ref()
@@ -547,13 +607,7 @@ pub fn queue_retained_run(state: &mut impl RunHost) -> bool {
                 &topology_closure,
                 current_plan,
             )
-        });
-    if !runnable {
-        return false;
-    }
-
-    state.queue_run_set();
-    true
+        })
 }
 
 /// Check Design over the configured design, unless a check of it still

@@ -190,6 +190,11 @@ pub struct PreflightDialogState {
     /// The converters the decks of [`Self::report`]'s run insert, as the
     /// engine built them. Kept beside the report and dropped with it.
     pub converters: Vec<CheckedConverters>,
+    /// The run [`Self::report`] authorizes, which Run asked for and which
+    /// needs more memory than the machine has free: what it needs, against
+    /// what is free. Nothing of it dispatches until the reader runs it
+    /// anyway; Stop drops it, and so does anything that drops the report.
+    pub held_for_memory: Option<rspice_simulation::execution::run_memory::MemoryWarning>,
 }
 
 /// The converters a set of the checked run's decks insert.
@@ -242,6 +247,7 @@ impl PreflightDialogState {
     pub fn invalidate(&mut self) {
         self.report = None;
         self.converters.clear();
+        self.held_for_memory = None;
     }
 
     /// Ask the frame loop to run the governed preflight-and-queue pass.

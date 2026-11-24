@@ -319,6 +319,10 @@ pub fn prepare(cx: &mut Cx<'_, SimulateFeature>) {
 pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
+        // A run of the plan held for more memory than is free asks above
+        // every page of it: Run anyway, or Stop, which Stop's command
+        // carries out as it stops any run.
+        memory_band(ui, cx);
         // The track this surface is laid out in, with the scrollbar's gutter
         // withheld from it whether or not a bar is showing.
         //
@@ -372,6 +376,36 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             });
         settle_surface_scroll(ui, cx.state, output.state.offset.y);
     });
+}
+
+/// The band of the plan's run held because it needs more memory than the
+/// machine has free, and what the reader answers there. Nothing while no
+/// run is held.
+fn memory_band(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    use crate::workbench::localization::MessageId;
+    let Some(warning) = cx.runs.preflight.held_for_memory else {
+        return;
+    };
+    let messages = cx.wb.messages();
+    let answer = crate::ui::widgets::held_run_band(
+        ui,
+        &crate::ui::widgets::HeldRunBand {
+            numbers: &warning.numbers(),
+            message: &warning.message(),
+            run_anyway: &messages.text(MessageId::NetlistMemoryRunAnyway),
+            run_anyway_hint: &messages.text(MessageId::SimulateMemoryRunAnywayTooltip),
+            stop: &messages.text(MessageId::NetlistMemoryStop),
+            stop_hint: &messages.text(MessageId::NetlistMemoryStopTooltip),
+        },
+    );
+    match answer {
+        Some(crate::ui::widgets::HeldRunAnswer::RunAnyway) => cx
+            .wb
+            .outbox
+            .push(crate::workbench::framework::requests::RunPlanAnyway),
+        Some(crate::ui::widgets::HeldRunAnswer::Stop) => cx.execute(ids::STOP_SIMULATION),
+        None => {}
+    }
 }
 
 /// Keep the offset the surface's scroll ended on, moved by whatever the

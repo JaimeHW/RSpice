@@ -69,7 +69,7 @@ use rspice_app_workbench::workbench::framework::requests::{
     BindComponentModel, CellHousekeeping, ClearSelectedModel, CloseForLiveMirror,
     ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
     OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
-    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel,
+    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel, RunPlanAnyway,
     SelectAnalysisInstance, SetFamilyFilter, ShowOnSchematic, ShowProjectDeck,
     ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
 };
@@ -401,6 +401,11 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, PromptAfterCommands(text)| app.state.workbench.prompt(text),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, RunPlanAnyway| run_plan_anyway(app),
         );
         requests::drain(
             self,
@@ -799,6 +804,33 @@ impl RSpiceApp {
     ) -> Result<Option<String>, String> {
         code_requests::step_history(&mut features::cx(self), direction == HistoryDirection::Undo)
     }
+}
+
+/// Run anyway: start the plan's run held for more memory than is free, as
+/// Run starts it. A run that needs more memory than is free may take the
+/// machine down with it: the work it could lose is kept before it
+/// dispatches.
+fn run_plan_anyway(app: &mut RSpiceApp) {
+    if !rspice_app_runs::workbench::preflight::run_held_run_anyway(&mut app.state) {
+        return;
+    }
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
+    let said = app.state.workbench.messages().format(
+        rspice_app_workbench::workbench::localization::MessageId::NetlistMemoryRunningAnyway,
+        &[("name", &plan)],
+    );
+    app.state.model.record(
+        rspice_app_state::diagnostics::LogSeverity::Info,
+        rspice_app_state::diagnostics::LogSource::Run,
+        said,
+    );
+    rspice_app_services::workbench::app_state::session::autosave::write_now(&mut app.state, None);
 }
 
 #[cfg(test)]

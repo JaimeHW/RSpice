@@ -413,6 +413,11 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
             "{} Run anyway above the deck runs it; Stop drops it.",
             warning.message()
         ))
+    } else if let Some(warning) = app.state.runs.preflight.held_for_memory {
+        Cow::Owned(format!(
+            "{} Run anyway above the plan runs it; Stop drops it.",
+            warning.message()
+        ))
     } else if let Some(deck) = &app.state.runs.preparing_deck {
         Cow::Owned(match deck.action {
             DeckAction::Run => format!("Preparing the run of {}. Stop drops it.", deck.name),
@@ -598,17 +603,27 @@ fn deck_preparing_words(app: &RSpiceApp) -> Option<String> {
         .map(|_| "Preparing".to_owned())
 }
 
-/// What a deck's run, prepared and waiting for more memory than is free,
-/// needs, against what is free: "Needs about 3.5 GB of memory · 3.1 GB
-/// free".
+/// What a run waiting for more memory than is free needs, against what is
+/// free: "Needs about 3.5 GB of memory · 3.1 GB free". The deck's run,
+/// prepared, or the plan's, authorized.
 fn memory_words(app: &RSpiceApp) -> Option<String> {
-    Some(app.state.runs.memory_warning()?.status())
+    Some(held_warning(app)?.status())
 }
 
-/// Whether a deck's run waits for the reader to run it anyway or stop it,
-/// and no check speaks over it.
+/// What the run waiting for Run anyway needs: the deck's, or the plan's.
+fn held_warning(
+    app: &RSpiceApp,
+) -> Option<rspice_simulation::execution::run_memory::MemoryWarning> {
+    app.state
+        .runs
+        .memory_warning()
+        .or(app.state.runs.preflight.held_for_memory)
+}
+
+/// Whether a run waits for the reader to run it anyway or stop it, and no
+/// check speaks over it.
 fn held_for_memory(app: &RSpiceApp) -> bool {
-    app.state.runs.memory_warning().is_some() && preflight_checking(app).is_none()
+    held_warning(app).is_some() && preflight_checking(app).is_none()
 }
 
 /// What waits for a Verilog-A compile before it is prepared: a manual deck's
