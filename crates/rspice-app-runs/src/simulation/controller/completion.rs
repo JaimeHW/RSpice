@@ -794,6 +794,9 @@ struct LookedOver {
     /// samples the run has still to store, or an imported one, which the
     /// validator reads otherwise once it is kept.
     verdict: Option<Result<(), Arc<str>>>,
+    /// The digest of its data, which the digest of its run's is taken of.
+    /// None for a result whose samples the run has still to store.
+    digest: Option<crate::product::ContentDigest>,
     /// The task it was validated as, and whether it held a transient and a
     /// Monte Carlo checkpoint then: kept otherwise, the verdict is not the
     /// kept result's.
@@ -824,6 +827,7 @@ impl LookedOver {
                     .as_ref()
                     .is_err_and(|cause| rspice_results::waveform::is_pending_read(cause))
             });
+        let digest = stored.then(|| crate::state::run_store::analysis_digest(&analysis.data));
         let checkpoints = (
             analysis.transient_checkpoint.is_some(),
             analysis.monte_carlo_checkpoint.is_some(),
@@ -831,6 +835,7 @@ impl LookedOver {
         Self {
             index,
             verdict,
+            digest,
             provenance,
             checkpoints,
         }
@@ -838,6 +843,10 @@ impl LookedOver {
 
     /// What was found, told to the viewers, of the analysis at `index` of
     /// `run`, which the run kept this result as.
+    ///
+    /// Keeping a result changes no more of what was found than its
+    /// checkpoints, which it fills only where the result held none: kept
+    /// with the ones it held, it is the result looked over.
     fn found_of(self, run: &crate::state::SimulationRun, index: usize) -> RunEvent {
         let kept = &run.analyses[index];
         let as_validated = kept.provenance() == Some(&self.provenance)
@@ -849,6 +858,7 @@ impl LookedOver {
             analysis: AnalysisPresentationKey::new(run.dataset_id, kept),
             index: self.index,
             verdict: self.verdict.filter(|_| as_validated),
+            digest: self.digest.filter(|_| as_validated),
         }
     }
 }

@@ -1470,14 +1470,18 @@ fn retained_evidence_verdict_in(
 impl ResultsState {
     /// Hold what looking `analysis` over away from the frame found, as the
     /// retained runs stand now: the index of its signals and, when there is
-    /// one, the validator's verdict on its evidence. Neither is worked out
-    /// again while the runs stand.
+    /// one of each, the validator's verdict on its evidence and its run's
+    /// digest, taken of the digest of its data. None is worked out again
+    /// while the runs stand.
     pub(crate) fn adopt_looked_over(
         &mut self,
         simulation: &crate::state::SimulationState,
         analysis: AnalysisPresentationKey,
         index: std::sync::Arc<rspice_results_ui::signal_index::SignalIndex>,
-        verdict: Option<Result<(), std::sync::Arc<str>>>,
+        (verdict, digest): (
+            Option<Result<(), std::sync::Arc<str>>>,
+            Option<crate::product::ContentDigest>,
+        ),
     ) {
         let source = (
             simulation.retained.runs.revision(),
@@ -1489,6 +1493,28 @@ impl ResultsState {
         if let Some(verdict) = verdict {
             self.retained_evidence_validity
                 .insert(simulation, &source, analysis, verdict);
+        }
+        let dataset = analysis.dataset_id();
+        if let Some(digest) = digest
+            && let Some(run) = simulation
+                .retained
+                .runs
+                .iter()
+                .find(|run| run.dataset_id == dataset)
+            && let Some(place) = run
+                .analyses
+                .iter()
+                .position(|kept| AnalysisPresentationKey::new(dataset, kept) == analysis)
+        {
+            // The run's other analyses, which were not looked over, are
+            // digested here.
+            if run.analyses.len() > 1 {
+                frame_work::note(frame_work::DatasetWalk::DatasetDigest);
+            }
+            let digest =
+                crate::state::run_store::dataset_digest_knowing(&run.data, (place, digest));
+            self.dataset_digests
+                .insert(simulation, &source, dataset, digest);
         }
     }
 }

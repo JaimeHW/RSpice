@@ -152,9 +152,10 @@ fn a_deck_that_names_no_output_plots_nothing_and_offers_every_signal() {
 
 /// A run's results show once it ends, in Results open while it runs: the output the deck names
 /// is drawn, nothing says the results failed validation, and neither the frame that keeps them
-/// nor the frames after it validate them again, which the run did as it converted them.
+/// nor the frames after it validate or digest them again, which the run did as it converted
+/// them.
 #[test]
-fn a_run_shows_its_results_once_it_ends_without_the_frame_validating_them() {
+fn a_run_shows_its_results_once_it_ends_without_the_frame_validating_or_digesting_them() {
     let root = unique_temp_dir("deck-run-end");
     let deck = root.join("outputs.cir");
     std::fs::write(&deck, format!("{DECK}.probe V(b)\n.end\n")).expect("the deck is written");
@@ -217,6 +218,16 @@ fn a_run_shows_its_results_once_it_ends_without_the_frame_validating_them() {
         ),
         (0, 0),
         "the run's frames validate its kept results again: {:?} then {:?}",
+        ending.nonzero(),
+        after.nonzero()
+    );
+    assert_eq!(
+        (
+            ending.get(DatasetWalk::DatasetDigest),
+            after.get(DatasetWalk::DatasetDigest)
+        ),
+        (0, 0),
+        "the run's frames digest its kept results again: {:?} then {:?}",
         ending.nonzero(),
         after.nonzero()
     );

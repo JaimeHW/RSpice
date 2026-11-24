@@ -63,14 +63,16 @@ pub enum RunEvent {
     /// have changed the active result.
     CompletionsCollected,
     /// A finished analysis was looked over away from the frame as it was
-    /// converted: `index` finds its signals by name, and `verdict`, when
-    /// there is one, is what validating its evidence answers. Both are of the
-    /// analysis `analysis` names as the retained runs stand when this is
-    /// reported, and hold until the runs change.
+    /// converted: `index` finds its signals by name, `verdict`, when there
+    /// is one, is what validating its evidence answers, and `digest`, when
+    /// there is one, is the digest of its data its run's digest is taken
+    /// of. All are of the analysis `analysis` names as the retained runs
+    /// stand when this is reported, and hold until the runs change.
     AnalysisLookedOver {
         analysis: AnalysisPresentationKey,
         index: Arc<SignalIndex>,
         verdict: Option<Result<(), Arc<str>>>,
+        digest: Option<crate::product::ContentDigest>,
     },
 }
 

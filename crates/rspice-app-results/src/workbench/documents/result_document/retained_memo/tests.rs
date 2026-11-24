@@ -175,6 +175,45 @@ fn read_all(state: &ResultsTestHost) {
     ));
 }
 
+/// A run's digest is taken of the digest its looked-over analysis came
+/// with and its other analyses' own, and is the run's digest: reading it
+/// then digests nothing.
+#[test]
+fn retained_memo_takes_a_runs_digest_of_its_looked_over_analysis() {
+    for others in [false, true] {
+        let mut state = retained_state(AnalysisType::Transient, 100);
+        if others {
+            state.model.simulation.retained.runs[0]
+                .analyses
+                .push(analysis(AnalysisType::Noise, 2, 100));
+        }
+        let run = &state.model.simulation.retained.runs[0];
+        let expected = run.dataset_content_digest();
+        let looked_over = crate::state::run_store::analysis_digest(&run.analyses[0].data);
+        let index = std::sync::Arc::new(rspice_results_ui::signal_index::SignalIndex::of(
+            &run.analyses[0].data,
+        ));
+        let key = key(&state);
+        state.results.results.adopt_looked_over(
+            &state.model.simulation,
+            key,
+            index,
+            (None, Some(looked_over)),
+        );
+        let work = frame_work::WorkCounts::reset();
+        let digest = retained_dataset_digest(
+            state.results_reads(),
+            &state.model.simulation.retained.runs[0],
+        );
+        assert_eq!(digest, expected, "with other analyses: {others}");
+        assert_eq!(
+            work.since().get(frame_work::DatasetWalk::DatasetDigest),
+            0,
+            "the run is digested again"
+        );
+    }
+}
+
 #[test]
 fn retained_memo_unchanged_clones_reuse_their_evidence_without_dataset_walks() {
     for samples in [3, 100_000] {

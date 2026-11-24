@@ -655,14 +655,28 @@ pub fn dataset_content_digest<'a, W>(
 where
     W: ExactSizeIterator<Item = &'a RetainedWaveform> + Clone,
 {
+    dataset_digest_of(
+        analyses.map(|(id, analysis)| (id, analysis.digest(version))),
+        version,
+    )
+}
+
+/// [`dataset_content_digest`] of ordered analyses whose own digests are
+/// known, each with its id: a digest taken of an analysis apart from its
+/// dataset is not taken again.
+#[must_use]
+pub fn dataset_digest_of(
+    analyses: impl ExactSizeIterator<Item = (u64, ContentDigest)>,
+    version: ResultDigestEncoding,
+) -> ContentDigest {
     let domain = match version {
         ResultDigestEncoding::V18 => "rspice.simulation-dataset-data/v18",
     };
     let mut writer = ResultDigestWriter::new(domain, version);
     writer.sequence(analyses.len());
-    for (id, analysis) in analyses {
+    for (id, digest) in analyses {
         writer.u64(id);
-        writer.digest(analysis.digest(version));
+        writer.digest(digest);
     }
     writer.finish()
 }

@@ -186,18 +186,54 @@ where
     A: AsRef<RetainedAnalysisResult<W>>,
     W: Clone + AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
 {
-    let stored: Vec<_> = analyses
-        .iter()
-        .map(|analysis| as_stored(analysis.as_ref()))
-        .collect();
-    rspice_results::result_digest::dataset_content_digest(
-        analyses
-            .iter()
-            .zip(&stored)
-            .map(|(analysis, stored)| stored.as_ref().unwrap_or(analysis.as_ref()))
-            .map(|analysis| (analysis.id, analysis.result_data_ref())),
+    rspice_results::result_digest::dataset_digest_of(
+        analyses.iter().map(|analysis| {
+            let analysis = analysis.as_ref();
+            (analysis.id, analysis_digest(analysis))
+        }),
         ResultDigestEncoding::CURRENT,
     )
+}
+
+/// [`dataset_digest`] of `run`, the digest of its analysis at `known.0`
+/// being `known.1`, as [`analysis_digest`] gives it: that analysis is not
+/// read again, and the others are digested here.
+#[must_use]
+pub fn dataset_digest_knowing<A, W>(
+    run: &rspice_results::run::SimulationRun<A>,
+    known: (usize, ContentDigest),
+) -> ContentDigest
+where
+    A: AsRef<RetainedAnalysisResult<W>>,
+    W: Clone + AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
+{
+    rspice_results::result_digest::dataset_digest_of(
+        run.analyses.iter().enumerate().map(|(place, analysis)| {
+            let analysis = analysis.as_ref();
+            let digest = if place == known.0 {
+                known.1
+            } else {
+                analysis_digest(analysis)
+            };
+            (analysis.id, digest)
+        }),
+        ResultDigestEncoding::CURRENT,
+    )
+}
+
+/// The digest of one analysis that [`dataset_digest`] takes of it: a
+/// function of its samples, and never of where they are held.
+#[must_use]
+pub fn analysis_digest<W>(analysis: &RetainedAnalysisResult<W>) -> ContentDigest
+where
+    W: Clone + AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
+{
+    let stored = as_stored(analysis);
+    stored
+        .as_ref()
+        .unwrap_or(analysis)
+        .result_data_ref()
+        .digest(ResultDigestEncoding::CURRENT)
 }
 
 /// [`store_analysis`] into segments held in memory, as the browser build keeps them.

@@ -215,9 +215,13 @@ impl RunEventSink for ResultsParts<'_> {
                 analysis,
                 index,
                 verdict,
-            } => self
-                .results
-                .adopt_looked_over(&self.model.simulation, analysis, index, verdict),
+                digest,
+            } => self.results.adopt_looked_over(
+                &self.model.simulation,
+                analysis,
+                index,
+                (verdict, digest),
+            ),
         }
     }
 }
