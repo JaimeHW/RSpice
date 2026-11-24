@@ -2716,23 +2716,42 @@ impl VisualizationDocument {
     /// it whole.
     #[must_use]
     pub fn signals_changed_since(&self, generation: u64) -> Option<Vec<(PaneId, &str)>> {
+        self.last_change_since(generation).map(|last| {
+            let Some(last) = last else {
+                return Vec::new();
+            };
+            let present = last.present.iter().filter_map(|trace_id| {
+                self.trace(*trace_id)
+                    .map(|trace| (trace.pane_id, journal::signal_of(trace)))
+            });
+            let gone = last
+                .gone
+                .iter()
+                .map(|(pane_id, signal)| (*pane_id, signal.as_str()));
+            present.chain(gone).collect()
+        })
+    }
+
+    /// Whether the document changed any pane's event-lane order or buses
+    /// since it held the content `generation` named; `None` as for
+    /// [`Self::signals_changed_since`].
+    #[must_use]
+    pub fn event_lanes_changed_since(&self, generation: u64) -> Option<bool> {
+        self.last_change_since(generation)
+            .map(|last| last.is_some_and(|last| last.lanes))
+    }
+
+    /// The one change since the content `generation` named: `Some(None)`
+    /// when the document holds it still, `None` when more lies between.
+    fn last_change_since(&self, generation: u64) -> Option<Option<&journal::LastChange>> {
         if generation == self.changes.generation {
-            return Some(Vec::new());
+            return Some(None);
         }
-        let last = self
-            .changes
+        self.changes
             .last
             .as_ref()
-            .filter(|last| last.from == generation)?;
-        let present = last.present.iter().filter_map(|trace_id| {
-            self.trace(*trace_id)
-                .map(|trace| (trace.pane_id, journal::signal_of(trace)))
-        });
-        let gone = last
-            .gone
-            .iter()
-            .map(|(pane_id, signal)| (*pane_id, signal.as_str()));
-        Some(present.chain(gone).collect())
+            .filter(|last| last.from == generation)
+            .map(Some)
     }
 
     #[must_use]

@@ -104,6 +104,7 @@ impl VisualizationDocument {
                 from: self.changes.generation,
                 present,
                 gone,
+                lanes: self.user_buses.is_touched() || self.event_lane_orders.is_touched(),
             }),
         };
     }
@@ -134,6 +135,8 @@ pub(super) struct LastChange {
     /// The pane and signal of each trace it took out, and of each trace it
     /// moved to another pane or signal as it stood before.
     pub(super) gone: Vec<(PaneId, String)>,
+    /// Whether it changed the event lanes' order or buses of any pane.
+    pub(super) lanes: bool,
 }
 
 impl Changes {
@@ -153,6 +156,7 @@ impl Changes {
                 from: self.generation,
                 present: Vec::new(),
                 gone: Vec::new(),
+                lanes: false,
             }),
         };
     }
