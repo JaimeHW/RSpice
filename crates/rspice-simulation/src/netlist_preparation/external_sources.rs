@@ -286,7 +286,7 @@ fn scan_deferred_external_sources(
     PreparationError::check_abort(abort)?;
     for_each_logical_line(netlist, |line_number, logical_line| {
         read += 1;
-        if read % RECORDS_PER_ABORT_POLL == 0 {
+        if read.is_multiple_of(RECORDS_PER_ABORT_POLL) {
             PreparationError::check_abort(abort)?;
         }
         if !may_name_an_external_source(logical_line) {

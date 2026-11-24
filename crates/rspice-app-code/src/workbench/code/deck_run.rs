@@ -57,7 +57,9 @@ use rspice_simulation::preparation::PreparationError;
 /// is prepared. `None` when there is no deck to take, or its files held the
 /// press, which the notices have said; an empty deck is not taken either,
 /// and the notice says it is empty.
-fn take_deck(cx: &mut Cx<'_, SourceFeature>) -> Option<(ManualDeckCopy, Vec<deck_files::EditedFile>)> {
+fn take_deck(
+    cx: &mut Cx<'_, SourceFeature>,
+) -> Option<(ManualDeckCopy, Vec<deck_files::EditedFile>)> {
     // A deck still being read is the deck Run runs once it is read.
     if let Some(refusal) = land_deck_read(cx) {
         cx.wb.prompt(refusal);
@@ -68,18 +70,19 @@ fn take_deck(cx: &mut Cx<'_, SourceFeature>) -> Option<(ManualDeckCopy, Vec<deck
     }
     // A file changed on disk under edits holds the press until the reader
     // answers for it.
-    let edited = match deck_files::sync_before_run(cx.model, &mut cx.state.netlist, cx.wb.messages()) {
-        Ok(deck_files::BeforeRun { notices, edited }) => {
-            for notice in notices {
-                cx.wb.prompt(notice);
+    let edited =
+        match deck_files::sync_before_run(cx.model, &mut cx.state.netlist, cx.wb.messages()) {
+            Ok(deck_files::BeforeRun { notices, edited }) => {
+                for notice in notices {
+                    cx.wb.prompt(notice);
+                }
+                edited
             }
-            edited
-        }
-        Err(why) => {
-            cx.wb.prompt(why);
-            return None;
-        }
-    };
+            Err(why) => {
+                cx.wb.prompt(why);
+                return None;
+            }
+        };
     // The deck's text is shared with the deck, not copied.
     let deck = manual_deck_in(&cx.state.netlist).map(ManualDeckCopy::of)?;
     // An empty deck has nothing to read: it comes to the front and the

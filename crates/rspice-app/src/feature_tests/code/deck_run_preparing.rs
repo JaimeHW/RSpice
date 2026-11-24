@@ -193,7 +193,10 @@ fn check_while_preparing_behaves_as_run_does() {
 
     app.execute_command_key(ids::STOP_SIMULATION);
     assert!(app.state.runs.preparing_deck.is_none());
-    assert_eq!(app.state.prompt_text(), Some("Stopped checking amp_tb.cir."));
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("Stopped checking amp_tb.cir.")
+    );
     release(hold);
     for _ in 0..2 {
         frame(&ctx, &mut app, DESKTOP);
