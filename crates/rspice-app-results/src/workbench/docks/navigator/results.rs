@@ -1035,12 +1035,13 @@ pub(super) fn follow_ticks(
             .iter()
             .filter_map(|dataset| simulation.retained.run_by_dataset_id(*dataset))
             .collect::<Vec<_>>();
-        // Each analysis of the active run, with the analyses of the runs
-        // overlaid on it, as a whole read pairs them.
+        // Each analysis of the active run with its index, and the analyses of
+        // the runs overlaid on it with theirs, as a whole read pairs them.
         let analyses = active
             .analyses
             .iter()
             .map(|analysis| {
+                let key = AnalysisPresentationKey::new(active.dataset_id, analysis);
                 let overlays = overlaid
                     .iter()
                     .filter_map(|run| {
@@ -1048,32 +1049,38 @@ pub(super) fn follow_ticks(
                             analysis.as_ref(),
                             run,
                         )?;
-                        Some((AnalysisPresentationKey::new(run.dataset_id, other), other))
+                        let other_key = AnalysisPresentationKey::new(run.dataset_id, other);
+                        Some((other_key, other, indices.index(&revision, other_key, other)))
                     })
                     .collect::<Vec<_>>();
                 (
-                    AnalysisPresentationKey::new(active.dataset_id, analysis),
+                    key,
                     analysis,
+                    indices.index(&revision, key, &analysis.data),
                     overlays,
                 )
             })
             .collect::<Vec<_>>();
-        // Whether a whole read ticks the signal `name` of the active run's
-        // analysis `at`: one of its columns of that name is on the plot.
-        let plotted = |at: usize, name: &str| -> Option<bool> {
-            let (key, analysis, _) = &analyses[at];
-            let index = indices.index(&revision, *key, &analysis.data)?;
-            let signal = SourceWaveformPresentationKey::new(*key, name);
-            Some(index.columns_named(&analysis.data, name).any(|column| {
-                let waveform = &analysis.waveforms[column];
-                crate::workbench::documents::result_document::waveform_plotted(
-                    state.model,
-                    state.results,
-                    &signal,
-                    &waveform.name,
-                    waveform.visible,
-                )
-            }))
+        // Whether a whole read ticks `signal` of the active run's analysis
+        // `at`: one of its columns of that name is on the plot.
+        let plotted = |at: usize, signal: &SourceWaveformPresentationKey| -> Option<bool> {
+            let (_, analysis, index, _) = &analyses[at];
+            let name = signal.source_name();
+            Some(
+                index
+                    .as_ref()?
+                    .columns_named(&analysis.data, name)
+                    .any(|column| {
+                        let waveform = &analysis.waveforms[column];
+                        crate::workbench::documents::result_document::waveform_plotted(
+                            state.model,
+                            state.results,
+                            signal,
+                            &waveform.name,
+                            waveform.visible,
+                        )
+                    }),
+            )
         };
         let ticked = std::sync::Arc::make_mut(&mut kept.ticked);
         let mut events = HashSet::new();
@@ -1085,7 +1092,7 @@ pub(super) fn follow_ticks(
                 // Another run's ticks: a whole read reads the active run's.
                 continue;
             };
-            let (_, analysis, overlays) = &analyses[at];
+            let (_, analysis, _, overlays) = &analyses[at];
             if matches!(
                 analysis.result_payload,
                 Some(crate::state::AnalysisResultPayload::TransientEvents { .. })
@@ -1093,15 +1100,15 @@ pub(super) fn follow_ticks(
                 events.insert(at);
             }
             let name = signal.source_name();
-            let on = plotted(at, name)?;
+            let on = plotted(at, signal)?;
             let own = ResultBrowserSelectionKey::Waveform(signal.clone());
             if on {
                 ticked.insert(own);
             } else if !checked.contains(&own) {
                 ticked.remove(&own);
             }
-            for (other_key, other) in overlays {
-                let overlays = match indices.index(&revision, *other_key, other) {
+            for (other_key, other, other_index) in overlays {
+                let overlays = match other_index {
                     Some(index) => index.columns_named(other, name).next().is_some(),
                     None => other.waveforms.iter().any(|waveform| waveform.name == name),
                 };
@@ -1115,11 +1122,15 @@ pub(super) fn follow_ticks(
                 // one may still plot the signal there.
                 let still = on
                     || checked.contains(&overlay)
-                    || analyses.iter().enumerate().any(|(place, (_, _, others))| {
-                        place != at
-                            && others.iter().any(|(key, _)| key == other_key)
-                            && plotted(place, name) == Some(true)
-                    });
+                    || analyses
+                        .iter()
+                        .enumerate()
+                        .any(|(place, (key, _, _, others))| {
+                            place != at
+                                && others.iter().any(|(other, ..)| other == other_key)
+                                && plotted(place, &SourceWaveformPresentationKey::new(*key, name))
+                                    == Some(true)
+                        });
                 if still {
                     ticked.insert(overlay);
                 } else {
@@ -1130,7 +1141,7 @@ pub(super) fn follow_ticks(
         // An event analysis's rows are read again as a whole read reads
         // them: an edit of a net may tick or untick a bus that holds it.
         for at in events {
-            let (key, analysis, _) = &analyses[at];
+            let (key, analysis, ..) = &analyses[at];
             for artifact in retained_result_artifacts(analysis, *key) {
                 if !is_plottable_artifact(artifact.identity.canonical_name()) {
                     continue;
