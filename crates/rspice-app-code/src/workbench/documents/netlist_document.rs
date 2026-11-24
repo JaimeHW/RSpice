@@ -70,14 +70,14 @@ enum OwnedNetlistReplacementTarget {
 }
 
 /// One replacement in the open deck or an include file open beside it,
-/// prepared before any file changes. The original digest prevents a stale
-/// search result from changing newer text.
+/// prepared before any file changes. The original text prevents a stale
+/// search result from changing newer text: the file must still hold it.
+/// Both texts are shared, with the file and the history, not copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedNetlistReplacement {
     target: OwnedNetlistReplacementTarget,
-    original: String,
-    expected_digest: crate::product::ContentDigest,
-    replacement: String,
+    original: crate::state::RevisedText,
+    replacement: crate::state::RevisedText,
     replacement_count: usize,
 }
 
@@ -86,9 +86,8 @@ impl OwnedNetlistReplacement {
     pub fn root(original: &str, replacement: String, replacement_count: usize) -> Self {
         Self {
             target: OwnedNetlistReplacementTarget::Root,
-            original: original.to_owned(),
-            expected_digest: crate::state::content_digest(original),
-            replacement,
+            original: original.into(),
+            replacement: replacement.into(),
             replacement_count,
         }
     }
@@ -102,8 +101,27 @@ impl OwnedNetlistReplacement {
     ) -> Self {
         Self {
             target: OwnedNetlistReplacementTarget::Dependency(logical_identity.into()),
-            original: original.to_owned(),
-            expected_digest: crate::state::content_digest(original),
+            original: original.into(),
+            replacement: replacement.into(),
+            replacement_count,
+        }
+    }
+
+    /// `replacement` in place of `original` in the file `include` names (the
+    /// deck for `None`), both texts shared rather than copied: a file read
+    /// again from disk, its tab's text the original.
+    #[must_use]
+    pub(crate) fn of_texts(
+        include: Option<&str>,
+        original: crate::state::RevisedText,
+        replacement: crate::state::RevisedText,
+        replacement_count: usize,
+    ) -> Self {
+        Self {
+            target: include.map_or(OwnedNetlistReplacementTarget::Root, |key| {
+                OwnedNetlistReplacementTarget::Dependency(key.to_owned())
+            }),
+            original,
             replacement,
             replacement_count,
         }
@@ -123,7 +141,6 @@ impl OwnedNetlistReplacement {
         Self {
             target: self.target.clone(),
             original: self.replacement.clone(),
-            expected_digest: crate::state::content_digest(&self.replacement),
             replacement: self.original.clone(),
             replacement_count: self.replacement_count,
         }
@@ -237,7 +254,9 @@ fn replace_deck_files_impl(
         let file = deck
             .file(replacement.include())
             .ok_or(DeckEditRefusal::FileClosed)?;
-        if crate::state::content_digest(&file.text) != replacement.expected_digest {
+        // The text the replacement was prepared from, told at once by its
+        // revision when the file still holds that very text.
+        if !file.text.same_text(&replacement.original) {
             return Err(DeckEditRefusal::FileChanged);
         }
     }
@@ -247,7 +266,7 @@ fn replace_deck_files_impl(
         .sum::<usize>();
     for replacement in &applied {
         if let Some(file) = deck.file_mut(replacement.include()) {
-            file.edit(replacement.replacement.clone());
+            file.edit_to(&replacement.replacement);
         }
         super::deck_files::keep_stored_edit(model, deck, replacement.include());
     }
