@@ -1,9 +1,8 @@
 //! A deck read away from the frame, as the application reads one: the first
-//! frame after the read opens it. A file opened from disk is read before a
-//! project is made around it or lists it, so a file that is not there is
-//! refused at once and one that does not read as text leaves nothing
-//! behind; a deck the project lists has its tab in front at once, saying it
-//! is reading.
+//! frame after the read opens it, and its tab is in front at once, saying it
+//! is reading, whether it was opened from disk or from the project's list.
+//! A file that is not there is refused at once, and one that does not read
+//! as text leaves nothing behind.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -40,9 +39,9 @@ fn until_taken(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
 }
 
-/// A deck file opened in a project of its own, read before the project is
-/// made, then a deck the project keeps opened from its list, whose tab is
-/// in front at once, reading: a later frame shows each one's text.
+/// A deck file opened in a project of its own, then a deck the project
+/// keeps opened from its list: each one's tab is in front at once, reading,
+/// and a later frame shows its text.
 #[test]
 fn a_deck_read_away_from_the_frame_opens_on_a_later_frame() {
     deck_files::read_decks_away_here();
@@ -68,12 +67,10 @@ fn a_deck_read_away_from_the_frame_opens_on_a_later_frame() {
         app.state.code.netlist.open_deck.is_none(),
         "read on the frame"
     );
-    assert!(
-        app.state.model.workspace.content.decks.is_empty(),
-        "listed before it read"
-    );
-    until_open(&ctx, &mut app);
     let id = app.state.model.workspace.content.decks[0].id;
+    assert_eq!(app.state.code.netlist.front, NetlistTab::Deck(id));
+    assert!(deck_files::reading_deck_in_front(&app.state.code.netlist));
+    until_open(&ctx, &mut app);
     frame(&ctx, &mut app, DESKTOP);
     assert_eq!(
         app.state.model.simulation.source.netlist_content.as_str(),
@@ -117,12 +114,12 @@ fn a_deck_read_away_from_the_frame_opens_on_a_later_frame() {
     let _ = std::fs::remove_dir_all(folder);
 }
 
-/// A file that opens but does not read as text is refused once it is read,
-/// naming it: opened with no project open it leaves no project, and opened
-/// into a project it leaves the project's decks and its open deck as they
-/// were.
+/// A file that opens but does not read as text shows its tab, reading, and
+/// is refused once it is read, naming it: its tab goes; opened with no
+/// project open it leaves no project, and opened into a project it leaves
+/// the project's decks, its open deck and the deck in front as they were.
 #[test]
-fn a_deck_that_does_not_decode_leaves_no_project() {
+fn a_deck_that_does_not_decode_leaves_no_tab_and_no_project() {
     deck_files::read_decks_away_here();
     let folder = unique_temp_dir("deck-not-text");
     let garbled = folder.join("garbled.cir");
@@ -137,13 +134,18 @@ fn a_deck_that_does_not_decode_leaves_no_project() {
     assert!(!app.state.platform.project_lifecycle.is_open());
 
     assert!(app.state.open_deck_at(&garbled, true));
+    assert!(deck_files::reading_deck_in_front(&app.state.code.netlist));
     until_taken(&ctx, &mut app);
     frame(&ctx, &mut app, DESKTOP);
     assert!(
         !app.state.platform.project_lifecycle.is_open(),
-        "no project is made for it"
+        "no project is left for it"
     );
     assert!(app.state.model.workspace.content.decks.is_empty());
+    assert!(
+        app.state.code.netlist.reading_deck.is_none(),
+        "its tab goes"
+    );
     assert!(
         app.state
             .prompt_text()
@@ -156,6 +158,7 @@ fn a_deck_that_does_not_decode_leaves_no_project() {
     until_open(&ctx, &mut app);
     let id = app.state.model.workspace.content.decks[0].id;
     assert!(app.state.open_deck_at(&garbled, false));
+    assert!(deck_files::reading_deck_in_front(&app.state.code.netlist));
     until_taken(&ctx, &mut app);
     frame(&ctx, &mut app, DESKTOP);
     assert!(app.state.platform.project_lifecycle.is_open());
@@ -183,6 +186,14 @@ fn a_deck_that_does_not_decode_leaves_no_project() {
     assert_eq!(
         app.state.model.simulation.source.netlist_content.as_str(),
         FILE_DECK
+    );
+    assert_eq!(app.state.code.netlist.front, NetlistTab::Deck(id));
+    assert!(
+        app.state
+            .prompt_text()
+            .is_some_and(|said| said.contains("garbled.cir")),
+        "{:?}",
+        app.state.prompt_text()
     );
     let _ = std::fs::remove_dir_all(folder);
 }

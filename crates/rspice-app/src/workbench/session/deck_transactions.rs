@@ -2,11 +2,13 @@
 //!
 //! A deck is a file on the desktop. Opening one adds it to the open
 //! project's decks and brings it to the front of the Netlist page; with no
-//! project open, a new project is made around it first. Both happen on a
+//! project open, a new project is made around it first. A file that cannot
+//! be read changes nothing. Read on the frame that opens it, both happen on a
 //! copy of the whole application state that replaces it only once the deck
-//! has opened, so a file that cannot be read changes nothing. The
-//! application reads the file away from the frame first, and does both on
-//! the frame its read lands in.
+//! has opened. The application reads the file away from the frame instead,
+//! its tab in front at once saying it is reading: a file that then does not
+//! read as text is let go, and a project made for it gives way to what was
+//! there before.
 
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
@@ -634,15 +636,13 @@ impl AppState {
 
     /// Open the deck file at `path`, in a new project around it when
     /// `new_project` says so, else in the open project. The application
-    /// reads the file away from the frame first: a later frame opens it
-    /// ([`Self::poll_deck_open`]), and a file that does not open is refused
-    /// now.
+    /// reads the file away from the frame ([`Self::read_deck_away`]); a file
+    /// that does not open is refused now.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn open_deck_at(&mut self, path: &std::path::Path, new_project: bool) -> bool {
         if !self.may_open_deck(new_project) {
             return false;
         }
-        let messages = self.workbench.messages();
         let shown = std::path::absolute(path).is_ok_and(|path| {
             self.code
                 .netlist
@@ -651,20 +651,8 @@ impl AppState {
                 .is_some_and(|open| open.root.path == path)
         });
         // The deck already open comes to the front without a second read.
-        if !shown {
-            match rspice_app_code::workbench::documents::deck_files::read_deck_file_away(
-                path, messages,
-            ) {
-                Some(Ok(read)) => {
-                    self.shell.opening_deck = Some((read, new_project));
-                    return true;
-                }
-                Some(Err(refusal)) => {
-                    self.prompt(refusal);
-                    return false;
-                }
-                None => {}
-            }
+        if !shown && rspice_app_code::workbench::documents::deck_files::reads_decks_away() {
+            return self.read_deck_away(path, new_project);
         }
         self.open_deck_with(path, new_project, |candidate, messages| {
             rspice_app_code::workbench::documents::deck_files::open_deck(
@@ -678,43 +666,107 @@ impl AppState {
         })
     }
 
-    /// Open the deck file read away from the frame once its read is done,
-    /// as [`Self::open_deck_at`] opens one. A file that did not read as text
-    /// is refused, and nothing was made or listed for it.
+    /// Open the deck file at `path` as the application does: read away from
+    /// the frame, with its tab in front at once, saying it is reading, as a
+    /// deck the project lists is opened, in a project made around it now
+    /// when `new_project` says so. Should the file not read as text, the
+    /// frame its read lands in lets it go, and a project made for it gives
+    /// way to what was there before ([`Self::poll_deck_open`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_deck_away(&mut self, path: &std::path::Path, new_project: bool) -> bool {
+        use rspice_app_code::workbench::documents::deck_files;
+        let messages = self.workbench.messages();
+        if let Some(refusal) = deck_files::deck_file_refusal(path, messages) {
+            self.prompt(refusal);
+            return false;
+        }
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        // What comes back should the file not read: the state before the
+        // project made for it, or for a deck still read into a project made
+        // for that one.
+        let opening = self.shell.opening_deck.take().filter(|opening| {
+            self.code
+                .netlist
+                .reading_deck
+                .as_ref()
+                .is_some_and(|reading| reading.id == opening.id)
+        });
+        let before = opening
+            .and_then(|opening| opening.before)
+            .or_else(|| new_project.then(|| Box::new(self.clone())));
+        if new_project {
+            self.create_netlist_project(&name);
+        }
+        match deck_files::read_deck_file_away(
+            &mut self.model,
+            &mut self.code.netlist,
+            &mut self.code.netlist_open_documents,
+            path,
+            messages,
+        ) {
+            Ok(id) => {
+                self.workbench
+                    .activate(rspice_app_state::workbench::workspace::Workspace::Netlist);
+                self.shell.opening_deck = Some(OpeningDeck { id, name, before });
+                true
+            }
+            Err(refusal) => {
+                if let Some(before) = before {
+                    self.commit_candidate(*before);
+                }
+                self.prompt(refusal);
+                false
+            }
+        }
+    }
+
+    /// Follow a deck file opened from disk until its read lands: once it
+    /// opened, the log says so. Should its file not have read as text, its
+    /// open was undone as the read landed; a project made for it gives way
+    /// now to what was there before, and the page says why.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn poll_deck_open(&mut self) {
-        let messages = self.workbench.messages();
-        let Some(read) = self
-            .shell
-            .opening_deck
+        let Some(id) = self.shell.opening_deck.as_ref().map(|opening| opening.id) else {
+            return;
+        };
+        if self
+            .code
+            .netlist
+            .reading_deck
             .as_ref()
-            .and_then(|(reading, _)| reading.landed(false, messages))
-        else {
-            return;
-        };
-        let Some((reading, new_project)) = self.shell.opening_deck.take() else {
-            return;
-        };
-        let root = match read {
-            Ok(root) => root,
-            Err(refusal) => {
-                self.prompt(refusal);
-                return;
-            }
-        };
-        if !self.may_open_deck(new_project) {
+            .is_some_and(|reading| reading.id == id)
+        {
             return;
         }
-        self.open_deck_with(reading.path(), new_project, |candidate, messages| {
-            rspice_app_code::workbench::documents::deck_files::open_read_deck(
-                &mut candidate.model,
-                &mut candidate.code.netlist,
-                &mut candidate.code.netlist_open_documents,
-                &mut candidate.runs,
-                root,
-                messages,
-            )
-        });
+        let Some(opening) = self.shell.opening_deck.take() else {
+            return;
+        };
+        let refused = self.code.netlist.refused_open.take();
+        if let Some((_, refusal)) = refused.filter(|(refused, _)| *refused == id) {
+            if let Some(before) = opening.before {
+                self.commit_candidate(*before);
+                self.shell.opening_deck = None;
+            }
+            self.prompt(refusal);
+            return;
+        }
+        if self
+            .code
+            .netlist
+            .open_deck
+            .as_ref()
+            .is_some_and(|deck| deck.id == id)
+        {
+            let messages = self.workbench.messages();
+            self.record(
+                LogSeverity::Info,
+                LogSource::Netlist,
+                messages.format(MessageId::NetlistOpenedDeck, &[("name", &opening.name)]),
+            );
+        }
     }
 
     /// Whether a deck may open now, else the page says why not: no run in
@@ -856,6 +908,32 @@ impl AppState {
         std::fs::write(&path, source).expect("test deck written");
         let new_project = !self.platform.project_lifecycle.is_open();
         self.open_deck_at(&path, new_project)
+    }
+}
+
+/// A deck file opened from disk while it is read away from the frame.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub(crate) struct OpeningDeck {
+    /// The deck, whose tab is in front saying it is reading.
+    pub(crate) id: rspice_app_state::state::DeckId,
+    /// Its file's name, which the log says once it opened.
+    name: String,
+    /// What stood before the project made around it, which comes back
+    /// should its file not read as text; `None` when it opened into the
+    /// project open before.
+    before: Option<Box<AppState>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::fmt::Debug for OpeningDeck {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OpeningDeck")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("made_a_project", &self.before.is_some())
+            .finish()
     }
 }
 

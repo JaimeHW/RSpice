@@ -760,6 +760,10 @@ pub struct NetlistDocumentState {
     /// the machine had no memory free for, until the reader asks for them.
     /// Read through [`NetlistDocumentState::language_off`].
     pub(crate) language_off: Option<super::deck_memory::LanguageOff>,
+    /// A deck file opened from disk that did not read as text, and why: its
+    /// open was undone as its read landed, and the shell gives up a project
+    /// it made around it.
+    pub refused_open: Option<(crate::state::DeckId, String)>,
     /// Whether the reader closed the open deck's tab: the deck stays open,
     /// with any edit not yet saved, until it is shown again.
     pub deck_tab_closed: bool,

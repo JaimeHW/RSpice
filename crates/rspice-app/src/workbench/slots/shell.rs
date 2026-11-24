@@ -28,12 +28,8 @@ pub(crate) struct ShellState {
     /// The commands raised while the editor's keys were pending, carried out
     /// in the order they were raised once the page has drawn.
     pub(crate) held_commands: Vec<rspice_app_state::state::command_catalog::CommandKey>,
-    /// A deck file being read away from the frame before it opens, and
-    /// whether it opens in a project of its own: nothing is made for it, and
-    /// no project lists it, until it has read as text.
+    /// A deck file opened from disk while it is read away from the frame,
+    /// its tab in front saying it is reading.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) opening_deck: Option<(
-        rspice_app_code::workbench::documents::deck_files::DeckFileRead,
-        bool,
-    )>,
+    pub(crate) opening_deck: Option<crate::workbench::session::deck_transactions::OpeningDeck>,
 }

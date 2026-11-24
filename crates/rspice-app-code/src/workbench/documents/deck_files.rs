@@ -1880,7 +1880,7 @@ pub fn remove_deck(
                 &[("file", &unsaved.name()), ("name", &name)],
             ));
         }
-        close_open_deck(model, netlist, open_documents);
+        let _ = close_open_deck(model, netlist, open_documents);
     }
     let content = &mut *model.workspace.content;
     content.decks.retain(|deck| deck.id != id);
@@ -1904,19 +1904,17 @@ pub fn remove_deck(
 }
 
 /// Close the open deck and its tabs; the generated netlist comes to the
-/// front when there is one.
+/// front when there is one. The deck closed.
 fn close_open_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
-) {
-    let Some(previous) = netlist.open_deck.take() else {
-        return;
-    };
-    let previous = previous.tab_id();
-    open_documents.retain(|tab| match tab {
-        WorkspaceDocumentId::NetlistOwned(id) => *id != previous,
-        WorkspaceDocumentId::NetlistDependency { root, .. } => *root != previous,
+) -> Option<OpenDeck> {
+    let previous = netlist.open_deck.take()?;
+    let tab = previous.tab_id();
+    open_documents.retain(|open| match open {
+        WorkspaceDocumentId::NetlistOwned(id) => *id != tab,
+        WorkspaceDocumentId::NetlistDependency { root, .. } => *root != tab,
         _ => true,
     });
     netlist.front = NetlistTab::Generated;
@@ -1928,6 +1926,7 @@ fn close_open_deck(
         .set(model.netlist_artifacts.generated_source.clone());
     netlist.revision = netlist.revision.wrapping_add(1);
     model.invalidate_source_evidence();
+    Some(previous)
 }
 
 /// Locate: the deck `id` is read from `path` from now on, and opens;
@@ -2255,8 +2254,8 @@ fn unused_name(name: &str, taken: &[String]) -> String {
 /// Open the deck at `path`, read on this frame: add it to the project
 /// unless it is one of the project's decks already, and bring it to the
 /// front. The deck open before it goes, so one with unsaved edits stops
-/// this. The application reads the file away from the frame first
-/// ([`read_deck_file_away`]) and opens what it read ([`open_read_deck`]).
+/// this. The application reads the file away from the frame instead
+/// ([`read_deck_file_away`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn open_deck(
     model: &mut Model,
@@ -2297,7 +2296,7 @@ fn shown_if_open(
 
 /// Open `root`, a deck file already read, as [`open_deck`] opens one.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn open_read_deck(
+fn open_read_deck(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
     open_documents: &mut HashSet<WorkspaceDocumentId>,
@@ -2463,7 +2462,7 @@ fn open_project_deck_by_id(
             Ok(())
         }
         Err(error) => {
-            close_open_deck(model, netlist, open_documents);
+            let _ = close_open_deck(model, netlist, open_documents);
             netlist.unreadable_deck = Some(id);
             show_missing_deck(model, netlist, id);
             Err(error)
@@ -2612,6 +2611,13 @@ pub fn read_decks_away_here() {
     READS_AWAY_HERE.set(true);
 }
 
+/// Whether a deck opened now is read away from the frame, as the
+/// application reads one.
+#[must_use]
+pub fn reads_decks_away() -> bool {
+    reads_away()
+}
+
 /// Whether a deck opened now is read away from the frame.
 fn reads_away() -> bool {
     if cfg!(target_arch = "wasm32") {
@@ -2635,7 +2641,25 @@ pub struct DeckRead {
     prompt: bool,
     /// The file a located deck is read from once it reads.
     located: Option<PathBuf>,
+    /// For a deck file opened from disk, what the open changed, undone
+    /// should the file not read as text.
+    from_disk: Option<FromDisk>,
     read: ReadAway<Result<OpenDeck, String>>,
+}
+
+/// What opening a deck file from disk changed before the file was read:
+/// undone should it not read as text, so that nothing it brought stays.
+#[derive(Debug, Clone)]
+struct FromDisk {
+    /// Whether the project listed the deck for this open.
+    listed: bool,
+    /// Whether the project's decks held unsaved changes before it did.
+    decks_dirty: bool,
+    /// The deck open before, which comes back.
+    previous: Option<Box<OpenDeck>>,
+    /// The deck whose file could not be read, open before, which comes
+    /// back.
+    unreadable: Option<DeckId>,
 }
 
 /// What a thread of its own reads, until a frame takes it.
@@ -2712,71 +2736,134 @@ impl DeckRead {
             id,
             prompt,
             located,
+            from_disk: None,
             read,
         })
     }
 }
 
-/// A deck file read away from the frame before anything opens it, so a
-/// file that does not read as text is refused before a project is made
-/// around it or lists it. [`open_read_deck`] opens what it read.
-#[derive(Debug, Clone)]
-pub struct DeckFileRead {
-    path: PathBuf,
-    read: ReadAway<Result<OpenFile, String>>,
+/// Why the deck file at `path` cannot be opened, when it cannot: a file
+/// opened from disk is refused at once, before anything is made for it.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn deck_file_refusal(path: &Path, messages: MessageCatalog) -> Option<String> {
+    std::fs::File::open(path)
+        .err()
+        .map(|error| unreadable(messages, &path.display().to_string(), &error))
 }
 
-impl DeckFileRead {
-    /// The file being read.
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// The file once it is read, waiting for its read when `wait`: `None`
-    /// while it is read.
-    #[must_use]
-    pub fn landed(&self, wait: bool, messages: MessageCatalog) -> Option<Result<OpenFile, String>> {
-        match self.read.landed(wait) {
-            Landed::Reading => None,
-            Landed::Read(read) => Some(read),
-            Landed::Lost => Some(Err(unreadable(
-                messages,
-                &self.path.display().to_string(),
-                &std::io::Error::from(std::io::ErrorKind::Interrupted),
-            ))),
-        }
-    }
-}
-
-/// Read the deck file at `path` away from the frame, as the application
-/// reads one before it opens it: `None` where decks are read on the frame
-/// that opens them. A file that does not open is refused at once.
+/// Open the deck file at `path` as the application opens one: it is read
+/// away from the frame, and its tab is in front at once, saying it is
+/// reading, as a deck opened from the project's list is. The project lists
+/// it while it is read. Should the file not read as text, the frame its read
+/// lands in undoes the open: the project lists it no longer, the deck open
+/// before comes back, and why is kept for the page to say
+/// ([`land_deck_read`]). The deck's identity; a file that does not open is
+/// refused at once, before anything changes.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_deck_file_away(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
     path: &Path,
     messages: MessageCatalog,
-) -> Option<Result<DeckFileRead, String>> {
-    if !reads_away() {
-        return None;
-    }
+) -> Result<DeckId, String> {
     let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let refused =
-        |error: &dyn std::fmt::Display| unreadable(messages, &path.display().to_string(), error);
-    if let Err(error) = std::fs::File::open(&path) {
-        return Some(Err(refused(&error)));
+    if let Some(refusal) = deck_file_refusal(&path, messages) {
+        return Err(refusal);
     }
+    let folder = model
+        .workspace
+        .content
+        .project
+        .data_root()
+        .map(Path::to_path_buf);
+    let listed = model
+        .workspace
+        .content
+        .decks
+        .iter()
+        .find(|deck| deck.is_file(&path, folder.as_deref()))
+        .map(|deck| deck.id);
+    // The deck being read comes to the front, still reading.
+    if let Some(id) = listed
+        && netlist
+            .reading_deck
+            .as_ref()
+            .is_some_and(|reading| reading.id == id)
+    {
+        show_deck_being_read(netlist);
+        return Ok(id);
+    }
+    let (id, added) = match listed {
+        Some(id) => (id, None),
+        None => {
+            let deck = crate::state::ProjectDeck::for_file(&path, folder.as_deref());
+            (deck.id, Some(deck))
+        }
+    };
     let file = path.clone();
-    Some(
-        ReadAway::start(move || {
-            read_file(&file, messages).inspect(|file| file.text.ready_for_editor())
+    let mut reading = DeckRead::start(id, (true, None), move || {
+        read_file(&file, messages).map(|root| OpenDeck {
+            id,
+            root,
+            includes: Vec::new(),
+            stored_files: None,
         })
-        .map_err(|error| refused(&error))
-        .map(|read| DeckFileRead {
-            path: path.clone(),
-            read,
-        }),
-    )
+    })
+    .map_err(|error| unreadable(messages, &path.display().to_string(), &error))?;
+    let content = &mut *model.workspace.content;
+    let decks_dirty = content.decks_dirty;
+    let listed = added.is_some();
+    if let Some(deck) = added {
+        content.decks.push(deck);
+        content.decks_dirty = true;
+    }
+    let unreadable = netlist.unreadable_deck.take();
+    let previous = close_open_deck(model, netlist, open_documents).map(Box::new);
+    reading.from_disk = Some(FromDisk {
+        listed,
+        decks_dirty,
+        previous,
+        unreadable,
+    });
+    netlist.reading_deck = Some(reading);
+    show_deck_being_read(netlist);
+    Ok(id)
+}
+
+/// Undo what opening the deck file `id` from disk changed, its file not
+/// read as text: the project lists it no longer, unless it did before, and
+/// the deck open before comes back, or the deck whose file could not be
+/// read, as it stood.
+fn undo_disk_open(
+    model: &mut Model,
+    netlist: &mut NetlistDocumentState,
+    open_documents: &mut HashSet<WorkspaceDocumentId>,
+    runs: &mut RunsState,
+    id: DeckId,
+    from_disk: FromDisk,
+) {
+    if from_disk.listed {
+        let content = &mut *model.workspace.content;
+        content.decks.retain(|deck| deck.id != id);
+        content.decks_dirty = from_disk.decks_dirty;
+    }
+    netlist.run_the_plan();
+    if let Some(previous) = from_disk.previous {
+        install_open_deck(model, netlist, open_documents, runs, *previous);
+        return;
+    }
+    netlist.unreadable_deck = from_disk.unreadable;
+    let missing = from_disk
+        .unreadable
+        .is_some_and(|missing| show_missing_deck(model, netlist, missing));
+    if !missing
+        && netlist.front == NetlistTab::Deck(id)
+        && !super::netlist_document::open_generated_primary_in(model, netlist)
+    {
+        netlist.front = NetlistTab::Generated;
+    }
 }
 
 /// Read the project's deck `id` away from the frame with `read`. The deck
@@ -2796,7 +2883,7 @@ fn start_reading(
 ) -> Result<(), String> {
     let reading = DeckRead::start(id, said, read)
         .map_err(|error| unreadable(messages, &deck_name(model, id), &error))?;
-    close_open_deck(model, netlist, open_documents);
+    let _ = close_open_deck(model, netlist, open_documents);
     netlist.unreadable_deck = None;
     netlist.reading_deck = Some(reading);
     show_deck_being_read(netlist);
@@ -2852,7 +2939,10 @@ pub fn reading_deck_in_front(netlist: &NetlistDocumentState) -> bool {
 /// then on, which is returned for the page to say. A deck that did not read
 /// is left unreadable, as one read on the frame is: why is returned, as an
 /// error, for the page to say when the reader opened the deck, and the log
-/// says it otherwise.
+/// says it otherwise. A deck file opened from disk that did not read as
+/// text leaves nothing behind ([`read_deck_file_away`]), and why is kept as
+/// well, for the shell, which made a project around it
+/// ([`NetlistDocumentState::refused_open`]).
 pub fn land_deck_read(
     model: &mut Model,
     netlist: &mut NetlistDocumentState,
@@ -2900,6 +2990,11 @@ pub fn land_deck_read(
         }
         Err(error) => {
             let id = reading.id;
+            if let Some(from_disk) = reading.from_disk {
+                undo_disk_open(model, netlist, open_documents, runs, id, from_disk);
+                netlist.refused_open = Some((id, error.clone()));
+                return Some(Err(error));
+            }
             let in_front = netlist.front == NetlistTab::Deck(id);
             netlist.unreadable_deck = Some(id);
             netlist.run_the_plan();
