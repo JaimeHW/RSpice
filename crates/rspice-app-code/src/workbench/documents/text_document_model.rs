@@ -301,10 +301,10 @@ impl TextDocumentModel {
     /// The display cells the widest of `line_count` lines from `start_line`
     /// takes. Most source is ASCII with no tab and no line break but `\n`, a
     /// cell a byte: its lines are measured by the distances between their
-    /// breaks, a piece of the text at a time, so the editor's scan of a long
-    /// text's lines costs a fraction of a millisecond a frame. From the first
-    /// piece that is not, the lines left are measured character by
-    /// character.
+    /// breaks, a piece of the text at a time, and each piece is looked
+    /// through many bytes at a time, so the editor's scan of a long text's
+    /// lines costs a fraction of a millisecond a frame. From the first piece
+    /// that is not, the lines left are measured character by character.
     pub fn maximum_line_cells_in_range(&self, start_line: usize, line_count: usize) -> usize {
         let lines = self.line_count();
         if start_line >= lines || line_count == 0 {
@@ -319,22 +319,23 @@ impl TextDocumentModel {
         };
         let (mut widest, mut line, mut width) = (0, start_line, 0);
         for piece in self.text.byte_slice(start..end).chunks() {
-            if !piece.is_ascii() {
+            // A byte past ASCII, a tab, or a line break other than `\n`
+            // (`\x0B` to `\r`). Folded with no early way out, the look
+            // takes many bytes at a time.
+            let other = piece.bytes().fold(false, |other, byte| {
+                other | (byte >= 0x80) | ((byte.wrapping_sub(b'\t') < 5) & (byte != b'\n'))
+            });
+            if other {
                 return widest.max(self.measured_line_cells(line, end_line - line));
             }
-            for &byte in piece.as_bytes() {
-                match byte {
-                    b'\n' => {
-                        widest = widest.max(width);
-                        width = 0;
-                        line += 1;
-                    }
-                    b'\t' | b'\r' | 0x0B | 0x0C => {
-                        return widest.max(self.measured_line_cells(line, end_line - line));
-                    }
-                    _ => width += 1,
-                }
+            let mut rest = piece;
+            while let Some(at) = rest.find('\n') {
+                widest = widest.max(width + at);
+                width = 0;
+                line += 1;
+                rest = &rest[at + 1..];
             }
+            width += rest.len();
         }
         widest.max(width)
     }
