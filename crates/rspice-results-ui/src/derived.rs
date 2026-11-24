@@ -239,27 +239,36 @@ impl DerivedSeries {
         key: u64,
         x: &SharedWaveformValues,
     ) -> Option<std::sync::Arc<rspice_results::sampling::SweepShape>> {
-        use rspice_results::sampling::SweepShape;
         if let Some(hit) = self.shapes.get(&key) {
             return Some(std::sync::Arc::clone(hit));
         }
-        let shape = if x.is_ascending_axis() {
-            std::sync::Arc::new(SweepShape::ascending(x.len()))
-        } else {
-            let sharing = x.sharing_key();
-            if let Some((_, shape)) = self.axis_shapes.get(&sharing) {
-                std::sync::Arc::clone(shape)
-            } else {
-                let shape = std::sync::Arc::new(match x.in_memory() {
-                    Some(samples) => SweepShape::of(samples),
-                    None => SweepShape::of(&x.fetch_whole().ready()?),
-                });
-                self.axis_shapes
-                    .insert(sharing, (x.clone(), std::sync::Arc::clone(&shape)));
-                shape
-            }
-        };
+        let shape = self.axis_shape(x)?;
         self.shapes.insert(key, std::sync::Arc::clone(&shape));
+        Some(shape)
+    }
+
+    /// The monotone structure of `x`, a curve's X axis, as
+    /// [`Self::axis_shape_or`] finds it, kept for the build alone: every
+    /// curve of the build that shares the axis shares its structure.
+    pub fn axis_shape(
+        &mut self,
+        x: &SharedWaveformValues,
+    ) -> Option<std::sync::Arc<rspice_results::sampling::SweepShape>> {
+        use rspice_results::sampling::SweepShape;
+        let sharing = x.sharing_key();
+        if let Some((_, shape)) = self.axis_shapes.get(&sharing) {
+            return Some(std::sync::Arc::clone(shape));
+        }
+        let shape = std::sync::Arc::new(if x.is_ascending_axis() {
+            SweepShape::ascending(x.len())
+        } else {
+            match x.in_memory() {
+                Some(samples) => SweepShape::of(samples),
+                None => SweepShape::of(&x.fetch_whole().ready()?),
+            }
+        });
+        self.axis_shapes
+            .insert(sharing, (x.clone(), std::sync::Arc::clone(&shape)));
         Some(shape)
     }
 

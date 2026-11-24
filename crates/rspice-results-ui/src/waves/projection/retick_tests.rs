@@ -376,3 +376,73 @@ fn strips_built_without_their_axis_are_built_again_once_it_arrives() {
         });
     });
 }
+
+/// The curves of a tick of many signals, made on the machine's threads,
+/// are the curves the projection makes of them one at a time, in order.
+#[test]
+fn curves_made_on_threads_are_the_ones_made_one_at_a_time() {
+    let run = two_transients(3 * THREAD_SHARE);
+    let analysis = &run.analyses[0];
+    let hidden = HashSet::new();
+    let context = ProjectionContext {
+        analysis_key: AnalysisPresentationKey::new(run.dataset_id, analysis),
+        run_id: run.id,
+        selection_key: 0,
+        sample_selection: None,
+        hidden_family_traces: &hidden,
+        phase_continuous: false,
+    };
+    let columns: Vec<usize> = (1..analysis.waveforms.len()).collect();
+    let mut derived = DerivedSeries::default();
+    let threaded = column_traces(
+        &mut derived,
+        &context,
+        analysis,
+        &columns,
+        AcDisplay::default(),
+    );
+    let mut one_at_a_time = Vec::new();
+    for &column in &columns {
+        append_column_trace(
+            &mut one_at_a_time,
+            &mut derived,
+            &context,
+            analysis,
+            (column, TraceKind::Value),
+            (egui::Color32::TRANSPARENT, None),
+        );
+    }
+    let made = |traces: &[StripTrace]| {
+        traces
+            .iter()
+            .map(|trace| {
+                format!(
+                    "{} {} {} {} {:?} {:?} {:?} {:?} {:?} {} {} {} {} {} {:?} {:?}",
+                    trace.waveform_index,
+                    trace.source_waveform_name,
+                    trace.base_name,
+                    trace.name,
+                    trace.unit,
+                    trace.signal_color,
+                    trace.color,
+                    trace.palette_slot,
+                    trace.shape,
+                    trace.kind as u8,
+                    trace.visible,
+                    trace.run_id,
+                    trace.overlay,
+                    trace.presentation_key,
+                    trace.family_group_ordinal,
+                    trace.family_visibility_key,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(made(&threaded), made(&one_at_a_time));
+    assert!(
+        threaded.iter().zip(&one_at_a_time).all(|(a, b)| {
+            SharedWaveformValues::ptr_eq(&a.x, &b.x) && SharedWaveformValues::ptr_eq(&a.y, &b.y)
+        }),
+        "a curve made on a thread reads other samples"
+    );
+}

@@ -2,7 +2,7 @@
 
 use super::{
     AnalysisPresentationKey, ProjectionContext, ProjectionOptions, StripModel, StripTrace,
-    append_column_trace, column_kind,
+    column_traces,
 };
 use crate::derived::DerivedSeries;
 use crate::session::WaveformLook;
@@ -112,24 +112,12 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
             hidden_family_traces: with.options.hidden_family_traces,
             phase_continuous: with.options.phase_continuous,
         };
-        let mut fresh = Vec::with_capacity(added.len());
-        for column in added {
-            let kind = column_kind(analysis, &analysis.waveforms[column], with.options.ac);
-            let before = fresh.len();
-            // Placed in the palette once the strip is ranked below.
-            append_column_trace(
-                &mut fresh,
-                derived,
-                &context,
-                analysis,
-                (column, kind),
-                (egui::Color32::TRANSPARENT, None),
-            );
-            if fresh.len() != before + 1 {
-                // A column drawn as other than one curve is placed in the
-                // palette by a build, which counts its curves by source.
-                return None;
-            }
+        // Placed in the palette once the strip is ranked below.
+        let fresh = column_traces(derived, &context, analysis, &added, with.options.ac);
+        if fresh.len() != added.len() {
+            // A column drawn as other than one curve is placed in the
+            // palette by a build, which counts its curves by source.
+            return None;
         }
         changes.push((place, fresh, taken));
     }

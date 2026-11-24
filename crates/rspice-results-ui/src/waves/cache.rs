@@ -441,8 +441,11 @@ pub(crate) fn drawn_color(
     stored: &str,
     hue: egui::Color32,
 ) -> egui::Color32 {
-    colors
-        .get(&SourceWaveformPresentationKey::new(analysis, signal))
+    // A view that gives no colour asks for none: a strip ranks a hundred
+    // thousand curves.
+    (!colors.is_empty())
+        .then(|| colors.get(&SourceWaveformPresentationKey::new(analysis, signal)))
+        .flatten()
         .map_or_else(
             || crate::presentation::trace_color(stored, hue),
             |color| crate::presentation::chosen_trace_color(*color),

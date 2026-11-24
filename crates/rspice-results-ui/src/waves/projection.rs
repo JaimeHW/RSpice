@@ -299,27 +299,16 @@ fn append_projected_traces(
         run_id,
         selection_key,
         sample_selection,
-        hidden_family_traces,
         phase_continuous,
+        ..
     } = context;
-    let TraceSource {
-        waveform_index,
-        source_waveform_name,
-        base_name,
-        source_unit,
-        signal_color,
-        palette_slot,
-        kind,
-        source_x,
-        source_y,
-        visible,
-    } = source;
-    for projection in projected_family_series(source_x, source_y, sample_selection) {
+    for projection in projected_family_series(source.source_x, source.source_y, sample_selection) {
         let presentation_key = projection.group.map_or(0, |group| group.stable_key);
-        let derived_key = stable_hash(&(analysis_key, source_waveform_name, kind as u8))
-            ^ selection_key
-            ^ presentation_key.rotate_left(23);
-        let y = match kind {
+        let derived_key =
+            stable_hash(&(analysis_key, source.source_waveform_name, source.kind as u8))
+                ^ selection_key
+                ^ presentation_key.rotate_left(23);
+        let y = match source.kind {
             TraceKind::MagnitudeDb => derived.db(derived_key, &projection.y),
             TraceKind::NoiseDensity => derived.noise_density_nv(derived_key, &projection.y),
             TraceKind::PhaseDeg => {
@@ -327,56 +316,192 @@ fn append_projected_traces(
             }
             _ => projection.y,
         };
-        let family_style = projection.group.map(|group| group.style);
-        let family_visibility_key = projection.group.map(|group| {
-            FamilyTraceVisibilityKey::new(
-                analysis_key,
-                group.stable_key,
-                source_waveform_name,
-                kind,
-            )
-        });
-        let name = projection.group.map_or_else(
-            || base_name.to_owned(),
-            |group| format!("{base_name} · {}", group.label),
-        );
         let shape = curve_shape(
             derived,
             shape_key(
                 analysis_key,
-                source_waveform_name,
-                kind,
+                source.source_waveform_name,
+                source.kind,
                 presentation_key,
                 run_id,
                 false,
             ),
             &projection.x,
         );
-        traces.push(StripTrace {
-            waveform_index,
-            source_waveform_name: source_waveform_name.to_owned(),
-            base_name: base_name.to_owned(),
-            name,
-            unit: source_unit.map(str::to_owned),
-            signal_color,
-            color: family_style.map_or(signal_color, |style| family_color(style, signal_color)),
-            palette_slot: palette_slot
-                .filter(|_| family_style.is_none_or(|style| style.color.is_none())),
-            x: projection.x,
-            y,
+        traces.push(projected_trace(
+            context,
+            &source,
+            projection.group,
+            (projection.x, y),
             shape,
-            kind,
-            visible: visible
-                && family_visibility_key.is_none_or(|key| !hidden_family_traces.contains(&key)),
-            run_id,
-            overlay: false,
-            presentation_key,
-            family_group_ordinal: projection.group.map(|group| group.ordinal),
-            family_style,
-            family_visibility_key,
-            style: Default::default(),
-        });
+        ));
     }
+}
+
+/// One curve of `source` as a strip draws it: of the family member `group`
+/// when it is one, over the X and Y series `(x, y)`, with the shape of `x`.
+fn projected_trace(
+    context: &ProjectionContext<'_>,
+    source: &TraceSource<'_>,
+    group: Option<&FamilyRenderGroup>,
+    (x, y): (SharedWaveformValues, SharedWaveformValues),
+    shape: Arc<SweepShape>,
+) -> StripTrace {
+    let &TraceSource {
+        waveform_index,
+        source_waveform_name,
+        base_name,
+        source_unit,
+        signal_color,
+        palette_slot,
+        kind,
+        visible,
+        ..
+    } = source;
+    let family_style = group.map(|group| group.style);
+    let family_visibility_key = group.map(|group| {
+        FamilyTraceVisibilityKey::new(
+            context.analysis_key,
+            group.stable_key,
+            source_waveform_name,
+            kind,
+        )
+    });
+    let name = group.map_or_else(
+        || base_name.to_owned(),
+        |group| format!("{base_name} · {}", group.label),
+    );
+    StripTrace {
+        waveform_index,
+        source_waveform_name: source_waveform_name.to_owned(),
+        base_name: base_name.to_owned(),
+        name,
+        unit: source_unit.map(str::to_owned),
+        signal_color,
+        color: family_style.map_or(signal_color, |style| family_color(style, signal_color)),
+        palette_slot: palette_slot
+            .filter(|_| family_style.is_none_or(|style| style.color.is_none())),
+        x,
+        y,
+        shape,
+        kind,
+        visible: visible
+            && family_visibility_key.is_none_or(|key| !context.hidden_family_traces.contains(&key)),
+        run_id: context.run_id,
+        overlay: false,
+        presentation_key: group.map_or(0, |group| group.stable_key),
+        family_group_ordinal: group.map(|group| group.ordinal),
+        family_style,
+        family_visibility_key,
+        style: Default::default(),
+    }
+}
+
+/// The fewest curves a thread of [`column_traces`] is given: one is made
+/// in a few hundred nanoseconds, so fewer are made sooner by the caller
+/// than a thread starts.
+const THREAD_SHARE: usize = 4096;
+
+/// The curves of the `columns` of `analysis`, in their order, each drawn as
+/// one curve of its own with no place in the palette yet, as
+/// [`append_column_trace`] draws it with no sample selection. A tick of a
+/// hundred thousand signals makes as many curves: the curves of plain
+/// values are made on the machine's threads, each axis they share
+/// classified once, here.
+fn column_traces(
+    derived: &mut DerivedSeries,
+    context: &ProjectionContext<'_>,
+    analysis: &AnalysisResult<RetainedTrace>,
+    columns: &[usize],
+    ac: AcDisplay,
+) -> Vec<StripTrace> {
+    let kinds: Vec<TraceKind> = columns
+        .iter()
+        .map(|&column| column_kind(analysis, &analysis.waveforms[column], ac))
+        .collect();
+    if context.sample_selection.is_some() || kinds.iter().any(|&kind| kind != TraceKind::Value) {
+        // A family member, or a series derived from the column, is made by
+        // the projection.
+        let mut traces = Vec::with_capacity(columns.len());
+        for (&column, kind) in columns.iter().zip(kinds) {
+            append_column_trace(
+                &mut traces,
+                derived,
+                context,
+                analysis,
+                (column, kind),
+                (egui::Color32::TRANSPARENT, None),
+            );
+        }
+        return traces;
+    }
+    let empty = Arc::new(SweepShape::of(&[]));
+    let mut before: Option<(&SharedWaveformValues, Arc<SweepShape>)> = None;
+    let shapes: Vec<Arc<SweepShape>> = columns
+        .iter()
+        .map(|&column| {
+            let x = &analysis.waveforms[column].x;
+            if let Some((axis, shape)) = &before
+                && SharedWaveformValues::ptr_eq(axis, x)
+            {
+                return Arc::clone(shape);
+            }
+            let shape = derived.axis_shape(x).unwrap_or_else(|| Arc::clone(&empty));
+            before = Some((x, Arc::clone(&shape)));
+            shape
+        })
+        .collect();
+    let one = |(&column, shape): (&usize, &Arc<SweepShape>)| {
+        let waveform = &analysis.waveforms[column];
+        let base_name = rspice_results::harmonic_spectrum::distortion_curve_name(
+            analysis.analysis_type,
+            &waveform.name,
+        );
+        let source = TraceSource {
+            waveform_index: column,
+            source_waveform_name: &waveform.name,
+            base_name: &base_name,
+            source_unit: waveform.unit.as_deref(),
+            signal_color: egui::Color32::TRANSPARENT,
+            palette_slot: None,
+            kind: TraceKind::Value,
+            source_x: &waveform.x,
+            source_y: &waveform.y,
+            visible: true,
+        };
+        let series = (waveform.x.clone(), waveform.y.clone());
+        projected_trace(context, &source, None, series, Arc::clone(shape))
+    };
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let share = columns.len().div_ceil(threads).max(THREAD_SHARE);
+    if columns.len() <= share {
+        return columns.iter().zip(&shapes).map(one).collect();
+    }
+    std::thread::scope(|scope| {
+        let shares: Vec<_> = columns
+            .chunks(share)
+            .zip(shapes.chunks(share))
+            .map(|(columns, shapes)| {
+                let spawned = std::thread::Builder::new()
+                    .name("strip curves".to_owned())
+                    .spawn_scoped(scope, move || {
+                        columns.iter().zip(shapes).map(one).collect::<Vec<_>>()
+                    });
+                // A share no thread could take is made here.
+                spawned.map_err(|_| columns.iter().zip(shapes).map(one).collect::<Vec<_>>())
+            })
+            .collect();
+        let mut traces = Vec::with_capacity(columns.len());
+        for share in shares {
+            traces.extend(match share {
+                Ok(thread) => thread
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+                Err(made) => made,
+            });
+        }
+        traces
+    })
 }
 
 /// The form a column of `analysis` is drawn in, its complex parts aside.
@@ -1217,13 +1342,6 @@ fn displayed_phase_series(
     }
 }
 
-/// Identity of one trace's X column for the sweep-shape memo.
-///
-/// The abscissa is projected before the ordinate is: a family group selects
-/// its own exact rows, and an overlay run carries its own coordinates, so the
-/// key has to name the group and the run as well as the signal. It is not
-/// [`super::trace_key`], because that folds in the phase wrap/unwrap choice — which
-/// changes Y and leaves X exactly where it was.
 /// The structure of `x`, the axis of the curve `key` names. A stored axis still being read off
 /// the frame has none yet, and the curve stands as empty until a build after the read has
 /// arrived ([`crate::derived::DerivedSeries::axis_shape_or`]).
@@ -1233,6 +1351,13 @@ fn curve_shape(derived: &mut DerivedSeries, key: u64, x: &SharedWaveformValues) 
         .unwrap_or_else(|| Arc::new(SweepShape::of(&[])))
 }
 
+/// Identity of one trace's X column for the sweep-shape memo.
+///
+/// The abscissa is projected before the ordinate is: a family group selects
+/// its own exact rows, and an overlay run carries its own coordinates, so the
+/// key has to name the group and the run as well as the signal. It is not
+/// [`super::trace_key`], because that folds in the phase wrap/unwrap choice — which
+/// changes Y and leaves X exactly where it was.
 fn shape_key(
     analysis_key: AnalysisPresentationKey,
     source_waveform_name: &str,
