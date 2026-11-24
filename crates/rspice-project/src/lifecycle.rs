@@ -11,7 +11,7 @@ pub use save::{
 use crate::persistence::BrowserBindingReceipt;
 use crate::{
     AcceptedProject, ProjectFile,
-    registry::{DocumentRegistry, ProjectDocumentId, ResultFingerprintCache},
+    registry::{DocumentRegistry, ProjectDocumentId, ResultFingerprintCache, ViewRevision},
 };
 
 use rspice_vocabulary::product::{ContentDigest, TransactionId};
@@ -131,6 +131,9 @@ pub struct ProjectLifecycle {
     /// What a project never saved started from: until its first save,
     /// content that still equals this has nothing a save would keep.
     pristine: Option<ContentDigest>,
+    /// The views the project never saved started with, by identity and
+    /// revision, while `pristine` is known.
+    pristine_views: Vec<ViewRevision>,
     registry: DocumentRegistry,
     result_fingerprints: ResultFingerprintCache,
     browser_operation_generation: u64,
@@ -147,6 +150,7 @@ impl Default for ProjectLifecycle {
             accepted_generation: 0,
             accepted: None,
             pristine: None,
+            pristine_views: Vec::new(),
             registry: DocumentRegistry::default(),
             result_fingerprints: ResultFingerprintCache::default(),
             browser_operation_generation: 1,
@@ -200,6 +204,7 @@ impl ProjectLifecycle {
     /// together. Lifecycle clones share that content and its cached fingerprints.
     pub fn accept_content(&mut self, baseline: ProjectFile) {
         self.pristine = None;
+        self.pristine_views = Vec::new();
         self.accepted = Some(Arc::new(AcceptedProject::new(baseline)));
         self.accepted_generation = self.accepted_generation.wrapping_add(1).max(1);
     }
@@ -216,6 +221,15 @@ impl ProjectLifecycle {
             .working_fingerprints(content)
             .ok()
             .map(|fingerprints| fingerprints.content_digest());
+        self.pristine_views = crate::registry::view_revisions(&content.workspace);
+    }
+
+    /// The views the never-saved project started with, by identity and
+    /// revision, while it is compared with what it started from: `None`
+    /// once it has an accepted baseline, or when what it started from is not
+    /// known.
+    pub fn pristine_views(&self) -> Option<&[ViewRevision]> {
+        (self.accepted.is_none() && self.pristine.is_some()).then_some(&self.pristine_views[..])
     }
 
     /// A first canonical save requires the complete working set. A platform

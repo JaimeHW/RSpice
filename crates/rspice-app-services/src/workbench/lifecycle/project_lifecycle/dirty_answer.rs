@@ -443,10 +443,10 @@ fn compare(
 /// left it, so an undo back to there reads clean, and any other position the
 /// history names since reads unsaved with no digest. A drawing edited before
 /// the first comparison is digested until the next baseline. The views the
-/// baseline holds are known from then on, so a view moved to a revision the
-/// baseline does not hold reads unsaved with no digest; `result_history`
-/// digests the result history when it is read again. Returns the documents
-/// whose digest changed.
+/// baseline holds, or a project never saved started with, are known from
+/// then on, so a view moved to a revision the baseline does not hold reads
+/// unsaved with no digest; `result_history` digests the result history when
+/// it is read again. Returns the documents whose digest changed.
 fn settle(
     state: &LifecycleView<'_>,
     (answer, documents): (&DirtyAnswer, &mut WorkingDocuments),
@@ -458,14 +458,17 @@ fn settle(
     if settled.as_ref() == Some(baseline) {
         return Ok(Vec::new());
     }
-    let accepted = state.platform.project_lifecycle.authority.accepted();
+    let authority = &state.platform.project_lifecycle.authority;
+    let accepted = authority.accepted();
     let changed = documents.settle(
         source,
         (
             accepted.and_then(|accepted| accepted.fingerprints().ok()),
-            accepted.map(|accepted| {
-                rspice_project::registry::view_revisions(&accepted.baseline().workspace)
-            }),
+            accepted
+                .map(|accepted| {
+                    rspice_project::registry::view_revisions(&accepted.baseline().workspace)
+                })
+                .or_else(|| authority.pristine_views().map(<[_]>::to_vec)),
         ),
         result_history,
     )?;
