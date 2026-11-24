@@ -14,6 +14,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ropey::Rope;
+use rspice_core::netlist::DeckTextChange;
 
 /// The revision the next new text takes. Zero is the empty default's.
 static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
@@ -26,6 +27,10 @@ pub struct TextSnapshot {
     /// The line break an edit inserts in the text, when it was worked out
     /// before the text was handed over.
     newline: Option<&'static str>,
+    /// The revision this text was edited from, and where: the bytes
+    /// `start..old_end` of that revision are the bytes `start..new_end` of
+    /// this one. `None` when the editor cannot say.
+    edit: Option<(u64, DeckTextChange)>,
 }
 
 impl TextSnapshot {
@@ -41,6 +46,7 @@ impl TextSnapshot {
             text: Rope::from_str(text),
             revision: Self::next_revision(),
             newline: None,
+            edit: None,
         }
     }
 
@@ -53,7 +59,21 @@ impl TextSnapshot {
             text,
             revision,
             newline: None,
+            edit: None,
         }
+    }
+
+    /// This text, which is the text of revision `from` after `change`.
+    #[must_use]
+    pub fn edited_from(mut self, from: u64, change: DeckTextChange) -> Self {
+        self.edit = Some((from, change));
+        self
+    }
+
+    /// The revision this text was edited from, and where, when the editor
+    /// said.
+    pub const fn edit(&self) -> Option<(u64, DeckTextChange)> {
+        self.edit
     }
 
     /// [`TextSnapshot::from_rope`], with the line break an edit inserts in
@@ -63,6 +83,7 @@ impl TextSnapshot {
             text,
             revision,
             newline,
+            edit: None,
         }
     }
 

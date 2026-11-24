@@ -533,7 +533,11 @@ impl NetlistProjectIndex {
             if file.text.same_text(&text.text) {
                 continue;
             }
-            let Some(change) = DeckTextChange::between(&file.text, &text.text) else {
+            let change = text
+                .text
+                .edit_since(file.text.revision())
+                .or_else(|| DeckTextChange::between(&file.text, &text.text));
+            let Some(change) = change else {
                 continue;
             };
             if edited.is_some() || may_change_language(change, &file.text, &text.text) {
@@ -1277,7 +1281,10 @@ impl ValueMap {
     /// scopes the lines around it, or to a deck only a parse reads, is
     /// built anew.
     fn edited(&self, buffer: &RevisedText) -> Self {
-        let Some(change) = DeckTextChange::between(&self.text, buffer) else {
+        let change = buffer
+            .edit_since(self.text.revision())
+            .or_else(|| DeckTextChange::between(&self.text, buffer));
+        let Some(change) = change else {
             return Self::of(self.map.clone(), buffer.clone(), true);
         };
         match rspice_core::netlist::source_map_for_editor_edited(

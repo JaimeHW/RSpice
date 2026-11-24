@@ -21,6 +21,7 @@ use std::ops::{Deref, Range};
 use std::sync::{Arc, OnceLock};
 
 use ropey::Rope;
+use rspice_core::netlist::DeckTextChange;
 
 use super::TextSnapshot;
 
@@ -30,6 +31,9 @@ use super::TextSnapshot;
 pub struct RevisedText {
     body: Arc<Body>,
     revision: u64,
+    /// The revision this text was edited from, and where, when the writer
+    /// said: what a reader holding that revision reads again.
+    edit: Option<(u64, DeckTextChange)>,
 }
 
 /// The text itself: as a rope, in one piece, or both, each made from the
@@ -127,6 +131,7 @@ impl RevisedText {
         Self {
             body: Arc::new(Body::of_string(text)),
             revision: TextSnapshot::next_revision(),
+            edit: None,
         }
     }
 
@@ -137,6 +142,7 @@ impl RevisedText {
         Self {
             body: Arc::new(Body::of_rope(snapshot.rope().clone())),
             revision: snapshot.revision(),
+            edit: snapshot.edit(),
         }
     }
 
@@ -144,6 +150,17 @@ impl RevisedText {
     /// zero only for the empty default.
     pub const fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Where this text differs from the text of `revision`, when this text
+    /// is that one after one edit its writer described: the bytes
+    /// `start..old_end` of that text are the bytes `start..new_end` of this
+    /// one. `None` when the writer did not say; a reader then compares the
+    /// two texts.
+    pub fn edit_since(&self, revision: u64) -> Option<DeckTextChange> {
+        self.edit
+            .filter(|(from, _)| *from == revision)
+            .map(|(_, change)| change)
     }
 
     /// The text in one piece, made the first time any clone of it asks.
@@ -274,6 +291,7 @@ impl RevisedText {
     /// Put `text` in place of the bytes `range`, at a new revision. A text
     /// held as a rope is changed as one, without putting it in one piece.
     pub fn replace_range(&mut self, range: Range<usize>, text: &str) {
+        let from = self.revision;
         if let Some(rope) = self.body.rope.get() {
             let mut rope = rope.clone();
             let start = rope.byte_to_char(range.start);
@@ -283,8 +301,16 @@ impl RevisedText {
             self.body = Arc::new(Body::of_rope(rope));
             self.revision = TextSnapshot::next_revision();
         } else {
-            self.edit(|held| held.replace_range(range, text));
+            self.edit(|held| held.replace_range(range.clone(), text));
         }
+        self.edit = Some((
+            from,
+            DeckTextChange {
+                start: range.start,
+                old_end: range.end,
+                new_end: range.start + text.len(),
+            },
+        ));
     }
 
     /// Change the text in place, at a new revision. A text a clone still
@@ -300,6 +326,7 @@ impl RevisedText {
         let result = edit(&mut text);
         self.body = Arc::new(Body::of_string(text));
         self.revision = TextSnapshot::next_revision();
+        self.edit = None;
         result
     }
 
@@ -350,11 +377,14 @@ impl rspice_core::netlist::DeckText for RevisedText {
             .map_or_else(|| Cow::Owned(String::from(slice)), Cow::Borrowed)
     }
 
+    /// A text held as a rope is read in the rope's pieces even when it is
+    /// held in one piece too: the pieces two revisions share are the same
+    /// pieces, so what is compared between them is only what an edit made.
     fn pieces(&self, from: usize) -> Box<dyn Iterator<Item = &str> + '_> {
-        if let Some(text) = self.body.string.get() {
-            return Box::new(text.get(from..).into_iter());
-        }
-        let Some((chunks, start, _, _)) = self.body.held_rope().get_chunks_at_byte(from) else {
+        let Some(rope) = self.body.rope.get() else {
+            return Box::new(self.body.held_string().get(from..).into_iter());
+        };
+        let Some((chunks, start, _, _)) = rope.get_chunks_at_byte(from) else {
             return Box::new(std::iter::empty());
         };
         let mut skip = from - start;
@@ -366,10 +396,9 @@ impl rspice_core::netlist::DeckText for RevisedText {
     }
 
     fn pieces_back(&self, to: usize) -> Box<dyn Iterator<Item = &str> + '_> {
-        if let Some(text) = self.body.string.get() {
-            return Box::new(text.get(..to).into_iter());
-        }
-        let rope = self.body.held_rope();
+        let Some(rope) = self.body.rope.get() else {
+            return Box::new(self.body.held_string().get(..to).into_iter());
+        };
         let Some((chunks, start, _, _)) = rope.get_chunks_at_byte(to) else {
             return Box::new(std::iter::empty());
         };
@@ -549,6 +578,20 @@ mod tests {
         deck.replace_range(3..4, "x");
         assert!(!deck.is_in_one_piece());
         assert_ne!(deck.revision(), snapshot.revision());
+        let change = DeckTextChange {
+            start: 3,
+            old_end: 4,
+            new_end: 4,
+        };
+        assert_eq!(deck.edit_since(snapshot.revision()), Some(change));
+        assert_eq!(deck.edit_since(deck.revision()), None);
+        let mut whole = deck.clone();
+        whole.edit(|text| text.push('\n'));
+        assert_eq!(
+            whole.edit_since(deck.revision()),
+            None,
+            "an edit in place does not say where"
+        );
         assert_eq!(deck.as_str(), "R1 x b 1k\n.end\n");
         assert_eq!(kept.as_str(), "R1 a b 1k\n.end\n");
         assert!(kept.is_in_one_piece());

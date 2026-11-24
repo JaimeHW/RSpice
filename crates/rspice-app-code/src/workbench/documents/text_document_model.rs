@@ -11,6 +11,7 @@ use std::ops::Range;
 use ropey::Rope;
 
 use crate::state::{TextSnapshot, preferred_newline};
+use rspice_core::netlist::DeckTextChange;
 
 /// The text an editor's undo history may keep alive. The oldest steps go
 /// once the history holds more, never the newest; typing is grouped, so a
@@ -189,6 +190,30 @@ pub(crate) struct TextDocumentModel {
     history_byte_budget: usize,
     open_step: Option<OpenStep>,
     revision: u64,
+    /// Where the text changed since the revision the owner last took, or
+    /// since the one before the last edit: a reader of the snapshot that
+    /// holds that revision reads again only what changed.
+    edit: Option<TextEdit>,
+}
+
+/// The text of revision `to` is the text of revision `from` after `change`.
+#[derive(Debug, Clone, Copy)]
+struct TextEdit {
+    from: u64,
+    to: u64,
+    change: DeckTextChange,
+}
+
+/// `first` then `then`, the change after it, as one change.
+fn composed(first: DeckTextChange, then: DeckTextChange) -> DeckTextChange {
+    // The span both touched, in the text between them.
+    let start = first.start.min(then.start);
+    let end = first.new_end.max(then.old_end);
+    DeckTextChange {
+        start,
+        old_end: end - first.new_end + first.old_end,
+        new_end: end - then.old_end + then.new_end,
+    }
 }
 
 impl TextDocumentModel {
@@ -219,6 +244,7 @@ impl TextDocumentModel {
             published: None,
             history_byte_budget: HISTORY_BYTE_BUDGET,
             open_step: None,
+            edit: None,
             revision: if source.is_empty() {
                 TextSnapshot::default().revision()
             } else {
@@ -248,7 +274,11 @@ impl TextDocumentModel {
 
     /// The text as it stands, shared with the model rather than copied.
     pub fn snapshot(&self) -> TextSnapshot {
-        TextSnapshot::from_rope(self.text.clone(), self.revision)
+        let snapshot = TextSnapshot::from_rope(self.text.clone(), self.revision);
+        match self.edit {
+            Some(edit) if edit.to == self.revision => snapshot.edited_from(edit.from, edit.change),
+            _ => snapshot,
+        }
     }
 
     pub fn len_chars(&self) -> usize {
@@ -420,6 +450,7 @@ impl TextDocumentModel {
             }
         }
         self.open_step = None;
+        self.edit = None;
         self.preferred_newline = snapshot.newline();
         self.selections =
             normalize_selections(std::mem::take(&mut self.selections), self.text.len_chars());
@@ -566,6 +597,11 @@ impl TextDocumentModel {
         let before = self.text.clone();
         let before_selections = self.selections.clone();
         let mut bytes = STEP_OVERHEAD_BYTES;
+        // The bytes from the first edit's start to the last one's end, and
+        // what the edits add to them.
+        let start = before.char_to_byte(edits.iter().map(|range| range.start).min().unwrap_or(0));
+        let old_end = before.char_to_byte(edits.iter().map(|range| range.end).max().unwrap_or(0));
+        let mut added = 0isize;
         for (index, range) in edits.iter().enumerate().rev() {
             let replacement = if replacements.len() == 1 {
                 &replacements[0]
@@ -573,8 +609,11 @@ impl TextDocumentModel {
                 &replacements[index]
             };
             bytes += replacement.len();
+            added += replacement.len() as isize;
             if !range.is_empty() {
-                bytes += self.text.slice(range.clone()).len_bytes();
+                let removed = self.text.slice(range.clone()).len_bytes();
+                bytes += removed;
+                added -= removed as isize;
                 self.text.remove(range.clone());
             }
             if !replacement.is_empty() {
@@ -597,7 +636,12 @@ impl TextDocumentModel {
             cumulative_delta += inserted_chars as isize - range.len() as isize;
         }
         self.selections = after_selections;
-        self.commit_history(before, before_selections, bytes);
+        let change = DeckTextChange {
+            start,
+            old_end,
+            new_end: old_end.saturating_add_signed(added),
+        };
+        self.commit_history(before, before_selections, bytes, change);
         true
     }
 
@@ -619,10 +663,16 @@ impl TextDocumentModel {
         let before_selections = self.selections.clone();
         let bytes =
             STEP_OVERHEAD_BYTES + self.text.slice(range.clone()).len_bytes() + replacement.len();
+        let start = self.text.char_to_byte(range.start);
+        let change = DeckTextChange {
+            start,
+            old_end: self.text.char_to_byte(range.end),
+            new_end: start + replacement.len(),
+        };
         self.text.remove(range.clone());
         self.text.insert(range.start, replacement);
         self.selections = normalize_selections(selections, self.text.len_chars());
-        self.commit_history(before, before_selections, bytes);
+        self.commit_history(before, before_selections, bytes, change);
         true
     }
 
@@ -778,6 +828,7 @@ impl TextDocumentModel {
         self.selections = entry.before_selections.clone();
         self.redo.push(entry);
         self.revision = TextSnapshot::next_revision();
+        self.edit = None;
         self.prune_invalid_folds();
         true
     }
@@ -792,6 +843,7 @@ impl TextDocumentModel {
         self.selections = entry.after_selections.clone();
         self.undo.push(entry);
         self.revision = TextSnapshot::next_revision();
+        self.edit = None;
         self.prune_invalid_folds();
         true
     }
@@ -1062,7 +1114,24 @@ impl TextDocumentModel {
         before: Rope,
         before_selections: Vec<TextSelection>,
         bytes: usize,
+        change: DeckTextChange,
     ) {
+        // An edit before the owner took the text the last one left is one
+        // edit with it, from the revision the owner holds.
+        let published = self.published.as_ref().map(|published| published.revision);
+        let from = self.revision;
+        let edit = match self.edit.take() {
+            Some(last) if last.to == from && published != Some(from) => TextEdit {
+                from: last.from,
+                to: 0,
+                change: composed(last.change, change),
+            },
+            _ => TextEdit {
+                from,
+                to: 0,
+                change,
+            },
+        };
         Self::keep_selections_before_change(&mut self.published, self.revision, &before_selections);
         self.open_step = None;
         self.undo.push(HistoryEntry {
@@ -1089,6 +1158,10 @@ impl TextDocumentModel {
         self.undo.drain(..dropped);
         self.redo.clear();
         self.revision = TextSnapshot::next_revision();
+        self.edit = Some(TextEdit {
+            to: self.revision,
+            ..edit
+        });
         self.prune_invalid_folds();
     }
 
@@ -1645,5 +1718,68 @@ mod tests {
         assert!(breaks(2).is_empty(), "a line that fits stays whole");
         let row = model.wrapped_row(1, 0, 11..17).expect("a row of the line");
         assert_eq!((row.text.as_str(), row.first_cell), ("gamma ", 11));
+    }
+
+    /// The bytes before `change.start`, and after its ends, are the same in
+    /// the two texts, and no end splits a character.
+    fn assert_covers(before: &TextSnapshot, after: &TextSnapshot, change: DeckTextChange) {
+        let (before, after) = (before.rope().to_string(), after.rope().to_string());
+        let (head, tail) = (before.get(..change.start), after.get(change.new_end..));
+        assert!(
+            head.is_some() && tail.is_some(),
+            "{change:?} splits a character"
+        );
+        assert_eq!(head, after.get(..change.start), "{change:?}");
+        assert_eq!(before.get(change.old_end..), tail, "{change:?}");
+    }
+
+    #[test]
+    fn a_snapshot_says_where_it_changed_since_the_text_its_owner_holds() {
+        let mut model = TextDocumentModel::from_source("R1 a b 1k\nC1 b 0 10\u{b5}\nV1 a 0 5\n");
+        let held = model.snapshot();
+        assert_eq!(held.edit(), None, "a text no edit made says nothing");
+        model.adopt(&held);
+
+        // Typing, then a replacement at two selections before the owner
+        // takes what the typing left: one change, from the text it holds.
+        model.set_selections(vec![TextSelection::caret(8)]);
+        type_out(&mut model, "00", 0.0, 0.1);
+        let typed = model.snapshot();
+        let (from, change) = typed.edit().expect("typing says where");
+        assert_eq!(from, held.revision());
+        assert_covers(&held, &typed, change);
+        model.set_selections(vec![
+            TextSelection {
+                anchor: 21,
+                cursor: 22,
+            },
+            TextSelection::caret(26),
+        ]);
+        assert!(model.replace_at_selections(&["u".to_owned(), "x ".to_owned()]));
+        let replaced = model.snapshot();
+        assert_eq!(
+            replaced.rope().to_string(),
+            "R1 a b 100k\nC1 b 0 10u\nV1 x a 0 5\n"
+        );
+        let (from, change) = replaced.edit().expect("a replacement says where");
+        assert_eq!(
+            from,
+            held.revision(),
+            "the owner still holds the first text"
+        );
+        assert_covers(&held, &replaced, change);
+
+        // Once the owner takes the text, the next edit is from it.
+        model.adopt(&replaced);
+        assert!(model.replace_range_transaction(0..2, "R9", vec![TextSelection::caret(2)]));
+        let renamed = model.snapshot();
+        let (from, change) = renamed.edit().expect("a transaction says where");
+        assert_eq!(from, replaced.revision());
+        assert_covers(&replaced, &renamed, change);
+        assert!(change.old_end <= 2, "{change:?} is the name alone");
+
+        // A step back is not an edit the snapshot can describe.
+        assert!(model.undo());
+        assert_eq!(model.snapshot().edit(), None);
     }
 }

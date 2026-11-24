@@ -52,12 +52,12 @@ fn latest_in(
         let last = slot
             .built()
             .filter(|(built, _)| built.0.as_ref() == shown)
-            .map(|(_, index)| index);
+            .map(|(built, index)| (built.1, index));
         let wake = ctx.clone();
         slot.start(
             (shown.cloned(), revision),
             move || match last {
-                Some(last) => edited_from(&last, from.as_ref(), read),
+                Some((built, last)) => edited_from(&last, built, from.as_ref(), read),
                 None => index_of(from.as_ref(), read),
             },
             move || wake.request_repaint(),
@@ -74,12 +74,14 @@ fn index_of(shown: Option<&ShownSource>, text: RevisedText) -> NetlistSourceInde
     NetlistSourceIndex::of_text(Arc::new(text), kind)
 }
 
-/// The index of `text`, built from `last`, the index of the same source
-/// before an edit: the part the edit touched read again, the rest shared.
-/// An edit that may change how the whole text is read, SPICE or Spectre,
-/// reads it all.
+/// The index of `text`, built from `last`, the index of the same source at
+/// revision `built`, before an edit: the part the edit touched read again,
+/// the rest shared. Where the edit is the editor says when it knows; else
+/// the two texts are compared. An edit that may change how the whole text
+/// is read, SPICE or Spectre, reads it all.
 fn edited_from(
     last: &NetlistSourceIndex,
+    built: u64,
     shown: Option<&ShownSource>,
     text: RevisedText,
 ) -> NetlistSourceIndex {
@@ -87,7 +89,10 @@ fn edited_from(
     let Some(before) = last.deck().text(0) else {
         return index_of(shown, text);
     };
-    let Some(change) = DeckTextChange::between(&**before, &text) else {
+    let change = text
+        .edit_since(built)
+        .or_else(|| DeckTextChange::between(&**before, &text));
+    let Some(change) = change else {
         return NetlistSourceIndex::clone(last);
     };
     // The lines the edit spans, before it and after it.
