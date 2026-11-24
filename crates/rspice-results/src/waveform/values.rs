@@ -231,6 +231,37 @@ pub struct StoredWindow {
     pub lead: WindowLead,
 }
 
+/// What a series shares with every series [`WaveformValues::ptr_eq`] finds the same as it, and
+/// with no other: a key to find each distinct series of many once, as a strip reads each axis its
+/// traces share once. It names an allocation, so it holds only while the series it was taken of
+/// is held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SharingKey(Sharing);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Sharing {
+    /// Samples in memory: their allocation.
+    Memory(usize),
+    /// A window of a column that states no identity: the column's allocation.
+    Source(usize, WindowKey),
+    /// A window of a column by its identity, however many sources read it.
+    Identity(([u8; 32], u64), WindowKey),
+}
+
+/// A window, as a key: its rows, and what it holds before them by the bits of its value.
+type WindowKey = (u64, u64, u8, u64);
+
+fn window_key(window: StoredWindow) -> WindowKey {
+    let (kind, value) = match window.lead {
+        WindowLead::None => (0, 0.0),
+        WindowLead::Value(value) => (1, value),
+        WindowLead::Interpolated(fraction) => (2, fraction),
+    };
+    // The windows `==` finds equal share a key: both zeros are zero.
+    let value = if value == 0.0 { 0.0 } else { value };
+    (window.first, window.rows, kind, value.to_bits())
+}
+
 /// A stored column that could not be read: the waveform it belongs to shows the window as
 /// unavailable samples, and the failure is kept for the run's diagnostics to name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1034,6 +1065,21 @@ impl WaveformValues {
             }
             _ => false,
         }
+    }
+
+    /// What this series shares with every series [`Self::ptr_eq`] finds the same as it, and
+    /// with no other, reading none of its samples.
+    pub fn sharing_key(&self) -> SharingKey {
+        SharingKey(match &self.0 {
+            Repr::Memory(values) => Sharing::Memory(Arc::as_ptr(values).addr()),
+            Repr::Stored(stored) => {
+                let window = window_key(stored.window);
+                match stored.source.identity() {
+                    Some(identity) => Sharing::Identity(identity, window),
+                    None => Sharing::Source(Arc::as_ptr(&stored.source).addr(), window),
+                }
+            }
+        })
     }
 }
 

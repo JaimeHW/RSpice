@@ -20,7 +20,6 @@ use egui::Ui;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, ExprTrace, ResultViewer, WavePanePresentationKey,
 };
-use rspice_results::waveform::WaveformValues;
 use rspice_ui_kit::{
     plot::{self, CursorId, CursorPair, XScale, sample::sample_at_with_shape},
     tokens::Tokens,
@@ -1169,9 +1168,10 @@ pub fn log_x_refusal(model: &StripModel) -> Option<String> {
 }
 
 /// The least and greatest finite X the strip's visible traces hold; `None`
-/// when they hold none. A stored run's time axis ascends, so its ends bound
-/// it and only they are read; other axes are read once here, as the model is
-/// built.
+/// when they hold none. Each axis the traces share is read once. A stored
+/// run's time axis ascends, so its ends bound it and only they are read;
+/// any other axis is held in memory, or read off the frame by the reader
+/// service and taken once it has arrived.
 pub(crate) fn visible_x_bounds(model: &StripModel) -> Option<(f64, f64)> {
     let (mut minimum, mut maximum) = (f64::INFINITY, f64::NEG_INFINITY);
     let mut take = |x: f64| {
@@ -1180,14 +1180,12 @@ pub(crate) fn visible_x_bounds(model: &StripModel) -> Option<(f64, f64)> {
             maximum = maximum.max(x);
         }
     };
-    let mut seen: Vec<&WaveformValues> = Vec::new();
-    for trace in model.traces.iter().filter(|trace| trace.visible) {
-        let x = &trace.x;
-        // A run's traces share its axis: read it once.
-        if seen.iter().any(|axis| WaveformValues::ptr_eq(axis, x)) {
-            continue;
-        }
-        seen.push(x);
+    let axes = model
+        .traces
+        .iter()
+        .filter(|trace| trace.visible)
+        .map(|trace| &trace.x);
+    for x in super::extent::each_axis_once(axes) {
         if x.is_ascending_axis()
             && let Some((first, last)) = x.ends()
         {

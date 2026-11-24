@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use rspice_results::result_presentation::AnalysisPresentationKey;
+use rspice_results::waveform::WaveformValues;
 use rspice_ui_kit::plot::XScale;
 
 use super::{StripModel, StripTrace, UnitPane, stable_hash};
@@ -76,7 +77,7 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
             x1 = x1.max(x);
         }
     };
-    for x in model
+    let axes = model
         .traces
         .iter()
         .filter(|trace| trace.visible)
@@ -87,8 +88,8 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
                 .iter()
                 .filter(|lane| lane.visible)
                 .map(|lane| &lane.x),
-        )
-    {
+        );
+    for x in each_axis_once(axes) {
         // A stored run's time axis ascends, so its ends are its extent, read
         // without reading the axis; on a decade scale its least positive
         // sample is found by bisection.
@@ -123,6 +124,24 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     } else {
         Some((x0 - 1.0, x1 + 1.0))
     }
+}
+
+/// Each of `axes` once, in the order they come, reading none of them: the
+/// traces of a run share its axis, which a strip reads once rather than once
+/// a trace, however many handles its traces hold of it. Most traces share the
+/// axis of the trace before them, and are passed over without a lookup.
+pub(crate) fn each_axis_once<'a>(
+    axes: impl IntoIterator<Item = &'a WaveformValues>,
+) -> impl Iterator<Item = &'a WaveformValues> {
+    let mut before: Option<&WaveformValues> = None;
+    let mut seen = HashSet::new();
+    axes.into_iter().filter(move |&x| {
+        if before.is_some_and(|before| WaveformValues::ptr_eq(before, x)) {
+            return false;
+        }
+        before = Some(x);
+        seen.insert(x.sharing_key())
+    })
 }
 
 pub use super::pane::FamilyEnvelopeSeries;

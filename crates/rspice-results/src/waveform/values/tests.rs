@@ -233,3 +233,36 @@ fn values_in_memory_are_shared_changed_and_compared_as_vectors_are() {
     let back: WaveformValues = serde_json::from_str(&json).unwrap();
     assert_eq!(back, stored);
 }
+
+/// Two series share a key exactly when `ptr_eq` finds them the same samples: clones and handles
+/// of one window do; another window, or another allocation of equal samples, does not.
+#[test]
+fn series_share_a_key_as_ptr_eq_finds_them_the_same() {
+    let column = Column::new("time", vec![0.0, 1.0, 2.0]);
+    let stored = |rows| WaveformValues::stored(column.clone(), window(0, rows, WindowLead::None));
+    let one = stored(3).unwrap();
+    let another_handle = stored(3).unwrap();
+    let shorter = stored(2).unwrap();
+    let memory = WaveformValues::from(vec![0.0, 1.0, 2.0]);
+    let copy = WaveformValues::from(vec![0.0, 1.0, 2.0]);
+    let (one_again, memory_again) = (one.clone(), memory.clone());
+    let all = [
+        &one,
+        &one_again,
+        &another_handle,
+        &shorter,
+        &memory,
+        &memory_again,
+        &copy,
+    ];
+    for left in all {
+        for right in all {
+            assert_eq!(
+                left.sharing_key() == right.sharing_key(),
+                WaveformValues::ptr_eq(left, right)
+            );
+        }
+    }
+    assert_eq!(one.sharing_key(), another_handle.sharing_key());
+    assert_ne!(memory.sharing_key(), copy.sharing_key());
+}

@@ -733,3 +733,108 @@ fn a_pane_of_more_stored_curves_than_a_frame_measures_fits_the_rest_once_they_ar
         .sum();
     assert_eq!(read, 0, "a curve's column was read rather than tiled");
 }
+
+/// A run of many traces, each holding a handle of its own on one stored axis.
+fn run_on_one_axis(
+    time: &Arc<Counted>,
+    traces: usize,
+) -> rspice_results::run::SimulationRun<AnalysisResult<RetainedTrace>> {
+    let out = counted("V(out)", vec![0.5; time.values.len()]);
+    let mut run = rspice_results::run::SimulationRun::new(
+        1,
+        0.0,
+        rspice_results::run::ExecutionTarget::LocalDesktop,
+    );
+    run.analyses.push(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran", 0.0).with_waveforms(
+            (0..traces)
+                .map(|trace| {
+                    RetainedTrace::new(format!("V(n{trace})"), stored(time), stored(&out), "#fff")
+                })
+                .collect(),
+        ),
+    );
+    run
+}
+
+/// The traces of a run share its axis however many handles they hold of it: the strip's X
+/// bounds and extent read the axis's ends once, and never the axis, at 100,000 traces as at one.
+#[test]
+fn the_bounds_of_many_traces_on_one_axis_read_the_axis_once() {
+    const TRACES: usize = 100_000;
+    let time = counted("time", (0..64).map(|row| f64::from(row) * 1.0e-9).collect());
+    let run = run_on_one_axis(&time, TRACES);
+    let models = models(&run);
+    let ends = Some((time.values[0], time.values[63]));
+    assert_eq!(models[0].traces.len(), TRACES);
+    assert_eq!(models[0].x_bounds, ends);
+    assert_eq!(models[0].x_range, ends);
+    assert_eq!(
+        time.reads.load(Ordering::SeqCst),
+        0,
+        "the axis is never read whole"
+    );
+    assert_eq!(
+        time.rows_read.load(Ordering::SeqCst),
+        2,
+        "the axis's first and last rows are read, once"
+    );
+}
+
+/// A reader service whose reads never arrive: what the frame has of a read on its way.
+#[derive(Default)]
+struct Waiting {
+    asked: AtomicUsize,
+}
+
+impl ReadService for Waiting {
+    fn request(
+        &self,
+        _run: u64,
+        _values: &WaveformValues,
+        _x: &WaveformValues,
+        _read: Read,
+    ) -> Option<ReadValue> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        None
+    }
+}
+
+/// An axis that does not ascend is asked of the reader service, which reads it off the frame:
+/// the strip's X bounds read none of it themselves, and take it once it has arrived.
+#[test]
+fn the_bounds_never_read_a_stored_axis_whole_themselves() {
+    let sweep = counted("sweep", vec![3.0, 1.0, 2.0]);
+    let run = run_on_one_axis(&sweep, 2);
+    let waiting: &'static Waiting = Box::leak(Box::default());
+    // On the thread that draws the window, which never waits for a read.
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            rspice_results::waveform::never_wait_for_reads_here();
+            rspice_results::waveform::read_through(waiting, || {
+                let mut models = models(&run);
+                // The build has classified each curve's axis; the bounds are counted alone.
+                sweep.reads.store(0, Ordering::SeqCst);
+                let asked = waiting.asked.load(Ordering::SeqCst);
+                models[0].x_bounds = None;
+                extent::resolve_x_ranges(&mut models);
+                assert_eq!(models[0].x_bounds, None, "the axis is still on its way");
+                assert_eq!(
+                    sweep.reads.load(Ordering::SeqCst),
+                    0,
+                    "the bounds read none of it"
+                );
+                assert!(
+                    waiting.asked.load(Ordering::SeqCst) > asked,
+                    "the bounds asked the service for it"
+                );
+            });
+        });
+    });
+
+    let reader: &'static Keeping = Box::leak(Box::default());
+    rspice_results::waveform::read_through(reader, || {
+        let models = models(&run);
+        assert_eq!(models[0].x_bounds, Some((1.0, 3.0)), "the axis has arrived");
+    });
+}
