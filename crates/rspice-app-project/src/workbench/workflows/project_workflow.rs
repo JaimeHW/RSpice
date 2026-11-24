@@ -1088,18 +1088,18 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
                 }
             }
             Err(error) => {
-                let message = error.to_string();
+                let message = error.to_string().trim_end_matches('.').to_owned();
                 report_lifecycle_error(
                     parts.lifecycle.model,
                     parts.workbench,
                     error,
-                    "Browser save completion failed",
+                    "Project save did not finish",
                 );
                 if !project_copy {
                     continuation = Some(SaveContinuationEvent::PublishedButNotAdopted(
                         transaction,
                         format!(
-                            "The project bytes were written, but RSpice could not adopt the saved baseline: {message}"
+                            "The project was saved, but this tab could not take the save as its current version: {message}. Reopen the project before continuing."
                         ),
                     ));
                 }
@@ -1164,18 +1164,18 @@ pub fn poll_browser_project_save(mut parts: SaveParts<'_>) -> Option<SaveContinu
                 }
             }
             Err(error) => {
-                let message = error.to_string();
+                let message = error.to_string().trim_end_matches('.').to_owned();
                 report_lifecycle_error(
                     parts.lifecycle.model,
                     parts.workbench,
                     error,
-                    "Browser save completion failed",
+                    "Project save did not finish",
                 );
                 if !project_copy {
                     continuation = Some(SaveContinuationEvent::PublishedButNotAdopted(
                         transaction,
                         format!(
-                            "The project bytes were written, but RSpice could not adopt the saved baseline: {message}"
+                            "The project was saved, but this tab could not take the save as its current version: {message}. Reopen the project before continuing."
                         ),
                     ));
                 }

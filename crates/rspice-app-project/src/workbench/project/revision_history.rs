@@ -684,11 +684,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
             change: format!("Attached technology {}", binding.display_label()),
             affected_evidence: [
                 counted(binding.model_count(), "model", "models"),
-                counted(
-                    binding.source_closure().len(),
-                    "pinned source",
-                    "pinned sources",
-                ),
+                counted(binding.source_closure().len(), "file", "files"),
                 counted(
                     binding.process_sections().len(),
                     "process section",
@@ -704,19 +700,12 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
     }
 
     for library in model.model_library_manager.libraries_sorted() {
-        let (revision, status, authority): (String, &str, String) = match library.source_authority {
-            ModelSourceAuthority::ProjectOwned {
-                source_id,
-                revision,
-                digest,
-            } => (
-                revision.get().to_string(),
-                "Pinned",
-                format!(
-                    "Project source {source_id}{SEPARATOR}{}",
-                    short_text(&digest.to_string())
-                ),
-            ),
+        // Where the library is read from, in the words the Dependencies
+        // inspector uses, and the version of its files the project recorded.
+        let (revision, status): (String, &str) = match library.source_authority {
+            ModelSourceAuthority::ProjectOwned { revision, .. } => {
+                (revision.get().to_string(), "Project-owned")
+            }
             ModelSourceAuthority::External => {
                 let root_digest = library
                     .root_path
@@ -729,30 +718,19 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
                     })
                     .map(|source| short_text(&source.digest.to_string()));
                 match root_digest {
-                    Some(digest) => (
-                        digest.clone(),
-                        "Pinned",
-                        format!("External source{SEPARATOR}root digest {digest}"),
-                    ),
+                    Some(digest) => (digest, "Linked to its file"),
                     None => (
-                        "Unversioned".to_owned(),
-                        "Not pinned",
-                        "External source with no accepted closure".to_owned(),
+                        "Not recorded".to_owned(),
+                        "Linked to its file, not read yet",
                     ),
                 }
             }
-            ModelSourceAuthority::RetainedImport { source_id, digest } => (
-                short_text(&digest.to_string()),
-                "Pinned",
-                format!(
-                    "Retained import {source_id}{SEPARATOR}root digest {}",
-                    short_text(&digest.to_string())
-                ),
-            ),
+            ModelSourceAuthority::RetainedImport { digest, .. } => {
+                (short_text(&digest.to_string()), "Kept as imported")
+            }
             ModelSourceAuthority::BuiltIn => (
                 nonempty_or(&library.version, "Built-in"),
-                "Built-in",
-                "Signed application catalog".to_owned(),
+                "Ships with RSpice",
             ),
         };
         rows.push(ProjectAuditRow {
@@ -761,7 +739,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
             revision,
             time: String::new(),
             made_unix_ms: None,
-            actor: authority,
+            actor: String::new(),
             change: if library.pdk_name.trim().is_empty() {
                 format!("Model library {}", library.name)
             } else {
@@ -773,11 +751,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, model: &Model) {
             affected_evidence: [
                 counted(library.model_count(), "model", "models"),
                 counted(library.corner_count(), "corner", "corners"),
-                counted(
-                    library.source_closure.len(),
-                    "pinned source",
-                    "pinned sources",
-                ),
+                counted(library.source_closure.len(), "file", "files"),
             ]
             .join(SEPARATOR),
             status: status.to_owned(),

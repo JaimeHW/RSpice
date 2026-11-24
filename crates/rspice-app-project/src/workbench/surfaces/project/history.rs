@@ -55,7 +55,8 @@ const NOTHING_SELECTED: &str = "Select a row first.";
 const BUSY: &str = "Checkpoint work is running; wait for it to finish.";
 const ONLY_CHECKPOINTS_PIN: &str = "Only a checkpoint can be pinned.";
 const ONLY_CHECKPOINTS_NOTE: &str = "Only a checkpoint takes a note.";
-const JOURNAL_KEEPS: &str = "The journal keeps every record; only a checkpoint can be deleted.";
+const REVISIONS_STAY: &str =
+    "A saved revision stays with the project; only a checkpoint can be deleted.";
 const DAMAGED_UNREADABLE: &str = "A damaged checkpoint cannot be read; delete it.";
 const NOT_COMPARABLE: &str =
     "Only a checkpoint or a schematic revision is compared with the project as it is.";
@@ -568,7 +569,7 @@ impl RowActions {
                     pin: refused(ONLY_CHECKPOINTS_PIN),
                     pinned: false,
                     note: refused(ONLY_CHECKPOINTS_NOTE),
-                    delete: refused(JOURNAL_KEEPS),
+                    delete: refused(REVISIONS_STAY),
                     save_as: None,
                 }
             }
