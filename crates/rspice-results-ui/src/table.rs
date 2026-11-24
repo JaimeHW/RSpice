@@ -1040,7 +1040,7 @@ fn search_and_go_to(ui: &mut Ui, reserve: f32) {
     egui::Popup::menu(&find)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.horizontal(|ui| search_fields(ui));
+            ui.horizontal(search_fields);
         });
 }
 
@@ -1464,7 +1464,7 @@ mod tests {
         let traces = (0..signals)
             .map(|k| {
                 let y: Vec<f64> = (0..samples).map(|i| (k * 1000 + i) as f64).collect();
-                RetainedTrace::new(&format!("V(s{k})"), x.clone(), y, "#fff")
+                RetainedTrace::new(format!("V(s{k})"), x.clone(), y, "#fff")
             })
             .collect();
         let analysis =
