@@ -1807,6 +1807,8 @@ impl VisualizationDocument {
         tombstoned: &mut Vec<EntityRef>,
     ) -> Result<(), VisualizationError> {
         let mut removal = Removal::default();
+        // Panes going one after another, taken out together.
+        let mut panes: Vec<PaneId> = Vec::new();
         for entity in entities {
             if let Some(group) = self.link_groups.iter().find(|group| {
                 group.members.contains(&entity)
@@ -1821,23 +1823,25 @@ impl VisualizationDocument {
                 EntityRef::Page(id) => {
                     self.take_out(std::mem::take(&mut removal), revision, tombstoned);
                     self.require_page(id)?;
-                    let pane_ids: Vec<_> = self
-                        .panes
-                        .iter()
-                        .filter_map(|pane| (pane.page_id == id).then_some(pane.id))
-                        .collect();
-                    for pane_id in pane_ids {
-                        self.remove_pane_cascade(pane_id, revision, tombstoned);
+                    for pane in self.panes.iter().filter(|pane| pane.page_id == id) {
+                        if !panes.contains(&pane.id) {
+                            panes.push(pane.id);
+                        }
                     }
+                    self.remove_panes_cascade(std::mem::take(&mut panes), revision, tombstoned);
                     self.pages.retain(|page| page.id != id);
                     self.record_tombstone(entity, revision, tombstoned);
                 }
                 EntityRef::Pane(id) => {
                     self.take_out(std::mem::take(&mut removal), revision, tombstoned);
                     self.require_pane(id)?;
-                    self.remove_pane_cascade(id, revision, tombstoned);
+                    if panes.contains(&id) {
+                        return Err(VisualizationError::EntityNotFound(entity));
+                    }
+                    panes.push(id);
                 }
                 _ => {
+                    self.remove_panes_cascade(std::mem::take(&mut panes), revision, tombstoned);
                     if removal.gone.contains(&entity) {
                         return Err(VisualizationError::EntityNotFound(entity));
                     }
@@ -1850,6 +1854,7 @@ impl VisualizationDocument {
                 }
             }
         }
+        self.remove_panes_cascade(panes, revision, tombstoned);
         self.take_out(removal, revision, tombstoned);
         Ok(())
     }
@@ -2027,69 +2032,78 @@ impl VisualizationDocument {
         }
     }
 
-    fn remove_pane_cascade(
+    /// Take out the panes `pane_ids`, in that order, and everything on
+    /// them: each list is passed once for them all.
+    fn remove_panes_cascade(
         &mut self,
-        pane_id: PaneId,
+        pane_ids: Vec<PaneId>,
         revision: ObjectRevision,
         tombstoned: &mut Vec<EntityRef>,
     ) {
-        let mut removed = Vec::new();
-        removed.extend(
-            self.axes
-                .iter()
-                .filter_map(|axis| (axis.pane_id == pane_id).then_some(EntityRef::Axis(axis.id))),
-        );
-        removed.extend(
-            self.traces.iter().filter_map(|trace| {
-                (trace.pane_id == pane_id).then_some(EntityRef::Trace(trace.id))
-            }),
-        );
-        removed.extend(self.cursors.iter().filter_map(|cursor| {
-            (cursor.pane_id == pane_id).then_some(EntityRef::Cursor(cursor.id))
-        }));
-        removed.extend(self.markers.iter().filter_map(|marker| {
-            (marker.pane_id == pane_id).then_some(EntityRef::Marker(marker.id))
-        }));
-        removed.extend(self.measurements.iter().filter_map(|measurement| {
-            (measurement.pane_id == pane_id).then_some(EntityRef::Measurement(measurement.id))
-        }));
-        removed.extend(self.annotations.iter().filter_map(|annotation| {
-            (annotation.pane_id == pane_id).then_some(EntityRef::Annotation(annotation.id))
-        }));
-        self.axes.retain(|axis| axis.pane_id != pane_id);
-        self.traces.retain(|trace| trace.pane_id != pane_id);
-        self.cursors.retain(|cursor| cursor.pane_id != pane_id);
-        self.markers.retain(|marker| marker.pane_id != pane_id);
+        if pane_ids.is_empty() {
+            return;
+        }
+        let gone: HashSet<PaneId> = pane_ids.iter().copied().collect();
+        // What each pane loses, kind by kind, in the order each list holds it.
+        let mut removed: HashMap<PaneId, Vec<EntityRef>> = HashMap::new();
+        let mut note = |pane_id: PaneId, entity: EntityRef| {
+            if gone.contains(&pane_id) {
+                removed.entry(pane_id).or_default().push(entity);
+            }
+        };
+        for axis in &self.axes {
+            note(axis.pane_id, EntityRef::Axis(axis.id));
+        }
+        for trace in &self.traces {
+            note(trace.pane_id, EntityRef::Trace(trace.id));
+        }
+        for cursor in &self.cursors {
+            note(cursor.pane_id, EntityRef::Cursor(cursor.id));
+        }
+        for marker in &self.markers {
+            note(marker.pane_id, EntityRef::Marker(marker.id));
+        }
+        for measurement in &self.measurements {
+            note(measurement.pane_id, EntityRef::Measurement(measurement.id));
+        }
+        for annotation in &self.annotations {
+            note(annotation.pane_id, EntityRef::Annotation(annotation.id));
+        }
+        let stays = |pane_id: &PaneId| !gone.contains(pane_id);
+        self.axes.retain(|axis| stays(&axis.pane_id));
+        self.traces.retain(|trace| stays(&trace.pane_id));
+        self.cursors.retain(|cursor| stays(&cursor.pane_id));
+        self.markers.retain(|marker| stays(&marker.pane_id));
         self.measurements
-            .retain(|measurement| measurement.pane_id != pane_id);
+            .retain(|measurement| stays(&measurement.pane_id));
         self.annotations
-            .retain(|annotation| annotation.pane_id != pane_id);
-        self.user_buses.retain(|bus| bus.pane_id != pane_id);
-        self.event_lane_orders
-            .retain(|order| order.pane_id != pane_id);
-        self.expression_traces
-            .retain(|trace| trace.pane_id != pane_id);
-        self.xy_plots.retain(|plot| plot.pane_id != pane_id);
-        self.readout_pins.retain(|pin| pin.pane_id != pane_id);
+            .retain(|annotation| stays(&annotation.pane_id));
+        self.user_buses.retain(|bus| stays(&bus.pane_id));
+        self.event_lane_orders.retain(|order| stays(&order.pane_id));
+        self.expression_traces.retain(|trace| stays(&trace.pane_id));
+        self.xy_plots.retain(|plot| stays(&plot.pane_id));
+        self.readout_pins.retain(|pin| stays(&pin.pane_id));
         self.sheet_settings
-            .retain(|setting| setting.pane_id != pane_id);
-        self.spectrum_settings
-            .retain(|held| held.pane_id != pane_id);
+            .retain(|setting| stays(&setting.pane_id));
+        self.spectrum_settings.retain(|held| stays(&held.pane_id));
         self.coefficient_settings
-            .retain(|held| held.pane_id != pane_id);
-        let page_id = self
-            .panes
-            .iter()
-            .find(|pane| pane.id == pane_id)
-            .map(|pane| pane.page_id);
-        self.panes.retain(|pane| pane.id != pane_id);
-        if let Some(page_id) = page_id {
+            .retain(|held| stays(&held.pane_id));
+        let mut pages = Vec::new();
+        for pane in self.panes.iter().filter(|pane| !stays(&pane.id)) {
+            if !pages.contains(&pane.page_id) {
+                pages.push(pane.page_id);
+            }
+        }
+        self.panes.retain(|pane| stays(&pane.id));
+        for page_id in pages {
             self.normalize_page_pane_layout(page_id, None);
         }
-        for entity in removed {
-            self.record_tombstone(entity, revision, tombstoned);
+        for pane_id in pane_ids {
+            for entity in removed.remove(&pane_id).unwrap_or_default() {
+                self.record_tombstone(entity, revision, tombstoned);
+            }
+            self.record_tombstone(EntityRef::Pane(pane_id), revision, tombstoned);
         }
-        self.record_tombstone(EntityRef::Pane(pane_id), revision, tombstoned);
     }
 
     fn record_tombstone(

@@ -412,6 +412,125 @@ fn removing_half_of_a_large_view_in_one_transaction_keeps_the_rest_in_order() {
     assert_eq!(tombstoned, removed, "each removal is tombstoned in order");
 }
 
+/// Taking panes out of a large view in one transaction passes each list once
+/// for them all, keeps the order of what is left, and tombstones each pane's
+/// entities before the pane, pane by pane, as taking them out one at a time
+/// did.
+#[test]
+fn removing_panes_of_a_large_view_keeps_the_rest_in_order() {
+    const PANES: usize = 4;
+    const ROUNDS: usize = 10;
+    const EACH: usize = 2_500;
+    let analyses: Vec<AnalysisInstanceId> =
+        (0..PANES).map(|_| AnalysisInstanceId::new()).collect();
+    let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([1; 32]));
+    let source = SourceDataset::run_reference(
+        binding,
+        "Run",
+        analyses
+            .iter()
+            .map(|analysis| RunSourceAnalysis::new(*analysis, AnalysisType::Transient))
+            .collect(),
+    )
+    .expect("a run reference");
+    let mut document = VisualizationDocument::new_working_view(
+        WorkingViewSource::Plan {
+            plan_id: SimulationPlanId::new(),
+        },
+        source,
+        ResultDocumentTracking::pinned(),
+        analyses
+            .iter()
+            .enumerate()
+            .map(|(index, analysis)| WorkingPane {
+                title: format!("Transient {index}"),
+                kind: PaneKind::Cartesian,
+                viewer_id: "viewer-waveform".to_owned(),
+                analysis_id: *analysis,
+                plotted: Vec::new(),
+            })
+            .collect(),
+    )
+    .expect("a view");
+    let panes: Vec<_> = analyses
+        .iter()
+        .map(|analysis| document.pane_of_analysis(*analysis).expect("its pane").id)
+        .collect();
+    // The panes' traces made a block at a time, each pane's blocks between
+    // the others'.
+    for round in 0..ROUNDS {
+        for &pane_id in &panes {
+            document
+                .transact(
+                    document.revision(),
+                    vec![DocumentEdit::SetSignalsPlotted {
+                        pane_id,
+                        signals: (round * EACH..(round + 1) * EACH)
+                            .map(|index| format!("V(n{index})"))
+                            .collect(),
+                        plotted: true,
+                    }],
+                )
+                .expect("the signals plot");
+        }
+    }
+    let (gone, stays) = ([panes[1], panes[3]], [panes[0], panes[2]]);
+    let kept: Vec<_> = document
+        .traces()
+        .iter()
+        .filter(|trace| stays.contains(&trace.pane_id))
+        .map(|trace| trace.id)
+        .collect();
+    let owners: std::collections::HashMap<EntityRef, _> = document
+        .traces()
+        .iter()
+        .map(|trace| (EntityRef::Trace(trace.id), trace.pane_id))
+        .chain(
+            document
+                .axes()
+                .iter()
+                .map(|axis| (EntityRef::Axis(axis.id), axis.pane_id)),
+        )
+        .collect();
+    let started = Instant::now();
+    let receipt = document
+        .transact(
+            document.revision(),
+            gone.iter()
+                .map(|pane_id| DocumentEdit::Remove(EntityRef::Pane(*pane_id)))
+                .collect(),
+        )
+        .expect("the panes go");
+    println!(
+        "taking {} of {PANES} panes out of a view of {} traces: {:?}",
+        gone.len(),
+        PANES * ROUNDS * EACH,
+        started.elapsed()
+    );
+    let left: Vec<_> = document.traces().iter().map(|trace| trace.id).collect();
+    assert_eq!(left, kept, "what is left keeps its order");
+    let stood: Vec<_> = document.panes().iter().map(|pane| pane.id).collect();
+    assert_eq!(stood, stays, "the panes left keep their order");
+    // Pane by pane: its entities, then the pane.
+    let mut tombstoned = receipt.tombstoned.iter();
+    for pane_id in gone {
+        let mut held = 0;
+        for entity in tombstoned.by_ref() {
+            if *entity == EntityRef::Pane(pane_id) {
+                break;
+            }
+            assert_eq!(
+                owners.get(entity),
+                Some(&pane_id),
+                "{entity:?} is tombstoned with its pane"
+            );
+            held += 1;
+        }
+        assert!(held >= ROUNDS * EACH, "every trace of the pane is tombstoned");
+    }
+    assert_eq!(tombstoned.next(), None, "nothing else is taken out");
+}
+
 /// A transaction refused at its last edit, after editing every trace of a
 /// view of a hundred thousand, leaves the view byte-identical.
 #[test]
