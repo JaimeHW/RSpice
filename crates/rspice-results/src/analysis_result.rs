@@ -73,6 +73,28 @@ impl RunChecks {
         self.hdl.is_empty() && self.assertions.is_empty() && self.finish.is_none()
     }
 
+    /// Whether the checks left a message for the reader: a `$warning`,
+    /// `$error` or `$fatal` record, the `$finish` or `$stop` that ended the
+    /// run, an assertion violation with a start, or outputs due after the
+    /// stop time. An `$info` record is not one; the Checks strip marks
+    /// exactly these.
+    pub fn has_messages(&self) -> bool {
+        use rspice_core::config::HdlSeverity;
+        self.finish.is_some()
+            || self
+                .hdl
+                .iter()
+                .any(|record| record.severity != HdlSeverity::Info)
+            || self.assertions.iter().any(|report| {
+                samples_after_stop(report).is_some()
+                    || (report.error.is_none()
+                        && report
+                            .violations
+                            .iter()
+                            .any(|violation| violation.start.is_some()))
+            })
+    }
+
     /// The worst thing the checks reported. A `$finish` or `$stop` ends a
     /// run without failing it, as `vvp -n` does; an `$info` and a
     /// notice-level `.ASSERT` are information only.

@@ -3274,11 +3274,11 @@ fn run_viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> Vie
         ResultViewer::Events => {
             if events::active_analysis_is_renderable(state) {
                 ViewerAvailability::available(
-                    "A committed XSPICE event history is available for the active analysis",
+                    "A committed event history or the run's check messages are available for the active analysis",
                 )
             } else {
                 ViewerAvailability::unavailable(
-                    "Requires a transient analysis with retained XSPICE event nodes",
+                    "Requires a transient analysis with retained event nodes or check messages",
                 )
             }
         }

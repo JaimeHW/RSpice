@@ -98,12 +98,33 @@ pub(super) fn active_analysis_is_renderable(state: ResultsReads<'_>) -> bool {
     let Some(analysis) = state.model.simulation.active_analysis() else {
         return false;
     };
-    super::analysis_answers_structural_gate(
-        state,
-        run.dataset_id,
-        analysis,
-        super::StructuralGate::EventHistory,
-    ) && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+    (analysis.data.checks.has_messages()
+        || super::analysis_answers_structural_gate(
+            state,
+            run.dataset_id,
+            analysis,
+            super::StructuralGate::EventHistory,
+        ))
+        && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+}
+
+/// Whether the active analysis kept events, rather than only its checks'
+/// messages.
+fn active_analysis_kept_events(state: ResultsReads<'_>) -> bool {
+    state.model.simulation.active_run().is_some_and(|run| {
+        state
+            .model
+            .simulation
+            .active_analysis()
+            .is_some_and(|analysis| {
+                super::analysis_answers_structural_gate(
+                    state,
+                    run.dataset_id,
+                    analysis,
+                    super::StructuralGate::EventHistory,
+                )
+            })
+    })
 }
 fn build_event_order(
     analysis: &AnalysisResult,
@@ -145,7 +166,13 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         viewer::show_absent(ui, EventAbsence::NoDataset);
         return;
     };
-    if !structurally_renderable {
+    let messages_only = !structurally_renderable
+        && state
+            .model
+            .simulation
+            .active_analysis()
+            .is_some_and(|analysis| analysis.data.checks.has_messages());
+    if !structurally_renderable && !messages_only {
         viewer::show_absent(ui, EventAbsence::NoEvents);
         return;
     }
@@ -153,34 +180,53 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         viewer::show_absent(ui, EventAbsence::InvalidEvidence);
         return;
     }
-    let Some(cache) = event_order(state) else {
-        return;
-    };
     let numbers = event_numbers(state);
-    let analysis = state
-        .model
-        .simulation
-        .active_analysis()
-        .expect("active analysis resolved above");
-    let messages = viewer::event_messages(
-        &analysis.data.checks,
-        viewer::event_axis(&analysis.data, &cache),
-    );
-    let response = viewer::show(
-        ui,
-        &viewer::EventView {
-            analysis_key,
-            analysis: &analysis.data,
-            order: &cache,
-            origin: active_event_origin(state.results_reads()),
-            radix: state.results.session.event_bus_radix,
-            expanded: &state.results.session.expanded_event_buses,
-            selected: state.results.session.selected_digital_event.as_ref(),
+    let response = if messages_only {
+        // A run that kept no events and whose checks reported messages is
+        // its Messages list alone.
+        let analysis = state
+            .model
+            .simulation
+            .active_analysis()
+            .expect("active analysis resolved above");
+        let axis = viewer::waveform_axis(&analysis.data).unwrap_or_default();
+        let messages = viewer::event_messages(&analysis.data.checks, axis);
+        viewer::show_message_list(
+            ui,
+            &analysis.data,
+            &messages,
+            &state.results.session.event_filter,
             numbers,
-            filter: &state.results.session.event_filter,
-            messages: &messages,
-        },
-    );
+        )
+    } else {
+        let Some(cache) = event_order(state) else {
+            return;
+        };
+        let analysis = state
+            .model
+            .simulation
+            .active_analysis()
+            .expect("active analysis resolved above");
+        let messages = viewer::event_messages(
+            &analysis.data.checks,
+            viewer::event_axis(&analysis.data, &cache),
+        );
+        viewer::show(
+            ui,
+            &viewer::EventView {
+                analysis_key,
+                analysis: &analysis.data,
+                order: &cache,
+                origin: active_event_origin(state.results_reads()),
+                radix: state.results.session.event_bus_radix,
+                expanded: &state.results.session.expanded_event_buses,
+                selected: state.results.session.selected_digital_event.as_ref(),
+                numbers,
+                filter: &state.results.session.event_filter,
+                messages: &messages,
+            },
+        )
+    };
     let viewer::EventResponse {
         requested,
         toggled_bus,
@@ -265,7 +311,8 @@ pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
                 if !digital_buses.is_empty()
         )
     });
-    let messages = state
+    let events = active_analysis_kept_events(state.results_reads());
+    let axis = state
         .results
         .event_order_cache
         .as_ref()
@@ -274,13 +321,11 @@ pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
                 cache.analysis == AnalysisPresentationKey::new(run.dataset_id, analysis)
             })
         })
-        .map_or(0, |cache| {
-            viewer::event_messages(
-                &analysis.data.checks,
-                viewer::event_axis(&analysis.data, &cache.order),
-            )
-            .len()
-        });
+        .map(|cache| viewer::event_axis(&analysis.data, &cache.order))
+        .or_else(|| (!events).then(|| viewer::waveform_axis(&analysis.data).unwrap_or_default()));
+    let messages = axis.map_or(0, |axis| {
+        viewer::event_messages(&analysis.data.checks, axis).len()
+    });
     let session = &mut state.results.session;
     let bar = viewer::domain_bar(
         ui,
@@ -288,6 +333,7 @@ pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
             radix: declares_bus.then_some(&mut session.event_bus_radix),
             filter: &mut session.event_filter,
             messages,
+            events,
         },
     );
     if bar.open_checks {

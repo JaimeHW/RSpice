@@ -316,6 +316,17 @@ fn one_line(text: &str) -> String {
 /// The messages `checks` hold on an axis whose first and last instants are
 /// `axis`, in time order: one row for each record and violation the
 /// waveform's Checks strip marks.
+/// The first and last instants of the analysis' waveforms, where the
+/// messages of a run that kept no events stand.
+pub fn waveform_axis<W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<W>,
+) -> Option<(f64, f64)> {
+    analysis
+        .waveforms
+        .first()
+        .and_then(|waveform| waveform.as_ref().x.ends())
+}
+
 pub fn event_messages(checks: &RunChecks, axis: (f64, f64)) -> Vec<EventMessage> {
     let Some(markers) = RunMarkers::of(checks, axis) else {
         return Vec::new();
@@ -368,11 +379,7 @@ pub fn event_axis<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,
     order: &EventOrder,
 ) -> (f64, f64) {
-    if let Some(axis) = analysis
-        .waveforms
-        .first()
-        .and_then(|waveform| waveform.as_ref().x.ends())
-    {
+    if let Some(axis) = waveform_axis(analysis) {
         return axis;
     }
     let time = |index: usize| {
@@ -868,6 +875,17 @@ fn severity_tone(severity: &str) -> rspice_ui_kit::widgets::table::Tone {
 /// The Messages list: every record and violation of the run's checks the
 /// search and the window keep. A click puts the cursor on its time; opening
 /// a row, or Show in Waves, goes there on the waveform sheet.
+/// The Messages list of a run that kept no events, which is the whole sheet.
+pub fn show_message_list<W: AsRef<RetainedWaveform>>(
+    ui: &mut Ui,
+    analysis: &AnalysisResult<W>,
+    messages: &[EventMessage],
+    filter: &EventFilter,
+    numbers: EventNumbers,
+) -> EventResponse {
+    show_messages(ui, analysis, messages, filter, numbers)
+}
+
 fn show_messages<W: AsRef<RetainedWaveform>>(
     ui: &mut Ui,
     analysis: &AnalysisResult<W>,
@@ -1054,6 +1072,9 @@ pub struct EventBar<'a> {
     pub filter: &'a mut EventFilter,
     /// How many messages the run's checks reported.
     pub messages: usize,
+    /// Whether the analysis kept events. A run that kept none and whose
+    /// checks reported messages shows its Messages list alone.
+    pub events: bool,
 }
 
 /// What the reader asked of the bar beyond its settings.
@@ -1074,7 +1095,7 @@ const SEARCH_WIDTH: f32 = 140.0;
 pub fn domain_bar(ui: &mut Ui, bar: EventBar<'_>) -> EventBarResponse {
     let mut out = EventBarResponse::default();
     let filter = bar.filter;
-    if bar.messages > 0 {
+    if bar.messages > 0 && bar.events {
         let pages = ["Events".to_owned(), format!("Messages {}", bar.messages)];
         let pages: Vec<&str> = pages.iter().map(String::as_str).collect();
         let mut index = usize::from(filter.page == EventPage::Messages);
@@ -1102,7 +1123,7 @@ pub fn domain_bar(ui: &mut Ui, bar: EventBar<'_>) -> EventBarResponse {
             .vertical_align(egui::Align::Center)
             .hint_text("Search…"),
     );
-    let messages_shown = bar.messages > 0 && filter.page == EventPage::Messages;
+    let messages_shown = bar.messages > 0 && (filter.page == EventPage::Messages || !bar.events);
     display_menu(ui, filter, if messages_shown { None } else { bar.radix });
     if messages_shown
         && Button::new("Checks")
@@ -1565,6 +1586,24 @@ mod tests {
                 line: 12,
             },
         }
+    }
+
+    /// A run's checks have messages exactly when the Checks strip marks
+    /// something, so the Events sheet is offered for what it lists.
+    #[test]
+    fn checks_have_messages_exactly_when_the_strip_marks_them() {
+        let mut checks = RunChecks::default();
+        let axis = (0.0, 20.0e-9);
+        assert!(!checks.has_messages());
+        assert!(RunMarkers::of(&checks, axis).is_none());
+        let mut info = warning_at(2.0e-9, "hello");
+        info.severity = rspice_results::engine_evidence::HdlSeverity::Info;
+        checks.hdl.push(info);
+        assert!(!checks.has_messages());
+        assert!(RunMarkers::of(&checks, axis).is_none());
+        checks.hdl.push(warning_at(3.0e-9, "glitch"));
+        assert!(checks.has_messages());
+        assert!(RunMarkers::of(&checks, axis).is_some());
     }
 
     /// The Messages list states every record the Checks strip marks, in

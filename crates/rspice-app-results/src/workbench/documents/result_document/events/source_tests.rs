@@ -1119,3 +1119,65 @@ fn a_message_row_puts_the_cursor_on_its_time_and_shows_it_in_waves() {
     assert_eq!(session.cursors.get(session.stepping_cursor), Some(7.5e-9));
     assert_eq!(session.viewer, ResultViewer::Events);
 }
+
+/// A run that kept no events but whose checks reported a message has the
+/// Events sheet, and the sheet is its Messages list alone; a run with only
+/// an `$info` record has no sheet.
+#[test]
+fn a_run_with_only_check_messages_has_the_events_sheet_as_its_messages() {
+    use rspice_results::engine_evidence::{HdlOrigin, HdlPoint, HdlSeverity};
+    let record = |severity, text: &str| rspice_results::analysis_result::HdlDiagnostic {
+        severity,
+        text: text.to_owned(),
+        point: HdlPoint::Transient { time: 3.0e-9 },
+        origin: HdlOrigin {
+            scope: "tb.dut".to_owned(),
+            file: "dut.va".to_owned(),
+            line: 12,
+        },
+    };
+    let analysis = |severity| {
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 10.0e-9], vec![0.0, 1.0], "#ffffff"),
+            ]);
+        analysis.checks.hdl.push(record(severity, "glitch on out"));
+        analysis
+    };
+
+    let mut state = state_with(analysis(HdlSeverity::Warning));
+    assert!(active_analysis_is_renderable(state.results_reads()));
+    state.results.results.session.viewer = ResultViewer::Events;
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 700.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
+        },
+    );
+    fn texts(shape: &egui::Shape, out: &mut String) {
+        match shape {
+            egui::Shape::Text(value) => out.push_str(value.galley.text()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
+            _ => {}
+        }
+    }
+    let mut painted = String::new();
+    for shape in &output.shapes {
+        texts(&shape.shape, &mut painted);
+    }
+    assert!(
+        painted.contains("glitch on out"),
+        "the message is not listed: {painted}"
+    );
+
+    let info = state_with(analysis(HdlSeverity::Info));
+    assert!(!active_analysis_is_renderable(info.results_reads()));
+}

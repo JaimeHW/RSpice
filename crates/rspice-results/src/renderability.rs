@@ -647,15 +647,19 @@ pub fn viewer_can_render(
                     _ => false,
                 }
         }
-        ResultViewer::Events => matches!(
-            analysis.result_payload,
-            Some(AnalysisResultPayload::TransientEvents {
-                ref digital_traces,
-                ref real_traces,
-                ref current_impulses,
-                ..
-            }) if !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some()
-        ),
+        // A run's check messages are listed on the sheet with its events,
+        // and alone when it kept none.
+        ResultViewer::Events => {
+            matches!(
+                analysis.result_payload,
+                Some(AnalysisResultPayload::TransientEvents {
+                    ref digital_traces,
+                    ref real_traces,
+                    ref current_impulses,
+                    ..
+                }) if !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some()
+            ) || analysis.checks.has_messages()
+        }
         ResultViewer::Soa => matches!(
             analysis.result_payload,
             Some(AnalysisResultPayload::Soa { ref evaluations, .. }) if !evaluations.is_empty()
