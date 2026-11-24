@@ -34,6 +34,8 @@ mod member_family;
 mod retick;
 pub use retick::{Retick, retick};
 #[cfg(test)]
+mod retick_tests;
+#[cfg(test)]
 mod ticked_tests;
 
 fn unique_analysis<'a>(
