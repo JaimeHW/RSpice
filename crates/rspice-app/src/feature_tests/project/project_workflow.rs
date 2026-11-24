@@ -1808,8 +1808,8 @@ fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
     );
 }
 
-/// A project file cut short says so in the reader's terms, with what to do;
-/// what the file reader said is kept in the Console line only.
+/// A project file cut short says so in the reader's terms; what the file
+/// reader said is kept in the Console line only.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_damaged_project_file_says_what_is_wrong_and_the_console_keeps_the_parser_text() {
@@ -1835,8 +1835,7 @@ fn a_damaged_project_file_says_what_is_wrong_and_the_console_keeps_the_parser_te
     assert_eq!(activity[0].title(), "Project open failed");
     assert_eq!(
         activity[0].message(),
-        "The project file is damaged or incomplete: it ends before the project does. Open its \
-         latest checkpoint from Recovery."
+        "The project file is damaged or incomplete: it ends before the project does."
     );
     let line = state
         .model

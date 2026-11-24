@@ -1453,20 +1453,18 @@ pub enum FileDamage {
 }
 
 impl FileDamage {
-    /// What is wrong and what to do, as the reader is told it.
+    /// What is wrong, as the reader is told it. Where a checkpoint of the
+    /// file can be opened instead is the application's to add: only it knows
+    /// whether the file has one and which page lists it.
     pub const fn sentence(self) -> &'static str {
         match self {
             Self::Truncated => {
-                "The project file is damaged or incomplete: it ends before the project does. \
-                 Open its latest checkpoint from Recovery."
+                "The project file is damaged or incomplete: it ends before the project does."
             }
-            Self::Unreadable => {
-                "The project file is damaged: it does not read as a project. Open its latest \
-                 checkpoint from Recovery."
-            }
+            Self::Unreadable => "The project file is damaged: it does not read as a project.",
             Self::Content => {
                 "The project file holds something this RSpice cannot read: a newer RSpice saved \
-                 it, or it is damaged. Update RSpice, or open its latest checkpoint from Recovery."
+                 it, or it is damaged. If a newer RSpice saved it, update RSpice to open it."
             }
         }
     }

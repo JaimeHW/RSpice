@@ -964,14 +964,54 @@ impl AppState {
                     &mut self.platform,
                 );
                 rspice_app_services::workbench::app_state::session::autosave::start_unopened_project_search(&mut self.platform, path, error.to_string());
-                self.report_failure_with_cause(
-                    "Project open failed",
-                    error.to_string(),
-                    error.cause(),
-                );
+                let mut message = error.to_string();
+                if error.cause().is_some()
+                    && let Some(way_back) = self.damaged_file_checkpoint_page(path)
+                {
+                    message.push(' ');
+                    message.push_str(way_back);
+                }
+                self.report_failure_with_cause("Project open failed", message, error.cause());
                 false
             }
         }
+    }
+
+    /// Where the reader opens a checkpoint of the damaged project file at
+    /// `path` in its place, said as what to do: History when it is the open
+    /// project's own file, the launcher's Recovery page when it is a recent
+    /// project; nothing when the file keeps no checkpoint, or no page lists
+    /// them (the offer to open one, which follows, is then the only way).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn damaged_file_checkpoint_page(&self, path: &std::path::Path) -> Option<&'static str> {
+        let same = |other: &std::path::Path| {
+            other == path
+                || std::fs::canonicalize(other)
+                    .ok()
+                    .zip(std::fs::canonicalize(path).ok())
+                    .is_some_and(|(other, path)| other == path)
+        };
+        let kept = rspice_app_services::workbench::lifecycle::project_checkpoint::list_beside(path)
+            .is_ok_and(|catalog| !catalog.checkpoints.is_empty());
+        if !kept {
+            return None;
+        }
+        if self
+            .platform
+            .project_lifecycle
+            .canonical_native_path()
+            .is_some_and(same)
+        {
+            return Some("Restore its latest checkpoint from History.");
+        }
+        self.platform
+            .recent_files
+            .iter()
+            .any(|recent| {
+                recent.kind == rspice_app_services::services::recent_files::RecentKind::Project
+                    && same(&recent.path)
+            })
+            .then_some("Open its latest checkpoint from the launcher's Recovery page.")
     }
 
     /// Replace the whole workbench project with a live-session host's snapshot.

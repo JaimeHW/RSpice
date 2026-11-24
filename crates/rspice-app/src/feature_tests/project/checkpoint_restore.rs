@@ -590,6 +590,64 @@ fn the_launcher_lists_a_recent_projects_checkpoints() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// What the failed open said, in its toast.
+fn open_failure(app: &mut RSpiceApp, file: &std::path::Path) -> String {
+    assert!(
+        !app.state.load_project_from_path(file),
+        "the file is damaged"
+    );
+    app.state.drain_notices(&egui::Context::default());
+    let activity = app.state.workbench.toasts.activity();
+    // Newest first.
+    let toast = activity.first().expect("the failed open is said");
+    assert_eq!(toast.title(), "Project open failed");
+    toast.message().to_owned()
+}
+
+/// A damaged project file's message says where to open a checkpoint of it
+/// only when it keeps one, and names the page that lists it: History for the
+/// open project's own file, the launcher's Recovery page for a recent
+/// project.
+#[test]
+fn a_damaged_file_names_the_page_of_its_checkpoints_only_when_it_has_one() {
+    use rspice_app_services::services::recent_files::{RecentFile, RecentKind};
+    const CUT: &str = "The project file is damaged or incomplete: it ends before the project does.";
+
+    // The open project's own file, cut short after a checkpoint of it.
+    let (mut app, root) = saved_project("damaged-own-file");
+    let file = root.join("idle.rspiceproj");
+    create(&mut app.state, ProjectCheckpointReason::Manual).expect("the checkpoint is written");
+    let bytes = std::fs::read(&file).expect("the file is read");
+    std::fs::write(&file, &bytes[..bytes.len() / 2]).expect("the file is cut short");
+    assert_eq!(
+        open_failure(&mut app, &file),
+        format!("{CUT} Restore its latest checkpoint from History.")
+    );
+
+    // Another project's file: named only once it is a recent project, which
+    // the launcher's Recovery page lists.
+    let mut other = RSpiceApp::test_instance();
+    assert_eq!(open_failure(&mut other, &file), CUT);
+    other.state.platform.recent_files = vec![RecentFile {
+        kind: RecentKind::Project,
+        path: file.clone(),
+        opened_at_unix_ms: 0,
+        pinned: false,
+        missing: false,
+    }];
+    assert_eq!(
+        open_failure(&mut other, &file),
+        format!("{CUT} Open its latest checkpoint from the launcher's Recovery page.")
+    );
+
+    // With no checkpoint kept, nothing points at one.
+    std::fs::remove_dir_all(root.join("idle.rspice-recovery"))
+        .expect("the checkpoint folder is removed");
+    assert_eq!(open_failure(&mut other, &file), CUT);
+    assert_eq!(open_failure(&mut app, &file), CUT);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A click on the first control whose spoken label passes `pick`.
 fn click_where(output: &egui::FullOutput, pick: impl Fn(&str) -> bool) -> Vec<egui::Event> {
     let label = output
