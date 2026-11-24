@@ -1048,7 +1048,7 @@ fn a_shape_drawn_in_place_lands_where_it_was_drawn_and_its_menu_works() {
     let menu = fixture.replay.frames(vec![]);
     let rotate = menu
         .iter()
-        .find(|control| control.label == "Rotate 90\u{b0}")
+        .find(|control| control.label == "Rotate clockwise")
         .unwrap_or_else(|| {
             panic!(
                 "the shape's menu offers Rotate: {:?}",
