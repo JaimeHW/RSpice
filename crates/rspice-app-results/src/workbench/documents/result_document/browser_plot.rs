@@ -167,12 +167,13 @@ pub fn set_result_quantities_ticked<'k>(
 
 /// What ticking many signals of the quick view at once leaves to do once
 /// for them all: the strips to bring back, the signals put on last for the
-/// browser's Recent scope, and the drawing state to build again.
+/// browser's Recent scope, and the cached series to build again once a hide
+/// is forgotten. The strip models follow the ticks by the edits they
+/// record, as they follow a single tick.
 #[derive(Default)]
 struct Gesture<'k> {
     revealed: Vec<AnalysisPresentationKey>,
     recent: Vec<&'k SourceWaveformPresentationKey>,
-    changed: bool,
     forgot: bool,
 }
 
@@ -183,9 +184,6 @@ impl Gesture<'_> {
         }
         for key in self.recent {
             state.results.session.note_recent_signal(key.clone());
-        }
-        if self.changed || self.forgot {
-            state.results.models.invalidate();
         }
         if self.forgot {
             state.results.session.cache.invalidate();
@@ -236,7 +234,6 @@ fn tick_quick_signal<'k>(
             _ => None,
         };
         session.waveform_visibility.set(key.clone(), set);
-        gesture.changed = true;
         gesture.forgot |= !plotted && !dataset_default;
         if plotted {
             if gesture.recent.len() == 2 * RECENT_SIGNALS {

@@ -321,3 +321,138 @@ fn a_strip_stroking_more_curves_than_the_cache_bound_rebuilds_nothing_warm_or_ho
         assert_eq!(hover.work.rebuilds, 0, "a hover rebuilt an envelope");
     }
 }
+
+/// One curve as a strip draws it: its signal, palette place, colour and
+/// whether it is drawn.
+type DrawnCurve = (String, Option<usize>, egui::Color32, bool);
+
+/// What a strip draws: each curve, and the strip's X extent.
+fn strip_drawn(model: &StripModel) -> (Vec<DrawnCurve>, String) {
+    let curves = model
+        .traces
+        .iter()
+        .map(|trace| {
+            (
+                trace.source_waveform_name.clone(),
+                trace.palette_slot,
+                trace.color,
+                trace.visible,
+            )
+        })
+        .collect();
+    (curves, format!("{:?} {:?}", model.x_bounds, model.x_range))
+}
+
+/// A hundred thousand signals ticked at once change the strip models built
+/// before by the ticks, as one tick does, so the strip they leave alone is
+/// the one built before; and after the gesture, its Undo and its Redo, every
+/// strip draws what a build from the same ticks draws.
+#[test]
+fn a_hundred_thousand_signals_ticked_at_once_follow_the_strips_built_before() {
+    use crate::workbench::docks::navigator::results_actions::set_result_quantities_ticked;
+    use crate::workbench::documents::result_document::view_edits;
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    use rspice_results_ui::selection::ResultBrowserSelectionKey;
+
+    const SIGNALS: usize = 100_000;
+    let wide = (0..SIGNALS)
+        .map(|index| {
+            let mut trace =
+                RetainedTrace::new(format!("V(n{index})"), vec![0.0, 1.0], vec![0.0, 1.0], "")
+                    .with_unit("V");
+            trace.visible = index == 0;
+            trace
+        })
+        .collect();
+    let mut state = ResultsTestHost::default();
+    let run = state.model.simulation.start_run();
+    run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(wide));
+    run.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![1.0, 2.0], "").with_unit("V"),
+        ]),
+    );
+    state.quick_frame();
+    let (ticked, other) = {
+        let run = state.model.simulation.active_run().expect("the run");
+        (
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1]),
+        )
+    };
+    let models = |state: &mut ResultsTestHost| {
+        let presentation = state.model.preferences.result_presentation_policy();
+        cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        )
+    };
+    let strip = |models: &[StripModel], analysis| {
+        models
+            .iter()
+            .position(|model| model.analysis_key == analysis)
+            .expect("the analysis has a strip")
+    };
+    // The strips as a build from the ticks draws them, and the revision of
+    // the one the gesture leaves alone.
+    let check = |state: &mut ResultsTestHost, label: &str| {
+        let followed = models(state);
+        let afresh = {
+            let mut fresh = state.clone();
+            fresh.results.results.models.invalidate();
+            let built = models(&mut fresh);
+            built.iter().map(strip_drawn).collect::<Vec<_>>()
+        };
+        let drawn = followed.iter().map(strip_drawn).collect::<Vec<_>>();
+        assert!(
+            drawn == afresh,
+            "{label}: the strips draw what a build from the same ticks draws"
+        );
+        followed[strip(&followed, other)].revision()
+    };
+    let before = check(&mut state, "before");
+    let keys: Vec<ResultBrowserSelectionKey> = (1..SIGNALS)
+        .map(|index| {
+            ResultBrowserSelectionKey::Waveform(SourceWaveformPresentationKey::new(
+                ticked,
+                format!("V(n{index})"),
+            ))
+        })
+        .collect();
+
+    set_result_quantities_ticked(&mut state.results_parts(), &keys, true);
+    // The frame the reader ticks in draws the strips before the view keeps
+    // the ticks.
+    assert_eq!(
+        check(&mut state, "the tick's frame"),
+        before,
+        "the strip no tick touched is the one built before"
+    );
+    state.quick_frame();
+    // The view keeping them changes none of the strips drawn from them.
+    let drawn = models(&mut state);
+    assert_eq!(drawn[strip(&drawn, other)].revision(), before);
+    let shown = drawn[strip(&drawn, ticked)]
+        .traces
+        .iter()
+        .filter(|trace| trace.visible)
+        .count();
+    assert_eq!(shown, SIGNALS, "every signal is drawn");
+    drop(drawn);
+
+    let view = state.working_view().expect("the run's view").id();
+    view_edits::step(&mut state.results_parts(), view, view_edits::Step::Undo)
+        .expect("the gesture is undone");
+    state.quick_frame();
+    let undone = check(&mut state, "undone");
+    view_edits::step(&mut state.results_parts(), view, view_edits::Step::Redo)
+        .expect("the gesture is redone");
+    state.quick_frame();
+    assert_eq!(
+        check(&mut state, "redone"),
+        undone,
+        "the strip no step touched is the one built before"
+    );
+}
