@@ -558,7 +558,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("plan manager", 11),
     ("rename analysis", 4),
     ("run points", 12),
-    ("design variable", 11),
+    ("design variable", 10),
     ("saved output", 9),
     ("clone plan", 8),
     ("capture group", 7),
@@ -624,7 +624,12 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// The Run Set page's Maximum storage field went: what a run may store is
 /// the plan's storage budget on the Save page, which the store holds it to
 /// as it writes, and the Run Set page only forecasts it (353).
-const PRESSED_FLOOR: usize = 353;
+///
+/// A new design variable opens with nothing written in, so its dialog's
+/// Create variable is disabled until a name and a value are typed, and a
+/// disabled control is not pressed; the tests that create a variable fill
+/// the draft in first (352).
+const PRESSED_FLOOR: usize = 352;
 
 /// Controls that are wired to nothing.
 ///
