@@ -261,7 +261,13 @@ pub(super) fn parse_matlab_v5(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
-    let decoded = rspice_formats::matlab::reader::decode_matlab_v5(
+    use rspice_formats::matlab::reader::{decode_matlab_v4, decode_matlab_v5_workspace};
+    let decode = if format == ResultImportFormat::MatlabV4 {
+        decode_matlab_v4
+    } else {
+        decode_matlab_v5_workspace
+    };
+    let decoded = decode(
         bytes,
         rspice_formats::matlab::reader::MatlabReadLimits {
             max_variables: source_capacity(),
@@ -272,7 +278,9 @@ pub(super) fn parse_matlab_v5(
         format.canonical_id(),
     )
     .map_err(|error| error.to_string())?;
-    finish_numeric_dataset(format, decoded)
+    let mut parsed = finish_numeric_dataset(format, decoded.dataset)?;
+    parsed.notes = decoded.notes;
+    Ok(parsed)
 }
 
 // -------------------------------------------------------------------------

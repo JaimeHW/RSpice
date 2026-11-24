@@ -31,6 +31,8 @@ pub enum ResultImportFormat {
     NumpyNpy,
     #[serde(rename = "numpy-npz")]
     NumpyNpz,
+    #[serde(rename = "matlab-v4")]
+    MatlabV4,
     #[serde(rename = "matlab-v5")]
     MatlabV5,
     #[serde(rename = "matlab-v7.3")]
@@ -46,7 +48,7 @@ pub enum ResultImportFormat {
 }
 
 impl ResultImportFormat {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::RSpiceResultBundle,
         Self::RSpiceDatasetBundle,
         Self::CsvRfc4180,
@@ -58,6 +60,7 @@ impl ResultImportFormat {
         Self::Parquet,
         Self::NumpyNpy,
         Self::NumpyNpz,
+        Self::MatlabV4,
         Self::MatlabV5,
         Self::MatlabV73,
         Self::SpiceRaw,
@@ -79,6 +82,7 @@ impl ResultImportFormat {
             Self::Parquet => "parquet",
             Self::NumpyNpy => "numpy-npy",
             Self::NumpyNpz => "numpy-npz",
+            Self::MatlabV4 => "matlab-v4",
             Self::MatlabV5 => "matlab-v5",
             Self::MatlabV73 => "matlab-v7.3",
             Self::SpiceRaw => "spice-raw",

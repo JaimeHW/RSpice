@@ -452,6 +452,66 @@ fn matlab_v5_imports_numeric_vectors_and_rejects_truncation() {
     assert!(parse_matlab_v5(&bytes[..140], ResultImportFormat::MatlabV5).is_err());
 }
 
+/// One Level 4 variable as SciPy's `savemat(format='4')` writes a 1-D array: header words
+/// `[0, 1, n, 0, name + NUL]` (little-endian full doubles, one row), the name, the values.
+fn mat_v4_row(name: &str, values: &[f64]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for word in [0, 1, values.len() as i32, 0, name.len() as i32 + 1] {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    bytes.extend_from_slice(name.as_bytes());
+    bytes.push(0);
+    bytes.extend(values.iter().flat_map(|value| value.to_le_bytes()));
+    bytes
+}
+
+/// A Level 4 MAT-file is read as itself. It was taken for a Level 5 file, or, before the
+/// FST signature was tightened, for an FST file. The values are SciPy's own, read back.
+#[test]
+fn a_level_four_mat_file_imports_as_itself() {
+    let time = [0.0, 1e-6, 2e-6, 3e-6, 4e-6];
+    let vout = [
+        0.0,
+        0.587785252292473,
+        0.9510565162951535,
+        0.9510565162951536,
+        0.5877852522924736,
+    ];
+    let mut bytes = mat_v4_row("time", &time);
+    bytes.extend(mat_v4_row("vout", &vout));
+    let parsed = parse_result_dataset("scope.mat", &bytes).expect("MAT v4");
+    assert_eq!(parsed.source_format, ResultImportFormat::MatlabV4);
+    assert_eq!(parsed.analysis_type, AnalysisType::Transient);
+    assert_eq!(parsed.waveforms[0].data.name, "vout");
+    assert_eq!(parsed.waveforms[0].x.read_whole().unwrap().as_ref(), &time);
+    assert_eq!(parsed.waveforms[0].y.read_whole().unwrap().as_ref(), &vout);
+
+    let error = parse_result_dataset("scope.mat", &bytes[..bytes.len() - 3])
+        .expect_err("a cut file is refused");
+    assert!(error.contains("cut short inside variable 2"), "{error}");
+}
+
+/// A workspace saved with a setting beside its signals imports the signals and says, in the
+/// review, that the setting was left out.
+#[test]
+fn a_matlab_workspace_scalar_beside_the_signals_is_left_out_with_a_note() {
+    let mut bytes = matlab_v5();
+    bytes.extend(mat_matrix("gain", &[2.0]));
+    let parsed = parse_result_dataset("workspace.mat", &bytes).expect("signals import");
+    let names: Vec<_> = parsed
+        .waveforms
+        .iter()
+        .map(|trace| &trace.data.name)
+        .collect();
+    assert_eq!(names, ["V_out"]);
+    assert_eq!(
+        parsed.notes,
+        [
+            "The MATLAB variable 'gain' holds one value, not a signal over 'time', so it is left out."
+        ]
+    );
+}
+
 /// The op-then-tran rawfile ngspice-46 writes under `-r` for an RC divider
 /// stepped from 0.5 V, in its ASCII encoding: its header lines verbatim, cut
 /// to the first three transient rows.

@@ -69,20 +69,22 @@ pub fn identify_result_import_format(
         Some("csv") => Some(ResultImportFormat::CsvRfc4180),
         Some("tsv" | "tab") => Some(ResultImportFormat::Tsv),
         Some("ts") => Some(ResultImportFormat::TouchstoneV2),
-        Some("snp") => Some(if text_looks_touchstone_v2(bytes) {
-            ResultImportFormat::TouchstoneV2
-        } else {
-            ResultImportFormat::TouchstoneV1
-        }),
+        // Touchstone 2.0 lets a file keep its `.sNp` name, and ADS writes it that way: the
+        // `[Version]` keyword, not the extension, says which version a file is.
         Some(extension)
-            if extension.starts_with('s')
-                && extension.ends_with('p')
-                && extension.len() > 2
-                && extension[1..extension.len() - 1]
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit()) =>
+            if extension == "snp"
+                || (extension.starts_with('s')
+                    && extension.ends_with('p')
+                    && extension.len() > 2
+                    && extension[1..extension.len() - 1]
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit())) =>
         {
-            Some(ResultImportFormat::TouchstoneV1)
+            Some(if text_looks_touchstone_v2(bytes) {
+                ResultImportFormat::TouchstoneV2
+            } else {
+                ResultImportFormat::TouchstoneV1
+            })
         }
         Some("h5" | "hdf5") => Some(ResultImportFormat::Hdf5),
         Some("arrow" | "feather") => Some(ResultImportFormat::ArrowIpc),
@@ -91,6 +93,11 @@ pub fn identify_result_import_format(
         Some("npz") => Some(ResultImportFormat::NumpyNpz),
         Some("mat") => Some(if bytes.starts_with(b"\x89HDF\r\n\x1a\n") {
             ResultImportFormat::MatlabV73
+        } else if !bytes.starts_with(crate::matlab::HEADER_SIGNATURE.as_bytes())
+            && crate::matlab::reader::looks_like_matlab_v4(bytes)
+        {
+            // Level 4 has no signature: its first variable's header is what says so.
+            ResultImportFormat::MatlabV4
         } else {
             ResultImportFormat::MatlabV5
         }),

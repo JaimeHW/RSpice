@@ -1543,7 +1543,9 @@ fn parse_result_dataset_beside(
         ResultImportFormat::Parquet => adapters::parse_parquet(bytes, format),
         ResultImportFormat::NumpyNpy => adapters::parse_npy(bytes, format),
         ResultImportFormat::NumpyNpz => adapters::parse_npz(bytes, format),
-        ResultImportFormat::MatlabV5 => adapters::parse_matlab_v5(bytes, format),
+        ResultImportFormat::MatlabV4 | ResultImportFormat::MatlabV5 => {
+            adapters::parse_matlab_v5(bytes, format)
+        }
         ResultImportFormat::MatlabV73 => adapters::parse_matlab_v73(bytes, format),
         ResultImportFormat::SpiceRaw => adapters::parse_spice_raw(bytes, companion_log, format),
         ResultImportFormat::PsfAscii => adapters::parse_psf_ascii(bytes, format),
@@ -1854,6 +1856,29 @@ mod tests {
         }
     }
 
+    /// Touchstone 2.0 content keeps its `.s2p` name when ADS writes it, and reads as version
+    /// 2. The source follows the specification (`[Two-Port Data Order] 12_21`, so S12 comes
+    /// before S21); scikit-rf reads it to S21 = 0.8 at -12 degrees at 1 GHz.
+    #[test]
+    fn touchstone_two_content_under_an_s2p_name_reads_as_version_two() {
+        let source = b"! two-port\n[Version] 2.0\n# GHz S MA R 50\n[Number of Ports] 2\n\
+            [Two-Port Data Order] 12_21\n[Number of Frequencies] 2\n[Network Data]\n\
+            1 0.5 -30 0.9 -10 0.8 -12 0.4 -60\n2 0.45 -60 0.85 -20 0.75 -24 0.35 -90\n[End]\n";
+        let parsed = parse_result_dataset("amplifier.s2p", source).expect("Touchstone 2 in .s2p");
+        assert_eq!(parsed.source_format, ResultImportFormat::TouchstoneV2);
+        assert_eq!(parsed.analysis_type, AnalysisType::SParameter);
+        let s21 = parsed
+            .waveforms
+            .iter()
+            .find(|trace| trace.data.name == "|S21|")
+            .expect("S21");
+        assert_eq!(s21.data.y.read_whole().unwrap().as_ref(), &[0.8, 0.75]);
+        let parts = s21.data.complex.as_ref().expect("S21 keeps its parts");
+        let angle = (-12.0_f64).to_radians();
+        assert!((parts.real.sample(0).unwrap() - 0.8 * angle.cos()).abs() < 1e-12);
+        assert!((parts.imag.sample(0).unwrap() - 0.8 * angle.sin()).abs() < 1e-12);
+    }
+
     /// A header reads as the file says: a bracket against a name is part of it (`bus[3]`), a
     /// parenthesized unit after a space is a unit (`time (s)` is a transient), and a coordinate
     /// that states no unit is read by its name, which the review says.
@@ -1927,7 +1952,7 @@ mod tests {
     }
 
     #[test]
-    fn format_registry_matches_the_seventeen_contract_import_ids() {
+    fn format_registry_matches_the_contract_import_ids() {
         let ids = ResultImportFormat::ALL.map(ResultImportFormat::canonical_id);
         assert_eq!(
             ids,
@@ -1943,6 +1968,7 @@ mod tests {
                 "parquet",
                 "numpy-npy",
                 "numpy-npz",
+                "matlab-v4",
                 "matlab-v5",
                 "matlab-v7.3",
                 "spice-raw",

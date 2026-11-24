@@ -1,8 +1,10 @@
-//! Bounded MATLAB v5 numeric parsing for import adapters.
+//! Bounded MATLAB numeric parsing for import adapters: MAT-file Level 5, and the Level 4
+//! layout older tools and `save -v4` still write.
 
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal, stated_coordinate_names};
 use std::io::Cursor;
 
+mod level4;
 mod structure;
 
 #[derive(Debug, Clone, Copy)]
@@ -76,13 +78,22 @@ pub enum MatlabReadFailure {
     ComplexTable {
         name: String,
     },
+    /// The `variable`-th Level 4 header (counted from one) does not read as one.
+    Level4Header {
+        variable: usize,
+    },
+    /// A variable holds something other than numbers, which a waveform cannot be.
+    NotNumeric {
+        name: String,
+        what: &'static str,
+    },
 }
 
 impl std::fmt::Display for MatlabReadFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ParserPanicked => f.write_str("MATLAB parser rejected malformed input"),
-            Self::Parse(source) => write!(f, "invalid MATLAB v5 file: {source}"),
+            Self::Parse(_) => f.write_str("the file is not a MATLAB v5 file this importer can read"),
             Self::Truncated { variable } => write!(f, "the MATLAB file is cut short inside variable {variable}"),
             Self::Malformed => f.write_str("a MATLAB variable's parts do not fit inside it"),
             Self::ExpandedByteLimit { expanded, limit } => write!(f, "compressed MATLAB variables expand to at least {expanded} bytes, past the import limit of {limit} bytes"),
@@ -98,6 +109,8 @@ impl std::fmt::Display for MatlabReadFailure {
             Self::MissingCoordinate { expected } => write!(f, "MATLAB file requires a coordinate variable named {expected}"),
             Self::TableShape { .. } => f.write_str("without a named coordinate, MATLAB data must be one rows-by-columns table with the coordinate in column one"),
             Self::ComplexTable { .. } => f.write_str("a complex MATLAB table requires separate named coordinate and signal variables"),
+            Self::Level4Header { variable } => write!(f, "MATLAB variable {variable} does not start with a Level 4 header"),
+            Self::NotNumeric { name, what } => write!(f, "MATLAB variable '{name}' is {what}, not numbers"),
         }
     }
 }
@@ -186,14 +199,6 @@ impl MatArray<'_> {
 
     fn size(&self) -> &[usize] {
         self.inner.size()
-    }
-
-    fn is_vector(&self) -> bool {
-        self.size()
-            .iter()
-            .filter(|dimension| **dimension > 1)
-            .count()
-            <= 1
     }
 
     fn values(&self, format: &str) -> Result<(Vec<f64>, Option<Vec<f64>>), MatlabReadError> {
@@ -303,66 +308,143 @@ impl MatArray<'_> {
     }
 }
 
+/// What a MATLAB workspace holds, read as one dataset, and what of it was left out.
+#[derive(Debug)]
+pub struct DecodedMatlab {
+    pub dataset: DecodedNumericDataset,
+    /// A sentence for each variable the dataset does not hold, saying why.
+    pub notes: Vec<String>,
+}
+
+/// One variable of a MATLAB workspace, as numbers.
+struct NamedArray {
+    name: String,
+    size: Vec<usize>,
+    real: Vec<f64>,
+    imag: Option<Vec<f64>>,
+}
+
+impl NamedArray {
+    fn is_vector(&self) -> bool {
+        self.size.iter().filter(|dimension| **dimension > 1).count() <= 1
+    }
+}
+
 /// Decode MATLAB numeric variables using their named coordinate or table layout.
 pub fn decode_matlab_v5(
     bytes: &[u8],
     limits: MatlabReadLimits<'_>,
     format: &str,
 ) -> Result<DecodedNumericDataset, MatlabReadError> {
+    decode_matlab_v5_workspace(bytes, limits, format).map(|decoded| decoded.dataset)
+}
+
+/// [`decode_matlab_v5`], with a note for each variable the dataset leaves out.
+pub fn decode_matlab_v5_workspace(
+    bytes: &[u8],
+    limits: MatlabReadLimits<'_>,
+    format: &str,
+) -> Result<DecodedMatlab, MatlabReadError> {
     let parsed = MatFile::parse(
         bytes,
         limits.max_variables,
         limits.max_expanded_bytes,
         format,
     )?;
-    let arrays = parsed.arrays();
+    let arrays = parsed
+        .arrays()
+        .into_iter()
+        .map(|array| {
+            let (real, imag) = array.values(format)?;
+            Ok(NamedArray {
+                name: array.name().to_owned(),
+                size: array.size().to_vec(),
+                real,
+                imag,
+            })
+        })
+        .collect::<Result<Vec<_>, MatlabReadError>>()?;
+    assemble(arrays, limits, format)
+}
+
+/// Whether `bytes` open as a Level 4 MAT-file, which has no signature of its own.
+pub fn looks_like_matlab_v4(bytes: &[u8]) -> bool {
+    level4::looks_like_level4(bytes)
+}
+
+/// Decode a Level 4 MAT-file by the rules a Level 5 one is read by.
+pub fn decode_matlab_v4(
+    bytes: &[u8],
+    limits: MatlabReadLimits<'_>,
+    format: &str,
+) -> Result<DecodedMatlab, MatlabReadError> {
+    assemble(
+        level4::parse(bytes, limits.max_variables, format)?,
+        limits,
+        format,
+    )
+}
+
+fn assemble(
+    mut arrays: Vec<NamedArray>,
+    limits: MatlabReadLimits<'_>,
+    format: &str,
+) -> Result<DecodedMatlab, MatlabReadError> {
     let coordinate_index = arrays.iter().position(|array| {
         limits
             .coordinate_names
             .iter()
-            .any(|name| array.name().eq_ignore_ascii_case(name))
+            .any(|name| array.name.eq_ignore_ascii_case(name))
     });
     if let Some(coordinate_index) = coordinate_index {
-        let coordinate_array = &arrays[coordinate_index];
-        let (coordinate, coordinate_imag) = coordinate_array.values(format)?;
-        if coordinate_imag.is_some() || !coordinate_array.is_vector() {
+        let coordinate_array = arrays.remove(coordinate_index);
+        if coordinate_array.imag.is_some() || !coordinate_array.is_vector() {
             return Err(adapter_error(
                 format,
                 MatlabReadFailure::CoordinateNotRealVector {
-                    name: coordinate_array.name().to_owned(),
-                    shape: coordinate_array.size().to_vec(),
-                    complex: coordinate_imag.is_some(),
+                    complex: coordinate_array.imag.is_some(),
+                    name: coordinate_array.name,
+                    shape: coordinate_array.size,
                 },
             ));
         }
         let mut signals = Vec::new();
-        for (index, array) in arrays.iter().enumerate() {
-            if index == coordinate_index {
+        let mut notes = Vec::new();
+        for array in arrays {
+            // A workspace saves its settings beside its signals: a gain, a step count. One
+            // value beside a longer coordinate is one of those, not a sample of a signal.
+            if array.real.len() == 1 && coordinate_array.real.len() != 1 {
+                notes.push(format!(
+                    "The MATLAB variable '{}' holds one value, not a signal over '{}', so it is left out.",
+                    array.name, coordinate_array.name
+                ));
                 continue;
             }
             if !array.is_vector() {
                 return Err(adapter_error(
                     format,
                     MatlabReadFailure::NonVector {
-                        name: array.name().to_owned(),
-                        shape: array.size().to_vec(),
+                        name: array.name,
+                        shape: array.size,
                     },
                 ));
             }
-            let (real, imag) = array.values(format)?;
             signals.push(DecodedNumericSignal {
-                name: array.name().to_owned(),
-                real,
-                imag,
+                name: array.name,
+                real: array.real,
+                imag: array.imag,
                 unit: None,
             });
         }
-        return Ok(DecodedNumericDataset {
-            coordinate_unit: None,
-            domain: crate::WaveformDomain::from_coordinate_name(coordinate_array.name()),
-            coordinate_name: coordinate_array.name().to_owned(),
-            coordinate,
-            signals,
+        return Ok(DecodedMatlab {
+            dataset: DecodedNumericDataset {
+                coordinate_unit: None,
+                domain: crate::WaveformDomain::from_coordinate_name(&coordinate_array.name),
+                coordinate_name: coordinate_array.name,
+                coordinate: coordinate_array.real,
+                signals,
+            },
+            notes,
         });
     }
 
@@ -374,8 +456,8 @@ pub fn decode_matlab_v5(
             },
         ));
     }
-    let array = &arrays[0];
-    let size = array.size();
+    let array = arrays.remove(0);
+    let size = &array.size;
     if size.len() != 2 || size[0] < limits.min_rows || size[1] < 2 {
         return Err(adapter_error(
             format,
@@ -385,12 +467,12 @@ pub fn decode_matlab_v5(
             },
         ));
     }
-    let (real, imag) = array.values(format)?;
+    let (real, imag) = (&array.real, &array.imag);
     if imag.is_some() {
         return Err(adapter_error(
             format,
             MatlabReadFailure::ComplexTable {
-                name: array.name().to_owned(),
+                name: array.name.clone(),
             },
         ));
     }
@@ -399,18 +481,21 @@ pub fn decode_matlab_v5(
     let coordinate = real[..rows].to_vec();
     let signals = (1..columns)
         .map(|column| DecodedNumericSignal {
-            name: format!("{}.{}", array.name(), column),
+            name: format!("{}.{}", array.name, column),
             real: real[column * rows..(column + 1) * rows].to_vec(),
             imag: None,
             unit: None,
         })
         .collect();
-    Ok(DecodedNumericDataset {
-        coordinate_unit: None,
-        domain: crate::WaveformDomain::DcSweep,
-        coordinate_name: "x".into(),
-        coordinate,
-        signals,
+    Ok(DecodedMatlab {
+        dataset: DecodedNumericDataset {
+            coordinate_unit: None,
+            domain: crate::WaveformDomain::DcSweep,
+            coordinate_name: "x".into(),
+            coordinate,
+            signals,
+        },
+        notes: Vec::new(),
     })
 }
 
@@ -434,7 +519,7 @@ mod tests {
         let arrays = parsed.arrays();
         assert_eq!(arrays.len(), 1);
         assert_eq!(arrays[0].name(), "V_out");
-        assert!(arrays[0].is_vector());
+        assert_eq!(arrays[0].size(), [2, 1]);
         let (real, imag) = arrays[0].values("matlab_v5").expect("values");
         assert_eq!(real, [1.0, 3.0]);
         assert_eq!(imag.as_deref(), Some(&[-2.0, 4.0][..]));
@@ -764,10 +849,8 @@ mod tests {
         let error = decode_matlab_v5(b"invalid", limits, "matlab_v5").unwrap_err();
         assert!(matches!(&error.reason, MatlabReadFailure::Parse(_)));
         assert!(error.reason.source().unwrap().is::<matfile::Error>());
-        assert!(
-            error
-                .to_string()
-                .starts_with("matlab_v5 import: invalid MATLAB v5 file: ")
-        );
+        assert!(error.to_string().starts_with(
+            "matlab_v5 import: the file is not a MATLAB v5 file this importer can read"
+        ));
     }
 }
