@@ -262,7 +262,7 @@ define_surface_catalog! {
     ReportAuthoring => { id: "report-authoring", label: "Verification report", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=report-authoring" },
     ModelEditor => { id: "model-editor", label: "Device model editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
     ModelCorrelation => { id: "model-correlation", label: "Measurement correlation", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=model-correlation" },
-    LibraryCellviewManager => { id: "library-cellview-manager", label: "Library Manager", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=library-cellview-manager" },
+    LibraryCellviewManager => { id: "library-cellview-manager", label: "Symbol and form manager", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=library-cellview-manager" },
     ProjectLauncher => { id: "project-launcher", label: "Project launcher", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=project-launcher" },
     Preferences => { id: "preferences", label: "Preferences", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=preferences" },
     DesignManagement => { id: "design-management", label: "Sheets, variants and annotation", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=design-management" },

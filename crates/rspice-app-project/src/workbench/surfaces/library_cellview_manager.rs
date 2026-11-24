@@ -40,8 +40,9 @@ const TAB_HEIGHT: f32 = 34.0;
 const PIN_TABLE_MIN_WIDTH: f32 = 690.0;
 const FORM_TABLE_MIN_WIDTH: f32 = 900.0;
 
-/// The manager goes by one name, Virtuoso's, wherever it is named.
-const SURFACE_TITLE: &str = "Library Manager";
+/// Named for what it manages: the Project workspace's Library page is the
+/// Library Manager.
+const SURFACE_TITLE: &str = "Symbol and form manager";
 
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
