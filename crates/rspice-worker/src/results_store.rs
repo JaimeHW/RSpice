@@ -551,7 +551,7 @@ async fn opened_segment<'a>(
             })?;
         let file = WorkerFile::hold(io);
         let key = file.0;
-        let mut reader = SegmentReader::open(Box::new(file) as SegmentBytes)
+        let reader = SegmentReader::open(Box::new(file) as SegmentBytes)
             .map_err(|error| error.to_string())?;
         if !store.checked.contains(&digest.0) {
             let SegmentState::Complete {
