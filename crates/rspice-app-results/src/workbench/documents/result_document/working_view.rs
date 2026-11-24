@@ -177,9 +177,13 @@ pub(crate) fn keep_analysis(
 }
 
 /// Before the quick view draws: keep what the reader changed since it last
-/// drew, make or follow the shown run's view, and draw from it.
+/// drew, make or follow the shown run's view, and draw from it. Many ticks
+/// the reader set this frame wait for the next frame's start, and the view
+/// waits with them: the frame they were set in draws them already.
 pub fn sync(state: &mut ResultsParts<'_>) {
-    capture(state);
+    if !keep_or_wait(state, true) {
+        return;
+    }
     prune(state);
     let Some(shown) = state.model.simulation.active_run() else {
         state.results.session.working_view_panes.clear();
@@ -270,12 +274,31 @@ fn followed_at(state: ResultsReads<'_>, view: Option<ResultDocumentId>) -> Optio
 /// the view takes them in, with the rest of the change, as one step once
 /// they are made; until then the quick view draws the reader's ticks.
 pub fn capture(state: &mut ResultsParts<'_>) {
+    capture_in(state, Capturing::Now);
+}
+
+/// When [`capture`] runs, which decides what waits for a frame's start.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Capturing {
+    /// At a frame's start, or for a caller that reads the view next:
+    /// whatever waits for a frame's start is taken in.
+    Now,
+    /// At the start of the frame after the reader's ticks waited: their
+    /// change is made ready, and the next frame's start takes it in.
+    Waited,
+    /// At the end of a frame: what waits for a frame's start waits on.
+    FrameEnd,
+}
+
+fn capture_in(state: &mut ResultsParts<'_>, capturing: Capturing) {
+    let at_start = capturing != Capturing::FrameEnd;
+    state.results.working_view_plotting.ticks_wait = false;
     let set = state.results.session.waveform_visibility.take_set();
     let Some(mut binding) = state.results.working_view.take() else {
-        take_in(state, None, false);
+        take_in(state, None, false, at_start);
         return;
     };
-    take_in(state, Some(&mut binding), false);
+    take_in(state, Some(&mut binding), false, at_start);
     let ticks: Option<Vec<SourceWaveformPresentationKey>> = set.map(|set| {
         set.into_iter()
             .filter(|tick| binding.keys.iter().any(|(key, _)| *key == tick.analysis()))
@@ -288,7 +311,7 @@ pub fn capture(state: &mut ResultsParts<'_>) {
     }
     // What the reader changed is kept after what an earlier change of
     // theirs is still making, so the steps stand in the order taken.
-    take_in(state, Some(&mut binding), true);
+    take_in(state, Some(&mut binding), true, at_start);
     let Captured {
         mut edits,
         new,
@@ -338,7 +361,7 @@ pub fn capture(state: &mut ResultsParts<'_>) {
                         edits,
                         ticks,
                         normalize,
-                        making,
+                        making: Making::Traces(making),
                     }));
                 }
                 // A thread that cannot start makes nothing: the ticks are
@@ -361,11 +384,74 @@ pub fn capture(state: &mut ResultsParts<'_>) {
                     plotted: true,
                 }
             }));
-            keep(state, view, Some(&mut binding), Ok(edits), ticks, normalize);
+            // Many ticks that waited a frame are read on this one, and
+            // kept on the next: reading them and keeping them each take
+            // most of what a frame of them may.
+            if capturing == Capturing::Waited {
+                state.results.working_view_plotting.pending = Some(Box::new(Plotting {
+                    view,
+                    edits,
+                    ticks,
+                    normalize,
+                    making: Making::Ready,
+                }));
+            } else {
+                keep(state, view, Some(&mut binding), Ok(edits), ticks, normalize);
+            }
         }
     }
     binding.scratch = scratch_of(state.results_reads(), &binding.keys);
     state.results.working_view = Some(binding);
+}
+
+/// [`capture`] at the end of a frame: many ticks the reader set this frame,
+/// what waits from it, and a change made ready on it, wait for the next
+/// frame's start.
+pub fn capture_at_frame_end(state: &mut ResultsParts<'_>) {
+    keep_or_wait(state, false);
+}
+
+/// Keep the ticks waiting for this frame, now: what comes next reads the
+/// view with them.
+pub(crate) fn keep_waiting(state: &mut ResultsParts<'_>) {
+    if state.results.working_view_plotting.ticks_wait {
+        capture(state);
+    }
+}
+
+/// How many ticks the reader sets in one frame that the view keeps in that
+/// frame: keeping one reads the run and the view for it, near a
+/// microsecond, so about this many take a few milliseconds. The view keeps
+/// more at the next frame's start, apart from the frame that set them and
+/// draws them already.
+const FRAME_TICKS: usize = 3_000;
+
+/// [`capture`], unless the reader set more ticks than a frame keeps: those
+/// wait for the start of the next frame, which `at_start` says this is.
+/// Whether the view keeps what the reader changed.
+fn keep_or_wait(state: &mut ResultsParts<'_>, at_start: bool) -> bool {
+    let many = state
+        .results
+        .session
+        .waveform_visibility
+        .set_count()
+        .is_some_and(|count| count > FRAME_TICKS);
+    let slot = &mut state.results.working_view_plotting;
+    if many && !(at_start && slot.ticks_wait) {
+        if !std::mem::replace(&mut slot.ticks_wait, true)
+            && let Some(ctx) = &slot.waker
+        {
+            ctx.request_repaint();
+        }
+        return false;
+    }
+    let capturing = match (at_start, slot.ticks_wait) {
+        (false, _) => Capturing::FrameEnd,
+        (true, true) => Capturing::Waited,
+        (true, false) => Capturing::Now,
+    };
+    capture_in(state, capturing);
+    true
 }
 
 /// How many new traces a frame makes itself: each is a few small
@@ -382,27 +468,43 @@ const FRAME_TRACES: usize = if cfg!(target_arch = "wasm32") {
 /// setting as it stood, and the view's.
 type Normal = (SourceWaveformPresentationKey, Option<bool>, Option<bool>);
 
-/// Traces being made away from the frame for one change of the reader's,
-/// and the rest of that change, which the view takes in with them.
+/// One change of the reader's that the view takes in later, and what it
+/// waits on.
 struct Plotting {
     view: ResultDocumentId,
     edits: Vec<DocumentEdit>,
     ticks: Option<Vec<SourceWaveformPresentationKey>>,
     normalize: Option<Vec<Normal>>,
-    making: std::thread::JoinHandle<
-        Result<
-            Vec<crate::results::visualization_document::PreparedPlot>,
-            crate::results::visualization_document::VisualizationError,
-        >,
-    >,
+    making: Making,
 }
 
-/// The traces a working view is being given away from the frame, if any,
-/// and the window to wake once they are made.
+/// What a change of the reader's waits on before the view takes it in.
+enum Making {
+    /// Its new traces, being made away from the frame.
+    Traces(
+        std::thread::JoinHandle<
+            Result<
+                Vec<crate::results::visualization_document::PreparedPlot>,
+                crate::results::visualization_document::VisualizationError,
+            >,
+        >,
+    ),
+    /// Nothing: made ready on one frame, the next frame's start takes it in.
+    Ready,
+}
+
+/// The change a working view takes in later, if any, the window to wake
+/// once its traces are made, and what waits for the next frame.
 #[derive(Default)]
 pub(crate) struct PlottingSlot {
     pending: Option<Box<Plotting>>,
     waker: Option<egui::Context>,
+    /// The reader set more ticks than a frame keeps: the view keeps them
+    /// at the next frame's start.
+    ticks_wait: bool,
+    /// The view changed more signals than a frame draws besides making
+    /// the change: they are drawn on the next frame.
+    draw_waits: bool,
 }
 
 impl Clone for PlottingSlot {
@@ -412,6 +514,8 @@ impl Clone for PlottingSlot {
         Self {
             pending: None,
             waker: self.waker.clone(),
+            ticks_wait: false,
+            draw_waits: false,
         }
     }
 }
@@ -431,6 +535,11 @@ impl PlottingSlot {
     /// The view traces are being made for, while they are.
     pub(crate) fn view(&self) -> Option<ResultDocumentId> {
         self.pending.as_ref().map(|pending| pending.view)
+    }
+
+    /// Whether the reader's ticks wait for the next frame to be kept.
+    pub(crate) fn waits(&self) -> bool {
+        self.ticks_wait
     }
 
     /// Make nothing more for `view`, which is gone.
@@ -663,28 +772,38 @@ fn wait_for_digest(state: &mut ResultsParts<'_>) -> bool {
 /// and read the run it waits to be digested, once it is: before anything
 /// else changes the view or draws from it.
 pub fn settle(state: &mut ResultsParts<'_>) {
+    keep_waiting(state);
     if wait_for_digest(state) {
         sync(state);
     }
-    if state.results.working_view_plotting.pending.is_none() {
-        return;
+    if state.results.working_view_plotting.pending.is_some() {
+        let mut binding = state.results.working_view.take();
+        take_in(state, binding.as_deref_mut(), true, true);
+        if state.results.working_view.is_none() {
+            state.results.working_view = binding;
+        }
     }
-    let mut binding = state.results.working_view.take();
-    take_in(state, binding.as_deref_mut(), true);
-    if state.results.working_view.is_none() {
-        state.results.working_view = binding;
+    if state.results.working_view_plotting.draw_waits {
+        sync(state);
     }
 }
 
-/// Have the view take in the traces made away from the frame, once they are
-/// made, or with `wait` as soon as they are.
-fn take_in(state: &mut ResultsParts<'_>, binding: Option<&mut QuickViewBinding>, wait: bool) {
+/// Have the view take in the change it waits to, once its traces are made
+/// or, made ready, at a frame's start, which `at_start` says this is; with
+/// `wait` as soon as it can.
+fn take_in(
+    state: &mut ResultsParts<'_>,
+    binding: Option<&mut QuickViewBinding>,
+    wait: bool,
+    at_start: bool,
+) {
     let slot = &mut state.results.working_view_plotting;
-    if !slot
-        .pending
-        .as_ref()
-        .is_some_and(|pending| wait || pending.making.is_finished())
-    {
+    if !slot.pending.as_ref().is_some_and(|pending| {
+        wait || match &pending.making {
+            Making::Traces(making) => making.is_finished(),
+            Making::Ready => at_start,
+        }
+    }) {
         return;
     }
     let Some(pending) = slot.pending.take() else {
@@ -697,11 +816,14 @@ fn take_in(state: &mut ResultsParts<'_>, binding: Option<&mut QuickViewBinding>,
         normalize,
         making,
     } = *pending;
-    let made = match making.join() {
-        Ok(made) => made,
-        // A preparation that failed fails the frame, as it would have had
-        // the frame made the traces.
-        Err(panic) => std::panic::resume_unwind(panic),
+    let made = match making {
+        Making::Traces(making) => match making.join() {
+            Ok(made) => made,
+            // A preparation that failed fails the frame, as it would have
+            // had the frame made the traces.
+            Err(panic) => std::panic::resume_unwind(panic),
+        },
+        Making::Ready => Ok(Vec::new()),
     };
     let edits = made
         .map(|prepared| {
@@ -1417,6 +1539,22 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         }
         return;
     }
+    // A change of more signals than a frame draws besides making it, as a
+    // step of a bulk tick is, is drawn on the frame after the one that
+    // made it.
+    let many = drawn.is_some_and(|binding| {
+        document
+            .signals_changed_count_since(binding.generation)
+            .is_some_and(|count| count > FRAME_TICKS)
+    });
+    let slot = &mut state.results.working_view_plotting;
+    if many && !std::mem::replace(&mut slot.draw_waits, true) {
+        if let Some(ctx) = &slot.waker {
+            ctx.request_repaint();
+        }
+        return;
+    }
+    slot.draw_waits = false;
     // The reader's change drawn again is taken from the binding, which is
     // made anew below, so the names it holds are read, not copied.
     let drawn = drawn.map(|binding| (binding.generation, binding.keys.clone()));

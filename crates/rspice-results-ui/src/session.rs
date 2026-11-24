@@ -609,6 +609,12 @@ impl VisibilityOverrides {
         Some(self.edited[from..].iter())
     }
 
+    /// How many signals [`Self::take_set`] would give, each as often as it
+    /// was set; `None` as it gives none.
+    pub fn set_count(&self) -> Option<usize> {
+        self.set_since.as_ref().map(Vec::len)
+    }
+
     /// The signals the reader set since this was last asked, each as often
     /// as it was set, and forget them: `None` when anything may have
     /// changed any signal.

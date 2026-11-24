@@ -2728,6 +2728,15 @@ impl VisualizationDocument {
         })
     }
 
+    /// How many traces the document made, changed or took out since it held
+    /// the content `generation` named, as [`Self::signals_changed_since`]
+    /// names them; `None` as it names none.
+    #[must_use]
+    pub fn signals_changed_count_since(&self, generation: u64) -> Option<usize> {
+        self.last_change_since(generation)
+            .map(|last| last.map_or(0, |last| last.present.len() + last.gone.len()))
+    }
+
     /// [`Self::signals_changed_since`], each signal with every trace of its
     /// pane that reads it now, in the document's order. The traces are
     /// taken from the change where it touched every one, as a bulk tick and

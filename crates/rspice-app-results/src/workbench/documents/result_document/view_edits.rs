@@ -233,6 +233,7 @@ pub(crate) fn apply_following(
 /// Have `document_id` take in the traces being made for it first, so a
 /// change of the view comes after the reader's change they belong to.
 fn settle(state: &mut ResultsParts<'_>, document_id: ResultDocumentId) {
+    super::working_view::keep_waiting(state);
     if state.results.working_view_plotting.view() == Some(document_id) {
         super::working_view::settle(state);
     }
@@ -321,9 +322,11 @@ enum NextStep {
 fn next_step(state: ResultsReads<'_>, direction: Step) -> Option<NextStep> {
     let histories = &state.results.view_edits;
     let shown = shown_view(state);
-    // A change whose traces are still being made is the latest step, and
-    // leaves the view nothing to redo.
-    let making = shown.filter(|view| state.results.working_view_plotting.view() == Some(*view));
+    // A change whose traces are still being made, or whose ticks wait for
+    // the next frame, is the latest step, and leaves the view nothing to
+    // redo.
+    let plotting = &state.results.working_view_plotting;
+    let making = shown.filter(|view| plotting.view() == Some(*view) || plotting.waits());
     if let (Some(view), Step::Undo) = (making, direction) {
         return Some(NextStep::View(view));
     }
@@ -352,6 +355,8 @@ pub(crate) fn shown_view_can_step(state: ResultsReads<'_>, direction: Step) -> b
 /// Take one undo or redo step in Results, the shown view's or a saved
 /// document's, saying on the status bar why when it cannot.
 pub(crate) fn step_shown_view(state: &mut ResultsParts<'_>, direction: Step) {
+    // Ticks waiting for the next frame are the reader's latest change.
+    super::working_view::keep_waiting(state);
     let outcome = match next_step(state.results_reads(), direction) {
         Some(NextStep::View(document_id)) => step(state, document_id, direction),
         Some(NextStep::Document) => step_document(state, direction),

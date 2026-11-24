@@ -2064,7 +2064,7 @@ fn show_with_chrome(
     if strip_height > 0.0 {
         waves::readout_strip(ui, state, strip_height);
     }
-    working_view::capture(state);
+    working_view::capture_at_frame_end(state);
 }
 
 /// Whether the stage shows its bar below the viewer tabs: whenever the run
