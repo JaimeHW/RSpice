@@ -134,23 +134,19 @@ pub fn project_library(
     let refusal = description_refusal(model, read_only);
     let mut asked = None;
     section_header(ui, "Selection", read_only.then_some("read-only"));
+    // The view named whole, a name to a row as a property sheet names a
+    // cell view, so a dock at its usual width holds each one; then the
+    // cell's description and the file the view is kept in.
+    if let Some((reference, _)) = &open_target {
+        property_row(ui, "Library", &reference.library);
+        property_row(ui, "Cell", &reference.cell);
+        property_row(ui, "View", &reference.view);
+    }
     property_row(
         ui,
         "View type",
         view.map_or("\u{2014}", |item| item.view_type.caption()),
     );
-    // The path whole, with the cell's description and the file the view is
-    // kept in.
-    if let Some((reference, _)) = &open_target {
-        property_row_path(
-            ui,
-            "Path",
-            &format!(
-                "{}/{}/{}",
-                reference.library, reference.cell, reference.view
-            ),
-        );
-    }
     if let (Some(item), Some(cell)) = (library, cell)
         && let Some(text) = description(ui, "cell", cell.description.trim(), refusal)
     {

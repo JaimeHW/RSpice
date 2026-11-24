@@ -114,14 +114,18 @@ fn a_verilog_a_view_reads_as_verilog_a() {
 
     let said = announced(&mut state, false, None);
 
-    assert!(said.iter().any(|text| text == "Verilog-A"), "{said:?}");
-    assert!(!said.iter().any(|text| text == "veriloga"), "{said:?}");
+    // The view is named as the reader named it; its type reads in words.
+    let typed = said
+        .iter()
+        .position(|text| text == "View type")
+        .and_then(|at| said.get(at + 1));
+    assert_eq!(typed.map(String::as_str), Some("Verilog-A"), "{said:?}");
 }
 
-/// The inspector states the selection's path whole, with what the cell is
-/// for and the file the view is kept in.
+/// The inspector names the selection's library, cell and view whole, with
+/// what the cell is for and the file the view is kept in.
 #[test]
-fn the_selection_reads_its_whole_path_description_and_file() {
+fn the_selection_names_its_library_cell_and_view_with_its_description_and_file() {
     let mut state = AppState::default();
     let mut cell = rspice_app_state::state::Cell::new("bandgap_reference_with_trim");
     cell.description = "Trimmed 1.2 V reference".to_owned();
@@ -138,8 +142,12 @@ fn the_selection_reads_its_whole_path_description_and_file() {
     let said = announced(&mut state, false, None);
 
     for row in [
-        "Path",
-        "analog/bandgap_reference_with_trim/schematic",
+        "Library",
+        "analog",
+        "Cell",
+        "bandgap_reference_with_trim",
+        "View",
+        "schematic",
         "Description",
         "Trimmed 1.2 V reference",
         "File",
