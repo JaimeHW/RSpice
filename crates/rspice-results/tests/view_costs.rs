@@ -338,6 +338,20 @@ fn a_small_edit_of_a_large_view_costs_what_it_changes() {
             },
         ),
         ("a removal", DocumentEdit::Remove(EntityRef::Trace(first))),
+        (
+            "a dataset attached",
+            DocumentEdit::AttachDataset(
+                SourceDataset::run_reference(
+                    DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([2; 32])),
+                    "Baseline",
+                    vec![RunSourceAnalysis::new(
+                        AnalysisInstanceId::new(),
+                        AnalysisType::Transient,
+                    )],
+                )
+                .expect("a run reference"),
+            ),
+        ),
     ];
     for (what, edit) in edits {
         let started = Instant::now();
@@ -364,6 +378,7 @@ fn a_small_edit_of_a_large_view_costs_what_it_changes() {
         "only the unticked signal is hidden"
     );
     assert!(traces.iter().all(|trace| trace.id != first));
+    assert_eq!(document.datasets().len(), 2, "the dataset is attached");
 }
 
 /// Removing half the traces of a view of a hundred thousand in one

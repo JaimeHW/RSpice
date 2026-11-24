@@ -2141,12 +2141,12 @@ impl VisualizationDocument {
     /// groups those belong to (the panes of a page, the settings of a
     /// pane's sheets), and what reads anything it took out or changed the
     /// reading of. Every other entity held before the transaction and still
-    /// holds: nothing it reads changed. A transaction that changes the
-    /// datasets the view reads changes what every consumer reads, so the
-    /// whole document is checked.
+    /// holds: nothing it reads changed. A transaction that changes datasets
+    /// the view reads has the set checked, and what reads those datasets.
     fn check_touched(&self) -> Result<(), VisualizationError> {
+        let datasets = self.changed_datasets();
         if self.datasets.is_touched() {
-            return self.check_whole();
+            validate_dataset_set(&self.datasets)?;
         }
         self.tracking.validate()?;
         self.presentation.validate()?;
@@ -2164,7 +2164,14 @@ impl VisualizationDocument {
             validate_key("page.template-id", &page.template_id)?;
             pages.insert(page.id);
         }
-        let panes = self.panes.touched();
+        let mut panes = self.panes.touched();
+        if !datasets.is_empty() {
+            panes.extend(self.panes.iter().filter(|pane| {
+                pane.binding
+                    .is_some_and(|binding| datasets.contains(&binding.dataset))
+                    && !self.panes.touches(pane.id.get())
+            }));
+        }
         for pane in &panes {
             pages.insert(pane.page_id);
             if let Some(before) = self.panes.before(pane.id.get()) {
@@ -2216,19 +2223,34 @@ impl VisualizationDocument {
         // reads it.
         let mut reread = HashSet::new();
         let mut relaned = false;
+        let check_trace = |trace: &Trace| -> Result<(), VisualizationError> {
+            Self::validate_trace(entities, trace)?;
+            if let Some(policy) = &entities.pane(trace.pane_id)?.family_policy {
+                validate_family_source(entities, trace.binding, policy)?;
+            }
+            Ok(())
+        };
         for (trace, before) in self.traces.touched_with_before() {
             relaned |= before.is_some_and(|before| before.lane.kind != trace.lane.kind);
-            if before.is_some_and(|before| reads_the_same(before, trace))
-                || self.traces.made_checked(trace.id.get())
+            if !datasets.contains(&trace.binding)
+                && (before.is_some_and(|before| reads_the_same(before, trace))
+                    || self.traces.made_checked(trace.id.get()))
             {
                 continue;
             }
             if before.is_some() {
                 reread.insert(trace.id);
             }
-            Self::validate_trace(entities, trace)?;
-            if let Some(policy) = &entities.pane(trace.pane_id)?.family_policy {
-                validate_family_source(entities, trace.binding, policy)?;
+            check_trace(trace)?;
+        }
+        // A trace the transaction left as it was reads otherwise when its
+        // dataset changed.
+        if !datasets.is_empty() {
+            for trace in self.traces.iter().filter(|trace| {
+                datasets.contains(&trace.binding) && !self.traces.touches(trace.id.get())
+            }) {
+                reread.insert(trace.id);
+                check_trace(trace)?;
             }
         }
         for cursor in self.cursors.touched() {
@@ -2298,36 +2320,51 @@ impl VisualizationDocument {
                 });
             }
         }
-        if self.comparisons.is_touched() {
+        // The lists without identities are each a few per pane, and are
+        // checked whole when changed, or when a dataset they may read did.
+        let reread_lists = !datasets.is_empty();
+        if self.comparisons.is_touched() || reread_lists {
             for receipt in &self.comparisons {
                 self.validate_comparison_receipt(entities, receipt)?;
             }
         }
-        if self.event_lane_orders.is_touched() || relaned {
+        if self.event_lane_orders.is_touched() || relaned || reread_lists {
             self.check_event_lane_orders(entities)?;
         }
-        if self.expression_traces.is_touched() {
+        if self.expression_traces.is_touched() || reread_lists {
             self.check_expression_traces(entities)?;
         }
-        if self.xy_plots.is_touched() {
+        if self.xy_plots.is_touched() || reread_lists {
             self.check_xy_plots(entities)?;
         }
-        if self.readout_pins.is_touched() {
+        if self.readout_pins.is_touched() || reread_lists {
             self.check_readout_pins(entities)?;
         }
-        if self.sheet_settings.is_touched() {
+        if self.sheet_settings.is_touched() || reread_lists {
             self.check_sheet_settings(entities)?;
         }
-        if self.spectrum_settings.is_touched() {
+        if self.spectrum_settings.is_touched() || reread_lists {
             self.check_spectrum_settings(entities)?;
         }
-        if self.coefficient_settings.is_touched() {
+        if self.coefficient_settings.is_touched() || reread_lists {
             self.check_coefficient_settings(entities)?;
         }
-        if self.user_buses.is_touched() || relaned {
+        if self.user_buses.is_touched() || relaned || reread_lists {
             self.check_user_buses(entities)?;
         }
         Ok(())
+    }
+
+    /// The datasets the running transaction attached, changed or took out:
+    /// what reads one of them reads otherwise.
+    fn changed_datasets(&self) -> HashSet<DatasetBinding> {
+        let (before, after) = self.datasets.changed();
+        before
+            .iter()
+            .filter(|held| !after.contains(held))
+            .chain(after.iter().filter(|now| !before.contains(now)))
+            .map(|dataset| dataset.binding)
+            .collect()
     }
 
     /// Every entity the running transaction took out.

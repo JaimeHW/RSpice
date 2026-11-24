@@ -660,6 +660,14 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
             .collect()
     }
 
+    /// Whether the transaction made, changed, put back or took out the
+    /// entity `identity`.
+    pub(super) fn touches(&self, identity: u64) -> bool {
+        self.journal.as_ref().is_some_and(|journal| {
+            identity >= journal.since || journal.slot(identity).is_some()
+        })
+    }
+
     /// The entity `identity` as it stood before the transaction, when the
     /// transaction changed or took it out.
     pub(super) fn before(&self, identity: u64) -> Option<&T> {
@@ -913,6 +921,17 @@ impl<T: Clone + PartialEq> SpliceList<T> {
                 splice
             }
             _ => Splice::default(),
+        }
+    }
+
+    /// The stretch of the list the transaction changed, as it stood before
+    /// and as it stands: empty both when it changed none.
+    pub(super) fn changed(&self) -> (&[T], &[T]) {
+        match &self.journal {
+            Some(SpliceJournal::From { at, tail }) => {
+                (tail, self.items.get(*at..).unwrap_or_default())
+            }
+            _ => (&[], &[]),
         }
     }
 
