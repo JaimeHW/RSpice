@@ -1,6 +1,7 @@
 //! A key typed in a deck the project keeps as text: the project holds the
 //! editor's own text rather than a copy of it, and every reader of the
 //! deck's text reads what was typed, with the deck's own line separators.
+//! A deck typed back to the text it was saved with reads as saved.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -199,6 +200,99 @@ fn a_key_typed_in_a_kept_deck_is_what_every_reader_of_its_text_reads() {
         app.state.model.simulation.source.netlist_content,
         TYPED.replace("\r\n", "\n"),
         "the deck brought back shows the key"
+    );
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// Type `x` at the start of the deck in front, then take it back.
+fn type_and_take_back(ctx: &egui::Context, app: &mut RSpiceApp) {
+    let editor = rspice_app_code::workbench::documents::netlist_document::editor_id_in(
+        &app.state.model,
+        &app.state.code.netlist,
+    );
+    rspice_app_code::workbench::documents::text_editor_commands::queue_caret_char_index(
+        ctx, editor, 0,
+    );
+    ctx.memory_mut(|memory| memory.request_focus(editor));
+    frame(ctx, app, DESKTOP);
+    frame(ctx, app, DESKTOP);
+    frame_with(ctx, app, DESKTOP, vec![egui::Event::Text("x".to_owned())]);
+    frame(ctx, app, DESKTOP);
+    frame_with(
+        ctx,
+        app,
+        DESKTOP,
+        vec![egui::Event::Key {
+            key: egui::Key::Backspace,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+}
+
+/// Frames until `saved` holds.
+fn until(ctx: &egui::Context, app: &mut RSpiceApp, saved: impl Fn(&RSpiceApp) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !saved(app) {
+        assert!(Instant::now() < deadline, "it never reads as saved");
+        frame(ctx, app, DESKTOP);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// A deck the project keeps, written with CRLF, and then a deck file, each
+/// typed in and typed back to the text it was saved with: each reads as
+/// saved again without a save.
+#[test]
+fn a_deck_typed_back_to_its_saved_text_reads_as_saved() {
+    use rspice_app_services::workbench::lifecycle::project_lifecycle::has_unsaved_changes;
+
+    let folder = unique_temp_dir("kept-deck-typed-back");
+    let file = folder.join("typed.rspiceproj");
+    let mut app = RSpiceApp::test_instance();
+    let typed = keep(&mut app.state, "typed.cir", TYPED);
+    keep(&mut app.state, "other.cir", OTHER);
+    assert!(app.state.save_project_to_path(&file), "the project saves");
+    open(&mut app.state, typed);
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    assert!(!has_unsaved_changes(&app.state));
+
+    type_and_take_back(&ctx, &mut app);
+    assert!(
+        app.state.model.workspace.content.decks_dirty,
+        "the edits read as unsaved"
+    );
+    until(&ctx, &mut app, |app| {
+        !app.state.model.workspace.content.decks_dirty && !has_unsaved_changes(&app.state)
+    });
+    assert_eq!(kept(&app.state, typed), TYPED);
+
+    let deck = folder.join("file.cir");
+    assert!(
+        app.state
+            .open_test_deck(OTHER.to_owned(), Some(deck.clone()), "file.cir"),
+        "{:?}",
+        app.state.prompt_text()
+    );
+    frame(&ctx, &mut app, DESKTOP);
+    type_and_take_back(&ctx, &mut app);
+    let unsaved = |app: &RSpiceApp| {
+        app.state
+            .code
+            .netlist
+            .open_deck
+            .as_ref()
+            .and_then(deck_files::OpenDeck::unsaved)
+            .is_some()
+    };
+    assert!(unsaved(&app), "the edits read as unsaved");
+    until(&ctx, &mut app, |app| !unsaved(app));
+    assert_eq!(
+        std::fs::read_to_string(&deck).expect("the deck file"),
+        OTHER
     );
     let _ = std::fs::remove_dir_all(folder);
 }

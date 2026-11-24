@@ -723,6 +723,148 @@ impl AppState {
         }
     }
 
+    /// The open deck, edited back to the text it was last saved with, reads
+    /// as saved again as soon as that is found, without a save. Once its
+    /// text has rested, a worker compares it with the saved text: a deck
+    /// file by the digest of what was last read or written, a deck the
+    /// project keeps with the text the project was last saved or opened
+    /// with. No frame reads the deck whole.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn poll_saved_deck_text(&mut self, ctx: &egui::Context) {
+        use rspice_app_code::workbench::documents::deck_files;
+        let Some((id, revision)) = self
+            .code
+            .netlist
+            .open_deck
+            .as_ref()
+            .map(|deck| (deck.id, deck.root.text.revision()))
+        else {
+            return;
+        };
+        if let Some((deck, compared, answer)) = &self.shell.saved_text.running {
+            let Some(&same) = answer.get() else {
+                return;
+            };
+            let current = (*deck, *compared) == (id, revision);
+            self.shell.saved_text.running = None;
+            if same && current {
+                self.read_deck_as_saved();
+                return;
+            }
+        }
+        if self.shell.saved_text.compared == Some((id, revision)) {
+            return;
+        }
+        let Some(saved) = self.saved_deck_text() else {
+            return;
+        };
+        // The text is compared once it rests, so typing starts no comparison.
+        let now = ctx.input(|input| input.time);
+        let resting = match self.shell.saved_text.resting {
+            Some((deck, at, since)) if (deck, at) == (id, revision) => now - since,
+            _ => {
+                self.shell.saved_text.resting = Some((id, revision, now));
+                0.0
+            }
+        };
+        if resting < SAVED_TEXT_REST {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                SAVED_TEXT_REST - resting,
+            ));
+            return;
+        }
+        self.shell.saved_text.compared = Some((id, revision));
+        let Some(deck) = self.code.netlist.open_deck.as_ref() else {
+            return;
+        };
+        let (text, line_ending) = (deck.root.text.clone(), deck.root.line_ending);
+        let answer = std::sync::Arc::new(std::sync::OnceLock::new());
+        let answered = std::sync::Arc::clone(&answer);
+        let wake = ctx.clone();
+        let started = std::thread::Builder::new()
+            .name("deck-saved-text".to_owned())
+            .spawn(move || {
+                let same = match &saved {
+                    SavedText::File(digest) => deck_files::editor_text_digest(&text) == *digest,
+                    SavedText::Kept(saved) => {
+                        deck_files::written_as(&text, line_ending, saved.as_str())
+                    }
+                };
+                let _ = answered.set(same);
+                wake.request_repaint();
+            });
+        if started.is_ok() {
+            self.shell.saved_text.running = Some((id, revision, answer));
+        }
+    }
+
+    /// The text the open deck reads as saved against, while it reads
+    /// unsaved: a deck file's digest, when the deck's file holds edits and
+    /// changed on disk in nothing else, of a text as long as the deck's now;
+    /// for a deck the project keeps, the text the project was last saved or
+    /// opened with, when only the deck's own text differs from it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn saved_deck_text(&self) -> Option<SavedText> {
+        let deck = self.code.netlist.open_deck.as_ref()?;
+        if !deck.is_stored() {
+            let root = &deck.root;
+            let stamp = root.disk.as_ref()?;
+            return (root.dirty && root.disk_change.is_none() && root.text.len() == stamp.text_len)
+                .then_some(SavedText::File(stamp.digest));
+        }
+        let content = &self.model.workspace.content;
+        if !content.decks_dirty {
+            return None;
+        }
+        let kept = content
+            .decks
+            .iter()
+            .find(|kept| kept.id == deck.id)?
+            .stored_deck()?;
+        let saved = saved_stored_deck(&self.platform, deck.id)?;
+        let only_its_text = kept.name == saved.name
+            && kept.encoding == saved.encoding
+            && kept.files.len() == saved.files.len()
+            && kept
+                .files
+                .iter()
+                .zip(&saved.files)
+                .all(|(kept, saved)| kept.path == saved.path && kept.text.is(&saved.text));
+        (only_its_text && !kept.text.is(&saved.text)).then(|| SavedText::Kept(saved.text.clone()))
+    }
+
+    /// The open deck reads as saved: a deck file's edits are its saved
+    /// text; a deck the project keeps holds the very text the project was
+    /// saved with again, and the project's decks read as they were saved
+    /// unless another differs.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_deck_as_saved(&mut self) {
+        let Some(deck) = self.code.netlist.open_deck.as_mut() else {
+            return;
+        };
+        if !deck.is_stored() {
+            deck.root.dirty = false;
+            return;
+        }
+        let id = deck.id;
+        let Some(saved) = saved_stored_deck(&self.platform, id).map(|saved| saved.text.clone())
+        else {
+            return;
+        };
+        let content = &mut *self.model.workspace.content;
+        if let Some(kept) = content
+            .decks
+            .iter_mut()
+            .find(|kept| kept.id == id)
+            .and_then(rspice_app_state::state::ProjectDeck::stored_deck_mut)
+        {
+            kept.text = saved;
+        }
+        if let Some(accepted) = self.platform.project_lifecycle.accepted() {
+            content.decks_dirty = accepted.source_dirty_flags(content).0;
+        }
+    }
+
     /// Follow a deck file opened from disk until its read lands: once it
     /// opened, the log says so. Should its file not have read as text, its
     /// open was undone as the read landed; a project made for it gives way
@@ -909,6 +1051,57 @@ impl AppState {
         let new_project = !self.platform.project_lifecycle.is_open();
         self.open_deck_at(&path, new_project)
     }
+}
+
+/// How long, in seconds, the open deck's text rests unchanged before it is
+/// compared with the text it was last saved with.
+#[cfg(not(target_arch = "wasm32"))]
+const SAVED_TEXT_REST: f64 = 0.3;
+
+/// The comparison of the open deck's text with the text it was last saved
+/// with ([`AppState::poll_saved_deck_text`]).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SavedTextCompare {
+    /// The deck and the revision of its text compared last, or being
+    /// compared: a revision is compared once.
+    compared: Option<(rspice_app_state::state::DeckId, u64)>,
+    /// The deck and the revision its text rests at, and since when.
+    resting: Option<(rspice_app_state::state::DeckId, u64, f64)>,
+    /// The comparison running, and its answer once it has one.
+    running: Option<(
+        rspice_app_state::state::DeckId,
+        u64,
+        std::sync::Arc<std::sync::OnceLock<bool>>,
+    )>,
+}
+
+/// The text a deck reads as saved against.
+#[cfg(not(target_arch = "wasm32"))]
+enum SavedText {
+    /// A deck file's, by the digest of what was last read or written.
+    File(rspice_app_state::product::ContentDigest),
+    /// A deck the project keeps: the text the project was last saved or
+    /// opened with.
+    Kept(rspice_app_state::state::DeckText),
+}
+
+/// The deck `id` as the project was last saved or opened with it, when it
+/// is one the project keeps.
+#[cfg(not(target_arch = "wasm32"))]
+fn saved_stored_deck(
+    platform: &rspice_app_services::workbench::slots::platform::PlatformState,
+    id: rspice_app_state::state::DeckId,
+) -> Option<&rspice_app_state::state::StoredDeck> {
+    platform
+        .project_lifecycle
+        .accepted()?
+        .baseline()
+        .workspace
+        .decks
+        .iter()
+        .find(|deck| deck.id == id)?
+        .stored_deck()
 }
 
 /// A deck file opened from disk while it is read away from the frame.

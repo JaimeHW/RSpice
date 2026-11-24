@@ -32,4 +32,8 @@ pub(crate) struct ShellState {
     /// its tab in front saying it is reading.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) opening_deck: Option<crate::workbench::session::deck_transactions::OpeningDeck>,
+    /// The comparison of the open deck's text, edited back, with the text it
+    /// was last saved with.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) saved_text: crate::workbench::session::deck_transactions::SavedTextCompare,
 }

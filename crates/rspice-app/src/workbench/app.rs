@@ -579,6 +579,9 @@ impl RSpiceApp {
         // A deck file opened from disk is followed until its read lands.
         #[cfg(not(target_arch = "wasm32"))]
         self.state.poll_deck_open();
+        // So is the open deck, edited back to its saved text.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.state.poll_saved_deck_text(ctx);
         #[cfg(target_arch = "wasm32")]
         if let Some(event) = self.state.poll_browser_project_save() {
             self.handle_save_continuation_event(event);

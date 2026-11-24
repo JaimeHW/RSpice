@@ -113,6 +113,9 @@ pub struct DiskStamp {
     pub digest: crate::product::ContentDigest,
     pub modified: Option<std::time::SystemTime>,
     pub len: u64,
+    /// The length of the text, as the editor holds it, that `digest` was
+    /// taken of.
+    pub text_len: usize,
 }
 
 /// One open file: a deck or an include it reads.
@@ -429,7 +432,78 @@ fn disk_stamp(path: &Path, text: &str) -> DiskStamp {
             .as_ref()
             .and_then(|metadata| metadata.modified().ok()),
         len: metadata.map_or(0, |metadata| metadata.len()),
+        text_len: text.len(),
     }
+}
+
+/// The digest of `text`, as the editor holds it, taken as a deck file's
+/// stamp takes it ([`DiskStamp::digest`]): read piece by piece, never put in
+/// one piece. A deck file edited back to the text it was read or saved with
+/// is told by it, away from the frame.
+#[must_use]
+pub fn editor_text_digest(text: &RevisedText) -> crate::product::ContentDigest {
+    use sha2::Digest as _;
+    struct Hashing(sha2::Sha256);
+    impl std::fmt::Write for Hashing {
+        fn write_str(&mut self, piece: &str) -> std::fmt::Result {
+            self.0.update(piece.as_bytes());
+            Ok(())
+        }
+    }
+    let mut hashing = Hashing(sha2::Sha256::new());
+    let _ = std::fmt::Write::write_fmt(&mut hashing, format_args!("{text}"));
+    crate::product::ContentDigest::from_bytes(hashing.0.finalize().into())
+}
+
+/// Whether `text`, as the editor holds it, is `saved` once written with
+/// `line_ending`'s separators: read piece by piece, never put in one piece,
+/// and only as far as the first difference. A deck the project keeps,
+/// edited back to the text the project was saved with, is told by it, away
+/// from the frame.
+#[must_use]
+pub fn written_as(text: &RevisedText, line_ending: LineEnding, saved: &str) -> bool {
+    /// What is left of the saved text to match, and what a line break is
+    /// written as.
+    struct Against<'a> {
+        rest: &'a [u8],
+        newline: &'static [u8],
+    }
+    impl Against<'_> {
+        fn take(&mut self, piece: &[u8]) -> std::fmt::Result {
+            let rest: &[u8] = self.rest;
+            self.rest = rest.strip_prefix(piece).ok_or(std::fmt::Error)?;
+            Ok(())
+        }
+    }
+    impl std::fmt::Write for Against<'_> {
+        fn write_str(&mut self, piece: &str) -> std::fmt::Result {
+            let mut lines = piece.split('\n');
+            if let Some(first) = lines.next() {
+                self.take(first.as_bytes())?;
+            }
+            for line in lines {
+                let newline = self.newline;
+                self.take(newline)?;
+                self.take(line.as_bytes())?;
+            }
+            Ok(())
+        }
+    }
+    let newline: &'static [u8] = match line_ending {
+        LineEnding::CrLf => b"\r\n",
+        LineEnding::Cr => b"\r",
+        LineEnding::None | LineEnding::Lf | LineEnding::Mixed => b"\n",
+    };
+    // Written as it is held, the two lengths tell most edits apart at once.
+    if newline == b"\n" && text.len() != saved.len() {
+        return false;
+    }
+    let mut against = Against {
+        rest: saved.as_bytes(),
+        newline,
+    };
+    std::fmt::Write::write_fmt(&mut against, format_args!("{text}")).is_ok()
+        && against.rest.is_empty()
 }
 
 /// What a look at the disk found for one open file.
