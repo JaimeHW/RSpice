@@ -418,6 +418,9 @@ pub struct StripModel {
     pub(crate) retickable: bool,
     /// What a frame asks of the traces as a whole, found once a revision.
     pub(crate) trace_facts: std::sync::OnceLock<TraceFacts>,
+    /// What a control acting on each pane calls it, by the pane's slot and
+    /// unit, found once a revision (see [`stack::pane_name`]).
+    pub(crate) pane_names: std::sync::OnceLock<Vec<((usize, String), Option<String>)>>,
 }
 
 /// Where one expression trace is drawn.
@@ -655,6 +658,7 @@ impl StripModel {
     pub(crate) fn forget_trace_panes(&mut self) {
         self.trace_panes = std::sync::OnceLock::new();
         self.trace_facts = std::sync::OnceLock::new();
+        self.pane_names = std::sync::OnceLock::new();
         self.revision = next_revision();
     }
 
