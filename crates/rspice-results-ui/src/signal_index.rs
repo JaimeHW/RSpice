@@ -70,6 +70,85 @@ impl SignalIndex {
         named.next().is_none().then_some(column)
     }
 
+    /// [`Self::column`] for each of `names`, found together: the names are
+    /// looked up in the order of their hashes, each from where the last was
+    /// found, and checked in column order, so many names cost about a walk
+    /// of what they name rather than a search of the index each.
+    pub fn columns(
+        &self,
+        analysis: &AnalysisResult<RetainedTrace>,
+        names: &[&str],
+    ) -> Vec<Option<usize>> {
+        self.found(analysis, names)
+            .into_iter()
+            .map(|(column, count)| column.filter(|_| count == 1))
+            .collect()
+    }
+
+    /// The first of [`Self::columns_named`] for each of `names`, found
+    /// together as [`Self::columns`] finds them.
+    pub fn first_columns(
+        &self,
+        analysis: &AnalysisResult<RetainedTrace>,
+        names: &[&str],
+    ) -> Vec<Option<usize>> {
+        self.found(analysis, names)
+            .into_iter()
+            .map(|(column, _)| column)
+            .collect()
+    }
+
+    /// The first column named each of `names`, and how many are.
+    fn found(
+        &self,
+        analysis: &AnalysisResult<RetainedTrace>,
+        names: &[&str],
+    ) -> Vec<(Option<usize>, u32)> {
+        let mut asked: Vec<(u64, usize)> = names
+            .iter()
+            .enumerate()
+            .map(|(at, name)| (name_hash(name), at))
+            .collect();
+        asked.sort_unstable();
+        // Each column whose hash a name's is, and the name.
+        let mut candidates = Vec::with_capacity(names.len());
+        let mut from = 0;
+        for (hash, at) in asked {
+            from = self.gallop(from, hash);
+            candidates.extend(
+                self.by_hash[from..]
+                    .iter()
+                    .take_while(|&&(other, _)| other == hash)
+                    .map(|&(_, column)| (column, at)),
+            );
+        }
+        candidates.sort_unstable();
+        let mut found = vec![(None, 0); names.len()];
+        for (column, at) in candidates {
+            if analysis
+                .waveforms
+                .get(column)
+                .is_some_and(|waveform| waveform.name == names[at])
+            {
+                let (first, count) = &mut found[at];
+                first.get_or_insert(column);
+                *count += 1;
+            }
+        }
+        found
+    }
+
+    /// Where the first hash at or above `hash` stands, at or after `from`:
+    /// steps doubling from `from`, then a search of the last step.
+    fn gallop(&self, from: usize, hash: u64) -> usize {
+        let mut step = 1;
+        while from + step < self.by_hash.len() && self.by_hash[from + step].0 < hash {
+            step *= 2;
+        }
+        let end = (from + step + 1).min(self.by_hash.len());
+        from + self.by_hash[from..end].partition_point(|&(other, _)| other < hash)
+    }
+
     /// The columns the dataset plots, in column order.
     pub fn plotted(&self) -> &[usize] {
         &self.plotted
@@ -163,5 +242,15 @@ mod tests {
         );
         assert_eq!(index.column(&analysis, "V(c)"), None);
         assert_eq!(index.plotted(), &[0, 3]);
+        let names = ["V(c)", "I(r)", "V(a)", "V(b)", "I(r)"];
+        assert_eq!(
+            index.columns(&analysis, &names),
+            vec![None, Some(3), None, Some(1), Some(3)],
+            "names found together are found as one at a time"
+        );
+        assert_eq!(
+            index.first_columns(&analysis, &names),
+            vec![None, Some(3), Some(0), Some(1), Some(3)]
+        );
     }
 }
