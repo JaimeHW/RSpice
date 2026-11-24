@@ -240,7 +240,7 @@ define_messages! {
     NetlistDeckTooLarge => "{name} is {size}. Opening it needs about {needed} of memory, more than the {installed} this computer has. Open it on a computer with more memory.",
     NetlistDeckLanguageOff => "Language features are off: indexing {name} needs about {needed}, and {free} was free.",
     NetlistDeckIndexAnyway => "Index anyway",
-    NetlistDeckLanguageOffShort => "Off: indexing this deck needs more memory than is free.",
+    NetlistDeckLanguageOffShort => "Off: too little memory is free.",
     NetlistComparisonGeneratedTitle => "Compare with earlier build",
     NetlistCompareRevisions => "Compare revisions",
     NetlistComparisonGeneratedDescription => "Choose an earlier build of the generated netlist to compare with the current one.",
