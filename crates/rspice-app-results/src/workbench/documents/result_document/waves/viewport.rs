@@ -215,7 +215,8 @@ pub(crate) struct PendingJump {
 /// A step to a neighbouring sample, and any jump on a trace in memory, lands now: `Some` of
 /// where. A peak, crossing or extreme of a stored trace is searched on a Results job, since the
 /// search reads the trace from its start; `None`, and [`poll_cursor_jump`] moves the cursor
-/// when the job answers. A jump asked while another searches replaces it.
+/// when the job answers. A search that has answered by the time it is started (the browser's
+/// run as they start) lands now, as `Some`. A jump asked while another searches replaces it.
 pub(crate) fn jump_cursor(
     state: &mut ResultsParts<'_>,
     tokens: &Tokens,
@@ -243,16 +244,17 @@ pub(crate) fn jump_cursor(
         job.step(&format!("Searching {}", work.trace_name()), 0);
         Ok(work.run())
     });
-    state.results.cursor_jump = Some(PendingJump { search, job });
-    // A job that ran as it started, as the browser's do, answers now.
-    poll_cursor_jump(state, tokens);
+    let pending = PendingJump { search, job };
+    if pending.job.is_finished() {
+        return land_answered_jump(state, tokens, pending);
+    }
+    state.results.cursor_jump = Some(pending);
     Ok(None)
 }
 
 /// Move the cursor a jump's search found, once its job has answered, or say on the status bar
 /// why it found nothing. Whether a search is still running.
 pub(crate) fn poll_cursor_jump(state: &mut ResultsParts<'_>, tokens: &Tokens) -> bool {
-    use crate::workbench::results_job::JobOutcome;
     let Some(pending) = state.results.cursor_jump.as_ref() else {
         return false;
     };
@@ -262,6 +264,20 @@ pub(crate) fn poll_cursor_jump(state: &mut ResultsParts<'_>, tokens: &Tokens) ->
     let Some(pending) = state.results.cursor_jump.take() else {
         return false;
     };
+    if let Err(refusal) = land_answered_jump(state, tokens, pending) {
+        state.prompt(format!("{refusal}."));
+    }
+    false
+}
+
+/// Move the cursor to where a finished search found its place: `Some` of where, why it found
+/// nothing, or `None` when the search was cancelled.
+fn land_answered_jump(
+    state: &mut ResultsParts<'_>,
+    tokens: &Tokens,
+    pending: PendingJump,
+) -> Result<Option<f64>, String> {
+    use crate::workbench::results_job::JobOutcome;
     match pending.job.take_outcome() {
         Some(JobOutcome::Done(Ok(x))) => {
             let presentation = state.results_reads().presentation_policy();
@@ -277,15 +293,15 @@ pub(crate) fn poll_cursor_jump(state: &mut ResultsParts<'_>, tokens: &Tokens) ->
                 &pending.search,
                 x,
             );
+            Ok(Some(x))
         }
-        Some(JobOutcome::Done(Err(refusal))) => state.prompt(format!("{refusal}.")),
-        Some(JobOutcome::Failed(reason)) => state.prompt(format!(
-            "{} could not be searched: {reason}.",
+        Some(JobOutcome::Done(Err(refusal))) => Err(refusal),
+        Some(JobOutcome::Failed(reason)) => Err(format!(
+            "{} could not be searched: {reason}",
             pending.search.trace_name()
         )),
-        Some(JobOutcome::Cancelled) | None => {}
+        Some(JobOutcome::Cancelled) | None => Ok(None),
     }
-    false
 }
 
 /// Wait for a cursor jump's search and land it as [`poll_cursor_jump`] does: the search's
