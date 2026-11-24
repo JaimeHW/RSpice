@@ -195,6 +195,10 @@ pub struct ProjectAutosave {
     /// The working project as a browser start reopened it, with the unsaved
     /// work its session kept, while recovered work is looked for.
     pub restart_stamp: Option<project_lifecycle::WorkingStamp>,
+    /// The autosave a browser start brought the project back from, which its
+    /// session named in place of the project: the start holds just what that
+    /// autosave holds.
+    pub restart_from: Option<uuid::Uuid>,
     /// The search, after an open failed, for a checkpoint of that file.
     #[cfg(not(target_arch = "wasm32"))]
     rescue_search: Option<Slot<Option<UnopenedProject>>>,
@@ -234,6 +238,19 @@ impl ProjectAutosave {
     /// The autosaves this process wrote and still holds.
     pub fn written(&self) -> &[ProjectCheckpointSummary] {
         &self.written
+    }
+
+    /// The key of the autosave record in the browser's records that holds
+    /// the working project `stamp` names: the newest this process wrote,
+    /// while no newer one is being written over it.
+    pub fn record_holding(&self, stamp: &project_lifecycle::WorkingStamp) -> Option<&str> {
+        if self.writing.is_some() || self.written_stamp.as_ref() != Some(stamp) {
+            return None;
+        }
+        match self.written.as_slice() {
+            [newest] => newest.record_key(),
+            _ => None,
+        }
     }
 }
 

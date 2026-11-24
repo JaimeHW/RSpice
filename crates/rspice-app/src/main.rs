@@ -231,9 +231,10 @@ fn main() {
             return;
         };
 
-        // The session's runs are kept in the browser's durable records, which
-        // answer later: they are read before the application starts.
-        rspice_app::read_browser_session().await;
+        // The session's runs, and the autosave it names in place of its
+        // project, are kept in the browser's durable records, which answer
+        // later: they are read before the application starts.
+        rspice_app::read_browser_session(rspice_app::autosave_named_by_session()).await;
 
         let result = eframe::WebRunner::new()
             .start(

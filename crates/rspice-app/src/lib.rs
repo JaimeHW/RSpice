@@ -68,10 +68,12 @@ mod feature_tests;
 /// The application root, constructed by both the desktop and browser entry
 /// points.
 pub use workbench::RSpiceApp;
-/// Read the runs the browser kept for the session, before the application
-/// starts.
+/// Read the runs, and the autosave named in place of the project, the
+/// browser kept for the session, before the application starts.
 #[cfg(target_arch = "wasm32")]
-pub use workbench::app_state::session::session_store::read_browser_session;
+pub use workbench::app_state::session::session_store::{
+    autosave_named_by_session, read_browser_session,
+};
 
 /// The desktop binary's logger: stderr as before, plus the running analysis's
 /// own Console log.

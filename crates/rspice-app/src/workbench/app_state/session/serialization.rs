@@ -20,7 +20,13 @@ impl AppState {
     /// project and layout vanish without a word. The decoder's own account,
     /// a position in the stored text, goes to the log.
     pub(crate) fn restore_eframe_session(storage: &dyn eframe::Storage) -> Option<Self> {
-        let text = storage.get_string(eframe::APP_KEY)?;
+        let mut text = storage.get_string(eframe::APP_KEY)?;
+        // The browser keeps the project's part of the session beside it.
+        if let Some(project) = storage.get_string(
+            rspice_app_services::workbench::app_state::session::browser_session::PROJECT_PART_KEY,
+        ) {
+            text = joined_session(&text, &project);
+        }
         // A stored run's results are read from the folder the instance that stored the session
         // kept them in.
         #[cfg(not(target_arch = "wasm32"))]
@@ -85,7 +91,7 @@ impl serde::Serialize for AppState {
     where
         S: serde::Serializer,
     {
-        self.serialize_session(serializer, true)
+        self.serialize_session(serializer, true, None)
     }
 }
 
@@ -101,12 +107,56 @@ impl serde::Serialize for WithoutRuns<'_> {
     where
         S: serde::Serializer,
     {
-        self.0.serialize_session(serializer, false)
+        self.0.serialize_session(serializer, false, None)
+    }
+}
+
+/// A part of the session, as the browser keeps it, its runs left out: the
+/// open project's working content, which changes only with the project, or
+/// the layout and selections around it. Together they read as the session.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::workbench::app_state) enum SessionPart {
+    Project,
+    Shell,
+}
+
+pub(in crate::workbench::app_state) struct PartOfSession<'a>(
+    pub(in crate::workbench::app_state) &'a AppState,
+    pub(in crate::workbench::app_state) SessionPart,
+);
+
+impl serde::Serialize for PartOfSession<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize_session(serializer, false, Some(self.1))
+    }
+}
+
+/// The session the browser kept in parts, read as one: the shell's fields
+/// and the project's. Either alone is a session, as an older one that kept
+/// them together is.
+pub(in crate::workbench::app_state) fn joined_session(shell: &str, project: &str) -> String {
+    let (shell, project) = (shell.trim(), project.trim());
+    match (
+        shell.strip_suffix('}').filter(|_| shell.starts_with('{')),
+        project.strip_prefix('{').filter(|_| project.ends_with('}')),
+    ) {
+        (Some(head), Some(tail)) if head.trim() != "{" && tail.trim() != "}" => {
+            format!("{head},{tail}")
+        }
+        _ => shell.to_owned(),
     }
 }
 
 impl AppState {
-    fn serialize_session<S>(&self, serializer: S, with_runs: bool) -> Result<S::Ok, S::Error>
+    fn serialize_session<S>(
+        &self,
+        serializer: S,
+        with_runs: bool,
+        part: Option<SessionPart>,
+    ) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -115,6 +165,11 @@ impl AppState {
         // isolation launch can never erase document restoration state,
         // working buffers, recent files, or the prior workspace layout.
         if let Some(preserved) = self.state_safe_mode_session_snapshot() {
+            if part.is_some() {
+                return Err(<S::Error as serde::ser::Error>::custom(
+                    "a safe-mode session is kept whole",
+                ));
+            }
             let snapshot: serde_json::Value = serde_json::from_str(preserved).map_err(|error| {
                 <S::Error as serde::ser::Error>::custom(format!(
                     "safe-mode session snapshot is invalid: {error}"
@@ -127,6 +182,13 @@ impl AppState {
         // flags stay out of the session; only user-visible result history is
         // persisted through the project-file DTO.
         use serde::ser::SerializeStruct;
+        let project = part != Some(SessionPart::Shell);
+        let shell = part != Some(SessionPart::Project);
+        if !project {
+            let mut state = serializer.serialize_struct("AppState", 7)?;
+            self.serialize_shell(&mut state)?;
+            return state.end();
+        }
         let mut simulation_results = if with_runs {
             rspice_app_services::io::capture_simulation_results(&self.model.simulation)
         } else {
@@ -153,10 +215,11 @@ impl AppState {
         {
             simulation_results = ProjectSimulationResults::default();
         }
-        let field_count = if simulation_results.is_empty() {
-            10
-        } else {
-            11
+        let field_count = match (shell, simulation_results.is_empty()) {
+            (true, true) => 10,
+            (true, false) => 11,
+            (false, true) => 3,
+            (false, false) => 4,
         };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         let mut committed_workspace;
@@ -185,11 +248,32 @@ impl AppState {
         };
         state.serialize_field("project_workspace", workspace)?;
         state.serialize_field("library_manager", &self.model.library_manager)?;
+        state.serialize_field("execution_context", &execution_context)?;
+        if shell {
+            self.serialize_shell(&mut state)?;
+        }
+        if !simulation_results.is_empty() {
+            // The session names the segments its runs read and holds none of their samples.
+            rspice_formats::project_results::saving_file(|| {
+                state.serialize_field("simulation_results", &simulation_results)
+            })?;
+        }
+        state.end()
+    }
+}
+
+impl AppState {
+    /// The session's fields around the project: its layout and selections,
+    /// recent files, licence, the bindings to the project's saved home, and
+    /// whether a project is open.
+    fn serialize_shell<S>(&self, state: &mut S) -> Result<(), S::Error>
+    where
+        S: serde::ser::SerializeStruct,
+    {
         state.serialize_field("ui_session", &UiSessionWire::capture(self))?;
         state.serialize_field("workbench", &WorkbenchWireRef::capture(self))?;
         state.serialize_field("recent_files", &self.platform.recent_files)?;
         state.serialize_field("license_key", &self.cloud.license_key)?;
-        state.serialize_field("execution_context", &execution_context)?;
         state.serialize_field(
             "native_project_binding_receipt",
             &self.platform.native_project_binding_receipt,
@@ -204,18 +288,9 @@ impl AppState {
         state.serialize_field(
             "no_project_open",
             &!self.platform.project_lifecycle.is_open(),
-        )?;
-        if !simulation_results.is_empty() {
-            // The session names the segments its runs read and holds none of their samples.
-            rspice_formats::project_results::saving_file(|| {
-                state.serialize_field("simulation_results", &simulation_results)
-            })?;
-        }
-        state.end()
+        )
     }
-}
 
-impl AppState {
     pub(in crate::workbench::app_state) fn state_safe_mode_session_snapshot(&self) -> Option<&str> {
         self.model.safe_mode.preserved_session()
     }

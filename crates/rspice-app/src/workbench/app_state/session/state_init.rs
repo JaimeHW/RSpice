@@ -30,6 +30,7 @@ impl AppState {
         // The browser keeps the session's runs apart from it, in its durable
         // records.
         if rspice_app_services::workbench::lifecycle::durable_records::browser_records().is_some() {
+            state.restore_browser_project(storage);
             state.restore_browser_runs(storage);
         }
         match store {

@@ -27,6 +27,9 @@ pub struct PlatformState {
     /// The runs the browser keeps for the session, written only when they
     /// changed. Transient.
     pub session_runs: crate::workbench::app_state::session::browser_session::KeptRuns,
+    /// What the browser's local storage holds of the session, each part
+    /// written again only when it changed. Transient.
+    pub session_parts: Box<crate::workbench::app_state::session::browser_session::KeptParts>,
     /// The scanned native checkpoint catalog the Project Launcher's recovery
     /// page lists. Runtime state, never project or user preferences.
     pub recovery_catalog: Box<crate::workbench::lifecycle::recovery::RecoveryCatalog>,
@@ -75,6 +78,7 @@ impl Default for PlatformState {
             autosave_failing: false,
             session_kept: Default::default(),
             session_runs: Default::default(),
+            session_parts: Box::default(),
             recovery_catalog: Default::default(),
             project_lifecycle: Box::default(),
             recent_files: Vec::new(),

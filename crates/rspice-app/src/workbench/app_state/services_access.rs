@@ -8,7 +8,9 @@
 use rspice_design::drc::DrcResult;
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::session::serialization::WithoutRuns;
+use crate::workbench::app_state::session::serialization::{
+    PartOfSession, SessionPart, WithoutRuns,
+};
 use rspice_app_design::workbench::app::actions::workspace::symbol_document::revert_active_symbol_with;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_app_project::workbench::workflows::file_workflow;
@@ -628,6 +630,12 @@ impl AppState {
     /// each written in a browser task; then the session itself, at once, in
     /// local storage, because the page may be gone before a task runs. The
     /// session names the runs record it goes with.
+    ///
+    /// Only what changed since the page last kept it is encoded and written:
+    /// the project's working content, or, when the autosave holds the project
+    /// as it is, the name of that record in its place; and the layout and
+    /// selections around it. A session kept with nothing changed writes
+    /// nothing.
     pub(crate) fn keep_browser_session(&mut self, storage: &mut dyn eframe::Storage) {
         use rspice_app_services::workbench::app_state::session::browser_session;
         if rspice_app_services::workbench::lifecycle::durable_records::browser_records().is_none() {
@@ -635,29 +643,113 @@ impl AppState {
         }
         autosave::write_now(self, None);
         browser_session::keep_runs(&self.model, &mut self.platform, None);
-        let session = match serde_json::to_string(&WithoutRuns(self)) {
-            Ok(session) => session,
-            Err(error) => {
-                log::error!("The session could not be encoded: {error}");
-                return;
-            }
+        let kept = if self.state_safe_mode_session_snapshot().is_some() {
+            self.keep_whole_session(storage)
+        } else {
+            self.keep_session_parts(storage)
         };
-        // Local storage refuses a write it has no room for and keeps what it
-        // held, saying nothing: the session is read back to know.
-        storage.set_string(eframe::APP_KEY, session.clone());
-        let kept = storage
-            .get_string(eframe::APP_KEY)
-            .is_some_and(|stored| stored == session);
-        if kept {
-            match self.platform.session_runs.record {
+        // A session that would not encode leaves the stored one as it was,
+        // as eframe's own encoder does.
+        let Some(kept) = kept else {
+            return;
+        };
+        let record = self.platform.session_runs.record;
+        if kept && self.platform.session_parts.runs_record != Some(record) {
+            match record {
                 Some(record) => {
                     storage.set_string(browser_session::RUNS_RECORD_KEY, record.to_string());
                 }
                 None => storage.remove_string(browser_session::RUNS_RECORD_KEY),
             }
+            self.platform.session_parts.runs_record = Some(record);
         }
         browser_session::session_written(&mut self.model, &mut self.platform, kept);
     }
+
+    /// Safe mode keeps the session it replaced, whole, in place of the parts.
+    fn keep_whole_session(&mut self, storage: &mut dyn eframe::Storage) -> Option<bool> {
+        use rspice_app_services::workbench::app_state::session::browser_session;
+        let kept = kept_in(storage, eframe::APP_KEY, encoded(&WithoutRuns(self))?);
+        if kept {
+            storage.remove_string(browser_session::PROJECT_PART_KEY);
+            storage.remove_string(browser_session::PROJECT_AUTOSAVE_KEY);
+            *self.platform.session_parts = Default::default();
+        }
+        Some(kept)
+    }
+
+    /// Keep the parts of the session that changed since the page last kept
+    /// them. The project goes first: a part refused for want of room leaves
+    /// the session as it was kept before.
+    fn keep_session_parts(&mut self, storage: &mut dyn eframe::Storage) -> Option<bool> {
+        use rspice_app_services::workbench::app_state::session::browser_session::{
+            KeptProject, PROJECT_AUTOSAVE_KEY, PROJECT_PART_KEY,
+        };
+        let stamp = project_lifecycle::working_stamp(self);
+        let holding = self
+            .platform
+            .project_autosave
+            .record_holding(&stamp)
+            .filter(|_| self.platform.project_lifecycle.is_open())
+            .map(str::to_owned);
+        let parts = &self.platform.session_parts;
+        let unchanged = parts.project.as_ref().is_some_and(|kept| {
+            kept.stamp == stamp && (kept.autosave.is_none() || kept.autosave == holding)
+        });
+        if !unchanged {
+            let project_id = self.model.workspace.content.project.id().to_string();
+            // The autosave is named over a project part this page kept of the
+            // same project, which a start falls back on when it is gone.
+            let named = holding.filter(|_| parts.project_part_of.as_ref() == Some(&project_id));
+            let kept = match named {
+                Some(record) => {
+                    if !kept_in(storage, PROJECT_AUTOSAVE_KEY, record.clone()) {
+                        return Some(false);
+                    }
+                    KeptProject {
+                        stamp,
+                        autosave: Some(record),
+                    }
+                }
+                None => {
+                    let project = encoded(&PartOfSession(self, SessionPart::Project))?;
+                    if !kept_in(storage, PROJECT_PART_KEY, project) {
+                        return Some(false);
+                    }
+                    storage.remove_string(PROJECT_AUTOSAVE_KEY);
+                    self.platform.session_parts.project_part_of = Some(project_id);
+                    KeptProject {
+                        stamp,
+                        autosave: None,
+                    }
+                }
+            };
+            self.platform.session_parts.project = Some(kept);
+        }
+        let shell = encoded(&PartOfSession(self, SessionPart::Shell))?;
+        if self.platform.session_parts.shell.as_ref() != Some(&shell) {
+            if !kept_in(storage, eframe::APP_KEY, shell.clone()) {
+                return Some(false);
+            }
+            self.platform.session_parts.shell = Some(shell);
+        }
+        Some(true)
+    }
+}
+
+/// The session, or a part of it, as stored text; `None`, said in the log,
+/// when it does not encode.
+fn encoded(session: &impl serde::Serialize) -> Option<String> {
+    serde_json::to_string(session)
+        .inspect_err(|error| log::error!("The session could not be encoded: {error}"))
+        .ok()
+}
+
+/// Write `text` under `key`. Local storage refuses a write it has no room for
+/// and keeps what it held, saying nothing: the text is read back to know.
+fn kept_in(storage: &mut dyn eframe::Storage, key: &str, text: String) -> bool {
+    storage.set_string(key, text.clone());
+    storage.get_string(key).is_some_and(|stored| stored == text)
 }
 
 /// A browser start reopened the project with the unsaved work its session
@@ -683,8 +775,12 @@ pub(crate) fn settle_restart_offer(state: &mut AppState) {
     // Runs the session could not keep, when storage was full, are still in
     // the autosave: their absence is not newer work.
     let runs_left_out = state.model.simulation.retained.runs.is_empty();
+    // A session that named the autosave in place of its project was brought
+    // back from it.
+    let brought_back_from_it =
+        state.platform.project_autosave.restart_from == Some(offer.autosave.checkpoint_id());
     let session_holds_the_autosave = stamp == project_lifecycle::working_stamp(state)
-        && project_lifecycle::snapshot(state)
+        && (brought_back_from_it || project_lifecycle::snapshot(state)
             .ok()
             .and_then(|working| {
                 rspice_app_services::workbench::lifecycle::project_checkpoint::differences_between(
@@ -699,7 +795,7 @@ pub(crate) fn settle_restart_offer(state: &mut AppState) {
                         && difference.document
                             == project_lifecycle::ProjectDocumentId::ResultHistory
                 })
-            });
+            }));
     let saved = state.platform.project_lifecycle.accepted_snapshot();
     match saved {
         Ok(saved) if session_holds_the_autosave => {

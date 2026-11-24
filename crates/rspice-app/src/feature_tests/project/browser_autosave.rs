@@ -24,27 +24,31 @@ use crate::workbench::app_state::services_access::initialize_from_session;
 use crate::workbench::app_state::session::session_store::read_browser_session;
 use rspice_app_project::workbench::project::library_dialogs::new_cell::create_new_cell;
 use rspice_app_project::workbench::workflows::project_workflow::SaveRequestOutcome;
-use rspice_app_services::workbench::app_state::session::browser_session::RUNS_KEY;
+use rspice_app_services::workbench::app_state::session::browser_session::{
+    PROJECT_AUTOSAVE_KEY, PROJECT_PART_KEY, RUNS_KEY,
+};
 use rspice_app_services::workbench::lifecycle::durable_records::{
     BrowserRecords, DurableRecords, KeptInMemory, MemoryOrigin, MemoryRecords, Record, RecordError,
     RecordFuture, block_on, forget_browser_tasks, keep_browser_records_in, run_browser_tasks,
 };
 use rspice_app_services::workbench::lifecycle::project_checkpoint::{
     CHECKPOINT_ENCODINGS, ProjectCheckpointCatalog, ProjectCheckpointReason, capture_for_records,
-    catalog_records, list_records,
+    catalog_records, delete_records, list_records,
 };
 use rspice_app_services::workbench::lifecycle::project_lifecycle::{
     SaveScope, active_document_is_dirty, has_unsaved_changes, has_unsaved_changes_fresh,
 };
 use rspice_app_state::diagnostics::LogSeverity;
 use rspice_app_state::state::{ComponentType, Point};
+use rspice_app_state::workbench::workspace::Workspace;
 
 /// A browser's local storage: it refuses a write past its quota and keeps
-/// what it held, as a browser's does.
+/// what it held, as a browser's does. Every write is counted, by its key.
 #[derive(Default)]
 struct LocalStorage {
     values: HashMap<String, String>,
     quota: Option<usize>,
+    writes: HashMap<String, usize>,
 }
 
 impl eframe::Storage for LocalStorage {
@@ -53,6 +57,7 @@ impl eframe::Storage for LocalStorage {
     }
 
     fn set_string(&mut self, key: &str, value: String) {
+        *self.writes.entry(key.to_owned()).or_default() += 1;
         let others = self
             .values
             .iter()
@@ -134,7 +139,10 @@ impl Browser {
     /// application starts, the session from local storage, and the project
     /// it holds bound again.
     fn reload(&self) -> RSpiceApp {
-        block_on(read_browser_session());
+        block_on(read_browser_session(eframe::Storage::get_string(
+            &self.local,
+            PROJECT_AUTOSAVE_KEY,
+        )));
         let mut app = RSpiceApp::test_instance();
         app.state = AppState::restore_with_store(Some(&self.local), None);
         initialize_from_session(&mut app.state);
@@ -568,8 +576,8 @@ fn in_the_browser_work_newer_than_the_autosave_is_not_asked_about() {
 
 /// The browser's storage fills while the session holds a run: the project's
 /// autosave is written all the same, in the space the run gave up, and the
-/// Console says once that run results are not kept. A reload brings back
-/// the session without them, and offers the autosave, which holds them.
+/// Console says once that run results are not kept. A reload offers the
+/// autosave, which holds them, over the project as saved, without them.
 #[test]
 fn when_the_browser_is_full_the_autosave_is_kept_and_the_runs_left_out_are_named() {
     let mut browser = Browser::open();
@@ -622,10 +630,10 @@ fn when_the_browser_is_full_the_autosave_is_kept_and_the_runs_left_out_are_named
     drop(app);
 
     let mut app = browser.reload();
-    assert!(app.state.model.simulation.retained.runs.is_empty());
     let asked = paint_until(&ctx, &mut app, |text| {
         text.contains("Recover unsaved changes?")
     });
+    assert!(app.state.model.simulation.retained.runs.is_empty());
     app_frame(
         &ctx,
         &mut app,
@@ -732,5 +740,158 @@ fn a_run_the_page_was_left_before_keeping_is_named_at_the_reload() {
         ),
         1
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The writes local storage took, by key, since `before`.
+fn writes_since(browser: &Browser, before: &HashMap<String, usize>) -> Vec<(String, usize)> {
+    let mut writes = browser
+        .local
+        .writes
+        .iter()
+        .map(|(key, count)| (key.clone(), count - before.get(key).copied().unwrap_or(0)))
+        .filter(|(_, count)| *count > 0)
+        .collect::<Vec<_>>();
+    writes.sort();
+    writes
+}
+
+/// The page is left again with nothing changed: nothing is written. A
+/// change to the layout writes the layout alone; an edit to the project
+/// writes the project; and when the autosave already holds the project as it
+/// is, the session names that record and the project is not written again.
+#[test]
+fn a_session_kept_with_nothing_changed_writes_nothing() {
+    let mut browser = Browser::open();
+    let (mut app, root) = saved_project("browser-session-unchanged");
+    edit(&mut app, 1);
+    let ctx = offscreen();
+    app_frame(&ctx, &mut app, Vec::new());
+    browser.leave_the_page(&ctx, &mut app, true);
+    assert!(browser.local.writes.contains_key(PROJECT_PART_KEY));
+
+    let before = browser.local.writes.clone();
+    browser.leave_the_page(&ctx, &mut app, true);
+    assert_eq!(
+        writes_since(&browser, &before),
+        Vec::new(),
+        "nothing changed"
+    );
+
+    let before = browser.local.writes.clone();
+    app.state.workbench.activate(Workspace::Results);
+    app_frame(&ctx, &mut app, Vec::new());
+    browser.leave_the_page(&ctx, &mut app, true);
+    assert_eq!(
+        writes_since(&browser, &before),
+        vec![(eframe::APP_KEY.to_owned(), 1)],
+        "the layout alone"
+    );
+
+    let before = browser.local.writes.clone();
+    edit(&mut app, 2);
+    browser.leave_the_page(&ctx, &mut app, true);
+    assert_eq!(
+        writes_since(&browser, &before),
+        vec![(PROJECT_PART_KEY.to_owned(), 1)],
+        "the project alone"
+    );
+
+    let before = browser.local.writes.clone();
+    edit(&mut app, 3);
+    autosave_interval_passes(&ctx, &mut app);
+    browser.leave_the_page(&ctx, &mut app, true);
+    assert_eq!(
+        writes_since(&browser, &before),
+        vec![(PROJECT_AUTOSAVE_KEY.to_owned(), 1)],
+        "the autosave named in place of the project"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A page left with unsaved work reopens with it through the browser's real
+/// store: kept in the session when the page went before its autosave was
+/// written, and offered back from the autosave the session names when that
+/// one held it.
+#[test]
+fn a_page_left_with_unsaved_work_reopens_with_it() {
+    let ctx = offscreen();
+
+    let mut browser = Browser::open();
+    let (mut app, root) = saved_project("browser-session-left-early");
+    let saved_parts = parts(&app);
+    edit(&mut app, 1);
+    browser.leave_the_page(&ctx, &mut app, false);
+    drop(app);
+    let mut app = browser.reload();
+    for _ in 0..3 {
+        run_browser_tasks();
+        app_frame(&ctx, &mut app, Vec::new());
+    }
+    assert_eq!(parts(&app), saved_parts + 1, "the work is open");
+    assert!(has_unsaved_changes(&app.state), "as unsaved work");
+    drop(app);
+    let _ = std::fs::remove_dir_all(root);
+
+    let mut browser = Browser::open();
+    let (mut app, root) = saved_project("browser-session-left-named");
+    let saved_parts = parts(&app);
+    edit(&mut app, 1);
+    browser.leave_the_page(&ctx, &mut app, true);
+    edit(&mut app, 2);
+    autosave_interval_passes(&ctx, &mut app);
+    browser.leave_the_page(&ctx, &mut app, true);
+    assert!(
+        eframe::Storage::get_string(&browser.local, PROJECT_AUTOSAVE_KEY).is_some(),
+        "the session names the autosave"
+    );
+    drop(app);
+    let mut app = browser.reload();
+    let asked = paint_until(&ctx, &mut app, |text| {
+        text.contains("Recover unsaved changes?")
+    });
+    assert_eq!(parts(&app), saved_parts, "asked over the project as saved");
+    app_frame(
+        &ctx,
+        &mut app,
+        click_on(&asked, "Keep the recovered changes"),
+    );
+    app_frame(&ctx, &mut app, Vec::new());
+    assert_eq!(parts(&app), saved_parts + 2, "the work is back");
+    assert!(has_unsaved_changes(&app.state), "as unsaved work");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The session names an autosave that is gone when the page is next opened,
+/// taken from the browser's storage: the work the session kept beside it,
+/// older, reopens as unsaved work rather than being given up.
+#[test]
+fn a_session_naming_an_autosave_that_is_gone_reopens_with_the_work_kept_beside_it() {
+    let mut browser = Browser::open();
+    let (mut app, root) = saved_project("browser-session-autosave-gone");
+    let saved_parts = parts(&app);
+    let ctx = offscreen();
+    edit(&mut app, 1);
+    browser.leave_the_page(&ctx, &mut app, true);
+    edit(&mut app, 2);
+    autosave_interval_passes(&ctx, &mut app);
+    browser.leave_the_page(&ctx, &mut app, true);
+    assert!(eframe::Storage::get_string(&browser.local, PROJECT_AUTOSAVE_KEY).is_some());
+    let project_id = app.state.model.workspace.content.project.id().to_string();
+    drop(app);
+    for checkpoint in block_on(list_records(&*browser.checkpoints, &project_id))
+        .expect("the checkpoints are listed")
+    {
+        block_on(delete_records(&*browser.checkpoints, &checkpoint))
+            .expect("the autosave is removed");
+    }
+
+    let mut app = browser.reload();
+    for _ in 0..3 {
+        run_browser_tasks();
+        app_frame(&ctx, &mut app, Vec::new());
+    }
+    assert_eq!(parts(&app), saved_parts + 1, "the work kept beside it");
+    assert!(has_unsaved_changes(&app.state), "as unsaved work");
     let _ = std::fs::remove_dir_all(root);
 }

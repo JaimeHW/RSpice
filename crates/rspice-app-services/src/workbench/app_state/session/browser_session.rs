@@ -10,6 +10,12 @@
 //! lost, never put under a session they do not belong to. When the browser's
 //! storage is full the project's autosave comes first: the runs give way to
 //! it, and what was not kept is said once, when it starts.
+//!
+//! The session is kept in parts, each written again only when it changed:
+//! the layout and selections, and the open project's working content apart
+//! from them. When the project's autosave holds the work as the session
+//! leaves it, the session names that record instead of encoding the project
+//! again, as it names its runs record.
 
 use egui::Context;
 
@@ -18,7 +24,7 @@ use crate::io::ProjectSimulationResults;
 use crate::services::session::SessionKept;
 use crate::state::RunHistoryRevision;
 use crate::workbench::lifecycle::durable_records::{self, DurableRecords, Record, RecordError};
-use crate::workbench::lifecycle::project_lifecycle::PlatformState;
+use crate::workbench::lifecycle::project_lifecycle::{PlatformState, WorkingStamp};
 use rspice_app_state::workbench::app_state::model::Model;
 
 /// The record that holds the session's runs.
@@ -26,6 +32,36 @@ pub const RUNS_KEY: &str = "runs";
 /// The local-storage key, beside the session's, naming the runs record the
 /// session was kept with.
 pub const RUNS_RECORD_KEY: &str = "rspice.session.runs";
+
+/// The local-storage key, beside the session's, of the open project's part
+/// of the session: its working content, written only when it changed.
+pub const PROJECT_PART_KEY: &str = "rspice.session.project";
+/// The local-storage key, beside the session's, naming the autosave record
+/// that holds the session's project as the session left it. The project
+/// part beside it, if any, is older.
+pub const PROJECT_AUTOSAVE_KEY: &str = "rspice.session.autosave";
+
+/// What local storage holds of the session, as this page last kept it.
+#[derive(Debug, Clone, Default)]
+pub struct KeptParts {
+    /// The layout and selections around the project, as written.
+    pub shell: Option<String>,
+    /// The working project the session holds.
+    pub project: Option<KeptProject>,
+    /// The project whose part local storage holds.
+    pub project_part_of: Option<String>,
+    /// The runs record the session names.
+    pub runs_record: Option<Option<u64>>,
+}
+
+/// The working project a kept session holds, and where it is held.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeptProject {
+    pub stamp: WorkingStamp,
+    /// The autosave record that holds it, by key; `None` when the session's
+    /// own project part does.
+    pub autosave: Option<String>,
+}
 
 /// The runs the browser keeps for the session.
 #[derive(Debug, Clone, Default)]

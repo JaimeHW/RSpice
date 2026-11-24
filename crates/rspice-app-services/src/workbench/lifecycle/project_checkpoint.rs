@@ -412,6 +412,12 @@ impl ProjectCheckpointSummary {
         self.checkpoint_id
     }
 
+    /// The key of its manifest in the browser's records; none for a
+    /// checkpoint kept on disk.
+    pub fn record_key(&self) -> Option<&str> {
+        self.locator.record_keys().map(|(manifest, _)| manifest)
+    }
+
     /// The technology the project was bound to when it was taken.
     pub fn technology(&self) -> Option<&crate::state::ProjectTechnologyBinding> {
         self.technology.as_ref()
@@ -2176,6 +2182,33 @@ pub async fn load_record(
         .and_then(Record::into_bytes)
         .ok_or("the checkpoint's project is missing from the browser's storage")?;
     validate_snapshot_bytes(summary, &bytes)
+}
+
+/// The checkpoint whose manifest `manifest_key` names in the browser's
+/// records, its project read back and verified; `None` when it is no longer
+/// there.
+pub async fn load_named_record(
+    records: &dyn DurableRecords,
+    manifest_key: &str,
+) -> Result<Option<(ProjectCheckpointSummary, ProjectSnapshot)>, String> {
+    let Some(text) = records.get(manifest_key).await?.and_then(Record::into_text) else {
+        return Ok(None);
+    };
+    let manifest = serde_json::from_str::<ProjectCheckpointManifest>(&text)
+        .map_err(|error| format!("the checkpoint's manifest does not read: {error}"))?;
+    let (expected_key, snapshot_key) = browser_keys(&manifest);
+    if expected_key != manifest_key {
+        return Err("the checkpoint's manifest is not the one its key names".to_owned());
+    }
+    let summary = summary_from_manifest(
+        manifest,
+        ProjectCheckpointLocator::Browser {
+            manifest_key: manifest_key.to_owned(),
+            snapshot_key,
+        },
+    )?;
+    let snapshot = load_record(records, &summary).await?;
+    Ok(Some((summary, snapshot)))
 }
 
 /// Delete a checkpoint from the browser's records, its manifest first, so it
