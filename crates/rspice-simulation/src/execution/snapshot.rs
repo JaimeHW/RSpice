@@ -368,8 +368,14 @@ struct TaskDeckFacts {
 
 impl TaskDeckFacts {
     fn of(deck: &str) -> Self {
+        Self::of_digested(deck, None)
+    }
+
+    /// The same for a deck whose content digest is `digest`, where it was
+    /// taken already.
+    fn of_digested(deck: &str, digest: Option<ContentDigest>) -> Self {
         Self {
-            digest: rspice_design::netlist_document::content_digest(deck),
+            digest: digest.unwrap_or_else(|| rspice_design::netlist_document::content_digest(deck)),
             model_sources: rspice_model_library::sealed_model_sources(deck).into(),
         }
     }
@@ -1331,13 +1337,17 @@ impl PreparedRunSnapshot {
         // under the analysis's own bounds. The parser takes the last card per
         // key, so the analysis wins over the plan without either block having
         // to know the other exists.
+        // The run's own deck is digested once, for every task that runs it
+        // and for what the frame a run starts in reads of it.
+        let mut run_deck_digest: Option<ContentDigest> = None;
         for task in &mut parts.tasks {
             PreparationError::check_abort(abort)?;
-            let deck = task
-                .executable_netlist_override
-                .as_deref()
-                .unwrap_or(&parts.executable_netlist);
-            task.source_basis_digest = Some(rspice_design::netlist_document::content_digest(deck));
+            task.source_basis_digest = Some(match task.executable_netlist_override.as_deref() {
+                Some(deck) => rspice_design::netlist_document::content_digest(deck),
+                None => *run_deck_digest.get_or_insert_with(|| {
+                    rspice_design::netlist_document::content_digest(&parts.executable_netlist)
+                }),
+            });
             let Some(block) = task
                 .task
                 .numeric_override
@@ -1836,7 +1846,9 @@ impl PreparedRunSnapshot {
             task.deck_facts = Some(match task.executable_netlist_override.as_deref() {
                 Some(deck) => TaskDeckFacts::of(deck),
                 None => run_deck
-                    .get_or_insert_with(|| TaskDeckFacts::of(&parts.executable_netlist))
+                    .get_or_insert_with(|| {
+                        TaskDeckFacts::of_digested(&parts.executable_netlist, run_deck_digest)
+                    })
                     .clone(),
             });
         }
