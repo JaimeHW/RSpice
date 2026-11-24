@@ -2359,6 +2359,9 @@ pub struct VisualizationDocument {
     /// The rows of embedded tables a check is reading, while it reads them.
     #[serde(skip)]
     row_index: query::RowIndex,
+    /// Which content the document holds, and what its last change changed.
+    #[serde(skip)]
+    changes: journal::Changes,
 }
 
 #[derive(Deserialize)]
@@ -2440,6 +2443,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 wire.coefficient_settings.unwrap_or_default(),
             ),
             row_index: query::RowIndex::default(),
+            changes: journal::Changes::fresh(),
         };
         if document.schema_version != Self::SCHEMA_VERSION {
             return Err(serde::de::Error::custom(format!(
@@ -2524,6 +2528,7 @@ impl VisualizationDocument {
             spectrum_settings: journal::SpliceList::new(Vec::new()),
             coefficient_settings: journal::SpliceList::new(Vec::new()),
             row_index: query::RowIndex::default(),
+            changes: journal::Changes::fresh(),
         };
         document.validate()?;
         Ok(document)
@@ -2597,6 +2602,7 @@ impl VisualizationDocument {
         let committed_revision = previous_revision.next()?;
         self.title = title;
         self.revision = committed_revision;
+        self.changes.bump();
         Ok(VisualizationTransactionReceipt {
             document_id: self.id,
             previous_revision,
@@ -2624,6 +2630,7 @@ impl VisualizationDocument {
         document.id = ResultDocumentId::new();
         document.revision = ObjectRevision::INITIAL;
         document.title = title;
+        document.changes = journal::Changes::fresh();
         document.validate()?;
         Ok(document)
     }
@@ -2661,6 +2668,61 @@ impl VisualizationDocument {
     #[must_use]
     pub fn traces(&self) -> &[Trace] {
         &self.traces
+    }
+
+    /// The trace `trace_id`, found by its identity.
+    #[must_use]
+    pub fn trace(&self, trace_id: TraceId) -> Option<&Trace> {
+        self.traces
+            .position(trace_id.get())
+            .map(|index| &self.traces[index])
+    }
+
+    /// The traces of pane `pane_id` that read `signal` (the vector each was
+    /// provisioned from, or its label when it names none), in order, found
+    /// without reading the pane's other traces.
+    #[must_use]
+    pub fn traces_reading(&self, pane_id: PaneId, signal: &str) -> Vec<&Trace> {
+        self.traces
+            .reading(pane_id, signal)
+            .into_iter()
+            .map(|index| &self.traces[index])
+            .collect()
+    }
+
+    /// A number that names the content the document holds now: no other
+    /// content of any document in this process had it, a copy keeps it, and
+    /// every change gives a new one.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.changes.generation
+    }
+
+    /// The pane and signal of each trace the document changed since it held
+    /// the content `generation` named: made, changed or taken out, each as it
+    /// stands now and, for one moved off it, as it stood before. Empty when
+    /// it holds that content still; `None` when more than its last change
+    /// lies between, or it was made or read whole since, so a reader draws
+    /// it whole.
+    #[must_use]
+    pub fn signals_changed_since(&self, generation: u64) -> Option<Vec<(PaneId, &str)>> {
+        if generation == self.changes.generation {
+            return Some(Vec::new());
+        }
+        let last = self
+            .changes
+            .last
+            .as_ref()
+            .filter(|last| last.from == generation)?;
+        let present = last.present.iter().filter_map(|trace_id| {
+            self.trace(*trace_id)
+                .map(|trace| (trace.pane_id, journal::signal_of(trace)))
+        });
+        let gone = last
+            .gone
+            .iter()
+            .map(|(pane_id, signal)| (*pane_id, signal.as_str()));
+        Some(present.chain(gone).collect())
     }
 
     #[must_use]
@@ -2849,6 +2911,7 @@ impl VisualizationDocument {
             return Err(error);
         }
         self.assert_whole();
+        self.note_change();
         let step = undo.then(|| ViewStep::back_to(self, &began));
         self.end();
         self.revision = committed_revision;
@@ -2925,6 +2988,7 @@ impl VisualizationDocument {
             return Err(error);
         }
         self.assert_whole();
+        self.note_change();
         let reverse = ViewStep::back_to(self, &began);
         self.end();
         self.revision = committed_revision;

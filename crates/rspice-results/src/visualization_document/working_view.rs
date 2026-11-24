@@ -110,6 +110,7 @@ impl VisualizationDocument {
         let mut document = self.clone();
         document.id = ResultDocumentId::new();
         document.revision = ObjectRevision::INITIAL;
+        document.changes = journal::Changes::fresh();
         document.title = title;
         document.working_view = None;
         document.validate()?;

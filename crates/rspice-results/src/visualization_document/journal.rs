@@ -12,6 +12,7 @@
 use std::collections::hash_map::{Entry, RandomState};
 use std::hash::BuildHasher;
 use std::ops::{Deref, Range};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::undo::{Changed, Identified, Splice};
 use super::*;
@@ -77,6 +78,99 @@ impl VisualizationDocument {
     /// Stop keeping what a committed transaction changed.
     pub(super) fn end(&mut self) {
         each_list!(&mut *self, end(), end());
+    }
+
+    /// Stamp the content a committed transaction or step left, keeping the
+    /// traces it made, changed or took out, while it still keeps them.
+    pub(super) fn note_change(&mut self) {
+        let mut present = Vec::new();
+        let mut gone = Vec::new();
+        for (now, before) in self.traces.touched_with_before() {
+            present.push(now.id);
+            if let Some(before) = before
+                && (before.pane_id != now.pane_id || signal_of(before) != signal_of(now))
+            {
+                gone.push((before.pane_id, signal_of(before).to_owned()));
+            }
+        }
+        for identity in self.traces.taken_out() {
+            if let Some(before) = self.traces.before(identity) {
+                gone.push((before.pane_id, signal_of(before).to_owned()));
+            }
+        }
+        self.changes = Changes {
+            generation: next_generation(),
+            last: Some(LastChange {
+                from: self.changes.generation,
+                present,
+                gone,
+            }),
+        };
+    }
+}
+
+/// A number no other content of a document in this process has had.
+fn next_generation() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Which content a document holds, and what its last change changed, so a
+/// reader that drew it before can draw only what changed. A document made,
+/// read or copied whole has content no reader drew.
+#[derive(Clone)]
+pub(super) struct Changes {
+    pub(super) generation: u64,
+    pub(super) last: Option<LastChange>,
+}
+
+/// The traces one transaction or step made, changed or took out.
+#[derive(Clone)]
+pub(super) struct LastChange {
+    /// The generation of the content it changed.
+    pub(super) from: u64,
+    /// The traces it made or changed that the document holds.
+    pub(super) present: Vec<TraceId>,
+    /// The pane and signal of each trace it took out, and of each trace it
+    /// moved to another pane or signal as it stood before.
+    pub(super) gone: Vec<(PaneId, String)>,
+}
+
+impl Changes {
+    /// Content no reader has drawn.
+    pub(super) fn fresh() -> Self {
+        Self {
+            generation: next_generation(),
+            last: None,
+        }
+    }
+
+    /// A change of what no reader draws.
+    pub(super) fn bump(&mut self) {
+        *self = Self {
+            generation: next_generation(),
+            last: Some(LastChange {
+                from: self.generation,
+                present: Vec::new(),
+                gone: Vec::new(),
+            }),
+        };
+    }
+}
+
+impl PartialEq for Changes {
+    /// Which content a document holds is not part of it.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl fmt::Debug for Changes {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Changes")
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
     }
 }
 
