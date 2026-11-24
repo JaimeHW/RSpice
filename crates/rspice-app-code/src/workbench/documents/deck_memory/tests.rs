@@ -177,8 +177,7 @@ fn the_band_says_what_indexing_needs_and_what_was_free() {
     assert_eq!(
         off.words("big.cir", messages),
         format!(
-            "Outline, hover, go to definition, completion and the check are off: indexing big.cir \
-             (100 MB) needs about {} of memory, and this computer had 200 MB free.",
+            "Language features are off: indexing big.cir needs about {}, and 200 MB was free.",
             memory_words(off.needed)
         )
     );
