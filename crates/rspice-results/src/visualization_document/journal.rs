@@ -691,6 +691,32 @@ impl<T: Identified + Clone + PartialEq> EntityList<T, Unindexed> {
 }
 
 impl EntityList<Trace, SignalIndex> {
+    /// Show or hide each trace of pane `pane_id` reading `signal`, and
+    /// whether the pane has one.
+    pub(super) fn show_signal(&mut self, pane_id: PaneId, signal: &str, visible: bool) -> bool {
+        let key = (pane_id, self.index.hashing.hash_one(signal));
+        let (first, rest) = match self.index.traces.get(&key).map(Vec::as_slice) {
+            None | Some([]) => return false,
+            Some([one]) => (*one, Vec::new()),
+            Some([one, more @ ..]) => (*one, more.to_vec()),
+        };
+        let mut held = false;
+        for identity in std::iter::once(first).chain(rest) {
+            let Some(index) = self.position(identity) else {
+                continue;
+            };
+            let trace = &self.items[index];
+            if trace.pane_id != pane_id || signal_of(trace) != signal {
+                continue;
+            }
+            held = true;
+            if trace.visible != visible {
+                self.update_at(index, |trace| trace.visible = visible);
+            }
+        }
+        held
+    }
+
     /// Whether pane `pane_id` has a trace reading `signal`, and if so
     /// whether every such trace is shown.
     pub(super) fn drawn(&self, pane_id: PaneId, signal: &str) -> Option<bool> {

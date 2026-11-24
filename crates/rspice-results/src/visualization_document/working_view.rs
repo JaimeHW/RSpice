@@ -175,27 +175,19 @@ impl VisualizationDocument {
         for name in names {
             validate_label("trace.signal", name)?;
         }
-        let mut looked = HashSet::new();
-        let mut held = HashSet::new();
+        let mut new = Vec::new();
         for name in names {
-            if !looked.insert(name.as_str()) {
-                continue;
-            }
-            for index in self.traces.reading(pane_id, name) {
-                held.insert(name.as_str());
-                if self.traces[index].visible != plotted {
-                    self.traces
-                        .update_at(index, |trace| trace.visible = plotted);
-                }
+            if !self.traces.show_signal(pane_id, name, plotted) {
+                new.push(name);
             }
         }
-        let mut added = HashSet::new();
-        let new: Vec<&String> = names
-            .iter()
-            .filter(|name| !held.contains(name.as_str()) && added.insert(name.as_str()))
-            .collect();
         if !plotted || new.is_empty() {
             return Ok(());
+        }
+        // A signal named twice is drawn once.
+        if new.len() > 1 {
+            let mut added = HashSet::with_capacity(new.len());
+            new.retain(|name| added.insert(name.as_str()));
         }
         if let Some(preparation) = self.plot_preparation(pane_id) {
             let prepared = preparation.prepare(new.into_iter().cloned().collect())?;
