@@ -687,7 +687,10 @@ fn headless_tasks(
         .collect();
     let deck = format!("{}\n{}\n.end\n", body.join("\n"), lowered.join("\n"));
     let queue = rspice_simulation::manual_deck::build_manual_deck_queue_with_runtimes(
-        27.0, &deck, runtimes,
+        27.0,
+        &deck,
+        runtimes,
+        rspice_core::ResourceLimits::default(),
     )
     .map_err(|error| match error {
         // The engine's own refusal of the circuit, met while lowering a card,
@@ -1743,6 +1746,7 @@ mod tests {
             27.0,
             "* t\n.tran 0.1u 2m\n.ac dec 10 1 10meg\n.tf v(out) vin\n.end\n",
             &rspice_simulation::veriloga::PreparedVerilogARuntimeSet::default(),
+            rspice_core::ResourceLimits::default(),
         )
         .map_err(rspice_simulation::manual_deck::ManualDeckError::into_messages)
         .unwrap();
