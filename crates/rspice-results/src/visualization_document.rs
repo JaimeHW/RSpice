@@ -3053,4 +3053,6 @@ mod strip_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod transaction_tests;
+#[cfg(test)]
 mod working_view_tests;
