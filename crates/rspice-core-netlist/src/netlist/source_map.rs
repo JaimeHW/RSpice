@@ -1,5 +1,6 @@
 // Lightweight source mapping for editor diagnostics.
 
+use super::deck_index::{DeckText, DeckTextChange};
 use super::expr::ParameterResolver;
 use super::optional_names_eq;
 use super::{SourceKind, comment_start};
@@ -123,7 +124,43 @@ pub struct NetlistSourceMap {
     /// whose lines only a parse can say are read. Without one,
     /// [`source_map_for_editor`] already counts what a parse would.
     pub decided_by_parse: bool,
+    /// Where an edit is read again from.
+    marks: EditorMarks,
 }
+
+/// Where the editor map's reading of the text changes, and where lines
+/// start, so an edit is read again from the card it falls in rather than
+/// from the text's first line.
+#[derive(Debug, Clone, Default)]
+struct EditorMarks {
+    /// After each `.subckt`, `.ends`, `.control` and `.endc` card, from the
+    /// byte its code starts at: the scope open and whether the lines are a
+    /// `.control` block's.
+    scopes: Vec<ScopeMark>,
+    /// A line's first byte and its zero-based number, one at least every
+    /// [`LINE_MARK_BYTES`] bytes of text.
+    lines: Vec<(usize, usize)>,
+}
+
+/// Two maps that hold the same definitions, reads and values are the same
+/// map, whatever bytes each would read an edit again from.
+impl PartialEq for EditorMarks {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for EditorMarks {}
+
+#[derive(Debug, Clone)]
+struct ScopeMark {
+    at: usize,
+    scope: Option<String>,
+    in_control: bool,
+}
+
+/// How far apart, at most, the lines an edit counts its line from are.
+const LINE_MARK_BYTES: usize = 64 * 1024;
 
 impl NetlistSourceMap {
     /// The parameter environment every editor reader inside `scope` sees: the
@@ -334,20 +371,325 @@ pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
     for_each_logical_line(
         buffer,
         1,
-        |_, raw| Some(&raw[..comment_start(raw, SourceKind::DeckRoot).unwrap_or(raw.len())]),
+        editor_code,
         |_| false,
         |line| {
-            let head = line.text.split_whitespace().next().unwrap_or_default();
-            if in_control {
-                in_control = !head.eq_ignore_ascii_case(".endc");
-            } else if head.eq_ignore_ascii_case(".control") {
-                in_control = true;
-            } else {
-                process_logical_line(&line, &mut scopes, &mut map);
+            if read_editor_card(&line, &mut scopes, &mut in_control, &mut map) {
+                map.marks.scopes.push(ScopeMark {
+                    at: line.first_byte(),
+                    scope: current_scope(&scopes),
+                    in_control,
+                });
             }
         },
     );
+    let (mut line, mut next) = (0, LINE_MARK_BYTES);
+    for (at, _) in buffer.match_indices('\n') {
+        line += 1;
+        if at + 1 >= next {
+            map.marks.lines.push((at + 1, line));
+            next = at + 1 + LINE_MARK_BYTES;
+        }
+    }
     map
+}
+
+/// The code of a physical line as the editor map reads it: the line before
+/// its comment.
+fn editor_code(_: usize, raw: &str) -> Option<&str> {
+    Some(&raw[..comment_start(raw, SourceKind::DeckRoot).unwrap_or(raw.len())])
+}
+
+/// Read one card into the editor map, `scopes` open and `in_control` when
+/// it falls in a `.control` block: whether it opened or closed either.
+fn read_editor_card(
+    line: &MappedLine,
+    scopes: &mut Vec<String>,
+    in_control: &mut bool,
+    map: &mut NetlistSourceMap,
+) -> bool {
+    let head = line.text.split_whitespace().next().unwrap_or_default();
+    if *in_control {
+        *in_control = !head.eq_ignore_ascii_case(".endc");
+        !*in_control
+    } else if head.eq_ignore_ascii_case(".control") {
+        *in_control = true;
+        true
+    } else {
+        process_logical_line(line, scopes, map);
+        head.eq_ignore_ascii_case(".subckt") || head.eq_ignore_ascii_case(".ends")
+    }
+}
+
+/// The editor source map of `new`, which is `old` after `change`, from
+/// `map`, the map of `old`: the cards the edit touched read again, and every
+/// definition, read and value after them moved by the bytes and lines the
+/// edit added. `None` when the edit touches the title line, or a card that
+/// opens or closes a subcircuit, a `.control` block, a `.if` branch or a
+/// library section, or when `map` applies what a parse decided: such an edit
+/// takes a new map.
+#[must_use]
+pub fn source_map_for_editor_edited(
+    map: &NetlistSourceMap,
+    old: &dyn DeckText,
+    new: &dyn DeckText,
+    change: DeckTextChange,
+) -> Option<NetlistSourceMap> {
+    if map.decided_by_parse
+        || change.start > change.old_end
+        || change.start > change.new_end
+        || change.old_end > old.len()
+        || change.new_end > new.len()
+    {
+        return None;
+    }
+    // The cards the edit touched, whole: from the start of the line it
+    // starts on, back over the lines a `+` continues, to the end of the line
+    // it ends on, on over the lines that continue it, as either text reads.
+    let start = card_start(old, change.start).min(card_start(new, change.start));
+    if start == 0 {
+        return None;
+    }
+    let grown = |end: usize| (end + change.new_end).checked_sub(change.old_end);
+    let new_end = card_end(new, change.new_end).max(grown(card_end(old, change.old_end))?);
+    let old_end = (new_end + change.old_end).checked_sub(change.new_end)?;
+    let (old_part, new_part) = (old.slice(start..old_end), new.slice(start..new_end));
+    let structural = |part: &str| {
+        let part = part.to_ascii_lowercase();
+        [
+            ".subckt", ".ends", ".control", ".endc", ".if", ".else", ".endif", ".endl",
+        ]
+        .iter()
+        .any(|keyword| part.contains(keyword))
+    };
+    if structural(&old_part) || structural(&new_part) {
+        return None;
+    }
+    let lines_in = |part: &str| part.bytes().filter(|byte| *byte == b'\n').count();
+    let (old_lines, new_lines) = (lines_in(&old_part), lines_in(&new_part));
+    let anchor = map
+        .marks
+        .lines
+        .partition_point(|(at, _)| *at <= start)
+        .checked_sub(1)
+        .map_or((0, 0), |at| map.marks.lines[at]);
+    let first_line = anchor.1 + newlines_between(old, anchor.0, start);
+
+    // The cards read again, in the scope open where they start.
+    let before = map
+        .marks
+        .scopes
+        .partition_point(|mark| mark.at < start)
+        .checked_sub(1)
+        .map(|at| &map.marks.scopes[at]);
+    let mut scopes = before
+        .and_then(|mark| mark.scope.clone())
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut in_control = before.is_some_and(|mark| mark.in_control);
+    let mut read = NetlistSourceMap::default();
+    for_each_logical_line(
+        &new_part,
+        0,
+        editor_code,
+        |_| false,
+        |line| {
+            read_editor_card(&line, &mut scopes, &mut in_control, &mut read);
+        },
+    );
+
+    // What the edit read, put at its place in `new`; what follows it, moved
+    // by what the edit added.
+    let read_at = |at: usize| at + start;
+    let read_line = |line: usize| line + first_line;
+    let moved_at = |at: usize| at + new_end - old_end;
+    let moved_line = |line: usize| line + new_lines - old_lines;
+    let bounds = (start, old_end);
+    let last_line = first_line + old_lines + usize::from(!old_part.ends_with('\n'));
+    let definitions = |old: &[NetlistDefinition], read: Vec<NetlistDefinition>| {
+        spliced(
+            old,
+            read.into_iter()
+                .map(|definition| definition_at(&definition, &read_at))
+                .collect(),
+            bounds,
+            |definition| definition.span.start,
+            |definition| definition_at(definition, &moved_at),
+        )
+    };
+    let mut marks = EditorMarks::default();
+    let kept = map.marks.scopes.partition_point(|mark| mark.at < start);
+    marks.scopes.extend_from_slice(&map.marks.scopes[..kept]);
+    marks.scopes.extend(
+        map.marks.scopes[kept..]
+            .iter()
+            .filter(|mark| mark.at >= old_end)
+            .map(|mark| ScopeMark {
+                at: moved_at(mark.at),
+                ..mark.clone()
+            }),
+    );
+    let kept = map.marks.lines.partition_point(|(at, _)| *at <= start);
+    marks.lines.extend_from_slice(&map.marks.lines[..kept]);
+    marks.lines.extend(
+        map.marks.lines[kept..]
+            .iter()
+            .filter(|(at, _)| *at >= old_end)
+            .map(|(at, line)| (moved_at(*at), moved_line(*line))),
+    );
+    Some(NetlistSourceMap {
+        model_defs: definitions(&map.model_defs, read.model_defs),
+        subckt_defs: definitions(&map.subckt_defs, read.subckt_defs),
+        references: spliced(
+            &map.references,
+            read.references
+                .into_iter()
+                .map(|reference| NetlistReference {
+                    span: read_at(reference.span.start)..read_at(reference.span.end),
+                    ..reference
+                })
+                .collect(),
+            bounds,
+            |reference| reference.span.start,
+            |reference| NetlistReference {
+                span: moved_at(reference.span.start)..moved_at(reference.span.end),
+                ..reference.clone()
+            },
+        ),
+        value_spans: spliced(
+            &map.value_spans,
+            read.value_spans
+                .into_iter()
+                .map(|value| NetlistValueSpan {
+                    span: read_at(value.span.start)..read_at(value.span.end),
+                    line: read_line(value.line),
+                    ..value
+                })
+                .collect(),
+            bounds,
+            |value| value.span.start,
+            |value| NetlistValueSpan {
+                span: moved_at(value.span.start)..moved_at(value.span.end),
+                line: moved_line(value.line),
+                ..value.clone()
+            },
+        ),
+        functions: spliced(
+            &map.functions,
+            read.functions
+                .into_iter()
+                .map(|function| NetlistFunctionDefinition {
+                    line: read_line(function.line),
+                    ..function
+                })
+                .collect(),
+            (first_line + 1, last_line + 1),
+            |function| function.line,
+            |function| NetlistFunctionDefinition {
+                line: moved_line(function.line),
+                ..function.clone()
+            },
+        ),
+        decided_by_parse: false,
+        marks,
+    })
+}
+
+/// `definition` with its span's bytes placed by `at`.
+fn definition_at(definition: &NetlistDefinition, at: &dyn Fn(usize) -> usize) -> NetlistDefinition {
+    NetlistDefinition {
+        span: at(definition.span.start)..at(definition.span.end),
+        ..definition.clone()
+    }
+}
+
+/// `old`'s items placed before `bounds.0`, then `read`, then `old`'s items
+/// placed from `bounds.1` on, through `moved`: an item's place is what `at`
+/// says, and `old` holds them in that order card by card.
+fn spliced<T: Clone>(
+    old: &[T],
+    read: Vec<T>,
+    bounds: (usize, usize),
+    at: impl Fn(&T) -> usize,
+    moved: impl Fn(&T) -> T,
+) -> Vec<T> {
+    let first = old.partition_point(|item| at(item) < bounds.0);
+    let end = first + old[first..].partition_point(|item| at(item) < bounds.1);
+    let mut items = Vec::with_capacity(first + read.len() + old.len() - end);
+    items.extend_from_slice(&old[..first]);
+    items.extend(read);
+    items.extend(old[end..].iter().map(moved));
+    items
+}
+
+/// The first byte of the card holding byte `at` of `text`: the start of
+/// its line, or of the line a `+` on it continues.
+fn card_start(text: &dyn DeckText, at: usize) -> usize {
+    let mut start = line_start(text, at);
+    while start > 0
+        && text
+            .slice(start..line_end(text, start))
+            .trim_start()
+            .starts_with('+')
+    {
+        start = line_start(text, start - 1);
+    }
+    start
+}
+
+/// The byte after the card holding byte `at` of `text`: past the end of its
+/// line and of every line after it a `+` continues it on.
+fn card_end(text: &dyn DeckText, at: usize) -> usize {
+    let mut end = line_end(text, at);
+    while end < text.len()
+        && text
+            .slice(end..line_end(text, end))
+            .trim_start()
+            .starts_with('+')
+    {
+        end = line_end(text, end);
+    }
+    end
+}
+
+/// The byte the line holding byte `at` starts at.
+fn line_start(text: &dyn DeckText, at: usize) -> usize {
+    let mut end = at;
+    for piece in text.pieces_back(at) {
+        if let Some(found) = piece.rfind('\n') {
+            return end - piece.len() + found + 1;
+        }
+        end -= piece.len();
+    }
+    0
+}
+
+/// The byte after the `\n` that ends the line holding byte `at`, or the
+/// text's length on its last line.
+fn line_end(text: &dyn DeckText, at: usize) -> usize {
+    let mut start = at;
+    for piece in text.pieces(at) {
+        if let Some(found) = piece.find('\n') {
+            return start + found + 1;
+        }
+        start += piece.len();
+    }
+    text.len()
+}
+
+/// How many line breaks `text` holds from byte `from` to byte `to`.
+fn newlines_between(text: &dyn DeckText, from: usize, to: usize) -> usize {
+    let mut count = 0;
+    let mut at = from;
+    for piece in text.pieces(from) {
+        if at >= to {
+            break;
+        }
+        let piece = &piece.as_bytes()[..piece.len().min(to - at)];
+        count += piece.iter().filter(|byte| **byte == b'\n').count();
+        at += piece.len();
+    }
+    count
 }
 
 /// Join `buffer` into logical cards and hand each to `each`, in source order.
@@ -480,6 +822,11 @@ impl MappedLine {
             .extend(std::iter::repeat_n(physical_line, segment.len()));
         self.inserted
             .extend(std::iter::repeat_n(false, segment.len()));
+    }
+
+    /// The byte of the buffer the card's code starts at.
+    fn first_byte(&self) -> usize {
+        self.byte_offsets.first().copied().unwrap_or(0)
     }
 
     /// The first and last one-based physical line the card is written on.
@@ -1840,5 +2187,86 @@ V1 a 0 {vth}\n\
         let reference = map.references.iter().find(|r| r.name == "gain").unwrap();
         assert_eq!(reference.kind, ReferenceKind::Model);
         assert_eq!(&src[reference.span.clone()], "gain");
+    }
+
+    /// A map updated through an edit, the cards it touched read again and
+    /// the rest moved, holds what a map of the edited text holds, edit after
+    /// edit; an edit to what scopes the lines around it takes a new map.
+    #[test]
+    fn a_map_updated_through_an_edit_holds_what_one_of_the_edited_text_holds() {
+        use std::fmt::Write as _;
+        let mut deck =
+            String::from("edits\n.param w=1 l={w*2}\n.func twice(x) {2*x}\n.model dm d is=1e-14\n");
+        for block in 0..1500 {
+            let _ = write!(
+                deck,
+                ".subckt cell{block} a b k=1\nR1 a b {{k*w}}\n.param p{block}=1 q{block}={{twice(p{block})}}\nD1 a vdd dm\nX2 a mid\n+ sub\n.ends cell{block}\nX{block} n{block} n{} cell{block} k={{l}} * é\n",
+                block + 1
+            );
+        }
+        deck.push_str(".control\nlet a = 1\n.endc\n.subckt sub p q\nR1 p q 1k\n.ends sub\n.end\n");
+        let anchor = deck.find(".subckt cell700 ").expect("block 700");
+        // What is edited, the text after block 700 opens it replaces, the
+        // replacement, and whether the map is read again only where it fell.
+        let cases: &[(&str, &str, &str, bool)] = &[
+            ("a value inside a subcircuit", "{k*w}", "{k*w*2}", true),
+            ("a device inserted", "R1 a b", "R9 a b {l}\nR1 a b", true),
+            ("a device deleted", "D1 a vdd dm\n", "", true),
+            ("a continuation joined", "mid\n+ sub", "mid sub", true),
+            ("a continuation made", "X700 n700", "X700\n+ n700", true),
+            (
+                "a parameter's value",
+                "q700={twice(p700)}",
+                "q700={3*p700}",
+                true,
+            ),
+            ("a parameter renamed", "p700=1 ", "r700=1 ", true),
+            ("a character in a comment", "* é", "* è", true),
+            (
+                "a line in the control block",
+                "let a = 1",
+                "let a = {w}",
+                true,
+            ),
+            ("a subcircuit renamed", "cell700 a b", "cellx a b", false),
+            ("a subcircuit's end deleted", ".ends cell700\n", "", false),
+        ];
+        let mut text = deck.clone();
+        let mut map = source_map_for_editor(&text);
+        for (what, replaced, replacement, incremental) in cases {
+            let from = if what.contains("control") {
+                text.find(".control").expect("the control block")
+            } else {
+                anchor
+            };
+            let at = from + text[from..].find(replaced).expect("the text to replace");
+            let edited = format!(
+                "{}{replacement}{}",
+                &text[..at],
+                &text[at + replaced.len()..]
+            );
+            let change = DeckTextChange::between(&text, &edited).expect("the texts differ");
+            let updated = source_map_for_editor_edited(&map, &text, &edited, change);
+            assert_eq!(updated.is_some(), *incremental, "{what}");
+            let built = source_map_for_editor(&edited);
+            if let Some(updated) = updated {
+                assert_eq!(updated.model_defs, built.model_defs, "{what}");
+                assert_eq!(updated.subckt_defs, built.subckt_defs, "{what}");
+                assert_eq!(updated.references, built.references, "{what}");
+                assert_eq!(updated.functions, built.functions, "{what}");
+                let difference = updated
+                    .value_spans
+                    .iter()
+                    .zip(&built.value_spans)
+                    .find(|(one, two)| one != two);
+                assert_eq!(difference, None, "{what}");
+                assert_eq!(updated.value_spans.len(), built.value_spans.len(), "{what}");
+                // The next edit is read from the map this one made.
+                map = updated;
+            } else {
+                map = built;
+            }
+            text = edited;
+        }
     }
 }
