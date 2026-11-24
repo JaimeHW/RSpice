@@ -551,9 +551,15 @@ fn take_disk_text(
     else {
         return;
     };
+    let DiskChange {
+        text,
+        encoding,
+        line_ending,
+        stamp,
+    } = change;
     let replacement = match include {
-        None => OwnedNetlistReplacement::root(&original, change.text.clone(), 1),
-        Some(key) => OwnedNetlistReplacement::dependency(key, &original, change.text.clone(), 1),
+        None => OwnedNetlistReplacement::root(&original, text, 1),
+        Some(key) => OwnedNetlistReplacement::dependency(key, &original, text, 1),
     };
     let _ = crate::workbench::documents::netlist_document::apply_deck_replacements(
         model,
@@ -565,9 +571,9 @@ fn take_disk_text(
         .as_mut()
         .and_then(|deck| deck.file_mut(include))
     {
-        file.encoding = change.encoding;
-        file.line_ending = change.line_ending;
-        file.disk = Some(change.stamp);
+        file.encoding = encoding;
+        file.line_ending = line_ending;
+        file.disk = Some(stamp);
         file.dirty = false;
         file.disk_change = None;
     }
