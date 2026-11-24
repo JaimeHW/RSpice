@@ -355,11 +355,17 @@ fn a_hundred_thousand_signals_ticked_at_once_follow_the_strips_built_before() {
     use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
     const SIGNALS: usize = 100_000;
+    // Every signal on the run's one time axis, as a run solves them.
+    let time = Arc::new(vec![0.0, 1.0]);
     let wide = (0..SIGNALS)
         .map(|index| {
-            let mut trace =
-                RetainedTrace::new(format!("V(n{index})"), vec![0.0, 1.0], vec![0.0, 1.0], "")
-                    .with_unit("V");
+            let mut trace = RetainedTrace::new(
+                format!("V(n{index})"),
+                Arc::clone(&time),
+                vec![0.0, 1.0],
+                "",
+            )
+            .with_unit("V");
             trace.visible = index == 0;
             trace
         })
