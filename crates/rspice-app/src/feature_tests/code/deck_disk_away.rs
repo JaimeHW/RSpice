@@ -5,6 +5,8 @@
 //! preparing at once; once the file is read, a tab holding edits holds the
 //! run with the band's three answers, and the run goes on with the text the
 //! reader chose. A file whose length and time did not move is not read.
+//! A file read again is one step Undo takes back, to the very text the tab
+//! held; a tab edited while its file is read keeps its edits and asks.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -15,7 +17,7 @@ use super::netlist_workflow::{Folder, app_with_deck};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_design_tests::{DESKTOP, frame, themed_context};
 use rspice_app_code::workbench::documents::deck_files;
-use rspice_app_code::workbench::documents::netlist_document::edit_deck_file;
+use rspice_app_code::workbench::documents::netlist_document::{edit_deck_file, undo_netlist_edit};
 use rspice_app_state::state::SimulationRunIntent;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
@@ -76,6 +78,15 @@ fn frames_until(
         assert!(Instant::now() < deadline, "{what} never came");
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+/// A frame on another page, then the frame that shows the Netlist page
+/// again, which looks at the disk.
+fn show_the_page_again(ctx: &egui::Context, app: &mut RSpiceApp) -> egui::FullOutput {
+    app.state.workbench.activate(Workspace::Design);
+    frame(ctx, app, DESKTOP);
+    app.state.workbench.activate(Workspace::Netlist);
+    frame(ctx, app, DESKTOP)
 }
 
 /// Whether a run of the deck was asked for or has started.
@@ -259,4 +270,83 @@ fn a_file_whose_length_and_time_did_not_move_is_not_read() {
 
     assert_eq!(text_run(&app).as_deref(), Some(DECK));
     assert_eq!(root(&app).text, DECK);
+}
+
+/// A file read again into its tab is one step Undo takes back: the tab, the
+/// deck a run reads and the editor then hold the text the tab held before,
+/// the very text and not a copy of it.
+#[test]
+fn undo_after_a_reload_puts_back_the_tabs_text_exactly() {
+    let folder = Folder::new();
+    let (mut app, ctx, path) = session(&folder);
+    let before = root(&app).text.clone();
+    std::fs::write(&path, ON_DISK).expect("another writer");
+
+    show_the_page_again(&ctx, &mut app);
+    frames_until(&ctx, &mut app, "the read", |app| root(app).text == ON_DISK);
+    let output = frame(&ctx, &mut app, DESKTOP);
+    assert!(
+        painted_text(&output).contains("R1 in 0 10k"),
+        "the editor shows the file"
+    );
+
+    let messages = app.state.workbench.messages();
+    let undone = undo_netlist_edit(&mut app.state.model, &mut app.state.code.netlist, messages)
+        .expect("Undo takes the reload back");
+    assert!(undone.is_some(), "the reload was a step");
+    frame(&ctx, &mut app, DESKTOP);
+    let output = frame(&ctx, &mut app, DESKTOP);
+
+    assert_eq!(root(&app).text, DECK);
+    assert_eq!(
+        root(&app).text.revision(),
+        before.revision(),
+        "the text the tab held, not a copy"
+    );
+    assert_eq!(app.state.model.simulation.source.netlist_content, DECK);
+    let painted = painted_text(&output);
+    assert!(painted.contains("R1 in 0 1k"), "{painted}");
+    assert!(!painted.contains("R1 in 0 10k"), "{painted}");
+}
+
+/// A tab edited while its file is read away from the frame keeps its
+/// edits once the read lands: the file's change is shown above the deck
+/// with the band's three answers, and nothing is written.
+#[test]
+fn a_tab_edited_while_its_file_is_read_keeps_its_edits_and_asks() {
+    let folder = Folder::new();
+    let (mut app, ctx, path) = session(&folder);
+    std::fs::write(&path, ON_DISK).expect("another writer");
+
+    show_the_page_again(&ctx, &mut app);
+    assert!(
+        !app.state.code.disk_looks.is_empty(),
+        "the file is being read"
+    );
+    assert!(edit_deck_file(
+        &mut app.state.model,
+        &mut app.state.code.netlist,
+        EDITED.to_owned()
+    ));
+    frames_until(&ctx, &mut app, "the read", |app| {
+        app.state.code.disk_looks.is_empty()
+    });
+    let output = frame(&ctx, &mut app, DESKTOP);
+
+    assert_eq!(root(&app).text, EDITED);
+    assert!(root(&app).dirty);
+    assert!(
+        root(&app).disk_change.is_some(),
+        "the change waits for an answer"
+    );
+    let painted = painted_text(&output);
+    for words in [
+        "amp.cir changed on disk since you opened it.",
+        "Reload",
+        "Keep mine",
+        "Compare",
+    ] {
+        assert!(painted.contains(words), "{words}: {painted}");
+    }
+    assert_eq!(std::fs::read_to_string(&path).expect("the deck"), ON_DISK);
 }

@@ -138,7 +138,8 @@ pub struct OpenFile {
 /// A file as it stands on disk after something else changed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiskChange {
-    pub text: String,
+    /// The text read, made ready for the editor where it was read.
+    pub text: RevisedText,
     pub encoding: TextEncoding,
     pub line_ending: LineEnding,
     pub stamp: DiskStamp,
@@ -490,8 +491,11 @@ fn read_against(path: &Path, since: &DiskStamp, messages: MessageCatalog) -> OnD
     if now.digest == since.digest {
         return OnDisk::Touched(now);
     }
+    // What the editor reads of the text when it first shows it is made here,
+    // away from the frame that puts it in the tab.
+    read.text.ready_for_editor();
     OnDisk::Changed(DiskChange {
-        text: read.text.into_string(),
+        text: read.text,
         encoding: read.encoding,
         line_ending: read.line_ending,
         stamp: now,
@@ -758,10 +762,9 @@ fn take_disk_text(
         line_ending,
         stamp,
     } = change;
-    let replacement = match include {
-        None => OwnedNetlistReplacement::root(&original, text, 1),
-        Some(key) => OwnedNetlistReplacement::dependency(key, &original, text, 1),
-    };
+    // The tab's text and the text read, shared: what the tab held is what
+    // Undo puts back, and nothing of either is copied.
+    let replacement = OwnedNetlistReplacement::of_texts(include, original, text, 1);
     let _ = crate::workbench::documents::netlist_document::apply_deck_replacements(
         model,
         netlist,
