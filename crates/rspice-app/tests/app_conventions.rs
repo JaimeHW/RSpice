@@ -1518,6 +1518,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("workbench/documents/result_document.rs", "frame_work"),
             ("workbench/documents/result_document.rs", "import"),
             ("workbench/documents/result_document.rs", "manifest"),
+            ("workbench/documents/result_document.rs", "notes"),
             ("workbench/documents/result_document.rs", "op_inspector"),
             (
                 "workbench/documents/result_document.rs",
@@ -1547,6 +1548,10 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             (
                 "workbench/documents/result_document/document_edit.rs",
                 "measurement",
+            ),
+            (
+                "workbench/documents/result_document/document_edit.rs",
+                "measurement_reading",
             ),
             ("workbench/results.rs", "calculator"),
             ("workbench/results.rs", "commands"),

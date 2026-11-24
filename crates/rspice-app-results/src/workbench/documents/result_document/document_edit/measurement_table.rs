@@ -713,7 +713,7 @@ fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
                     ui.close();
                 }
                 if !held.family {
-                    ui.menu_button("Read over", |ui| {
+                    rspice_ui_kit::widgets::menu_button(ui, "Read over", |ui| {
                         if let Some(chosen) = window_items(ui, id, *window) {
                             asked = Some(chosen);
                         }
