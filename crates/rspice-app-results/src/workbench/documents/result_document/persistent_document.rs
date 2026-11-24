@@ -917,7 +917,7 @@ pub fn project_pane_presentation(
         .active_analysis()
         .ok_or_else(|| "The pane's retained analysis is not active.".to_owned())?;
     let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
-    let lanes = lanes::EventNames::of(analysis);
+    let lanes = lanes::EventNames::of(analysis, None);
     let mut visibility = analysis
         .waveforms
         .iter()
@@ -1244,7 +1244,7 @@ pub fn capture_pane_presentation(
     // The lanes as drawn this frame, kept as the document's.
     if let Some(run) = state.model.simulation.active_run()
         && let Some(analysis) = state.model.simulation.active_analysis()
-        && let Some(names) = lanes::EventNames::of(analysis)
+        && let Some(names) = lanes::EventNames::of(analysis, None)
         && let Some(layout) =
             state
                 .results

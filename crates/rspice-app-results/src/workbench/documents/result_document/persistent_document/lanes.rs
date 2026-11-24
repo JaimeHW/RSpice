@@ -19,6 +19,7 @@ use crate::results::visualization_document::{
     UserBus, VisualizationDocument,
 };
 use crate::state::{AnalysisResult, AnalysisResultPayload};
+use rspice_results_ui::signal_index::SignalIndex;
 use rspice_results_ui::waves::lanes::{BusView, EventLaneLayout, LaneKey, UserLaneBus};
 
 /// What a run's event history names: its digital and real nets, each
@@ -29,11 +30,27 @@ pub(in crate::workbench::documents::result_document) struct EventNames {
     real: HashSet<String>,
     buses: Vec<(String, Vec<String>)>,
     history_only: Vec<String>,
+    /// The same names, to look one up.
+    history_set: HashSet<String>,
+}
+
+/// Whether `analysis` draws event lanes: whether it keeps an event history.
+pub(in crate::workbench::documents::result_document) fn has_event_lanes(
+    analysis: &AnalysisResult,
+) -> bool {
+    matches!(
+        analysis.result_payload.as_ref(),
+        Some(AnalysisResultPayload::TransientEvents { .. })
+    )
 }
 
 impl EventNames {
+    /// What `analysis`' event history names; with its signal `index`, the
+    /// nets it has a column for are found there, not by reading every
+    /// column's name.
     pub(in crate::workbench::documents::result_document) fn of(
         analysis: &AnalysisResult,
+        index: Option<&SignalIndex>,
     ) -> Option<Self> {
         let Some(AnalysisResultPayload::TransientEvents {
             digital_traces,
@@ -44,12 +61,7 @@ impl EventNames {
         else {
             return None;
         };
-        let columns: HashSet<&str> = analysis
-            .waveforms
-            .iter()
-            .map(|waveform| waveform.name.as_str())
-            .collect();
-        let history_only = digital_traces
+        let nets: Vec<String> = digital_traces
             .iter()
             .map(|trace| format!("D({})", trace.node_name))
             .chain(
@@ -57,9 +69,32 @@ impl EventNames {
                     .iter()
                     .map(|trace| format!("E({})", trace.node_name)),
             )
-            .filter(|name| !columns.contains(name.as_str()))
+            .collect();
+        let names: Vec<&str> = nets.iter().map(String::as_str).collect();
+        let held: Vec<bool> = match index {
+            Some(index) => index
+                .first_columns(&analysis.data, &names)
+                .into_iter()
+                .map(|column| column.is_some())
+                .collect(),
+            None => {
+                let wanted: HashSet<&str> = names.iter().copied().collect();
+                let columns: HashSet<&str> = analysis
+                    .waveforms
+                    .iter()
+                    .map(|waveform| waveform.name.as_str())
+                    .filter(|name| wanted.contains(name))
+                    .collect();
+                names.iter().map(|name| columns.contains(name)).collect()
+            }
+        };
+        let history_only: Vec<String> = nets
+            .into_iter()
+            .zip(held)
+            .filter_map(|(name, held)| (!held).then_some(name))
             .collect();
         Some(Self {
+            history_set: history_only.iter().cloned().collect(),
             history_only,
             digital: digital_traces
                 .iter()
@@ -228,7 +263,7 @@ pub(in crate::workbench::documents::result_document) fn plotted_history_nets(
             EventLaneRef::Trace { .. } => {}
         }
     }
-    plotted.retain(|name| names.history_only.contains(name));
+    plotted.retain(|name| names.history_set.contains(name));
     Some(plotted)
 }
 
@@ -249,14 +284,16 @@ pub(in crate::workbench::documents::result_document) fn lane_edits(
         .iter()
         .filter(|trace| trace.pane_id == pane)
         .collect();
-    let history_only = |name: &str| names.history_only.iter().any(|net| net == name);
+    let history_only = |name: &str| names.history_set.contains(name);
     let mut edits = Vec::new();
-    let trace_of = |column_name: &str| {
-        traces
-            .iter()
-            .find(|trace| column(trace) == column_name)
-            .copied()
-    };
+    // The first trace of each column, and each trace by its identity.
+    let mut by_column: HashMap<&str, &Trace> = HashMap::with_capacity(traces.len());
+    for &trace in &traces {
+        by_column.entry(column(trace)).or_insert(trace);
+    }
+    let by_id: HashMap<TraceId, &Trace> = traces.iter().map(|trace| (trace.id, *trace)).collect();
+    let trace_of = |column_name: &str| by_column.get(column_name).copied();
+    let on_plot: HashSet<&str> = plotted.iter().copied().collect();
     let mut logic: HashSet<TraceId> = HashSet::new();
     for trace in traces.iter().filter(|trace| trace.visible) {
         if let Some(kind) = names.lane_kind(column(trace)) {
@@ -301,7 +338,7 @@ pub(in crate::workbench::documents::result_document) fn lane_edits(
     }
     for wanted in &desired {
         for member in &wanted.members {
-            if let Some(trace) = traces.iter().find(|trace| trace.id == *member)
+            if let Some(trace) = by_id.get(member)
                 && !logic.contains(member)
             {
                 mark(&mut edits, &mut logic, trace, TraceLaneKind::Logic);
@@ -332,8 +369,8 @@ pub(in crate::workbench::documents::result_document) fn lane_edits(
         .order
         .iter()
         .filter_map(|key| match key {
-            LaneKey::Signal(signal) if history_only(signal) => plotted
-                .contains(&signal.as_str())
+            LaneKey::Signal(signal) if history_only(signal) => on_plot
+                .contains(signal.as_str())
                 .then(|| EventLaneRef::Net {
                     name: signal.clone(),
                 }),

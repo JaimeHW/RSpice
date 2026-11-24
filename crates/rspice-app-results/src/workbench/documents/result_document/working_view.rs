@@ -1156,6 +1156,15 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         }
         Some(again)
     });
+    // A pane of event lanes draws its lanes again where the view changed
+    // them, or an event net they list, or the reader's change is retaken.
+    let lanes_again = drawn.is_none_or(|binding| {
+        document.event_lanes_changed_since(binding.generation) != Some(false)
+    });
+    let retaken: Vec<AnalysisPresentationKey> = drawn
+        .and_then(|binding| binding.retake.as_ref())
+        .map(|ticks| ticks.iter().map(SourceWaveformPresentationKey::analysis).collect())
+        .unwrap_or_default();
     // The run is borrowed where it is kept, not copied: a copy is every
     // signal's name.
     let Some(run) = retained_run(state.model, dataset) else {
@@ -1168,10 +1177,23 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         let Some(pane) = document.panes().iter().find(|pane| pane.id == pane_id) else {
             continue;
         };
-        let names = lanes::EventNames::of(analysis);
-        match again.as_ref().and_then(|again| again.get(&pane_id)) {
-            // A pane of event lanes draws its nets whole: its lanes read them all.
-            Some(signals) if names.is_none() => {
+        let events = lanes::has_event_lanes(analysis);
+        let event_names = || {
+            let index = state
+                .results
+                .session
+                .signal_indices
+                .index(&runs, key, &analysis.data);
+            lanes::EventNames::of(analysis, index.as_deref())
+        };
+        let names = match again.as_ref().and_then(|again| again.get(&pane_id)) {
+            Some(signals) => {
+                let names = (events
+                    && (lanes_again
+                        || retaken.contains(&key)
+                        || signals.iter().any(|signal| is_event_net(signal))))
+                .then(event_names)
+                .flatten();
                 project_signals(
                     state.results,
                     &runs,
@@ -1181,17 +1203,25 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
                     analysis,
                     signals,
                 );
+                if let Some(names) = &names {
+                    project_history_nets(state.results, document, key, pane_id, names);
+                }
+                names
             }
-            _ => project_traces(
-                state.results,
-                &runs,
-                document,
-                key,
-                pane_id,
-                analysis,
-                names.as_ref(),
-            ),
-        }
+            None => {
+                let names = events.then(event_names).flatten();
+                project_traces(
+                    state.results,
+                    &runs,
+                    document,
+                    key,
+                    pane_id,
+                    analysis,
+                    names.as_ref(),
+                );
+                names
+            }
+        };
 
         let held: Vec<_> = document
             .expression_traces()
@@ -1526,6 +1556,33 @@ fn project_signals(
     }
 }
 
+/// Whether `signal` names an event net, the `D()` or `E()` column or
+/// history of one, which a pane's event lanes may list.
+fn is_event_net(signal: &str) -> bool {
+    signal.starts_with("D(") || signal.starts_with("E(")
+}
+
+/// Draw the nets `names` keeps only as history on pane `pane_id` as the
+/// view lists them; while the pane lists no lanes, the reader's choice
+/// stands.
+fn project_history_nets(
+    results: &mut super::ResultsState,
+    document: &VisualizationDocument,
+    key: AnalysisPresentationKey,
+    pane_id: PaneId,
+    names: &lanes::EventNames,
+) {
+    let Some(listed) = lanes::plotted_history_nets(document, pane_id, names) else {
+        return;
+    };
+    for name in names.history_only() {
+        results.project_waveform_visible(
+            SourceWaveformPresentationKey::new(key, name.clone()),
+            listed.contains(name).then_some(true),
+        );
+    }
+}
+
 /// The drawing state of the strips `keys` name, besides the ticks.
 fn scratch_of(state: ResultsReads<'_>, keys: &[(AnalysisPresentationKey, PaneId)]) -> ViewScratch {
     let session = &state.results.session;
@@ -1714,6 +1771,8 @@ fn capture_edits(
         // A signal is drawn when every trace of it is shown; one with no
         // trace yet is new.
         let (mut ticked, mut unticked, mut new) = (Vec::new(), Vec::new(), Vec::new());
+        // Whether the reader set any signal of the strip, or may have.
+        let mut touched = ticks.is_none();
         let mut differ = |column: usize, name: &str, wanted: bool, drawn: Option<bool>| {
             let to = match (wanted, drawn) {
                 (true, None) => &mut new,
@@ -1727,6 +1786,7 @@ fn capture_edits(
             Some(ticks) => {
                 let ticks: Vec<&SourceWaveformPresentationKey> =
                     ticks.iter().filter(|tick| tick.analysis() == key).collect();
+                touched = !ticks.is_empty();
                 let names: Vec<&str> = ticks.iter().map(|tick| tick.source_name()).collect();
                 let columns = match session.signal_indices.index(
                     &state.model.simulation.retained.runs.revision(),
@@ -1798,8 +1858,23 @@ fn capture_edits(
             new.dedup_by_key(|(column, _)| *column);
             all_new.push((pane_id, new.into_iter().map(|(_, name)| name).collect()));
         }
-        if let Some(names) = lanes::EventNames::of(analysis)
-            && let Some(layout) = session.event_lanes.get(&key)
+        // The lanes are taken where the reader changed them, or set a
+        // signal they may list.
+        let layout = session.event_lanes.get(&key);
+        if (touched || layout != binding.scratch.lanes.get(&key))
+            && lanes::has_event_lanes(analysis)
+            && let Some(layout) = layout
+            && let Some(names) = lanes::EventNames::of(
+                analysis,
+                session
+                    .signal_indices
+                    .index(
+                        &state.model.simulation.retained.runs.revision(),
+                        key,
+                        &analysis.data,
+                    )
+                    .as_deref(),
+            )
         {
             let plotted: Vec<&str> = names
                 .history_only()
