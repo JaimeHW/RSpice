@@ -187,7 +187,12 @@ pub fn cursors_page(
         .id_salt("rspice.results.cursors")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            actions = cursor_table::paint_page(ui, state, source, tables);
+            // The page scrolls, not its tables: in a kit body inside a pane
+            // that scrolls, each table shows every row, edge to edge, and
+            // lays out only the rows the page shows.
+            rspice_ui_kit::panels::panel_body(ui, |ui| {
+                actions = cursor_table::paint_page(ui, state, source, tables);
+            });
         });
     Some(actions)
 }
