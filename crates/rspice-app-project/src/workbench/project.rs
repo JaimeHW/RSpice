@@ -64,9 +64,11 @@ impl Feature for ProjectFeature {
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
         ids::RUN_SIMULATION,
         ids::OPEN_PROBLEMS,
+        ids::open_workspace(Workspace::Simulate),
         ids::open_workspace(Workspace::Results),
         ids::open_workspace(Workspace::Netlist),
         ids::open_workspace(Workspace::Verify),
+        ProjectCommand::Page(ProjectPage::Configuration).key(),
         ProjectCommand::Page(ProjectPage::Dependencies).key(),
     ];
 

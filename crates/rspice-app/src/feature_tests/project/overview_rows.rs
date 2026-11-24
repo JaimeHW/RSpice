@@ -95,6 +95,89 @@ fn the_latest_run_opens_the_newest_run() {
     );
 }
 
+/// The label of the control the keyboard stands on after `output`'s frame.
+fn focused(output: &egui::FullOutput) -> Option<String> {
+    let tree = output.platform_output.accesskit_update.as_ref()?;
+    let node = tree
+        .nodes
+        .iter()
+        .find_map(|(id, node)| (*id == tree.focus).then_some(node))?;
+    Some(node.label().unwrap_or_default().to_owned())
+}
+
+/// Every value of the band that names something is a link, Tab reaches each
+/// one, and Enter follows the one it stands on: the plan named opens where
+/// it is edited.
+#[test]
+fn tab_reaches_every_link_of_the_band_and_enter_on_the_plan_opens_simulate() {
+    let mut replay = overview(populated_project_app());
+    let plan = replay
+        .app
+        .state
+        .model
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
+    let controls = replay.frames(Vec::new());
+    let links: Vec<String> = controls
+        .iter()
+        .filter(|control| control.role == Role::Link)
+        .map(|control| control.label.clone())
+        .collect();
+    for named in [plan.as_str(), "Run "] {
+        assert!(
+            links.iter().any(|link| link.starts_with(named)),
+            "{named:?} is a link: {links:#?}"
+        );
+    }
+    let plan = links
+        .iter()
+        .find(|link| link.starts_with(&plan))
+        .expect("the plan's link")
+        .clone();
+
+    // Round the window once with Tab, then on to the plan.
+    let tab = |pressed| Event::Key {
+        key: Key::Tab,
+        physical_key: Some(Key::Tab),
+        pressed,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    };
+    let mut reached: Vec<String> = Vec::new();
+    let mut first = None;
+    let mut rounds = 0;
+    for _ in 0..800 {
+        replay.frame(vec![tab(true), tab(false)]);
+        let Some(label) = focused(&replay.frame(Vec::new())) else {
+            continue;
+        };
+        if first.is_none() {
+            first = Some(label.clone());
+        } else if first.as_ref() == Some(&label) {
+            rounds += 1;
+        }
+        if links.contains(&label) && !reached.contains(&label) {
+            reached.push(label.clone());
+        }
+        if rounds > 0 && label == plan {
+            break;
+        }
+    }
+    for link in &links {
+        assert!(reached.contains(link), "Tab reaches {link:?}: {reached:#?}");
+    }
+    assert_eq!(
+        focused(&replay.frame(Vec::new())).as_deref(),
+        Some(plan.as_str()),
+        "Tab stands on the plan"
+    );
+
+    replay.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(replay.app.state.workbench.workspace, Workspace::Simulate);
+}
+
 /// A row pressed is stood on, not acted on; Enter then opens Verify on the
 /// specification it states.
 #[test]

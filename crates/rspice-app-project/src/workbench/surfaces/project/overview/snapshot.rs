@@ -173,7 +173,8 @@ impl OverviewSnapshot {
         let deck = (netlist_first || !model.workspace.content.decks.is_empty())
             .then(|| deck_summary(ctx, model, cx.peers.code()))
             .flatten();
-        // A deck-driven project runs its deck as written, not the plan.
+        // A deck-driven project runs its deck as written, not the plan. The
+        // plan named opens where it is edited.
         let mut facts = vec![if netlist_first {
             SummaryFact::new(
                 "Runs",
@@ -181,7 +182,14 @@ impl OverviewSnapshot {
                     .map_or_else(|| "The deck".to_owned(), DeckSummary::runs),
             )
         } else {
-            SummaryFact::new("Plan", model.sim_setup.active_plan_name().as_str())
+            let simulate = ids::open_workspace(Workspace::Simulate);
+            SummaryFact::new("Plan", model.sim_setup.active_plan_name().as_str()).linked(Some(
+                Action::new(
+                    "Open in Simulate",
+                    OverviewIntent::Command(simulate),
+                    command_gate(cx, simulate),
+                ),
+            ))
         }];
         // The inspector names the configuration the project marks for runs;
         // the page says which one runs only where that is not it, or where
@@ -195,7 +203,14 @@ impl OverviewSnapshot {
                 .active()
                 .map_or("Default", |configuration| configuration.name());
             if status.tone != Tone::Neutral || status.state != marked {
-                facts.push(SummaryFact::of("Configuration", status));
+                let page = ProjectCommand::Page(ProjectPage::Configuration).key();
+                facts.push(
+                    SummaryFact::of("Configuration", status).linked(Some(Action::new(
+                        "Open in Configuration",
+                        OverviewIntent::Command(page),
+                        command_gate(cx, page),
+                    ))),
+                );
             }
         }
         // A deck-driven project keeps its top cell pristine: it has no
