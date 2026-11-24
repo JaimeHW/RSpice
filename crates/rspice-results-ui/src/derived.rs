@@ -69,6 +69,24 @@ pub struct DerivedSeries {
     /// under way, each with what it measures; kept across data versions, as
     /// what it measures names the build of the models it was taken of.
     measurements: crate::waves::readout::MeasurementsMemo,
+    /// What each pane's traces draw over their whole record and over the
+    /// last window asked of it, per pane, as read while `extents_kept` was
+    /// what it is: a frame that changes neither the strip nor an extent
+    /// reads a pane's answer, not every trace of it.
+    pane_extremes: std::collections::HashMap<u64, PaneExtremesMemo>,
+    /// How many extents, whole-record extremes and block summaries have
+    /// been kept: an answer read at an earlier count may have missed one.
+    extents_kept: u64,
+    /// The count the pane answers held were read at.
+    pane_extremes_at: u64,
+}
+
+/// A pane's extremes over its whole record, and over the last window asked
+/// of it by its bounds' bits.
+#[derive(Debug, Clone, Copy, Default)]
+struct PaneExtremesMemo {
+    whole: Option<Extremes>,
+    window: Option<((u64, u64), Extremes)>,
 }
 
 /// A stored series' extent over its whole record, and over the last window
@@ -143,6 +161,8 @@ impl DerivedSeries {
             self.xy_curves.clear();
             self.stored_extents.clear();
             self.measuring.forget();
+            self.pane_extremes.clear();
+            self.extents_kept = self.extents_kept.wrapping_add(1);
             self.version = version;
         }
     }
@@ -258,7 +278,13 @@ impl DerivedSeries {
     ) -> Option<rspice_results::waveform::ValueExtent> {
         let memo = self.stored_extents.entry(key).or_default();
         let Some((x0, x1)) = window else {
-            return *memo.whole.get_or_insert_with(build);
+            if let Some(whole) = memo.whole {
+                return whole;
+            }
+            let whole = build();
+            memo.whole = Some(whole);
+            self.extents_kept = self.extents_kept.wrapping_add(1);
+            return whole;
         };
         let bits = (x0.to_bits(), x1.to_bits());
         if let Some((held, extent)) = memo.window
@@ -268,6 +294,7 @@ impl DerivedSeries {
         }
         let extent = build();
         memo.window = Some((bits, extent));
+        self.extents_kept = self.extents_kept.wrapping_add(1);
         extent
     }
 
@@ -323,6 +350,43 @@ impl DerivedSeries {
                 None => memo.whole = Some(extent),
                 Some(bits) => memo.window = Some((bits, extent)),
             }
+            self.extents_kept = self.extents_kept.wrapping_add(1);
+        }
+    }
+
+    /// What the pane `pane` drew over `window`, or over its whole record
+    /// when there is none, as last kept, unless an extent has been kept
+    /// since that it may not have read.
+    pub(crate) fn pane_extremes(&self, pane: u64, window: Option<(f64, f64)>) -> Option<Extremes> {
+        if self.pane_extremes_at != self.extents_kept {
+            return None;
+        }
+        let memo = self.pane_extremes.get(&pane)?;
+        match measuring::bits(window) {
+            None => memo.whole,
+            Some(bits) => memo
+                .window
+                .filter(|(held, _)| *held == bits)
+                .map(|(_, extremes)| extremes),
+        }
+    }
+
+    /// Keep what the pane `pane` drew over `window`, read from the extents
+    /// kept so far.
+    pub(crate) fn keep_pane_extremes(
+        &mut self,
+        pane: u64,
+        window: Option<(f64, f64)>,
+        extremes: Extremes,
+    ) {
+        if self.pane_extremes_at != self.extents_kept {
+            self.pane_extremes.clear();
+            self.pane_extremes_at = self.extents_kept;
+        }
+        let memo = self.pane_extremes.entry(pane).or_default();
+        match measuring::bits(window) {
+            None => memo.whole = Some(extremes),
+            Some(bits) => memo.window = Some((bits, extremes)),
         }
     }
 
@@ -362,6 +426,7 @@ impl DerivedSeries {
         }
         note_samples(values.len());
         let index = std::sync::Arc::new(ExtremaIndex::build(values));
+        self.extents_kept = self.extents_kept.wrapping_add(1);
         self.extrema.insert(key, std::sync::Arc::clone(&index));
         // The pass that built the summary read the whole-record range too,
         // and a reader of `range_or` under the same key (the shared X axis'

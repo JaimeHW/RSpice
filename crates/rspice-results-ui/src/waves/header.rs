@@ -372,37 +372,18 @@ pub fn show_header(
     // and its curves read, and offers the hidden signals of its unit. A
     // magnitude's phase is drawn in the phase pane, so it is named there,
     // and the signal a pane is drawn against is its X, not a curve.
-    let curve = |trace: &&StripTrace| {
-        !drawn_against
-            .is_some_and(|name| super::xy::is_own_abscissa(&trace.source_waveform_name, name))
-    };
-    let mut plotted_traces: Vec<&StripTrace> = pane
-        .all_traces()
-        .filter(|index| *index < model.signal_trace_count)
-        .filter_map(|index| model.traces.get(index))
-        .filter(curve)
-        .collect();
-    let mut hidden: Vec<&StripTrace> = model
-        .traces
-        .iter()
-        .take(model.signal_trace_count)
-        .filter(|trace| {
-            !trace.visible && !pane.unlabeled && model.trace_unit(trace) == pane.quantity_unit()
-        })
-        .filter(curve)
-        .collect();
-    sweep_members_in_value_order(&mut plotted_traces, |trace| &trace.source_waveform_name);
-    sweep_members_in_value_order(&mut hidden, |trace| &trace.source_waveform_name);
+    let order = legend_order(ui, model, pane, drawn_against);
     let (drawn_expressions, hidden_expressions): (Vec<_>, Vec<_>) = expressions
         .iter()
         .partition(|expression| expression.visible);
     // The pane names every curve it draws: its signals, then the strip's
-    // expressions routed to it.
-    let entries: Vec<Entry<'_>> = plotted_traces
-        .iter()
-        .map(|trace| Entry::Signal(trace))
-        .chain(drawn_expressions.iter().map(|e| Entry::Expression(e)))
-        .collect();
+    // expressions routed to it. Only the entries the row has room for are
+    // looked at on a frame; the whole list only when the reader opens it.
+    let entry_count = order.plotted.len() + drawn_expressions.len();
+    let entry = |at: usize| match order.plotted.get(at) {
+        Some(index) => Entry::Signal(&model.traces[*index]),
+        None => Entry::Expression(drawn_expressions[at - order.plotted.len()]),
+    };
     // A name gives way only past a share of the row: hierarchical names keep
     // their leaf, cut from the middle as ViVA cuts them.
     let name_budget = (legend_rect.width() * 0.4).max(72.0);
@@ -411,11 +392,11 @@ pub fn show_header(
     // million curves measures the handful of names its row can hold.
     let mut chips: Vec<LegendEntry> = Vec::new();
     let mut measured = 0.0;
-    for entry in &entries {
+    for at in 0..entry_count {
         if measured > legend_rect.width() {
             break;
         }
-        let chip = match entry {
+        let chip = match entry(at) {
             Entry::Signal(trace) => legend_entry(
                 ui,
                 model,
@@ -434,12 +415,7 @@ pub fn show_header(
     // trace list, right after the last entry that fits: the drawn curves
     // there is no room for, and the ones not drawn. The far right of the row
     // is the strip's column of scale and window controls, not the legend's.
-    let hidden_count = hidden.len() + hidden_expressions.len();
-    let hidden_entries: Vec<Entry<'_>> = hidden
-        .iter()
-        .map(|trace| Entry::Signal(trace))
-        .chain(hidden_expressions.iter().map(|e| Entry::Expression(e)))
-        .collect();
+    let hidden_count = order.hidden.len() + hidden_expressions.len();
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(legend_rect)
@@ -454,12 +430,12 @@ pub fn show_header(
             spacing.interact_size.y = ACTION_ICON_SIDE;
             spacing.button_padding.y = spacing.button_padding.y.min(2.0);
             let folded = folded_axes.len();
-            let fitted = fitted_chips(&chips, entries.len(), legend_rect.width(), |overflow| {
+            let fitted = fitted_chips(&chips, entry_count, legend_rect.width(), |overflow| {
                 trace_list_label(overflow, hidden_count, folded)
                     .map_or(0.0, |label| chip_width(ui, &label) + 3.0)
             });
-            for (entry, chip) in entries.iter().zip(&chips).take(fitted) {
-                entry.show(
+            for (at, chip) in chips.iter().enumerate().take(fitted) {
+                entry(at).show(
                     ui,
                     chip,
                     (model, arrange, dimmed),
@@ -468,7 +444,7 @@ pub fn show_header(
                     &mut output,
                 );
             }
-            let Some(label) = trace_list_label(entries.len() - fitted, hidden_count, folded) else {
+            let Some(label) = trace_list_label(entry_count - fitted, hidden_count, folded) else {
                 return;
             };
             // Centred on the band as the scale chip and the icon are, and
@@ -521,6 +497,13 @@ pub fn show_header(
                                 .to_lowercase()
                                 .contains(&needle)
                     };
+                    let entries: Vec<Entry<'_>> = (0..entry_count).map(entry).collect();
+                    let hidden_entries: Vec<Entry<'_>> = order
+                        .hidden
+                        .iter()
+                        .map(|index| Entry::Signal(&model.traces[*index]))
+                        .chain(hidden_expressions.iter().map(|e| Entry::Expression(e)))
+                        .collect();
                     let shown: Vec<&Entry<'_>> = entries.iter().filter(matches).collect();
                     let waiting: Vec<&Entry<'_>> = hidden_entries.iter().filter(matches).collect();
                     egui::ScrollArea::vertical()
@@ -685,11 +668,82 @@ fn sweep_member(name: &str) -> Option<(&str, &str, f64)> {
     Some((base, source, value.parse::<f64>().ok()?))
 }
 
+/// The curves a pane's legend names, in the order it names them, and the
+/// hidden signals of its unit it offers, by their places among the strip's
+/// traces.
+#[derive(Debug, Default)]
+struct LegendOrder {
+    plotted: Vec<usize>,
+    hidden: Vec<usize>,
+}
+
+/// The legend order of `pane`, kept while its strip, its curves and the
+/// signal it is drawn against are what they were: putting a hundred
+/// thousand curves in order on every frame cost the frame tens of
+/// milliseconds.
+fn legend_order(
+    ui: &Ui,
+    model: &StripModel,
+    pane: &UnitPane,
+    drawn_against: Option<&str>,
+) -> std::sync::Arc<LegendOrder> {
+    use std::hash::{Hash, Hasher};
+    let key = {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (
+            model.revision(),
+            pane.unit,
+            pane.quantity_unit(),
+            pane.unlabeled,
+            drawn_against,
+            super::indices_digest(pane.all_traces()),
+        )
+            .hash(&mut hasher);
+        hasher.finish()
+    };
+    let id = egui::Id::new(("pane legend order", model.analysis_key, pane.unit));
+    if let Some((held, order)) =
+        ui.data(|data| data.get_temp::<(u64, std::sync::Arc<LegendOrder>)>(id))
+        && held == key
+    {
+        return order;
+    }
+    // A magnitude's phase is drawn in the phase pane, so it is named there,
+    // and the signal a pane is drawn against is its X, not a curve.
+    let curve = |trace: &StripTrace| {
+        !drawn_against
+            .is_some_and(|name| super::xy::is_own_abscissa(&trace.source_waveform_name, name))
+    };
+    let signals = model.signal_trace_count.min(model.traces.len());
+    let mut plotted: Vec<usize> = pane
+        .all_traces()
+        .filter(|index| *index < signals && curve(&model.traces[*index]))
+        .collect();
+    let mut hidden: Vec<usize> = (0..signals)
+        .filter(|index| {
+            let trace = &model.traces[*index];
+            !trace.visible
+                && !pane.unlabeled
+                && model.trace_unit(trace) == pane.quantity_unit()
+                && curve(trace)
+        })
+        .collect();
+    let name = |index: &usize| model.traces[*index].source_waveform_name.as_str();
+    sweep_members_in_value_order(&mut plotted, name);
+    sweep_members_in_value_order(&mut hidden, name);
+    let order = std::sync::Arc::new(LegendOrder { plotted, hidden });
+    ui.data_mut(|data| data.insert_temp(id, (key, std::sync::Arc::clone(&order))));
+    order
+}
+
 /// Put the members of each nested sweep in `items` in the order of their
 /// parameter value, numerically, in the places the members already hold:
 /// VG = 1, 1.5, 2 rather than the 1.5, 1, 2 their names sort to. Every
 /// other item keeps its place.
-pub(crate) fn sweep_members_in_value_order<T: Copy>(items: &mut [T], name: impl Fn(&T) -> &str) {
+pub(crate) fn sweep_members_in_value_order<'n, T: Copy>(
+    items: &mut [T],
+    name: impl Fn(&T) -> &'n str,
+) {
     // Each item's family (its base name and swept source) and value, owned:
     // the items move while these are read.
     let members: Vec<Option<(String, f64)>> = items

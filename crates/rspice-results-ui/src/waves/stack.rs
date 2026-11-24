@@ -330,8 +330,22 @@ pub fn pane_trace_extremes(
             .x_bounds
             .is_some_and(|(low, high)| x0.min(x1) <= low && x0.max(x1) >= high)
     });
-    let mut extremes = Extremes::default();
     derived.keep_measured_extents();
+    // A pane of the same strip revision and traces, over the same window,
+    // drew what it drew while no extent was kept since: the frame reads its
+    // answer rather than every trace again.
+    let pane = super::stable_hash(&(
+        model.revision(),
+        super::indices_digest(indices.iter().copied()),
+    ));
+    if let Some(extremes) = derived.pane_extremes(pane, window) {
+        derived.measure_asked_extents();
+        return extremes;
+    }
+    let mut extremes = Extremes::default();
+    // A trace whose read is on its way has nothing to say yet, and its
+    // arrival keeps no extent: the answer is not kept without it.
+    let mut waiting = false;
     let mut here = FRAME_EXTENTS;
     for trace in indices.iter().filter_map(|index| model.traces.get(*index)) {
         let window = if whole_record && trace.visible {
@@ -360,6 +374,7 @@ pub fn pane_trace_extremes(
         }
         // Held in memory, or held once its read has arrived.
         let Some((x, y)) = trace.held() else {
+            waiting = true;
             continue;
         };
         let index = derived.extrema_or(trace_key(model, trace), &y, &mut note_samples);
@@ -369,6 +384,9 @@ pub fn pane_trace_extremes(
         });
     }
     derived.measure_asked_extents();
+    if !waiting {
+        derived.keep_pane_extremes(pane, window, extremes);
+    }
     extremes
 }
 

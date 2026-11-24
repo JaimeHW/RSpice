@@ -161,6 +161,35 @@ fn strip_trace_cues(
         .palette_slot(palette_slot.unwrap_or(waveform_index % TRACE_HUES))
 }
 
+/// The samples the curve of `trace`, the strip's `index`th, draws in
+/// `color`: a stored trace's from its store's tiles, never its columns; one
+/// held in memory from its columns; one in memory over a stored axis from the
+/// read of that axis in `held`. `None` while that read is on its way.
+fn curve_samples<'t>(
+    trace: &'t StripTrace,
+    index: usize,
+    held: &'t std::collections::HashMap<
+        usize,
+        (
+            rspice_results::waveform::HeldColumn,
+            rspice_results::waveform::HeldColumn,
+        ),
+    >,
+    color: egui::Color32,
+) -> Option<Trace<'t>> {
+    if trace.y.is_stored() {
+        return Some(Trace::stored(&trace.x, &trace.y, color));
+    }
+    let (xs, ys): (&[f64], &[f64]) = match (trace.x.in_memory(), trace.y.in_memory()) {
+        (Some(xs), Some(ys)) => (xs, ys),
+        _ => {
+            let (xs, ys) = held.get(&index)?;
+            (xs, ys)
+        }
+    };
+    Some(Trace::new(xs, ys, color).shared(&trace.x, &trace.y))
+}
+
 /// How far apart, relative to their size, a fit's extremes may be and still
 /// be one level: a node held steady differs from itself only in the rounding
 /// of its solution, far below any tolerance a solver converges to.
@@ -790,13 +819,27 @@ pub fn show_plot<'a>(
     // has to mean nearest on screen — and on a decade pane a linear guess is
     // wrong by most of the window.
     let y_scale = if log_y { XScale::Log10 } else { XScale::Linear };
-    let pane_traces: Vec<(usize, &StripTrace)> = pane
-        .traces
-        .iter()
-        .copied()
-        .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
-        .collect();
-    let families = family_bands(&pane_traces);
+    // A strip of no families draws its curves from one picture named by the
+    // strip's revision: a frame that shows the picture it holds lists none of
+    // them, and a hover or a click lists them when it needs them.
+    let lazy = !model.trace_facts().families && input.family_envelopes.is_empty();
+    let listed = std::cell::OnceCell::new();
+    let pane_traces = || {
+        listed
+            .get_or_init(|| {
+                pane.traces
+                    .iter()
+                    .copied()
+                    .filter_map(|index| model.traces.get(index).map(|trace| (index, trace)))
+                    .collect::<Vec<(usize, &StripTrace)>>()
+            })
+            .as_slice()
+    };
+    let families = if lazy {
+        Vec::new()
+    } else {
+        family_bands(pane_traces())
+    };
     // The plot's own description is where the caution has to live as words.
     // The kind tag carries it as colour and a glyph, and neither of those
     // reaches a reader who cannot see the strip. A band says which family it
@@ -815,11 +858,12 @@ pub fn show_plot<'a>(
         .join(". ");
     // A trace held in memory over an axis a results store keeps (a magnitude in dB, an
     // expression, over a stored run) strokes its axis from a read made off the frame, and is
-    // not drawn until that read has arrived.
-    let held_traces: Vec<_> = model
-        .traces
+    // not drawn until that read has arrived. Only such traces are read here.
+    let held_traces: std::collections::HashMap<usize, _> = model
+        .trace_facts()
+        .over_stored_axes
         .iter()
-        .map(|trace| (!trace.y.is_stored()).then(|| trace.held()).flatten())
+        .filter_map(|index| Some((*index, model.traces.get(*index)?.held()?)))
         .collect();
     let held_exprs: Vec<_> = exprs
         .iter()
@@ -854,6 +898,13 @@ pub fn show_plot<'a>(
                 .x
         })
         .fold(0.0, f32::max);
+    // A large family is drawn as the band it occupies, with the member the
+    // reader points at stroked over it; see `FAMILY_BAND_MEMBERS`. Declared
+    // before the spec, whose curves are made from them.
+    let mut banded = std::collections::HashSet::new();
+    let mut highlighted: Vec<usize> = Vec::new();
+    let highlighted_members: Vec<&StripTrace>;
+    let sibling_of_highlight;
     let mut spec = pane_spec(PlotSpec::new(x_axis, model.x_scale, y_axis), pane)
         .accessible_name("Waveform plot")
         .with_right_margin(input.right_margin)
@@ -893,11 +944,8 @@ pub fn show_plot<'a>(
         }
     }
 
-    // A large family is drawn as the band it occupies, with the member the
-    // reader points at stroked over it; see `FAMILY_BAND_MEMBERS`. A family's
-    // envelope is that same band, drawn under its members.
-    let mut banded = std::collections::HashSet::new();
-    let mut highlighted: Vec<usize> = Vec::new();
+    // A family's envelope is the band a large family is drawn as, drawn
+    // under its members.
     let enveloped: Vec<Vec<(usize, &StripTrace)>> = input
         .family_envelopes
         .iter()
@@ -910,9 +958,10 @@ pub fn show_plot<'a>(
         })
         .filter(|members| members.len() >= 2)
         .collect();
-    let family_in_pane = pane_traces
-        .iter()
-        .any(|(_, trace)| trace.family_group_ordinal.is_some());
+    let family_in_pane = !lazy
+        && pane_traces()
+            .iter()
+            .any(|(_, trace)| trace.family_group_ordinal.is_some());
     if !families.is_empty() || !enveloped.is_empty() || family_in_pane {
         let plot_rect = plot::plot_rect(ui, &spec);
         // The renderer's own column count, so a band is quantized as its
@@ -1012,7 +1061,7 @@ pub fn show_plot<'a>(
         // reading: it strokes over its siblings at the active run's width and
         // the readout names it first.
         if let Some(position) = pointer.filter(|_| highlighted.is_empty()) {
-            let members: Vec<(usize, &StripTrace)> = pane_traces
+            let members: Vec<(usize, &StripTrace)> = pane_traces()
                 .iter()
                 .copied()
                 .filter(|(index, trace)| {
@@ -1074,150 +1123,81 @@ pub fn show_plot<'a>(
         }));
     }
 
-    // Run owns weight: overlay traces keep the signal hue at reduced alpha
-    // and stroke, painted first so the active run draws at full strength
-    // on top.
-    // A highlighted member is stroked last, over everything it was among.
-    let draw_order = pane_traces
-        .iter()
-        .filter(|(_, trace)| trace.overlay)
-        .chain(
-            pane_traces
-                .iter()
-                .filter(|(index, trace)| !trace.overlay && !highlighted.contains(index)),
-        )
-        .chain(
-            pane_traces
-                .iter()
-                .filter(|(index, trace)| !trace.overlay && highlighted.contains(index)),
-        )
-        .filter(|(index, _)| !banded.contains(index) || highlighted.contains(index));
-    let highlighted_members: Vec<&StripTrace> = highlighted
+    highlighted_members = highlighted
         .iter()
         .filter(|index| !banded.contains(*index))
         .filter_map(|index| model.traces.get(*index))
         .collect();
     // A member of the family a highlighted member belongs to.
-    let sibling_of_highlight = |trace: &StripTrace| {
+    sibling_of_highlight = |trace: &StripTrace| {
         trace.family_group_ordinal.is_some()
             && highlighted_members
                 .iter()
                 .any(|member| same_family(member, trace))
     };
-    for (index, trace) in draw_order {
-        // While one member of a family that is stroked member by member is
-        // highlighted, its siblings step back to an overlay's weight: members
-        // of one quantity share its hue, and a wider stroke alone is lost
-        // among them.
-        let lifted = highlighted.contains(index) && !banded.contains(index);
-        let sibling = !lifted && sibling_of_highlight(trace);
-        let color = if trace.overlay || sibling {
-            trace.color.gamma_multiply(0.40)
-        } else {
-            trace.color
-        };
-        // The reduction has to be told what the abscissa is. Without it a
-        // reverse sweep vanished the moment it was zoomed — every window it
-        // was asked for came back empty — and a hysteresis loop lost whichever
-        // branch fell outside one contiguous index window.
-        // A stored trace draws from its store's tiles, never its columns.
-        let samples = if trace.y.is_stored() {
-            Trace::stored(&trace.x, &trace.y, color)
-        } else if let Some(Some((xs, ys))) = held_traces.get(*index) {
-            Trace::new(xs, ys, color).shared(&trace.x, &trace.y)
-        } else {
-            continue;
-        };
-        let mut plot_trace = strip_trace_cues(
-            samples
-                .width(input.trace_width)
-                .cache_key(trace_key(model, trace))
-                .shape(&trace.shape),
-            trace.palette_slot,
-            trace.family_style,
-            trace.waveform_index,
-        );
-        let width = trace
-            .style
-            .width
-            .map_or(input.trace_width, |width| width.points());
-        plot_trace = styled(plot_trace, trace.style);
-        if trace.overlay {
-            plot_trace = plot_trace.width(width * SECONDARY_TRACE_RATIO);
-        }
-        if lifted {
-            plot_trace = plot_trace.width(width);
-        }
-        spec.traces.push(plot_trace);
-    }
-    for (expr, held) in exprs.iter().zip(&held_exprs) {
-        let Some((expr_x, expr_y)) = held else {
-            continue;
-        };
-        let mut trace = apply_family_trace_style(
-            Trace::new(expr_x, expr_y, expr.color)
-                .width(input.trace_width * SECONDARY_TRACE_RATIO)
-                .cache_key(expr.cache_key)
-                .shape(&expr.shape),
-            expr.family_style,
-        );
-        // An expression's dash and marker follow its hue, as a signal's do,
-        // so its legend swatch is its curve wherever the pane lists it. A
-        // real lane's step trace is no expression.
-        if expr.slot != usize::MAX {
-            trace = trace.palette_slot(super::stack::expression_hue_slot(model, expr.slot));
-        }
-        spec.traces.push(trace);
-    }
-    // The curves of the strip's other axes, each mapped through its own.
-    for (axis, held) in input.secondary.iter().zip(&held_secondary) {
-        let on = plot::TraceAxis {
-            min: axis.range.0,
-            max: axis.range.1,
-            scale: XScale::Linear,
-        };
-        for index in axis.traces {
-            let Some(trace) = model.traces.get(*index) else {
-                continue;
-            };
-            let color = if trace.overlay {
+    // Run owns weight: overlay traces keep the signal hue at reduced alpha
+    // and stroke, painted first so the active run draws at full strength
+    // on top.
+    // A highlighted member is stroked last, over everything it was among.
+    let make = || {
+        let mut traces = Vec::new();
+        let draw_order = pane_traces()
+            .iter()
+            .filter(|(_, trace)| trace.overlay)
+            .chain(
+                pane_traces()
+                    .iter()
+                    .filter(|(index, trace)| !trace.overlay && !highlighted.contains(index)),
+            )
+            .chain(
+                pane_traces()
+                    .iter()
+                    .filter(|(index, trace)| !trace.overlay && highlighted.contains(index)),
+            )
+            .filter(|(index, _)| !banded.contains(index) || highlighted.contains(index));
+        for (index, trace) in draw_order {
+            // While one member of a family that is stroked member by member is
+            // highlighted, its siblings step back to an overlay's weight: members
+            // of one quantity share its hue, and a wider stroke alone is lost
+            // among them.
+            let lifted = highlighted.contains(index) && !banded.contains(index);
+            let sibling = !lifted && sibling_of_highlight(trace);
+            let color = if trace.overlay || sibling {
                 trace.color.gamma_multiply(0.40)
             } else {
                 trace.color
             };
-            let samples = if trace.y.is_stored() {
-                Trace::stored(&trace.x, &trace.y, color)
-            } else if let Some(Some((xs, ys))) = held_traces.get(*index) {
-                Trace::new(xs, ys, color).shared(&trace.x, &trace.y)
-            } else {
+            // The reduction has to be told what the abscissa is. Without it a
+            // reverse sweep vanished the moment it was zoomed — every window it
+            // was asked for came back empty — and a hysteresis loop lost whichever
+            // branch fell outside one contiguous index window.
+            // A stored trace draws from its store's tiles, never its columns.
+            let Some(samples) = curve_samples(trace, *index, &held_traces, color) else {
                 continue;
             };
+            let mut plot_trace = strip_trace_cues(
+                samples
+                    .width(input.trace_width)
+                    .cache_key(trace_key(model, trace))
+                    .shape(&trace.shape),
+                trace.palette_slot,
+                trace.family_style,
+                trace.waveform_index,
+            );
             let width = trace
                 .style
                 .width
                 .map_or(input.trace_width, |width| width.points());
-            let width = if trace.overlay {
-                width * SECONDARY_TRACE_RATIO
-            } else {
-                width
-            };
-            spec.traces.push(
-                styled(
-                    strip_trace_cues(
-                        samples
-                            .cache_key(trace_key(model, trace))
-                            .shape(&trace.shape),
-                        trace.palette_slot,
-                        trace.family_style,
-                        trace.waveform_index,
-                    ),
-                    trace.style,
-                )
-                .width(width)
-                .on_axis(on),
-            );
+            plot_trace = styled(plot_trace, trace.style);
+            if trace.overlay {
+                plot_trace = plot_trace.width(width * SECONDARY_TRACE_RATIO);
+            }
+            if lifted {
+                plot_trace = plot_trace.width(width);
+            }
+            traces.push(plot_trace);
         }
-        for (expr, held) in axis.expressions.iter().zip(held) {
+        for (expr, held) in exprs.iter().zip(&held_exprs) {
             let Some((expr_x, expr_y)) = held else {
                 continue;
             };
@@ -1228,43 +1208,170 @@ pub fn show_plot<'a>(
                     .shape(&expr.shape),
                 expr.family_style,
             );
+            // An expression's dash and marker follow its hue, as a signal's do,
+            // so its legend swatch is its curve wherever the pane lists it. A
+            // real lane's step trace is no expression.
             if expr.slot != usize::MAX {
                 trace = trace.palette_slot(super::stack::expression_hue_slot(model, expr.slot));
             }
-            spec.traces.push(trace.on_axis(on));
+            traces.push(trace);
         }
+        // The curves of the strip's other axes, each mapped through its own.
+        for (axis, held) in input.secondary.iter().zip(&held_secondary) {
+            let on = plot::TraceAxis {
+                min: axis.range.0,
+                max: axis.range.1,
+                scale: XScale::Linear,
+            };
+            for index in axis.traces {
+                let Some(trace) = model.traces.get(*index) else {
+                    continue;
+                };
+                let color = if trace.overlay {
+                    trace.color.gamma_multiply(0.40)
+                } else {
+                    trace.color
+                };
+                let Some(samples) = curve_samples(trace, *index, &held_traces, color) else {
+                    continue;
+                };
+                let width = trace
+                    .style
+                    .width
+                    .map_or(input.trace_width, |width| width.points());
+                let width = if trace.overlay {
+                    width * SECONDARY_TRACE_RATIO
+                } else {
+                    width
+                };
+                traces.push(
+                    styled(
+                        strip_trace_cues(
+                            samples
+                                .cache_key(trace_key(model, trace))
+                                .shape(&trace.shape),
+                            trace.palette_slot,
+                            trace.family_style,
+                            trace.waveform_index,
+                        ),
+                        trace.style,
+                    )
+                    .width(width)
+                    .on_axis(on),
+                );
+            }
+            for (expr, held) in axis.expressions.iter().zip(held) {
+                let Some((expr_x, expr_y)) = held else {
+                    continue;
+                };
+                let mut trace = apply_family_trace_style(
+                    Trace::new(expr_x, expr_y, expr.color)
+                        .width(input.trace_width * SECONDARY_TRACE_RATIO)
+                        .cache_key(expr.cache_key)
+                        .shape(&expr.shape),
+                    expr.family_style,
+                );
+                if expr.slot != usize::MAX {
+                    trace = trace.palette_slot(super::stack::expression_hue_slot(model, expr.slot));
+                }
+                traces.push(trace.on_axis(on));
+            }
+        }
+
+        traces
+    };
+    if lazy {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (
+            model.revision(),
+            super::indices_digest(pane.traces.iter().copied()),
+            input.trace_width.to_bits(),
+            held_traces.len(),
+        )
+            .hash(&mut hasher);
+        let expression = |hasher: &mut std::collections::hash_map::DefaultHasher,
+                          expr: &ResolvedExpr,
+                          held: bool| {
+            (
+                expr.cache_key,
+                expr.color.to_array(),
+                expr.slot,
+                held,
+                format!("{:?}", expr.family_style),
+            )
+                .hash(hasher);
+        };
+        for (expr, held) in exprs.iter().zip(&held_exprs) {
+            expression(&mut hasher, expr, held.is_some());
+        }
+        for (axis, held) in input.secondary.iter().zip(&held_secondary) {
+            (
+                axis.range.0.to_bits(),
+                axis.range.1.to_bits(),
+                super::indices_digest(axis.traces.iter().copied()),
+            )
+                .hash(&mut hasher);
+            for (expr, held) in axis.expressions.iter().zip(held) {
+                expression(&mut hasher, expr, held.is_some());
+            }
+        }
+        // Every curve listed draws, but one held in memory over a stored axis
+        // whose read is on its way.
+        let waiting = model
+            .trace_facts()
+            .over_stored_axes
+            .len()
+            .saturating_sub(held_traces.len());
+        let count = (pane.traces.len()
+            + input
+                .secondary
+                .iter()
+                .map(|axis| axis.traces.len())
+                .sum::<usize>()
+            + held_exprs.iter().flatten().count()
+            + held_secondary.iter().flatten().flatten().count())
+        .saturating_sub(waiting);
+        spec.curves = Some(plot::Curves {
+            key: hasher.finish(),
+            count,
+            make: Box::new(make),
+        });
+    } else {
+        spec.traces.extend(make());
     }
 
     // A family reads out the member the reader points at, not the first six
     // of its members.
-    let readout_traces: Vec<&StripTrace> = highlighted
-        .iter()
-        .filter_map(|index| model.traces.get(*index))
-        .chain(
-            pane_traces
-                .iter()
-                .filter(|(index, trace)| {
-                    !banded.contains(index)
-                        && !highlighted.contains(index)
-                        && !sibling_of_highlight(trace)
-                })
-                .map(|(_, trace)| *trace),
-        )
-        .chain(
-            input
-                .secondary
-                .iter()
-                .flat_map(|axis| axis.traces.iter())
-                .filter_map(|index| model.traces.get(*index)),
-        )
-        .collect();
+    let readout_traces = || {
+        highlighted
+            .iter()
+            .filter_map(|index| model.traces.get(*index))
+            .chain(
+                pane_traces()
+                    .iter()
+                    .filter(|(index, trace)| {
+                        !banded.contains(index)
+                            && !highlighted.contains(index)
+                            && !sibling_of_highlight(trace)
+                    })
+                    .map(|(_, trace)| *trace),
+            )
+            .chain(
+                input
+                    .secondary
+                    .iter()
+                    .flat_map(|axis| axis.traces.iter())
+                    .filter_map(|index| model.traces.get(*index)),
+            )
+    };
     let readout = |x: f64| -> Vec<(String, String)> {
         let mut rows = vec![(
             model.x_label().to_owned(),
             model.format_x(x, significant_digits, quantity_policy),
         )];
         let mut samples: Vec<BranchSample> = Vec::new();
-        for trace in &readout_traces {
+        for trace in readout_traces() {
             samples.clear();
             if !trace.shape.is_single_ascending()
                 && let Some((xs, ys)) = trace.held()
@@ -1357,7 +1464,7 @@ pub fn show_plot<'a>(
         .filter(|_| input.find_nearest)
         .and_then(|x| {
             nearest_drawn_trace(
-                &pane_traces,
+                pane_traces(),
                 x,
                 response.response.interact_pointer_pos().map(|pos| pos.y),
                 response.plot_rect,
@@ -1370,7 +1477,7 @@ pub fn show_plot<'a>(
         x,
         y,
         trace: nearest_drawn_trace(
-            &pane_traces,
+            pane_traces(),
             x,
             response.response.interact_pointer_pos().map(|pos| pos.y),
             response.plot_rect,
