@@ -264,6 +264,55 @@ where
 #[derive(Default)]
 struct Sha256Writer(Sha256);
 
+/// The content digest of the content one generation names, kept so a reader
+/// that asks again of content that has not changed reads it rather than
+/// writing the whole document out once more.
+#[derive(Default)]
+struct DigestMemo(std::sync::Mutex<Option<(u64, ContentDigest)>>);
+
+impl DigestMemo {
+    /// The digest kept for `generation`, if it is the one kept.
+    fn get(&self, generation: u64) -> Option<ContentDigest> {
+        let kept = *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        kept.and_then(|(kept, digest)| (kept == generation).then_some(digest))
+    }
+
+    fn keep(&self, generation: u64, digest: ContentDigest) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((generation, digest));
+    }
+}
+
+impl Clone for DigestMemo {
+    /// A copy keeps its generation, so it keeps the digest too.
+    fn clone(&self) -> Self {
+        Self(std::sync::Mutex::new(
+            *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        ))
+    }
+}
+
+impl PartialEq for DigestMemo {
+    /// What a document has worked out about itself is not part of it.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl fmt::Debug for DigestMemo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("DigestMemo").finish_non_exhaustive()
+    }
+}
+
 impl Sha256Writer {
     fn finish(self) -> ContentDigest {
         ContentDigest::from_bytes(self.0.finalize().into())
@@ -2372,6 +2421,9 @@ pub struct VisualizationDocument {
     /// Which content the document holds, and what its last change changed.
     #[serde(skip)]
     changes: journal::Changes,
+    /// The content digest of the generation it names, once asked for.
+    #[serde(skip)]
+    digest: DigestMemo,
 }
 
 #[derive(Deserialize)]
@@ -2454,6 +2506,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             ),
             row_index: query::RowIndex::default(),
             changes: journal::Changes::fresh(),
+            digest: DigestMemo::default(),
         };
         if document.schema_version != Self::SCHEMA_VERSION {
             return Err(serde::de::Error::custom(format!(
@@ -2539,6 +2592,7 @@ impl VisualizationDocument {
             coefficient_settings: journal::SpliceList::new(Vec::new()),
             row_index: query::RowIndex::default(),
             changes: journal::Changes::fresh(),
+            digest: DigestMemo::default(),
         };
         document.validate()?;
         Ok(document)
@@ -2907,7 +2961,20 @@ impl VisualizationDocument {
     /// datasets, presentation entities, and comparison receipts. It is the
     /// publication boundary for references that must identify one exact
     /// visualization revision rather than merely the underlying dataset.
+    ///
+    /// Content keeps its digest: asked again of the generation it was worked
+    /// out for, the document answers from what it kept.
     pub fn content_digest(&self) -> Result<ContentDigest, VisualizationError> {
+        let generation = self.changes.generation;
+        if let Some(digest) = self.digest.get(generation) {
+            return Ok(digest);
+        }
+        let digest = self.work_out_content_digest()?;
+        self.digest.keep(generation, digest);
+        Ok(digest)
+    }
+
+    fn work_out_content_digest(&self) -> Result<ContentDigest, VisualizationError> {
         // A report's copy carries the samples its figures draw. They are the
         // referenced runs' own samples, which each binding's digest already
         // authenticates, so the copy authenticates as the document it copies.
@@ -2926,7 +2993,7 @@ impl VisualizationDocument {
             {
                 run.set_figure_samples(Vec::new());
             }
-            return document.content_digest();
+            return document.work_out_content_digest();
         }
         self.validate()?;
         let mut writer = Sha256Writer::default();
