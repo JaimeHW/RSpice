@@ -163,7 +163,7 @@ pub fn comment_ranges(text: &str, kind: SourceKind) -> Vec<std::ops::Range<usize
 }
 
 /// Where the comment on one line of SPICE starts.
-fn spice_comment_start(line: &str) -> Option<usize> {
+pub(crate) fn spice_comment_start(line: &str) -> Option<usize> {
     let indent = line.len() - line.trim_start().len();
     if line[indent..].starts_with(['*', '#']) {
         return Some(indent);

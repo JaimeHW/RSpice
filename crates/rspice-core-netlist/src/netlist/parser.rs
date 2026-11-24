@@ -202,6 +202,7 @@ use elements::*;
 use freq_synthesis::*;
 pub(in crate::netlist) use laplace_synthesis::TransferExpression;
 use laplace_synthesis::*;
+pub(in crate::netlist) use line::spice_comment_start;
 use line::*;
 pub use line::{SourceKind, comment_ranges, comment_start};
 use pspice_stim::*;

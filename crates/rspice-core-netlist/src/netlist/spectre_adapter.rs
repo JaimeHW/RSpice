@@ -963,36 +963,74 @@ pub(crate) fn source_comment_ranges<'a>(
     spice_comment_start: impl Fn(&str) -> Option<usize>,
     ranges: &mut Vec<Range<usize>>,
 ) {
-    let mut language = if in_spectre {
-        Language::Spectre
-    } else {
-        Language::Spice
-    };
-    let mut in_block_comment = false;
+    let mut comments = SourceComments::new(in_spectre);
     let mut line_ranges = Vec::new();
     for (offset, raw) in lines {
-        let mut boundary_block = false;
-        let is_boundary = strip_spectre_comments_from_line(raw, &mut boundary_block, 0, None)
-            .trim()
-            .to_ascii_lowercase()
-            .starts_with("simulator lang=");
+        comments.line(raw, &spice_comment_start, &mut line_ranges);
+        ranges.extend(
+            line_ranges
+                .iter()
+                .map(|range| offset + range.start..offset + range.end),
+        );
+    }
+}
+
+/// The comment rule of [`source_comment_ranges`] read a line at a time: the
+/// language the lines are in and whether a block comment is open, carried
+/// from one line to the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SourceComments {
+    language: Language,
+    in_block_comment: bool,
+}
+
+impl SourceComments {
+    /// The rule at a source's first line, which is Spectre when `in_spectre`.
+    pub(crate) const fn new(in_spectre: bool) -> Self {
+        Self {
+            language: if in_spectre {
+                Language::Spectre
+            } else {
+                Language::Spice
+            },
+            in_block_comment: false,
+        }
+    }
+
+    /// The comments on the line `raw` as byte ranges of it, in `line_ranges`,
+    /// none of them empty; and the rule the line after it is read by.
+    pub(crate) fn line(
+        &mut self,
+        raw: &str,
+        spice_comment_start: impl Fn(&str) -> Option<usize>,
+        line_ranges: &mut Vec<Range<usize>>,
+    ) {
+        // Only a line that says `lang=` can switch the language.
+        let is_boundary = raw
+            .as_bytes()
+            .windows(5)
+            .any(|word| word.eq_ignore_ascii_case(b"lang="))
+            && strip_spectre_comments_from_line(raw, &mut false, 0, None)
+                .trim()
+                .to_ascii_lowercase()
+                .starts_with("simulator lang=");
         line_ranges.clear();
-        let kept = if language == Language::Spectre || in_block_comment || is_boundary {
+        let kept = if self.language == Language::Spectre || self.in_block_comment || is_boundary {
             let mut kept = String::with_capacity(raw.len());
             scan_spectre_comments_in_line(
                 raw,
-                &mut in_block_comment,
+                &mut self.in_block_comment,
                 0,
                 None,
                 |character| kept.push(character),
                 |range| line_ranges.push(range),
             );
-            if language == Language::Spectre && !is_boundary {
-                if let Some(star) = star_comment_start(raw, &line_ranges) {
+            if self.language == Language::Spectre && !is_boundary {
+                if let Some(star) = star_comment_start(raw, line_ranges) {
                     line_ranges.retain(|range| range.start < star);
                     line_ranges.push(star..raw.len());
                 }
-            } else if language == Language::Spice && !is_boundary {
+            } else if self.language == Language::Spice && !is_boundary {
                 // The SPICE parser reads what the block comment leaves.
                 let tail = line_ranges.last().map_or(0, |range| range.end);
                 if let Some(start) = spice_comment_start(&raw[tail..]) {
@@ -1006,16 +1044,11 @@ pub(crate) fn source_comment_ranges<'a>(
             }
             None
         };
-        ranges.extend(
-            line_ranges
-                .iter()
-                .filter(|range| !range.is_empty())
-                .map(|range| offset + range.start..offset + range.end),
-        );
+        line_ranges.retain(|range| !range.is_empty());
         if let Some(kept) = kept {
             match kept.trim().to_ascii_lowercase().as_str() {
-                "simulator lang=spectre" => language = Language::Spectre,
-                "simulator lang=spice" => language = Language::Spice,
+                "simulator lang=spectre" => self.language = Language::Spectre,
+                "simulator lang=spice" => self.language = Language::Spice,
                 _ => {}
             }
         }

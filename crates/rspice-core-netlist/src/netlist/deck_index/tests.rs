@@ -1,26 +1,24 @@
 use super::*;
 
 fn index(deck: &str) -> DeckIndex {
-    DeckIndex::build(&[DeckIndexSource {
-        identity: "deck.cir",
-        text: deck,
-        kind: SourceKind::DeckRoot,
-    }])
+    DeckIndex::build(&[DeckIndexSource::copied(
+        "deck.cir",
+        deck,
+        SourceKind::DeckRoot,
+    )])
 }
 
-fn symbol<'a>(index: &'a DeckIndex, kind: DeckSymbolKind, name: &str) -> Vec<&'a DeckSymbol> {
+fn symbol<'a>(index: &'a DeckIndex, kind: DeckSymbolKind, name: &str) -> Vec<DeckSymbol<'a>> {
     index
         .symbols()
-        .iter()
-        .filter(|symbol| symbol.kind == kind && symbol.name == name)
+        .filter(|symbol| symbol.kind() == kind && symbol.name() == name)
         .collect()
 }
 
-fn reads<'a>(index: &'a DeckIndex, name: &str) -> Vec<&'a DeckReference> {
+fn reads<'a>(index: &'a DeckIndex, name: &str) -> Vec<DeckReference<'a>> {
     index
         .references()
-        .iter()
-        .filter(|reference| reference.name.eq_ignore_ascii_case(name))
+        .filter(|reference| reference.name().eq_ignore_ascii_case(name))
         .collect()
 }
 
@@ -31,15 +29,14 @@ fn a_number_with_a_suffix_reads_no_parameter_of_the_suffix_name() {
     let index = index(deck);
     let n = index
         .symbols()
-        .iter()
-        .position(|symbol| symbol.name == "n")
+        .position(|symbol| symbol.name() == "n")
         .expect("n is defined");
     let lines = index
         .references_to(n)
-        .map(|reference| reference.location.line)
+        .map(|reference| reference.location().line)
         .collect::<Vec<_>>();
     assert_eq!(lines, [5, 6], "only the expressions read n");
-    let tokens = index.card_tokens(index.card_on_line(0, 4).unwrap(), deck);
+    let tokens = index.card_tokens(index.card_on_line(0, 4).unwrap());
     let kinds = tokens.iter().map(|token| token.kind).collect::<Vec<_>>();
     assert_eq!(
         kinds,
@@ -68,29 +65,31 @@ R1 a 0 {gain}
     let index = index(deck);
     let formal = index
         .symbols()
-        .iter()
-        .position(|symbol| symbol.name == "gain" && symbol.location.line == 3)
+        .position(|symbol| symbol.name() == "gain" && symbol.location().line == 3)
         .expect("the formal is a definition");
     let global = index
         .symbols()
-        .iter()
-        .position(|symbol| symbol.name == "gain" && symbol.location.line == 2)
+        .position(|symbol| symbol.name() == "gain" && symbol.location().line == 2)
         .expect("the global is a definition");
-    assert_ne!(index.symbols()[formal].scope, 0, "the formal is local");
+    assert_ne!(
+        index.symbol(formal).unwrap().scope(),
+        0,
+        "the formal is local"
+    );
     let inside = reads(&index, "gain")
         .into_iter()
-        .find(|reference| reference.location.line == 4)
+        .find(|reference| reference.location().line == 4)
         .expect("the body reads gain");
-    assert_eq!(inside.target, Some(formal));
+    assert_eq!(inside.target(), Some(formal));
     let outside = reads(&index, "gain")
         .into_iter()
-        .find(|reference| reference.location.line == 7)
+        .find(|reference| reference.location().line == 7)
         .expect("the top level reads gain");
-    assert_eq!(outside.target, Some(global));
+    assert_eq!(outside.target(), Some(global));
     assert!(
         reads(&index, "gain")
             .iter()
-            .all(|reference| reference.location.line != 6),
+            .all(|reference| reference.location().line != 6),
         "an instance's parameter name is not a read"
     );
 }
@@ -108,17 +107,17 @@ M1 d g s b nch
     let index = index(deck);
     let w0 = reads(&index, "w0");
     assert_eq!(w0.len(), 1);
-    assert_eq!(w0[0].location.line, 4);
-    assert_eq!(w0[0].location.column, 6);
-    assert_eq!(&deck[w0[0].location.span.clone()], "w0");
-    assert!(w0[0].target.is_some());
+    assert_eq!(w0[0].location().line, 4);
+    assert_eq!(w0[0].location().column, 6);
+    assert_eq!(&deck[w0[0].location().span.clone()], "w0");
+    assert!(w0[0].target().is_some());
     let l0 = reads(&index, "l0");
     assert_eq!(l0.len(), 1, "a bare value reads its parameter");
     let card = index
         .card_on_line(0, 4)
         .expect("the continuation is the card's");
-    assert_eq!(index.cards()[card].lines, 3..=4);
-    assert_eq!(index.cards()[card].head, "M1");
+    assert_eq!(index.card(card).unwrap().lines(), 3..=4);
+    assert_eq!(index.card(card).unwrap().head(), "M1");
 }
 
 #[test]
@@ -135,30 +134,32 @@ X1 in out
     let index = index(deck);
     let opamp = symbol(&index, DeckSymbolKind::Subcircuit, "opamp");
     assert_eq!(opamp.len(), 1);
-    let opamp_index = index
-        .symbols()
-        .iter()
-        .position(|symbol| symbol == opamp[0])
-        .unwrap();
+    let opamp_index = opamp[0].id();
     let use_site = reads(&index, "opamp")
         .into_iter()
-        .find(|reference| reference.location.line == 6)
+        .find(|reference| reference.location().line == 6)
         .expect("the X card names its subcircuit on the continuation");
-    assert_eq!(use_site.target, Some(opamp_index));
+    assert_eq!(use_site.target(), Some(opamp_index));
     let x1 = symbol(&index, DeckSymbolKind::Instance, "X1");
-    assert_eq!(x1[0].target, Some(opamp_index));
+    assert_eq!(x1[0].target(), Some(opamp_index));
     let x1_nodes = index
         .nodes()
-        .iter()
-        .filter(|node| node.card == x1[0].card)
-        .map(|node| node.name.as_str())
+        .filter(|node| node.card() == x1[0].card())
+        .map(|node| node.name())
         .collect::<Vec<_>>();
     assert_eq!(
         x1_nodes,
         ["in", "out", "vdd", "vss"],
         "out is a node, not the subcircuit"
     );
-    assert_eq!(index.scopes()[opamp[0].opens.unwrap()].ports.len(), 5);
+    assert_eq!(
+        index
+            .scope(opamp[0].opens().unwrap())
+            .unwrap()
+            .ports()
+            .len(),
+        5
+    );
 }
 
 #[test]
@@ -166,35 +167,28 @@ fn a_read_in_an_include_file_carries_that_files_identity() {
     let deck = "top\n.include \"models/lib.sp\"\n.param vt=0.7\nD1 a 0 dmod\n.end\n";
     let library = "* library\n.model dmod d is=1e-14 vj={vt}\n";
     let index = DeckIndex::build(&[
-        DeckIndexSource {
-            identity: "deck.cir",
-            text: deck,
-            kind: SourceKind::DeckRoot,
-        },
-        DeckIndexSource {
-            identity: "models/lib.sp",
-            text: library,
-            kind: SourceKind::Included,
-        },
+        DeckIndexSource::copied("deck.cir", deck, SourceKind::DeckRoot),
+        DeckIndexSource::copied("models/lib.sp", library, SourceKind::Included),
     ]);
     let vt = reads(&index, "vt");
     assert_eq!(vt.len(), 1);
     assert_eq!(
-        index.file_identity(vt[0].location.file),
+        index.file_identity(vt[0].location().file),
         Some("models/lib.sp")
     );
-    assert_eq!(vt[0].location.line, 2);
-    let dmod_definition = index.symbols()[reads(&index, "dmod")[0].target.unwrap()].clone();
+    assert_eq!(vt[0].location().line, 2);
+    let dmod_definition = index
+        .symbol(reads(&index, "dmod")[0].target().unwrap())
+        .unwrap();
     assert_eq!(
-        index.file_identity(dmod_definition.location.file),
+        index.file_identity(dmod_definition.location().file),
         Some("models/lib.sp")
     );
-    assert_eq!(index.includes()[0].path, "models/lib.sp");
+    assert_eq!(index.includes().next().unwrap().path(), "models/lib.sp");
     assert_eq!(
         index
             .cards()
-            .iter()
-            .filter(|card| card.kind == DeckCardKind::Title)
+            .filter(|card| card.kind() == DeckCardKind::Title)
             .count(),
         1,
         "an include file has no title"
@@ -207,8 +201,7 @@ fn the_first_line_is_the_title_whatever_it_says_and_control_lines_are_no_instanc
     let index = index(deck);
     let kinds = index
         .cards()
-        .iter()
-        .map(|card| (card.kind, card.lines.clone()))
+        .map(|card| (card.kind(), card.lines()))
         .collect::<Vec<_>>();
     assert_eq!(
         kinds,
@@ -236,8 +229,7 @@ R1 a 0 1k
 ";
     let kinds = index(deck)
         .cards()
-        .iter()
-        .map(|card| (card.head.clone(), card.kind))
+        .map(|card| (card.head().into_owned(), card.kind()))
         .collect::<Vec<_>>();
     for (head, kind) in [
         (".tr", DeckCardKind::Analysis),
@@ -260,20 +252,19 @@ fn a_transistor_reads_the_model_its_fields_name_not_its_area() {
     let index = index(deck);
     let model = reads(&index, "QN");
     assert_eq!(model.len(), 2);
-    assert!(model.iter().all(|reference| reference.target.is_some()));
+    assert!(model.iter().all(|reference| reference.target().is_some()));
     assert!(reads(&index, "2").is_empty());
     assert!(
-        reads(&index, "1N4148")[0].target.is_some(),
+        reads(&index, "1N4148")[0].target().is_some(),
         "a digit-led model name is a name"
     );
     let q2_nodes = index
         .nodes()
-        .iter()
-        .filter(|node| node.location.line == 3)
+        .filter(|node| node.location().line == 3)
         .count();
     assert_eq!(q2_nodes, 4, "a substrate node counts");
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "Q1")[0].detail,
+        symbol(&index, DeckSymbolKind::Instance, "Q1")[0].detail(),
         "QN"
     );
 }
@@ -284,34 +275,32 @@ fn a_model_defined_in_a_selected_library_section_binds_first() {
     let library =
         ".lib TT\n.model nch nmos vto=0.5\n.endl TT\n.lib SS\n.model nch nmos vto=0.6\n.endl SS\n";
     let index = DeckIndex::build(&[
-        DeckIndexSource {
-            identity: "deck.cir",
-            text: deck,
-            kind: SourceKind::DeckRoot,
-        },
-        DeckIndexSource {
-            identity: "models.lib",
-            text: library,
-            kind: SourceKind::Included,
-        },
+        DeckIndexSource::copied("deck.cir", deck, SourceKind::DeckRoot),
+        DeckIndexSource::copied("models.lib", library, SourceKind::Included),
     ]);
-    let target = reads(&index, "nch")[0].target.expect("nch is defined");
-    assert_eq!(index.symbols()[target].section.as_deref(), Some("SS"));
-    assert_eq!(index.symbols()[target].location.line, 5);
-    assert_eq!(index.includes()[0].section.as_deref(), Some("SS"));
+    let target = reads(&index, "nch")[0].target().expect("nch is defined");
+    assert_eq!(
+        index.symbol(target).unwrap().section().as_deref(),
+        Some("SS")
+    );
+    assert_eq!(index.symbol(target).unwrap().location().line, 5);
+    assert_eq!(
+        index.includes().next().unwrap().section().as_deref(),
+        Some("SS")
+    );
 }
 
 #[test]
 fn ground_and_global_nodes_belong_to_the_top_level() {
     let deck = "inverter\n.global vdd\n.subckt inv in out\nM1 out in vdd vdd p\nM2 out in 0 0 n\n.ends\n.end\n";
-    let index = DeckIndex::build(&[DeckIndexSource {
-        identity: "lib.sp",
-        text: deck,
-        kind: SourceKind::DeckRoot,
-    }]);
+    let index = DeckIndex::build(&[DeckIndexSource::copied(
+        "lib.sp",
+        deck,
+        SourceKind::DeckRoot,
+    )]);
     for node in index.nodes() {
-        let global = matches!(node.name.as_str(), "vdd" | "0");
-        assert_eq!(node.scope == 0, global, "{node:?}");
+        let global = matches!(&*node.name(), "vdd" | "0");
+        assert_eq!(node.scope() == 0, global, "{node:?}");
     }
 }
 
@@ -321,11 +310,11 @@ fn a_function_body_reads_no_parameter_of_a_formal_name() {
     let index = index(deck);
     let x_reads = reads(&index, "x");
     assert_eq!(x_reads.len(), 1, "only the use outside the body reads x");
-    assert_eq!(x_reads[0].location.line, 4);
+    assert_eq!(x_reads[0].location().line, 4);
     assert_eq!(reads(&index, "k").len(), 1);
     let scale = reads(&index, "scale");
     assert_eq!(scale.len(), 1);
-    assert_eq!(scale[0].kind, DeckSymbolKind::Function);
+    assert_eq!(scale[0].kind(), DeckSymbolKind::Function);
     assert!(
         reads(&index, "sin").is_empty(),
         "a built-in function is no read"
@@ -344,34 +333,28 @@ C1 b 0 { k * 1p }
     assert!(
         index
             .references()
-            .iter()
-            .all(|reference| reference.kind != DeckSymbolKind::Model),
+            .all(|reference| reference.kind() != DeckSymbolKind::Model),
         "no part of an expression is a model: {:?}",
-        index.references()
+        index.references().collect::<Vec<_>>()
     );
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "R9")[0].detail,
+        symbol(&index, DeckSymbolKind::Instance, "R9")[0].detail(),
         "{1 * k}"
     );
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "C1")[0].detail,
+        symbol(&index, DeckSymbolKind::Instance, "C1")[0].detail(),
         "{ k * 1p }"
     );
     assert_eq!(reads(&index, "k").len(), 2);
-    let nodes = index
-        .nodes()
-        .iter()
-        .map(|node| node.name.as_str())
-        .collect::<Vec<_>>();
+    let nodes = index.nodes().map(|node| node.name()).collect::<Vec<_>>();
     assert_eq!(nodes, ["a", "b", "b", "0"]);
 }
 
-fn instance_names(index: &DeckIndex) -> Vec<&str> {
+fn instance_names(index: &DeckIndex) -> Vec<String> {
     index
         .symbols()
-        .iter()
-        .filter(|symbol| symbol.kind == DeckSymbolKind::Instance)
-        .map(|symbol| symbol.name.as_str())
+        .filter(|symbol| symbol.kind() == DeckSymbolKind::Instance)
+        .map(|symbol| symbol.name().into_owned())
         .collect()
 }
 
@@ -381,11 +364,11 @@ fn comments_are_where_the_engine_reads_them_and_a_pspice_node_is_no_comment() {
     let index = index(deck);
     assert_eq!(instance_names(&index), ["V_V1", "R1", "C1"]);
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "R1")[0].detail,
+        symbol(&index, DeckSymbolKind::Instance, "R1")[0].detail(),
         "1k"
     );
     assert!(
-        index.nodes().iter().any(|node| node.name == "$N_0001"),
+        index.nodes().any(|node| node.name() == "$N_0001"),
         "a PSpice $N_ name is a node"
     );
     assert!(
@@ -397,36 +380,36 @@ fn comments_are_where_the_engine_reads_them_and_a_pspice_node_is_no_comment() {
 #[test]
 fn a_spectre_source_is_read_as_spectre_past_its_block_comments() {
     let source = "// spectre deck\nsimulator lang=spectre\n/* a block comment\n   swept over two lines */\nparameters vdd=1.8\nsubckt amp (in out)\nparameters gain=2\nR1 (in out) resistor r=1k*gain\nends amp\nV1 (vdd 0) vsource dc=vdd\nX1 (vdd out) amp\ntran1 tran stop=1u\n";
-    let index = DeckIndex::build(&[DeckIndexSource {
-        identity: "amp.scs",
-        text: source,
-        kind: SourceKind::Spectre,
-    }]);
+    let index = DeckIndex::build(&[DeckIndexSource::copied(
+        "amp.scs",
+        source,
+        SourceKind::Spectre,
+    )]);
     assert_eq!(instance_names(&index), ["R1", "V1", "X1"]);
     let amp = &symbol(&index, DeckSymbolKind::Subcircuit, "amp")[0];
-    assert_eq!(amp.detail, "2 ports");
-    let scope = amp.opens.expect("the subcircuit opens a scope");
-    assert_eq!(index.scopes()[scope].ports, ["in", "out"]);
+    assert_eq!(amp.detail(), "2 ports");
+    let scope = amp.opens().expect("the subcircuit opens a scope");
+    assert_eq!(index.scope(scope).unwrap().ports(), ["in", "out"]);
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "R1")[0].scope,
+        symbol(&index, DeckSymbolKind::Instance, "R1")[0].scope(),
         scope
     );
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Parameter, "gain")[0].scope,
+        symbol(&index, DeckSymbolKind::Parameter, "gain")[0].scope(),
         scope
     );
     let x1 = &symbol(&index, DeckSymbolKind::Instance, "X1")[0];
-    assert_eq!(x1.detail, "amp");
+    assert_eq!(x1.detail(), "amp");
     assert_eq!(
         reads(&index, "amp")
             .iter()
-            .filter(|read| read.target.is_some())
+            .filter(|read| read.target().is_some())
             .count(),
         2,
         "the instance and the ends both read the subcircuit"
     );
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "V1")[0].detail,
+        symbol(&index, DeckSymbolKind::Instance, "V1")[0].detail(),
         "vsource"
     );
     assert!(
@@ -436,15 +419,13 @@ fn a_spectre_source_is_read_as_spectre_past_its_block_comments() {
     assert_eq!(reads(&index, "vdd").len(), 1, "dc=vdd reads the parameter");
     let analysis = index
         .cards()
-        .iter()
-        .find(|card| card.head == "tran1")
+        .find(|card| card.head() == "tran1")
         .expect("the analysis is a card");
-    assert_eq!(analysis.kind, DeckCardKind::Analysis);
+    assert_eq!(analysis.kind(), DeckCardKind::Analysis);
     assert!(
         index
             .cards()
-            .iter()
-            .all(|card| card.head != "swept" && card.head != "/*"),
+            .all(|card| card.head() != "swept" && card.head() != "/*"),
         "nothing in a block comment is a card"
     );
 }
@@ -452,19 +433,19 @@ fn a_spectre_source_is_read_as_spectre_past_its_block_comments() {
 #[test]
 fn a_simulator_switch_hands_the_lines_after_it_to_spectre_and_back() {
     let deck = "* mixed\nR1 a 0 1k\nsimulator lang=spectre\nR2 (a b) resistor r=2k\n// a Spectre comment\nsimulator lang=spice\nR3 b 0 3k\n.end\n";
-    let index = DeckIndex::build(&[DeckIndexSource {
-        identity: "mixed.cir",
-        text: deck,
-        kind: SourceKind::Included,
-    }]);
+    let index = DeckIndex::build(&[DeckIndexSource::copied(
+        "mixed.cir",
+        deck,
+        SourceKind::Included,
+    )]);
     let names = instance_names(&index);
     assert_eq!(names, ["R1", "R2", "R3"]);
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "R2")[0].detail,
+        symbol(&index, DeckSymbolKind::Instance, "R2")[0].detail(),
         "resistor"
     );
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "R3")[0].detail,
+        symbol(&index, DeckSymbolKind::Instance, "R3")[0].detail(),
         "3k"
     );
 }
@@ -472,30 +453,29 @@ fn a_simulator_switch_hands_the_lines_after_it_to_spectre_and_back() {
 #[test]
 fn a_spectre_line_ending_in_a_backslash_is_continued_by_the_next() {
     let source = "simulator lang=spectre\nparameters vdd=1.8 \\\n    gain=2\nX1 (in \\\n  out) amp\nsubckt amp (a b)\nends amp\n";
-    let index = DeckIndex::build(&[DeckIndexSource {
-        identity: "amp.scs",
-        text: source,
-        kind: SourceKind::Spectre,
-    }]);
+    let index = DeckIndex::build(&[DeckIndexSource::copied(
+        "amp.scs",
+        source,
+        SourceKind::Spectre,
+    )]);
     let parameters = index
         .cards()
-        .iter()
-        .find(|card| card.head == "parameters")
+        .find(|card| card.head() == "parameters")
         .expect("the parameters statement is a card");
-    assert_eq!(parameters.lines, 2..=3, "one card over both lines");
+    assert_eq!(parameters.lines(), 2..=3, "one card over both lines");
     let gain = &symbol(&index, DeckSymbolKind::Parameter, "gain")[0];
-    assert_eq!((gain.location.line, gain.detail.as_str()), (3, "2"));
+    assert_eq!((gain.location().line, &*gain.detail()), (3, "2"));
     assert!(
-        index.cards().iter().all(|card| card.head != "gain=2"),
+        index.cards().all(|card| card.head() != "gain=2"),
         "the continued line is no card of its own"
     );
     let x1 = index.card_on_line(0, 5).expect("X1 spans line 5");
-    assert_eq!(index.cards()[x1].head, "X1");
+    assert_eq!(index.card(x1).unwrap().head(), "X1");
     assert_eq!(
-        symbol(&index, DeckSymbolKind::Instance, "X1")[0].detail,
+        symbol(&index, DeckSymbolKind::Instance, "X1")[0].detail(),
         "amp"
     );
-    let tokens = index.card_tokens(x1, source);
+    let tokens = index.card_tokens(x1);
     assert!(
         tokens
             .iter()
@@ -518,28 +498,18 @@ fn a_voltage_probe_names_the_nodes_it_reads_and_a_current_probe_none() {
     let index = index(deck);
     let probed = index
         .nodes()
-        .iter()
         // Past B1's own terminals: what the probes name.
-        .filter(|node| (node.location.line, node.location.column) > (3, 6))
+        .filter(|node| (node.location().line, node.location().column) > (3, 6))
         .map(|node| {
-            (
-                node.name.as_str(),
-                node.location.line,
-                &deck[node.location.span.clone()],
-            )
+            assert_eq!(node.name(), &deck[node.location().span.clone()]);
+            (&deck[node.location().span.clone()], node.location().line)
         })
         .collect::<Vec<_>>();
     assert_eq!(
         probed,
-        [
-            ("out", 3, "out"),
-            ("out", 5, "out"),
-            ("a", 5, "a"),
-            ("b", 5, "b"),
-            ("out", 6, "out"),
-        ]
+        [("out", 3), ("out", 5), ("a", 5), ("b", 5), ("out", 6),]
     );
-    assert!(index.nodes().iter().all(|node| node.name != "R1"));
+    assert!(index.nodes().all(|node| node.name() != "R1"));
 }
 
 #[test]
@@ -549,7 +519,7 @@ fn a_name_resolves_through_the_scopes_a_reader_sees() {
     let inner = index.scope_on_line(0, 5);
     let w = index.resolve(DeckSymbolKind::Parameter, "W", inner);
     assert_eq!(
-        w.map(|symbol| index.symbols()[symbol].location.line),
+        w.map(|symbol| index.symbol(symbol).unwrap().location().line),
         Some(2)
     );
     assert!(index.resolve(DeckSymbolKind::Parameter, "l", 0).is_none());
@@ -569,10 +539,13 @@ fn definitions_leave_out_the_devices() {
     );
     let defined = index
         .definitions()
-        .map(|symbol| (symbol.kind, symbol.name.as_str()))
+        .map(|symbol| (symbol.kind(), symbol.name().into_owned()))
         .collect::<Vec<_>>();
     assert_eq!(
-        defined,
+        defined
+            .iter()
+            .map(|(kind, name)| (*kind, name.as_str()))
+            .collect::<Vec<_>>(),
         [
             (DeckSymbolKind::Parameter, "w"),
             (DeckSymbolKind::Subcircuit, "amp"),
@@ -581,10 +554,9 @@ fn definitions_leave_out_the_devices() {
     );
     let devices = index
         .symbols()
-        .iter()
-        .filter(|symbol| symbol.kind == DeckSymbolKind::Instance)
+        .filter(|symbol| symbol.kind() == DeckSymbolKind::Instance)
         .count();
-    assert_eq!(devices + defined.len(), index.symbols().len());
+    assert_eq!(devices + defined.len(), index.symbol_count());
     assert!(index.resolve(DeckSymbolKind::Model, "DM", 0).is_some());
     assert!(index.resolve(DeckSymbolKind::Instance, "x1", 0).is_some());
 }
@@ -618,33 +590,23 @@ L2 b 0 1u
 ";
     let include = "R9 x y {w}\nX9 x y amp\n";
     let index = DeckIndex::build(&[
-        DeckIndexSource {
-            identity: "deck.cir",
-            text: deck,
-            kind: SourceKind::DeckRoot,
-        },
-        DeckIndexSource {
-            identity: "inc.lib",
-            text: include,
-            kind: SourceKind::Included,
-        },
+        DeckIndexSource::copied("deck.cir", deck, SourceKind::DeckRoot),
+        DeckIndexSource::copied("inc.lib", include, SourceKind::Included),
     ]);
-    assert!(!index.references().is_empty() && !index.nodes().is_empty());
+    assert!(index.reference_count() > 0 && index.node_count() > 0);
     let scanned_name_at = |file: usize, byte: usize| {
         let covers = |location: &DeckLocation| {
             location.file == file && location.span.start <= byte && byte <= location.span.end
         };
         if let Some(at) = index
             .references()
-            .iter()
-            .position(|reference| covers(&reference.location))
+            .position(|reference| covers(&reference.location()))
         {
             return Some(DeckNameAt::Reference(at));
         }
         index
             .symbols()
-            .iter()
-            .position(|symbol| covers(&symbol.location))
+            .position(|symbol| covers(&symbol.location()))
             .map(DeckNameAt::Definition)
     };
     for (file, text) in [(0, deck), (1, include), (2, "")] {
@@ -657,7 +619,7 @@ L2 b 0 1u
         }
         for line in 0..=text.lines().count() + 1 {
             let on = |location: &DeckLocation| location.file == file && location.line == line;
-            let scanned = |locations: Vec<(usize, &DeckLocation)>| {
+            let scanned = |locations: Vec<(usize, DeckLocation)>| {
                 locations
                     .into_iter()
                     .filter(|(_, location)| on(location))
@@ -671,14 +633,7 @@ L2 b 0 1u
             symbols.sort_unstable();
             assert_eq!(
                 symbols,
-                scanned(
-                    index
-                        .symbols()
-                        .iter()
-                        .map(|s| &s.location)
-                        .enumerate()
-                        .collect()
-                ),
+                scanned(index.symbols().map(|s| s.location()).enumerate().collect()),
                 "symbols on line {line} of file {file}"
             );
             assert_eq!(
@@ -689,8 +644,7 @@ L2 b 0 1u
                 scanned(
                     index
                         .references()
-                        .iter()
-                        .map(|r| &r.location)
+                        .map(|r| r.location())
                         .enumerate()
                         .collect()
                 ),
@@ -701,32 +655,264 @@ L2 b 0 1u
                     .nodes_on_line(file, line)
                     .map(|(at, _)| at)
                     .collect::<Vec<_>>(),
-                scanned(
-                    index
-                        .nodes()
-                        .iter()
-                        .map(|n| &n.location)
-                        .enumerate()
-                        .collect()
-                ),
+                scanned(index.nodes().map(|n| n.location()).enumerate().collect()),
                 "nodes on line {line} of file {file}"
             );
         }
     }
-    for symbol in 0..index.symbols().len() + 1 {
+    for symbol in 0..index.symbol_count() + 1 {
         let found = index.references_to(symbol).collect::<Vec<_>>();
         let scanned = index
             .references()
-            .iter()
-            .filter(|reference| reference.target == Some(symbol))
+            .filter(|reference| reference.target() == Some(symbol))
             .collect::<Vec<_>>();
         assert_eq!(found, scanned, "the reads of symbol {symbol}");
     }
-    let bound = (0..index.symbols().len())
+    let bound = (0..index.symbol_count())
         .filter(|symbol| index.references_to(*symbol).next().is_some())
         .count();
     assert!(
         bound >= 4,
         "the deck reads w, f, l, gain, k, amp, sub and dm"
+    );
+}
+
+/// A deck of `blocks` subcircuits and an instance of each, long enough to be
+/// read in several pages.
+fn long_deck(blocks: usize) -> String {
+    use std::fmt::Write as _;
+    let mut deck =
+        String::from("long deck\n.param w=1 l={w*2}\n.global vdd\n.model dm d is=1e-14\n");
+    for block in 0..blocks {
+        let _ = write!(
+            deck,
+            ".subckt cell{block} a b k=1\nR1 a b {{k*w}}\nD1 a vdd dm\nX2 a mid\n+ sub\n.ends cell{block}\nX{block} n{block} n{} cell{block} k={{l}}\n",
+            block + 1
+        );
+    }
+    deck.push_str(".subckt sub p q\nR1 p q 1k\n.ends sub\n.end\n");
+    deck
+}
+
+/// The first place two runs of views differ, if any.
+fn first_difference<T: PartialEq + std::fmt::Debug>(
+    what: &str,
+    one: impl Iterator<Item = T>,
+    two: impl Iterator<Item = T>,
+) -> Option<String> {
+    let mut one = one.fuse();
+    let mut two = two.fuse();
+    for at in 0.. {
+        match (one.next(), two.next()) {
+            (None, None) => return None,
+            (left, right) if left != right => {
+                return Some(format!("{what} {at}: {left:?} against {right:?}"));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// An index updated through an edit answers what one built from the edited
+/// text answers: an insertion, a deletion and a replacement, inside a
+/// statement, across lines and on a scope's `.subckt` and `.ends` lines. An
+/// edit that changes what the deck defines or how the lines after it read
+/// takes a new build; every other one reads its own page again and shares
+/// the rest.
+#[test]
+fn an_index_updated_through_an_edit_answers_as_one_built_from_the_edited_text() {
+    let deck = long_deck(1500);
+    let anchor = deck.find(".subckt cell700 ").expect("block 700");
+    let build = |text: &SharedDeckText| {
+        DeckIndex::build(&[DeckIndexSource::new(
+            "deck.cir",
+            Arc::clone(text),
+            SourceKind::DeckRoot,
+        )])
+    };
+    let old: SharedDeckText = Arc::new(deck.clone());
+    let index = build(&old);
+    assert!(index.pages.len() >= 3, "the deck is read in several pages");
+    // What is edited, the text after block 700 opens it replaces, the
+    // replacement, and whether the edit reads its own page again.
+    let cases: &[(&str, &str, &str, bool)] = &[
+        ("a value inside a statement", "{k*w}", "{k*w*2}", true),
+        ("a device inserted", "R1 a b", "R9 a b {l}\nR1 a b", true),
+        ("a device deleted", "D1 a vdd dm\n", "", true),
+        (
+            "a continuation joined across lines",
+            "mid\n+ sub",
+            "mid sub",
+            true,
+        ),
+        (
+            "an edit across two statements",
+            "{k*w}\nD1 a",
+            "{k}\nD7 a",
+            true,
+        ),
+        (
+            "a port added on the .subckt line",
+            "cell700 a b",
+            "cell700 a b c",
+            true,
+        ),
+        (
+            "the name on the .ends line",
+            ".ends cell700",
+            ".ends cellx",
+            true,
+        ),
+        (
+            "the subcircuit renamed on its .subckt line",
+            "cell700 a b",
+            "cellx a b",
+            false,
+        ),
+        ("the .ends line deleted", ".ends cell700\n", "", false),
+        ("a parameter defined", "R1 a b", ".param z=1\nR1 a b", false),
+        ("a .end inserted", "D1 a vdd dm\n", ".end\n", false),
+    ];
+    for (what, replaced, replacement, incremental) in cases {
+        let at = anchor + deck[anchor..].find(replaced).expect("the text to replace");
+        let edited_text = format!(
+            "{}{replacement}{}",
+            &deck[..at],
+            &deck[at + replaced.len()..]
+        );
+        let new: SharedDeckText = Arc::new(edited_text.clone());
+        let change = DeckTextChange::between(&*old, &*new).expect("the texts differ");
+        assert!(change.start >= at, "{what}");
+        assert_eq!(
+            &deck[..change.start],
+            &edited_text[..change.start],
+            "{what}"
+        );
+        assert_eq!(
+            &deck[change.old_end..],
+            &edited_text[change.new_end..],
+            "{what}"
+        );
+        let updated = index.edited(0, change, Arc::clone(&new));
+        assert_eq!(updated.is_some(), *incremental, "{what}");
+        let Some(updated) = updated else {
+            continue;
+        };
+        let built = build(&new);
+        let shared = index
+            .pages
+            .iter()
+            .zip(&updated.pages)
+            .filter(|(one, two)| Arc::ptr_eq(&one.page, &two.page))
+            .count();
+        assert_eq!(shared, index.pages.len() - 1, "{what}: one page read again");
+        let difference = first_difference("card", updated.cards(), built.cards())
+            .or_else(|| first_difference("symbol", updated.symbols(), built.symbols()))
+            .or_else(|| first_difference("read", updated.references(), built.references()))
+            .or_else(|| first_difference("node", updated.nodes(), built.nodes()))
+            .or_else(|| first_difference("include", updated.includes(), built.includes()))
+            .or_else(|| first_difference("scope", updated.scopes(), built.scopes()));
+        assert_eq!(difference, None, "{what}");
+        assert!(updated == built, "{what}");
+        let around = change.start.saturating_sub(80)..(change.new_end + 80).min(new.len());
+        for byte in around.clone() {
+            assert_eq!(
+                updated.name_at(0, byte),
+                built.name_at(0, byte),
+                "{what}: the name at {byte}"
+            );
+            assert_eq!(
+                updated.definition_at(0, byte),
+                built.definition_at(0, byte),
+                "{what}: the definition at {byte}"
+            );
+        }
+        let first_line = edited_text[..around.start].lines().count();
+        for line in first_line..first_line + 8 {
+            let card = updated.card_on_line(0, line);
+            assert_eq!(card, built.card_on_line(0, line), "{what}: line {line}");
+            if let Some(card) = card {
+                assert_eq!(updated.card_tokens(card), built.card_tokens(card), "{what}");
+            }
+            assert_eq!(
+                updated.scope_on_line(0, line),
+                built.scope_on_line(0, line),
+                "{what}: the scope of line {line}"
+            );
+        }
+    }
+}
+
+/// A text held in pieces of a few bytes, as a rope holds a large one.
+struct Pieces(Vec<String>);
+
+impl DeckText for Pieces {
+    fn len(&self) -> usize {
+        self.0.iter().map(String::len).sum()
+    }
+
+    fn slice(&self, range: Range<usize>) -> Cow<'_, str> {
+        Cow::Owned(self.0.concat().get(range).unwrap_or_default().to_owned())
+    }
+
+    fn pieces(&self, from: usize) -> Box<dyn Iterator<Item = &str> + '_> {
+        let mut skip = from;
+        Box::new(self.0.iter().filter_map(move |piece| {
+            let cut = skip.min(piece.len());
+            skip -= cut;
+            (cut < piece.len()).then(|| &piece[cut..])
+        }))
+    }
+
+    fn pieces_back(&self, to: usize) -> Box<dyn Iterator<Item = &str> + '_> {
+        let mut start = 0;
+        let mut held = Vec::new();
+        for piece in &self.0 {
+            if start < to {
+                held.push(&piece[..(to - start).min(piece.len())]);
+            }
+            start += piece.len();
+        }
+        Box::new(held.into_iter().rev())
+    }
+}
+
+/// The change between two texts is the run from the first byte that differs
+/// to the last, however the texts are cut into pieces.
+#[test]
+fn the_change_between_two_texts_spans_from_the_first_difference_to_the_last() {
+    let pieces = |text: &str, size: usize| {
+        Pieces(
+            text.as_bytes()
+                .chunks(size)
+                .map(|chunk| String::from_utf8(chunk.to_vec()).expect("ASCII"))
+                .collect(),
+        )
+    };
+    let old = "R1 a b 1k\nR2 b 0 2k\n";
+    for (new, start, old_end, new_end) in [
+        ("R1 a b 1k\nR2 b 0 3k\n", 17, 18, 18),
+        ("R1 a b 1k\nR2 b 0 2k\nR3 b 0 4k\n", 20, 20, 30),
+        ("R2 b 0 2k\n", 1, 11, 1),
+        ("XR1 a b 1k\nR2 b 0 2k\n", 0, 0, 1),
+    ] {
+        for size in [1, 3, 7, 64] {
+            for other in [1, 4, 64] {
+                assert_eq!(
+                    DeckTextChange::between(&pieces(old, size), &pieces(new, other)),
+                    Some(DeckTextChange {
+                        start,
+                        old_end,
+                        new_end
+                    }),
+                    "{new:?} in pieces of {size} and {other}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        DeckTextChange::between(&pieces(old, 3), &pieces(old, 5)),
+        None
     );
 }

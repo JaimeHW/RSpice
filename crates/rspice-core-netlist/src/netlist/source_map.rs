@@ -443,7 +443,14 @@ pub(super) struct MappedLine {
 }
 
 impl MappedLine {
-    fn push_join_space(&mut self) {
+    pub(super) fn clear(&mut self) {
+        self.text.clear();
+        self.byte_offsets.clear();
+        self.physical_lines.clear();
+        self.inserted.clear();
+    }
+
+    pub(super) fn push_join_space(&mut self) {
         if !self.text.is_empty()
             && !self
                 .text
@@ -460,7 +467,12 @@ impl MappedLine {
         }
     }
 
-    fn push_segment(&mut self, segment: &str, original_start: usize, physical_line: usize) {
+    pub(super) fn push_segment(
+        &mut self,
+        segment: &str,
+        original_start: usize,
+        physical_line: usize,
+    ) {
         self.text.push_str(segment);
         self.byte_offsets
             .extend((0..segment.len()).map(|idx| original_start + idx));
