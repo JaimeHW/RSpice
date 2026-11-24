@@ -83,6 +83,7 @@ mod directive_parse_ratchet;
 mod live_segment;
 mod live_transient;
 mod machine_memory;
+pub use machine_memory::machine_memory;
 #[cfg(test)]
 mod manual_deck_tests;
 mod monte_carlo_checkpoint;

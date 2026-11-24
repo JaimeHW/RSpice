@@ -2,4 +2,4 @@
 //! page's check and the command line ask it, so all three size the reader's
 //! deck to the same machine.
 
-pub(crate) use rspice_simulation::execution::run_memory::machine_memory;
+pub use rspice_simulation::execution::run_memory::machine_memory;

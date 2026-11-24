@@ -351,9 +351,9 @@ impl MemoryWarning {
         format!(
             "This design's {} devices need about {} of memory; {} of {} is free.",
             grouped(self.devices),
-            bytes(self.needed_bytes),
-            bytes(self.memory.free_bytes),
-            bytes(self.memory.installed_bytes)
+            memory_words(self.needed_bytes),
+            memory_words(self.memory.free_bytes),
+            memory_words(self.memory.installed_bytes)
         )
     }
 
@@ -362,8 +362,8 @@ impl MemoryWarning {
     pub fn status(&self) -> String {
         format!(
             "Needs about {} of memory · {} free",
-            bytes(self.needed_bytes),
-            bytes(self.memory.free_bytes)
+            memory_words(self.needed_bytes),
+            memory_words(self.memory.free_bytes)
         )
     }
 }
@@ -389,8 +389,8 @@ pub fn check_fits(devices: usize, memory: MachineMemory) -> MemoryFit {
             "This design has {} devices. Running it needs about {} of memory, more than the {} \
              this computer has. Run it on a computer with more memory.",
             grouped(devices),
-            bytes(needed),
-            bytes(memory.installed_bytes)
+            memory_words(needed),
+            memory_words(memory.installed_bytes)
         ),
     ))
 }
@@ -466,7 +466,7 @@ fn said_where(
             "{subject}. {} it needs more than the {} of memory this computer has. Run it on a \
              computer with more memory.",
             verb(refusal.resource),
-            bytes(memory.installed_bytes)
+            memory_words(memory.installed_bytes)
         ),
         None => return None,
     })
@@ -538,7 +538,7 @@ fn amount(resource: ResourceKind, count: usize) -> String {
         | ResourceKind::DependencySourceBytes
         | ResourceKind::ExternalDataBytes
         | ResourceKind::SharedCacheBytes
-        | ResourceKind::TransportHistoryBytes => bytes(count as u64),
+        | ResourceKind::TransportHistoryBytes => memory_words(count as u64),
         _ => grouped(count),
     }
 }
@@ -556,8 +556,10 @@ fn grouped(count: usize) -> String {
     out
 }
 
-/// `count` bytes as the operating system states memory, `3.1 GB`.
-fn bytes(count: u64) -> String {
+/// `count` bytes as the operating system states memory, `3.1 GB`: the
+/// words every refusal for want of memory says it in.
+#[must_use]
+pub fn memory_words(count: u64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
     const GB: f64 = 1024.0 * MB;
     let count = count as f64;
@@ -795,7 +797,7 @@ mod tests {
                 && words.ends_with(&format!(
                     ", too large for the browser, which can take at most {}. The desktop app \
                      runs it.",
-                    bytes(browser.max_netlist_bytes as u64)
+                    memory_words(browser.max_netlist_bytes as u64)
                 )),
             "{words}"
         );

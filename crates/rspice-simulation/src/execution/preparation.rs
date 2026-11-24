@@ -1,7 +1,7 @@
 //! Checked generated-design and manual-deck preparation over borrowed inputs.
 
 use super::run_memory;
-pub use super::run_memory::MachineMemory;
+pub use super::run_memory::{MachineMemory, memory_words};
 use super::{
     ExecutionTargetCapabilities, ModelSourceIdentity, PreparationError, PreparationStage,
     PreparedRunSnapshot, PreparedTask, RunSourceReceipt, SavePolicy, SnapshotParts,
