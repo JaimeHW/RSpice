@@ -1369,14 +1369,49 @@ pub(crate) fn retained_evidence_verdict_over(
     model: &Model,
     analysis: AnalysisPresentationKey,
 ) -> Result<(), std::sync::Arc<str>> {
-    // A verdict that waits on the reader service, for a stored trace still being read, is
-    // asked again on a later frame rather than kept as a failure.
-    results.retained_evidence_validity.get_or_insert_lasting(
+    retained_evidence_verdict_in(
+        &results.retained_evidence_validity,
         &model.simulation,
         analysis,
+    )
+}
+
+/// [`incomplete_evidence_reason`] answered from the workspace's memo of the
+/// evidence, `validity`: a build of the strips asks it of every analysis of
+/// the shown run, and the validator reads every column of one.
+fn remembered_incomplete_reason(
+    validity: &RetainedMemo<AnalysisPresentationKey, Result<(), std::sync::Arc<str>>>,
+    simulation: &crate::state::SimulationState,
+    dataset_id: DatasetId,
+    analysis: &AnalysisResult,
+) -> Option<&'static str> {
+    if !analysis.success {
+        return Some("the run did not complete — these samples stop where it failed");
+    }
+    // A stored trace still being read has not failed.
+    retained_evidence_verdict_in(
+        validity,
+        simulation,
+        AnalysisPresentationKey::new(dataset_id, analysis),
+    )
+    .is_err_and(|cause| !rspice_results::waveform::is_pending_read(&cause))
+    .then_some("the saved results failed validation")
+}
+
+/// The validator's verdict on `analysis`, with its reason, from `validity`,
+/// the workspace's memo of it.
+fn retained_evidence_verdict_in(
+    validity: &RetainedMemo<AnalysisPresentationKey, Result<(), std::sync::Arc<str>>>,
+    simulation: &crate::state::SimulationState,
+    analysis: AnalysisPresentationKey,
+) -> Result<(), std::sync::Arc<str>> {
+    // A verdict that waits on the reader service, for a stored trace still being read, is
+    // asked again on a later frame rather than kept as a failure.
+    validity.get_or_insert_lasting(
+        simulation,
+        analysis,
         || {
-            let Some((_, resolved)) = model
-                .simulation
+            let Some((_, resolved)) = simulation
                 .retained
                 .runs
                 .iter()

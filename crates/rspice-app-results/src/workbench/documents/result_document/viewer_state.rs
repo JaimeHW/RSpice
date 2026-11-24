@@ -130,17 +130,14 @@ impl ResultsState {
         &mut self,
         waveforms: impl IntoIterator<Item = (SourceWaveformPresentationKey, bool)>,
     ) {
-        let mut changed = false;
+        // The strip models follow the ticks by the edits they record: only
+        // the strips of the signals change.
         for (key, dataset_default) in waveforms {
             if !self.session.waveform_visibility(&key, dataset_default) {
                 let visible = (!dataset_default).then_some(true);
                 self.session.waveform_visibility.set(key.clone(), visible);
-                changed = true;
             }
             self.session.note_recent_signal(key);
-        }
-        if changed {
-            self.models.invalidate();
         }
     }
 
@@ -159,8 +156,8 @@ impl ResultsState {
             .set(key, kept.then_some(visible));
         // Hiding or showing a trace keeps the A/B cursors, and the cached
         // series of every other trace: each is keyed by its own trace, so the
-        // one shown again is the only one built.
-        self.models.invalidate();
+        // one shown again is the only one built. The strip models follow the
+        // tick by the edit it records: only the strip of the signal changes.
         visible
     }
 
@@ -174,7 +171,6 @@ impl ResultsState {
     ) {
         if !dataset_default && self.session.waveform_visibility.get(key) == Some(&false) {
             self.session.waveform_visibility.set(key.clone(), None);
-            self.models.invalidate();
             self.session.cache.invalidate();
         }
     }
@@ -198,13 +194,10 @@ impl ResultsState {
                 })
             })
             .collect::<HashMap<_, _>>();
-        if self
-            .session
+        // The strip models follow by the signals this changes.
+        self.session
             .waveform_visibility
-            .project_analysis(analysis, desired)
-        {
-            self.models.invalidate();
-        }
+            .project_analysis(analysis, desired);
     }
 
     /// Draw `key`'s signal shown (`Some(true)`), hidden (`Some(false)`) or as
@@ -214,9 +207,8 @@ impl ResultsState {
         key: SourceWaveformPresentationKey,
         visible: Option<bool>,
     ) {
-        if self.session.waveform_visibility.project(key, visible) {
-            self.models.invalidate();
-        }
+        // The strip models follow by the signal this changes.
+        self.session.waveform_visibility.project(key, visible);
     }
 
     /// Draw `analysis`'s traces in the colours the view being drawn gives

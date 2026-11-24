@@ -38,8 +38,9 @@ pub mod xy;
 pub use policy::{ReadoutPolicy, cursor_interpolation};
 mod units;
 pub use projection::{
-    AcDisplay, ComplexSource, ProjectionOptions, SignalLookup, StripProjection, build_models,
-    drawn_projection, family_color, matching_overlay_analysis, project_strips, set_projection,
+    AcDisplay, ComplexSource, ProjectionOptions, Retick, SignalLookup, StripProjection,
+    build_models, drawn_projection, family_color, matching_overlay_analysis, project_strips,
+    retick, set_projection,
 };
 pub use rspice_ui_kit::plot::format::unit_carries_its_decade;
 use units::signal_unit;
@@ -235,8 +236,85 @@ pub type MarkerPositions = std::sync::Mutex<
 #[derive(Debug, Clone)]
 pub(crate) struct TracePane {
     opener: usize,
-    traces: Vec<usize>,
+    traces: PaneTraces,
     drawn: bool,
+}
+
+/// What a frame asks of a strip's traces as a whole, found once for each
+/// revision of the strip rather than by a walk of its traces on each frame.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TraceFacts {
+    /// Whether any trace is a member of a family.
+    pub(crate) families: bool,
+    /// The traces held in memory over an axis a results store keeps, which
+    /// are drawn from a read of that axis.
+    pub(crate) over_stored_axes: Vec<usize>,
+}
+
+/// A new strip revision: no two strips built in a process share one.
+pub(crate) fn next_revision() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A digest of a list of trace indices, cheap enough to take of a pane of a
+/// hundred thousand curves on every frame.
+pub(crate) fn indices_digest(indices: impl IntoIterator<Item = usize>) -> u64 {
+    let mut count = 0u64;
+    let digest = indices
+        .into_iter()
+        .fold(0x9E37_79B9_7F4A_7C15_u64, |digest, index| {
+            count += 1;
+            (digest.rotate_left(5) ^ index as u64).wrapping_mul(0x0100_0000_01B3)
+        });
+    digest ^ count.rotate_left(32)
+}
+
+/// The traces a pane draws, by their places among the strip's: shared with
+/// the strip's grouping, which every control that draws on the strip asks
+/// for on every frame, rather than copied for each.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct PaneTraces(Arc<[usize]>);
+
+impl std::ops::Deref for PaneTraces {
+    type Target = [usize];
+
+    fn deref(&self) -> &[usize] {
+        &self.0
+    }
+}
+
+impl From<Vec<usize>> for PaneTraces {
+    fn from(traces: Vec<usize>) -> Self {
+        Self(traces.into())
+    }
+}
+
+impl FromIterator<usize> for PaneTraces {
+    fn from_iter<I: IntoIterator<Item = usize>>(traces: I) -> Self {
+        Self(traces.into_iter().collect())
+    }
+}
+
+impl<'a> IntoIterator for &'a PaneTraces {
+    type Item = &'a usize;
+    type IntoIter = std::slice::Iter<'a, usize>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl PartialEq<Vec<usize>> for PaneTraces {
+    fn eq(&self, other: &Vec<usize>) -> bool {
+        *self.0 == **other
+    }
+}
+
+impl<const N: usize> PartialEq<[usize; N]> for PaneTraces {
+    fn eq(&self, other: &[usize; N]) -> bool {
+        *self.0 == *other
+    }
 }
 
 /// One strip (== one analysis of the active run).
@@ -331,6 +409,15 @@ pub struct StripModel {
     /// empty, each unit has a strip of its own. Filled in by the host from
     /// the view it draws.
     pub arrangement: Vec<Strip>,
+    /// Which build of the strip this is: changed whenever its traces or how
+    /// they group change, so whatever a frame derives from them is kept by
+    /// it and found again while it stands.
+    pub(crate) revision: u64,
+    /// Whether an edit of the reader's ticks changes the strip by the
+    /// curves it adds and takes away (see [`retick`]).
+    pub(crate) retickable: bool,
+    /// What a frame asks of the traces as a whole, found once a revision.
+    pub(crate) trace_facts: std::sync::OnceLock<TraceFacts>,
 }
 
 /// Where one expression trace is drawn.
@@ -534,6 +621,7 @@ impl StripModel {
     /// its first trace comes.
     fn group_traces(&self) -> Vec<TracePane> {
         let mut groups: Vec<TracePane> = Vec::new();
+        let mut lists: Vec<Vec<usize>> = Vec::new();
         let mut units: Vec<&str> = Vec::new();
         for (index, trace) in self.traces.iter().enumerate() {
             let unit = self.trace_unit(trace);
@@ -544,24 +632,52 @@ impl StripModel {
                     units.push(unit);
                     groups.push(TracePane {
                         opener: index,
-                        traces: Vec::new(),
+                        traces: PaneTraces::default(),
                         drawn: false,
                     });
+                    lists.push(Vec::new());
                     groups.len() - 1
                 });
-            let group = &mut groups[ordinal];
             if trace.visible {
-                group.traces.push(index);
+                lists[ordinal].push(index);
             }
-            group.drawn |= trace.visible;
+            groups[ordinal].drawn |= trace.visible;
+        }
+        for (group, list) in groups.iter_mut().zip(lists) {
+            group.traces = list.into();
         }
         groups
     }
 
     /// Forget how the traces group into panes, as when their visibility
-    /// changes.
+    /// changes, and whatever else was found of them: the strip is a new
+    /// revision.
     pub(crate) fn forget_trace_panes(&mut self) {
         self.trace_panes = std::sync::OnceLock::new();
+        self.trace_facts = std::sync::OnceLock::new();
+        self.revision = next_revision();
+    }
+
+    /// Which build of the strip this is; see [`Self::revision`].
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// What a frame asks of the traces as a whole.
+    pub(crate) fn trace_facts(&self) -> &TraceFacts {
+        self.trace_facts.get_or_init(|| TraceFacts {
+            families: self
+                .traces
+                .iter()
+                .any(|trace| trace.family_group_ordinal.is_some()),
+            over_stored_axes: self
+                .traces
+                .iter()
+                .enumerate()
+                .filter(|(_, trace)| !trace.y.is_stored() && trace.x.is_stored())
+                .map(|(index, _)| index)
+                .collect(),
+        })
     }
 
     /// The unit one trace is measured in.
@@ -805,7 +921,7 @@ impl StripModel {
                 });
                 let first = axes.next()?;
                 let mut pane = UnitPane {
-                    traces: first.traces,
+                    traces: first.traces.into(),
                     expressions: first.expressions,
                     hidden_expressions: row.hidden_expressions,
                     unlabeled: row.unlabeled,
@@ -1073,7 +1189,7 @@ pub struct UnitPane<'a> {
     /// The unit the axis reads in: `unit` itself, except on a pane apart.
     pub axis: &'a str,
     /// Trace indices on this pane's axis.
-    pub traces: Vec<usize>,
+    pub traces: PaneTraces,
     /// The expressions drawn on this pane's axis, by their place in the
     /// strip's expression list.
     pub expressions: Vec<usize>,
@@ -1141,7 +1257,7 @@ impl<'a> UnitPane<'a> {
         Self {
             unit,
             axis,
-            traces: Vec::new(),
+            traces: PaneTraces::default(),
             expressions: Vec::new(),
             hidden_expressions: Vec::new(),
             unlabeled: false,

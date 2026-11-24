@@ -1,7 +1,9 @@
 //! Retained-history invalidation and source selection for waveform projections.
 use super::{ComplexNumberDisplay, ResultsState, SimulationState, StripModel, Tokens};
+use rspice_results::result_presentation::SourceWaveformPresentationKey;
+use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::waves::ProjectionOptions;
-use rspice_results_ui::waves::cache::{ModelCacheInput, apply_waveform_visibility};
+use rspice_results_ui::waves::cache::{ModelCacheInput, ModelsMaker, apply_waveform_visibility};
 use std::sync::Arc;
 
 pub(in crate::workbench::documents::result_document) fn cached_models(
@@ -79,13 +81,35 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
             expressions,
             x_scales: &session.x_scales,
             strips,
+            derived: &mut session.derived,
         },
         &simulation.retained.executed_decks,
         t,
         &mut results.plans.envelopes,
-        |projection, visibility| {
-            let mut built =
-                super::build_shown_models(simulation, &mut session.derived, t, projection);
+        ModelsMaker {
+            build: |derived: &mut DerivedSeries,
+                    projection: ProjectionOptions<'_>,
+                    visibility: &std::collections::HashMap<SourceWaveformPresentationKey, bool>| {
+            // Whether each analysis is complete, from the memo of its
+            // evidence: the validator reads every column of the run.
+            let display_runs = simulation.display_runs();
+            let validity = &results.retained_evidence_validity;
+            let mut built = rspice_results_ui::waves::build_models(
+                &display_runs,
+                &simulation.retained.executed_decks,
+                derived,
+                t,
+                projection,
+                |index| {
+                    let run = display_runs[0];
+                    crate::workbench::documents::result_document::remembered_incomplete_reason(
+                        validity,
+                        simulation,
+                        run.dataset_id,
+                        &run.analyses[index],
+                    )
+                },
+            );
             // The forms the reader's strips show a complex signal in.
             if let Some(run) = simulation.display_runs().first() {
                 rspice_results_ui::waves::project_strips(&mut built, run, strips);
@@ -129,6 +153,34 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                 |analysis, text| failed_texts.contains(&(analysis, text.to_owned())),
             );
             built
+        },
+            retick: |derived: &mut DerivedSeries,
+                     models: &mut [StripModel],
+                     edited: &[&SourceWaveformPresentationKey],
+                     projection: ProjectionOptions<'_>| {
+                // A strip that draws the reader's expressions routes them by
+                // its curves' units, and is built afresh.
+                if edited.iter().any(|key| {
+                    session
+                        .analysis_exprs
+                        .get(&key.analysis())
+                        .is_some_and(|exprs| !exprs.is_empty())
+                }) {
+                    return None;
+                }
+                rspice_results_ui::waves::retick(
+                    models,
+                    edited,
+                    derived,
+                    &rspice_results_ui::waves::Retick {
+                        run: simulation.active_run()?.as_ref(),
+                        options: projection,
+                        colors: &session.waveform_colors,
+                        looks: &session.waveform_looks,
+                        palette: &t.color.traces,
+                    },
+                )
+            },
         },
     )
 }

@@ -39,6 +39,8 @@ pub struct ModelCacheInput<'a> {
         rspice_results::result_presentation::AnalysisPresentationKey,
         Vec<rspice_results::visualization_document::Strip>,
     >,
+    /// The series derived from the run's, which a projection reads and adds to.
+    pub derived: &'a mut crate::derived::DerivedSeries,
 }
 
 /// Frame cache for the strip models. Building them clones every trace name
@@ -151,29 +153,54 @@ fn models_fingerprint(input: &ModelCacheInput<'_>, t: &Tokens) -> u64 {
     h.finish()
 }
 
+/// How the host makes the strip models: `build` projects every strip
+/// afresh; `retick` changes the strips built before by the reader's ticks of
+/// the signals edited since, answering which strips it changed, or `None`
+/// when only a build follows the edits (see [`super::retick`]).
+pub struct ModelsMaker<B, R> {
+    pub build: B,
+    pub retick: R,
+}
+
 impl ModelsCache {
-    /// Reuse the current projection or lazily build one from host-selected sources.
-    pub fn get_or_build(
+    /// Reuse the current projection, change it by the reader's ticks edited
+    /// since it was built, or build one from host-selected sources.
+    pub fn get_or_build<B, R>(
         &mut self,
-        input: ModelCacheInput<'_>,
+        mut input: ModelCacheInput<'_>,
         executed_decks: &ExecutedDeckArchive,
         tokens: &Tokens,
         envelopes: &mut extent::FamilyEnvelopeCache,
-        build: impl FnOnce(
+        maker: ModelsMaker<B, R>,
+    ) -> Arc<Vec<StripModel>>
+    where
+        B: FnOnce(
+            &mut crate::derived::DerivedSeries,
             ProjectionOptions<'_>,
             &HashMap<SourceWaveformPresentationKey, bool>,
         ) -> Vec<StripModel>,
-    ) -> Arc<Vec<StripModel>> {
+        R: FnOnce(
+            &mut crate::derived::DerivedSeries,
+            &mut [StripModel],
+            &[&SourceWaveformPresentationKey],
+            ProjectionOptions<'_>,
+        ) -> Option<Vec<usize>>,
+    {
         let fp = models_fingerprint(&input, tokens);
         let visibility = input.waveform_visibility.revision();
-        if let Some(cached) = &self.cached
-            && cached.fingerprint == fp
-            && cached.visibility == visibility
-            && cached.decks.shares_content_with(executed_decks)
-        {
-            return Arc::clone(&cached.models);
+        if let Some(cached) = self.cached.take_if(|cached| {
+            cached.fingerprint == fp && cached.decks.shares_content_with(executed_decks)
+        }) {
+            if cached.visibility == visibility {
+                let models = Arc::clone(&cached.models);
+                self.cached = Some(cached);
+                return models;
+            }
+            if let Some(models) = self.follow_ticks(cached, &mut input, maker.retick, envelopes) {
+                return models;
+            }
         }
-        let mut built = build(input.projection, input.waveform_visibility);
+        let mut built = (maker.build)(input.derived, input.projection, input.waveform_visibility);
         // The reader's X scale replaces the analysis' own, unless a
         // logarithmic axis cannot show the strip's domain.
         for model in &mut built {
@@ -212,10 +239,7 @@ impl ModelsCache {
             _ => true,
         });
         let models = Arc::new(built);
-        self.generation = self.generation.wrapping_add(1);
-        if self.generation == 0 {
-            *envelopes = extent::FamilyEnvelopeCache::default();
-        }
+        self.next_generation(envelopes);
         self.cached = Some(CachedModels {
             fingerprint: fp,
             visibility,
@@ -223,6 +247,59 @@ impl ModelsCache {
             models: Arc::clone(&models),
         });
         models
+    }
+
+    /// The strips of `cached`, changed by the reader's ticks edited since
+    /// they were built: a tick changes the strip of its signal by the curves
+    /// it adds or takes away, and leaves every other strip as it was. `None`
+    /// when only a build follows: the edits are no longer known, a strip is
+    /// shared with a reader off the frame, or an edited strip is one the
+    /// reader arranged or put on a logarithmic X, which its curves decide.
+    fn follow_ticks<'a>(
+        &mut self,
+        cached: CachedModels,
+        input: &mut ModelCacheInput<'a>,
+        retick: impl FnOnce(
+            &mut crate::derived::DerivedSeries,
+            &mut [StripModel],
+            &[&SourceWaveformPresentationKey],
+            ProjectionOptions<'_>,
+        ) -> Option<Vec<usize>>,
+        envelopes: &mut extent::FamilyEnvelopeCache,
+    ) -> Option<Arc<Vec<StripModel>>> {
+        let ticks: &'a crate::session::VisibilityOverrides = input.waveform_visibility;
+        let edited: Vec<&SourceWaveformPresentationKey> =
+            ticks.edits_since(&cached.visibility)?.collect();
+        if edited.iter().any(|key| {
+            input.strips.contains_key(&key.analysis())
+                || input.x_scales.get(&key.analysis()) == Some(&rspice_ui_kit::plot::XScale::Log10)
+        }) {
+            return None;
+        }
+        let mut models = Arc::try_unwrap(cached.models).ok()?;
+        let touched = retick(&mut *input.derived, &mut models, &edited, input.projection)?;
+        for &place in &touched {
+            let model = &mut models[place];
+            model.x_bounds = super::stack::visible_x_bounds(model);
+            extent::resolve_x_ranges(std::slice::from_mut(model));
+        }
+        let models = Arc::new(models);
+        self.next_generation(envelopes);
+        self.cached = Some(CachedModels {
+            fingerprint: cached.fingerprint,
+            visibility: ticks.revision(),
+            decks: cached.decks,
+            models: Arc::clone(&models),
+        });
+        Some(models)
+    }
+
+    /// Count a new generation of strip models.
+    fn next_generation(&mut self, envelopes: &mut extent::FamilyEnvelopeCache) {
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            *envelopes = extent::FamilyEnvelopeCache::default();
+        }
     }
 }
 
@@ -288,27 +365,40 @@ pub fn apply_waveform_looks(
     }
     for model in models {
         for trace in &mut model.traces {
-            let Some(look) = looks.get(&SourceWaveformPresentationKey::new(
-                model.analysis_key,
-                trace.source_waveform_name.clone(),
-            )) else {
-                continue;
-            };
-            trace.style = look.style;
-            if let Some(name) = look.name.as_deref() {
-                trace.name = match trace.name.strip_prefix(trace.base_name.as_str()) {
-                    Some(tag) if !tag.is_empty() => format!("{name}{tag}"),
-                    _ => name.to_owned(),
-                };
-            }
+            give_look(trace, model.analysis_key, looks);
         }
+    }
+}
+
+/// Give `trace`, a curve of the analysis `analysis`, the style and name the
+/// view gives its signal in `looks`.
+pub(crate) fn give_look(
+    trace: &mut super::StripTrace,
+    analysis: rspice_results::result_presentation::AnalysisPresentationKey,
+    looks: &HashMap<SourceWaveformPresentationKey, crate::session::WaveformLook>,
+) {
+    if looks.is_empty() {
+        return;
+    }
+    let Some(look) = looks.get(&SourceWaveformPresentationKey::new(
+        analysis,
+        trace.source_waveform_name.clone(),
+    )) else {
+        return;
+    };
+    trace.style = look.style;
+    if let Some(name) = look.name.as_deref() {
+        trace.name = match trace.name.strip_prefix(trace.base_name.as_str()) {
+            Some(tag) if !tag.is_empty() => format!("{name}{tag}"),
+            _ => name.to_owned(),
+        };
     }
 }
 
 /// The colour a curve or real lane of `analysis` reading `signal` draws in:
 /// the one the view gives it, else the one its run's column stores, else
 /// `hue`, its palette place.
-fn drawn_color(
+pub(crate) fn drawn_color(
     colors: &HashMap<SourceWaveformPresentationKey, TraceColor>,
     analysis: rspice_results::result_presentation::AnalysisPresentationKey,
     signal: &str,
@@ -335,7 +425,7 @@ fn drawn_color(
 /// As with curves, the real lanes the dataset plots rank first and keep that
 /// rank whatever the reader hides, then the ones the reader added; a column
 /// that stores a colour keeps it, and a colour the view gives one wins.
-fn rank_lane_hues(
+pub(crate) fn rank_lane_hues(
     model: &mut StripModel,
     analysis: &AnalysisResult<RetainedTrace>,
     first_slot: usize,

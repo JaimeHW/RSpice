@@ -31,6 +31,8 @@ pub use strip_projection::{
 };
 
 mod member_family;
+mod retick;
+pub use retick::{Retick, retick};
 #[cfg(test)]
 mod ticked_tests;
 
@@ -374,6 +376,91 @@ fn append_projected_traces(
     }
 }
 
+/// The form a column of `analysis` is drawn in, its complex parts aside.
+fn column_kind(
+    analysis: &AnalysisResult<RetainedTrace>,
+    waveform: &RetainedTrace,
+    ac: AcDisplay,
+) -> TraceKind {
+    let is_phase = waveform.name.starts_with("phase(");
+    let is_mag = waveform.name.starts_with('|');
+    let is_time_complex_phase = || {
+        analysis.analysis_type.is_time_domain()
+            && is_phase
+            && analysis.waveforms.iter().any(|candidate| {
+                candidate.complex.as_ref().is_some_and(|complex| {
+                    waveform.name == format!("phase({})", complex.source_name)
+                })
+            })
+    };
+    if analysis.analysis_type == AnalysisType::Hbnoise
+        && waveform.name == "Noise figure (SSB)"
+        && waveform.unit.as_deref() == Some("dB")
+    {
+        // Noise figure is already in decibels and has its own unit
+        // pane; only power spectra receive the square-root mapping.
+        TraceKind::Value
+    } else if ((analysis.analysis_type.uses_complex_bode_projection()
+        || analysis.analysis_type == AnalysisType::Qpnoise)
+        && is_phase)
+        || is_time_complex_phase()
+    {
+        // Drawn in degrees; the pane shows the reader's angle unit.
+        TraceKind::PhaseDeg
+    } else if analysis.analysis_type.uses_complex_bode_projection()
+        && is_mag
+        && !ac.linear_magnitude
+    {
+        TraceKind::MagnitudeDb
+    } else if matches!(
+        analysis.analysis_type,
+        AnalysisType::Noise | AnalysisType::Hbnoise
+    ) || (analysis.analysis_type == AnalysisType::Pnoise
+        && waveform.unit.as_deref() != Some("dBc/Hz"))
+    {
+        // A periodic noise run referred to the carrier's phase keeps
+        // decibels, read as they are.
+        // Voltage and current PSDs share the square-root projection;
+        // the retained unit selects nV/√Hz or nA/√Hz.
+        TraceKind::NoiseDensity
+    } else {
+        TraceKind::Value
+    }
+}
+
+/// Project column `waveform_index` of `analysis`, drawn as `kind`, onto
+/// `traces`, in `color` at `palette_slot` until the strip ranks it.
+fn append_column_trace(
+    traces: &mut Vec<StripTrace>,
+    derived: &mut DerivedSeries,
+    projection: &ProjectionContext<'_>,
+    analysis: &AnalysisResult<RetainedTrace>,
+    (waveform_index, kind): (usize, TraceKind),
+    (color, palette_slot): (egui::Color32, Option<usize>),
+) {
+    let waveform = &analysis.waveforms[waveform_index];
+    append_projected_traces(
+        traces,
+        derived,
+        projection,
+        TraceSource {
+            waveform_index,
+            source_waveform_name: &waveform.name,
+            base_name: &rspice_results::harmonic_spectrum::distortion_curve_name(
+                analysis.analysis_type,
+                &waveform.name,
+            ),
+            source_unit: waveform.unit.as_deref(),
+            signal_color: color,
+            palette_slot,
+            kind,
+            source_x: &waveform.x,
+            source_y: &waveform.y,
+            visible: true,
+        },
+    );
+}
+
 /// How AC results are drawn: the reader's choice, applied to every pane.
 /// The default is decibels over a decade frequency axis.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -583,6 +670,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         // and the ticked are read: after a million-device run, a tick is not
         // a walk of a million columns. An analysis of event lanes or STB
         // reads every column to sort them.
+        let indexed = index.is_some();
         let columns: Box<dyn Iterator<Item = usize>> = match index
             .filter(|_| event_lanes.is_none() && analysis.analysis_type != AnalysisType::Stb)
         {
@@ -645,14 +733,6 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             // colour, so its curve and its legend swatch agree.
             let palette_slot = Some(slot);
             let is_phase = waveform.name.starts_with("phase(");
-            let is_mag = waveform.name.starts_with('|');
-            let is_time_complex_phase = analysis.analysis_type.is_time_domain()
-                && is_phase
-                && analysis.waveforms.iter().any(|candidate| {
-                    candidate.complex.as_ref().is_some_and(|complex| {
-                        waveform.name == format!("phase({})", complex.source_name)
-                    })
-                });
             if displays_cartesian_complex {
                 if let Some(complex) = &waveform.complex {
                     if waveform.visible {
@@ -710,39 +790,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     continue;
                 }
             }
-            let kind = if analysis.analysis_type == AnalysisType::Hbnoise
-                && waveform.name == "Noise figure (SSB)"
-                && waveform.unit.as_deref() == Some("dB")
-            {
-                // Noise figure is already in decibels and has its own unit
-                // pane; only power spectra receive the square-root mapping.
-                TraceKind::Value
-            } else if ((analysis.analysis_type.uses_complex_bode_projection()
-                || analysis.analysis_type == AnalysisType::Qpnoise)
-                && is_phase)
-                || is_time_complex_phase
-            {
-                // Drawn in degrees; the pane shows the reader's angle unit.
-                TraceKind::PhaseDeg
-            } else if analysis.analysis_type.uses_complex_bode_projection()
-                && is_mag
-                && !ac.linear_magnitude
-            {
-                TraceKind::MagnitudeDb
-            } else if matches!(
-                analysis.analysis_type,
-                AnalysisType::Noise | AnalysisType::Hbnoise
-            ) || (analysis.analysis_type == AnalysisType::Pnoise
-                && waveform.unit.as_deref() != Some("dBc/Hz"))
-            {
-                // A periodic noise run referred to the carrier's phase keeps
-                // decibels, read as they are.
-                // Voltage and current PSDs share the square-root projection;
-                // the retained unit selects nV/√Hz or nA/√Hz.
-                TraceKind::NoiseDensity
-            } else {
-                TraceKind::Value
-            };
+            let kind = column_kind(analysis, waveform, ac);
             if waveform.visible {
                 dataset_ranks.insert((waveform_index, kind), dataset_rank);
                 dataset_rank += 1;
@@ -750,25 +798,13 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             if !shown {
                 continue;
             }
-            append_projected_traces(
+            append_column_trace(
                 &mut traces,
                 derived,
                 &projection,
-                TraceSource {
-                    waveform_index,
-                    source_waveform_name: &waveform.name,
-                    base_name: &rspice_results::harmonic_spectrum::distortion_curve_name(
-                        analysis.analysis_type,
-                        &waveform.name,
-                    ),
-                    source_unit: waveform.unit.as_deref(),
-                    signal_color: color,
-                    palette_slot,
-                    kind,
-                    source_x: &waveform.x,
-                    source_y: &waveform.y,
-                    visible: shown,
-                },
+                analysis,
+                (waveform_index, kind),
+                (color, palette_slot),
             );
         }
         // A selection slices one analysis's own rows; with one in force the
@@ -998,6 +1034,18 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             );
         }
 
+        // A strip of one curve per column, of this run alone, follows an
+        // edit of the reader's ticks by the curves it adds or takes away.
+        let retickable = indexed
+            && event_lanes.is_none()
+            && !matches!(
+                analysis.analysis_type,
+                AnalysisType::Stb | AnalysisType::Pnoise
+            )
+            && family.is_none()
+            && sample_selection.is_none()
+            && !displays_cartesian_complex
+            && overlay_runs.is_empty();
         let mut model = StripModel {
             analysis_index,
             analysis_key,
@@ -1034,6 +1082,9 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             expression_panes: Vec::new(),
             arrangement: Vec::new(),
             trace_panes: std::sync::OnceLock::new(),
+            trace_facts: std::sync::OnceLock::new(),
+            revision: super::next_revision(),
+            retickable,
         };
         model.grid_ascending = super::grid_is_ascending(&model);
         models.push(model);
