@@ -252,9 +252,29 @@ fn logic_bits_to_f64(bits: &[u8], format: &str) -> Result<f64, FstReadError> {
     Ok(value as f64)
 }
 
+/// Whether `bytes` open as an FST file does: its header block (type 0, 329 bytes long, with
+/// the real number *e* the format writes to state its byte order), or a whole file gzip-wrapped
+/// (type 254 and the gzip magic). A first byte alone matches too much: a MAT v4 file and
+/// UTF-16 text both start with one an FST block can have.
 pub fn looks_like_fst(bytes: &[u8]) -> bool {
-    let mut cursor = Cursor::new(bytes);
-    fst_reader::is_fst_file(&mut cursor)
+    const HEADER_BLOCK: u8 = 0;
+    const WRAPPED_FILE: u8 = 254;
+    const HEADER_SECTION_BYTES: u64 = 329;
+    let section = bytes
+        .get(1..9)
+        .and_then(|section| <[u8; 8]>::try_from(section).ok())
+        .map(u64::from_be_bytes);
+    match bytes.first() {
+        Some(&HEADER_BLOCK) if section == Some(HEADER_SECTION_BYTES) => bytes
+            .get(25..33)
+            .and_then(|marker| <[u8; 8]>::try_from(marker).ok())
+            .is_some_and(|marker| {
+                [f64::from_le_bytes(marker), f64::from_be_bytes(marker)]
+                    .contains(&std::f64::consts::E)
+            }),
+        Some(&WRAPPED_FILE) => bytes.get(17..19) == Some(&[0x1f, 0x8b]),
+        _ => false,
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

@@ -40,6 +40,7 @@ pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
         "csv",
         "tsv",
         "tab",
+        "txt",
         "s1p",
         "s2p",
         "s3p",
@@ -1519,14 +1520,15 @@ fn parse_result_dataset_beside(
         identify_result_import_format(source_name, bytes).map_err(|error| error.to_string())?;
     match format {
         ResultImportFormat::CsvRfc4180 | ResultImportFormat::Tsv => {
-            let text = std::str::from_utf8(bytes)
-                .map_err(|error| format!("the selected file is not valid UTF-8: {error}"))?;
+            let text = rspice_formats::delimited::decode_source_text(bytes)?;
+            // A `.csv` is comma-separated unless its header says otherwise: a spreadsheet
+            // whose decimal mark is the comma separates fields with semicolons.
             let delimiter = if format == ResultImportFormat::Tsv {
                 b'\t'
             } else {
-                b','
+                rspice_formats::delimited::header_delimiter(&text).unwrap_or(b',')
             };
-            let mut parsed = parse_delimited_result_dataset(text, delimiter)?;
+            let mut parsed = parse_delimited_result_dataset(&text, delimiter)?;
             parsed.source_format = format;
             Ok(parsed)
         }
@@ -1628,6 +1630,20 @@ fn parse_delimited_result_dataset(
         waveform.unit = unit;
         waveforms.push(waveform);
     }
+    // A coordinate that states no unit was read by its name alone, and the review says so.
+    let coordinate_name = &headers[0].name;
+    let notes = match (headers[0].canonical_unit(), analysis_type) {
+        (Some(_), _) => Vec::new(),
+        (None, AnalysisType::Transient) => vec![format!(
+            "The '{coordinate_name}' column states no unit, so it is read as time in seconds."
+        )],
+        (None, AnalysisType::Ac) => vec![format!(
+            "The '{coordinate_name}' column states no unit, so it is read as frequency in hertz."
+        )],
+        (None, _) => vec![format!(
+            "The '{coordinate_name}' column is neither time nor frequency by name or unit, so the file is read as a DC sweep over it."
+        )],
+    };
     Ok(ParsedResultDataset {
         source_format: if delimiter == b'\t' {
             ResultImportFormat::Tsv
@@ -1641,7 +1657,7 @@ fn parse_delimited_result_dataset(
         waveforms,
         family_metadata: None,
         delimiter,
-        notes: Vec::new(),
+        notes,
         event_payload: None,
         event_dump: None,
         plots: None,
@@ -1791,6 +1807,90 @@ mod tests {
             assert!(maximum.x <= available.x);
             assert!(maximum.y <= available.y);
         }
+    }
+
+    /// The values of one signal of a parsed table, in row order.
+    fn column(parsed: &ParsedResultDataset, index: usize) -> Vec<f64> {
+        parsed.waveforms[index].y.read_whole().unwrap().into_owned()
+    }
+
+    /// Tables read as spreadsheets write them. Each source is the bytes Python's `csv` module
+    /// writes in Excel's dialects: "Unicode Text" (UTF-16 with a byte-order mark, tabs, CRLF), the
+    /// semicolons and decimal commas of a locale whose decimal mark is the comma, and a CSV under
+    /// the `#` line an instrument writes first.
+    #[test]
+    fn spreadsheet_tables_read_as_excel_and_comma_decimal_locales_write_them() {
+        let samples = [0.0, 0.587785252292473, 0.9510565162951535];
+        let unicode_text =
+            "time\tV(out)\r\n0.0\t0.0\r\n1e-06\t0.587785252292473\r\n2e-06\t0.9510565162951535\r\n";
+        let mut little_endian = vec![0xff, 0xfe];
+        little_endian.extend(unicode_text.encode_utf16().flat_map(u16::to_le_bytes));
+        let mut big_endian = vec![0xfe, 0xff];
+        big_endian.extend(unicode_text.encode_utf16().flat_map(u16::to_be_bytes));
+        for (name, bytes) in [
+            ("sheet.txt", little_endian.clone()),
+            ("sheet.tsv", little_endian),
+            ("sheet.txt", big_endian),
+            (
+                "sheet.csv",
+                b"time;V(out)\r\n0,0;0,0\r\n1e-06;0,587785252292473\r\n2e-06;0,9510565162951535\r\n"
+                    .to_vec(),
+            ),
+            (
+                "sheet.csv",
+                b"# exported by a bench instrument\r\ntime,V(out)\r\n0.0,0.0\r\n1e-06,0.587785252292473\r\n2e-06,0.9510565162951535\r\n"
+                    .to_vec(),
+            ),
+        ] {
+            let parsed = parse_result_dataset(name, &bytes)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(parsed.analysis_type, AnalysisType::Transient, "{name}");
+            assert_eq!(
+                parsed.waveforms[0].x.read_whole().unwrap().as_ref(),
+                &[0.0, 1e-6, 2e-6],
+                "{name}"
+            );
+            assert_eq!(column(&parsed, 0), samples, "{name}");
+        }
+    }
+
+    /// A header reads as the file says: a bracket against a name is part of it (`bus[3]`), a
+    /// parenthesized unit after a space is a unit (`time (s)` is a transient), and a coordinate
+    /// that states no unit is read by its name, which the review says.
+    #[test]
+    fn headers_read_bus_members_as_names_and_parenthesized_units_as_units() {
+        let parsed = parse_result_dataset(
+            "logic.csv",
+            b"time (s),bus[3],data[7:0],V(out) (V)\n0,1,5,0.5\n1e-9,0,6,0.25\n",
+        )
+        .expect("named bus members and parenthesized units");
+        assert_eq!(parsed.analysis_type, AnalysisType::Transient);
+        assert_eq!(parsed.coordinate_unit.as_deref(), Some("s"));
+        let names: Vec<_> = parsed
+            .waveforms
+            .iter()
+            .map(|trace| &trace.data.name)
+            .collect();
+        assert_eq!(names, ["bus[3]", "data[7:0]", "V(out)"]);
+        assert_eq!(parsed.waveforms[0].data.unit, None);
+        assert_eq!(parsed.waveforms[2].data.unit.as_deref(), Some("V"));
+        assert_eq!(column(&parsed, 0), [1.0, 0.0]);
+        assert!(parsed.notes.is_empty(), "{:?}", parsed.notes);
+
+        let guessed = parse_result_dataset("sweep.csv", b"x,V(out)\n0,1\n1,2\n").unwrap();
+        assert_eq!(guessed.analysis_type, AnalysisType::DcSweep);
+        assert!(
+            guessed.notes[0].contains("read as a DC sweep over it"),
+            "{:?}",
+            guessed.notes
+        );
+        let by_name = parse_result_dataset("scope.csv", b"time,V(out)\n0,1\n1,2\n").unwrap();
+        assert_eq!(by_name.analysis_type, AnalysisType::Transient);
+        assert!(
+            by_name.notes[0].contains("read as time in seconds"),
+            "{:?}",
+            by_name.notes
+        );
     }
 
     #[test]

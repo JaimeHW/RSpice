@@ -10,7 +10,8 @@ pub enum ResultFormatError {
         extension_format: ResultImportFormat,
         signature_format: ResultImportFormat,
     },
-    UnknownBinary(std::str::Utf8Error),
+    /// Neither text nor a container this importer knows.
+    UnknownBinary,
     UnsupportedExtension(String),
     NoHeader,
     MissingDelimiter,
@@ -33,32 +34,25 @@ impl std::fmt::Display for ResultFormatError {
                 extension_format.canonical_id(),
                 signature_format.canonical_id()
             ),
-            Self::UnknownBinary(_) => {
-                f.write_str("the result format is unknown and has no recognized binary signature")
-            }
+            Self::UnknownBinary => f.write_str(
+                "the file is neither text nor a result container this importer reads",
+            ),
             Self::UnsupportedExtension(extension) => write!(
                 f,
-                "unsupported .{extension} result format; select a UTF-8 CSV or TSV file"
+                "this importer does not read .{extension} files; choose a file of a listed type"
             ),
             Self::NoHeader => f.write_str("the selected file contains no header row"),
-            Self::MissingDelimiter => {
-                f.write_str("could not infer CSV or TSV delimiter from the header")
-            }
+            Self::MissingDelimiter => f.write_str(
+                "the header row has no commas, semicolons or tabs to tell its columns apart",
+            ),
             Self::MixedDelimiters { .. } => f.write_str(
-                "the header mixes comma and tab delimiters; use a consistent CSV or TSV file",
+                "the header mixes tabs with commas or semicolons; save the table with one delimiter",
             ),
         }
     }
 }
 
-impl std::error::Error for ResultFormatError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::UnknownBinary(source) => Some(source),
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for ResultFormatError {}
 
 pub fn identify_result_import_format(
     source_name: &str,
@@ -124,8 +118,10 @@ pub fn identify_result_import_format(
         return Ok(format);
     }
 
-    let text = std::str::from_utf8(bytes).map_err(ResultFormatError::UnknownBinary)?;
-    if text_looks_touchstone_v2(bytes) {
+    let text = crate::delimited::decode_source_text(bytes)
+        .map_err(|_| ResultFormatError::UnknownBinary)?;
+    let text = text.as_ref();
+    if text_looks_touchstone_v2(text.as_bytes()) {
         return Ok(ResultImportFormat::TouchstoneV2);
     }
     if text.lines().any(|line| line.trim_start().starts_with('#'))
@@ -190,27 +186,28 @@ fn infer_delimiter(source_name: &str, text: &str) -> Result<u8, ResultFormatErro
     match extension.as_deref() {
         Some("csv") => return Ok(b','),
         Some("tsv") => return Ok(b'\t'),
+        // Excel saves a sheet as "Unicode Text" or "Text (Tab delimited)" under `.txt`.
+        Some("txt") | None => {}
         Some(extension) => {
             return Err(ResultFormatError::UnsupportedExtension(
                 extension.to_owned(),
             ));
         }
-        None => {}
     }
 
-    let header = text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .ok_or(ResultFormatError::NoHeader)?;
-    let commas = header.bytes().filter(|byte| *byte == b',').count();
-    let tabs = header.bytes().filter(|byte| *byte == b'\t').count();
-    match (commas, tabs) {
-        (0, 0) => Err(ResultFormatError::MissingDelimiter),
-        (commas, tabs) if commas > 0 && tabs > 0 => {
-            Err(ResultFormatError::MixedDelimiters { commas, tabs })
-        }
-        (_, 0) => Ok(b','),
-        (0, _) => Ok(b'\t'),
-        _ => unreachable!(),
+    let (_, table) = crate::delimited::skip_preamble(text);
+    let header = table.lines().next().ok_or(ResultFormatError::NoHeader)?;
+    if let Some(delimiter) = crate::delimited::header_delimiter(table) {
+        return Ok(delimiter);
     }
+    let commas = header
+        .bytes()
+        .filter(|byte| matches!(byte, b',' | b';'))
+        .count();
+    let tabs = header.bytes().filter(|byte| *byte == b'\t').count();
+    Err(if commas == 0 && tabs == 0 {
+        ResultFormatError::MissingDelimiter
+    } else {
+        ResultFormatError::MixedDelimiters { commas, tabs }
+    })
 }

@@ -96,11 +96,77 @@ enum CoordinateDirection {
     Decreasing,
 }
 
+/// The text of a delimited source: UTF-8, with or without a byte-order mark, or UTF-16 in the
+/// byte order its byte-order mark states, which is what Excel writes when it saves "Unicode
+/// Text".
+pub fn decode_source_text(bytes: &[u8]) -> Result<std::borrow::Cow<'_, str>, String> {
+    fn utf16(units: &[u8], word: fn([u8; 2]) -> u16) -> Result<String, String> {
+        if units.len() % 2 != 0 {
+            return Err("the UTF-16 text ends in half a character".to_owned());
+        }
+        char::decode_utf16(units.chunks_exact(2).map(|pair| word([pair[0], pair[1]])))
+            .collect::<Result<String, _>>()
+            .map_err(|_| "the UTF-16 text holds a broken character".to_owned())
+    }
+    if let Some(units) = bytes.strip_prefix(b"\xff\xfe") {
+        utf16(units, u16::from_le_bytes).map(std::borrow::Cow::Owned)
+    } else if let Some(units) = bytes.strip_prefix(b"\xfe\xff") {
+        utf16(units, u16::from_be_bytes).map(std::borrow::Cow::Owned)
+    } else {
+        std::str::from_utf8(bytes)
+            .map(std::borrow::Cow::Borrowed)
+            .map_err(|error| {
+                format!(
+                    "the file is not UTF-8 or UTF-16 text: byte {} is not part of a character",
+                    error.valid_up_to() + 1
+                )
+            })
+    }
+}
+
+/// The lines above a table's header that are not part of it: blank lines and the `#` comment
+/// lines an instrument or script writes first. Returns how many there are and the text from the
+/// header on.
+pub fn skip_preamble(text: &str) -> (usize, &str) {
+    let mut rest = text;
+    let mut skipped = 0;
+    while !rest.is_empty() {
+        let end = rest.find('\n').map_or(rest.len(), |end| end + 1);
+        let line = rest[..end].trim_start_matches('\u{feff}').trim();
+        if !(line.is_empty() || line.starts_with('#')) {
+            break;
+        }
+        rest = &rest[end..];
+        skipped += 1;
+    }
+    (skipped, rest)
+}
+
+/// The delimiter a table's header line uses: tabs, semicolons (the CSV a spreadsheet writes
+/// where the comma is the decimal mark) or commas. `None` when the line holds none of them, or
+/// mixes tabs with either of the others.
+pub fn header_delimiter(text: &str) -> Option<u8> {
+    let (_, text) = skip_preamble(text);
+    let header = text.lines().next()?;
+    let count = |delimiter: u8| header.bytes().filter(|byte| *byte == delimiter).count();
+    match (count(b'\t'), count(b';'), count(b',')) {
+        (0, 0, 0) => None,
+        (tabs, 0, 0) if tabs > 0 => Some(b'\t'),
+        (0, semicolons, commas) if semicolons > commas => Some(b';'),
+        (0, _, _) => Some(b','),
+        _ => None,
+    }
+}
+
 pub fn decode_delimited_waveforms(
     text: &str,
     delimiter: u8,
     limits: DelimitedReadLimits,
 ) -> Result<DecodedDelimitedWaveforms, DelimitedReadError> {
+    let (preamble_lines, text) = skip_preamble(text);
+    // Where the comma does not separate fields it is the decimal mark, as a spreadsheet set to
+    // such a locale writes it.
+    let decimal_comma = delimiter != b',';
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(delimiter)
         .has_headers(true)
@@ -194,7 +260,7 @@ pub fn decode_delimited_waveforms(
     let mut declared_kinds = None;
 
     for (row_index, record) in reader.records().enumerate() {
-        let line = row_index + 2;
+        let line = row_index + 2 + preamble_lines;
         if has_layout {
             return Err("the table layout record must be unique and final"
                 .to_owned()
@@ -231,7 +297,14 @@ pub fn decode_delimited_waveforms(
             has_layout = true;
             continue;
         }
-        let x = parse_finite_cell(record.get(0), line, 1, &headers[0].name, headers[0].unit)?;
+        let x = parse_finite_cell(
+            record.get(0),
+            line,
+            1,
+            &headers[0].name,
+            headers[0].unit,
+            decimal_comma,
+        )?;
         if analysis_type == WaveformDomain::Ac && x <= 0.0 {
             return Err(format!(
                 "row {line} frequency must be greater than zero after unit conversion"
@@ -275,6 +348,7 @@ pub fn decode_delimited_waveforms(
                     column,
                     &headers[signal_index + 1].name,
                     headers[signal_index + 1].unit,
+                    decimal_comma,
                 )?
             });
         }
@@ -375,11 +449,21 @@ fn parse_column_header(
         })?;
         let name = raw[..open].trim();
         let unit = raw[open + 1..raw.len() - 1].trim();
-        if name.is_empty() || unit.is_empty() {
-            return Err(format!(
-                "column {column} must provide both a name and a non-empty bracketed unit"
-            ));
+        // A bracket against the name that holds no unit is part of the name: `bus[3]` and
+        // `data[7:0]` are a bus member and a bus, as every logic tool writes them.
+        let attached = !raw[..open].ends_with(char::is_whitespace);
+        if attached && !name.is_empty() && parse_unit(unit).is_err() {
+            (raw, None)
+        } else {
+            if name.is_empty() || unit.is_empty() {
+                return Err(format!(
+                    "column {column} must provide both a name and a non-empty bracketed unit"
+                ));
+            }
+            (name, Some(unit))
         }
+    } else if let Some((name, unit)) = parenthesized_unit(raw) {
+        // `time (s)`, the other way a header states its unit.
         (name, Some(unit))
     } else {
         if raw.contains('[') || raw.contains(']') {
@@ -396,6 +480,16 @@ fn parse_column_header(
         unit,
         stated_unit: None,
     })
+}
+
+/// A header of a name, a space and a parenthesized unit, `time (s)`: the name and the unit.
+/// Parentheses against the name are part of it (`V(out)`), as are any that hold no unit.
+fn parenthesized_unit(raw: &str) -> Option<(&str, &str)> {
+    let inner = raw.strip_suffix(')')?;
+    let open = inner.rfind(" (")?;
+    let name = inner[..open].trim();
+    let unit = inner[open + 2..].trim();
+    (!name.is_empty() && !unit.is_empty() && parse_unit(unit).is_ok()).then_some((name, unit))
 }
 
 fn parse_unit(raw: &str) -> Result<EngineeringUnit, String> {
@@ -488,12 +582,20 @@ fn parse_finite_cell(
     column: usize,
     header: &str,
     unit: Option<EngineeringUnit>,
+    decimal_comma: bool,
 ) -> Result<f64, String> {
     let value =
         value.ok_or_else(|| format!("row {row}, column {column} ({header:?}) is missing"))?;
     if value.is_empty() {
         return Err(format!("row {row}, column {column} ({header:?}) is empty"));
     }
+    let point;
+    let value = if decimal_comma && value.contains(',') && !value.contains('.') {
+        point = value.replacen(',', ".", 1);
+        point.as_str()
+    } else {
+        value
+    };
     let parsed = value.parse::<f64>().map_err(|_| {
         format!("row {row}, column {column} ({header:?}) contains non-numeric value {value:?}")
     })?;
@@ -704,5 +806,42 @@ mod tests {
                 .downcast_ref::<csv::Error>()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn spreadsheet_text_decodes_in_either_utf16_order_and_comma_decimal_tables_read() {
+        let text = "time;V(out)\r\n0,5;-1,25\r\n";
+        let mut little = vec![0xff, 0xfe];
+        little.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        let mut big = vec![0xfe, 0xff];
+        big.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+        for bytes in [little, big, text.as_bytes().to_vec()] {
+            assert_eq!(decode_source_text(&bytes).unwrap(), text);
+        }
+        assert!(decode_source_text(b"\xff\xfe\x41").is_err());
+        assert!(
+            decode_source_text(b"\xc3\x28")
+                .unwrap_err()
+                .contains("byte 1")
+        );
+
+        assert_eq!(header_delimiter("# note\n\ntime;V(out)\n"), Some(b';'));
+        assert_eq!(header_delimiter("time\tV(out)\n"), Some(b'\t'));
+        assert_eq!(header_delimiter("time,V(out)\n"), Some(b','));
+        assert_eq!(header_delimiter("time\tV(a),V(b)\n"), None);
+        let limits = DelimitedReadLimits {
+            max_columns: 2,
+            max_rows: 2,
+            max_header_bytes: 32,
+            min_rows: 1,
+        };
+        let decoded =
+            decode_delimited_waveforms("# bench export\ntime;V(out)\n0,5;-1,25\n", b';', limits)
+                .unwrap();
+        assert_eq!(decoded.coordinate, [0.5]);
+        assert_eq!(decoded.signal_values, [vec![-1.25]]);
+        let error = decode_delimited_waveforms("# bench export\ntime;V(out)\n0;x\n", b';', limits)
+            .unwrap_err();
+        assert!(error.to_string().starts_with("row 3,"), "{error}");
     }
 }
