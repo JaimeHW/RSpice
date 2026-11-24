@@ -56,6 +56,7 @@ const FREEING_BEFORE_A_PAUSE: std::time::Duration = std::time::Duration::from_mi
 const PAUSE: std::time::Duration = std::time::Duration::from_millis(1);
 
 impl Release {
+    #[cfg(not(target_arch = "wasm32"))]
     fn new() -> Self {
         Self {
             since: std::time::Instant::now(),
