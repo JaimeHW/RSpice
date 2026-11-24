@@ -41,15 +41,18 @@
 //! nothing dispatches, the status line and the band above the deck say what
 //! it needs and what is free, and the band offers Run anyway and Stop. Run
 //! anyway keeps the project's unsaved work as an autosave first, then starts
-//! the run prepared; Stop drops it as it drops a run being prepared. A run
-//! that needs more than the machine has is refused before it runs, as any
-//! deck its preparation stops is.
+//! the run prepared; Stop drops it as it drops a run being prepared. Where
+//! no autosave keeps that work, the band says to save first. A run that
+//! needs more than the machine has is refused before it runs: the status
+//! line says it in short, and the band above the deck says what it needs
+//! against what the machine has until the deck is edited or pressed again.
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::simulation::controller::{BeforePreparing, DeckAction, DeckRunVerdict};
 use crate::workbench::MessageId;
 use crate::workbench::code::SourceFeature;
 use crate::workbench::documents::deck_files;
+use crate::workbench::documents::netlist_document::MemoryRefusal;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::run_view::{RunCodeFacts, RunView};
 use crate::workbench::slots::{manual_deck_in, veriloga_compilation_in};
@@ -58,7 +61,7 @@ use crate::workbench::workflows::netlist_workflow::record_include_resolutions;
 use rspice_app_runs::simulation::ManualDeckCopy;
 use rspice_app_runs::workbench::slots::runs::{DiskWait, PreparingDeck};
 use rspice_app_runs::workbench::waiting;
-use rspice_simulation::execution::run_memory::MemoryWarning;
+use rspice_simulation::execution::run_memory::{MemoryWarning, RunOf};
 use rspice_simulation::preparation::PreparationError;
 
 /// Take the deck Run runs as it stands for `action`: its files looked at on
@@ -323,6 +326,8 @@ fn land_deck_saves(cx: &mut Cx<'_, SourceFeature>) {
 /// how its preparation ends. Where the deck is prepared in the press, that
 /// is now.
 fn press(cx: &mut Cx<'_, SourceFeature>, action: DeckAction) {
+    // A refusal for memory stands until the deck is pressed again.
+    cx.state.netlist.memory_refusal = None;
     press_looking(cx, action, true);
 }
 
@@ -529,7 +534,7 @@ fn hold_for_memory(
     cx.model.record(
         LogSeverity::Warning,
         LogSource::Run,
-        format!("{name}: {}", warning.message()),
+        format!("{name}: {}", warning.message_of(RunOf::Deck)),
     );
     cx.runs.preparing_deck = Some(Box::new(PreparingDeck {
         name,
@@ -582,7 +587,7 @@ fn refuse(
     cx: &mut Cx<'_, SourceFeature>,
     name: &str,
     verdict: Verdict,
-    text: &str,
+    text: &crate::state::RevisedText,
     error: &PreparationError,
 ) {
     deck_files::show_deck(cx.model, &mut cx.state.netlist);
@@ -597,6 +602,30 @@ fn refuse(
             MessageId::NetlistDeckCannotRun,
         ),
     };
+    // A run that needs more memory than the machine has is said of the deck:
+    // in short on the status line, whole in the log, and in the band above
+    // the deck until it is edited or pressed again.
+    if let Some(&shortfall) = error.memory_shortfall() {
+        let whole = messages.format(
+            without_line,
+            &[
+                ("name", name),
+                ("error", &shortfall.message_of(RunOf::Deck)),
+            ],
+        );
+        let short = messages.format(
+            without_line,
+            &[("name", name), ("error", &shortfall.status())],
+        );
+        cx.model
+            .record(LogSeverity::Error, LogSource::Netlist, whole);
+        cx.wb.prompt(short);
+        cx.state.netlist.memory_refusal = Some(MemoryRefusal {
+            revision: text.revision(),
+            shortfall,
+        });
+        return;
+    }
     // A deck past one of the engine's limits is said to be, in the words
     // its finding says it in; past one sized to the machine, in the words
     // the preparation said it in.

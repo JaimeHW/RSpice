@@ -1,11 +1,13 @@
 //! Run on the plan weighed against the memory of the machine it runs on, a
 //! machine the tests pretend: a run the check authorizes that needs more
 //! than is free waits, for Run anyway or Stop, with its numbers on the
-//! status line and in the band above the plan, as a deck's run waits.
+//! status line and in the band above the plan, as a deck's run waits; the
+//! band says to save first while no autosave keeps the project's work.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use egui::accesskit::Role;
+use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 use rspice_simulation::execution::run_memory::{
     MachineMemory, forget_machine_memory_here, pretend_machine_memory_here,
@@ -102,7 +104,11 @@ fn a_plan_run_needing_more_than_is_free_waits_for_run_anyway() {
     let output = replay.frame(Vec::new());
     let status = format!("Warning: {}", warning.status());
     assert!(says(&output, &status), "the status line says {status:?}");
-    assert!(says(&output, &warning.numbers()), "the band says it");
+    // The project has no file for an autosave to keep its work in.
+    assert!(
+        says(&output, &format!("{} Save first.", warning.numbers())),
+        "the band says it"
+    );
     assert!(
         says_first(&output, "Stop the run waiting for memory"),
         "the run control is Stop"
@@ -128,6 +134,49 @@ fn a_plan_run_needing_more_than_is_free_waits_for_run_anyway() {
         "the log says it ran anyway"
     );
     forget_machine_memory_here();
+}
+
+/// Run anyway keeps the project's unsaved work as an autosave first, which a
+/// project with no file has nowhere to keep: while the plan's run waits, its
+/// band says to save first. Once the project is saved there is no unsaved
+/// work to lose, and the band says nothing of it.
+#[test]
+fn a_plan_run_held_for_memory_says_to_save_first_while_nothing_keeps_its_work() {
+    let app = held_plan();
+    let warning = app
+        .state
+        .runs
+        .preflight
+        .held_for_memory
+        .expect("the run waits for an answer");
+    let band = warning.numbers();
+    let mut replay = Replay::of(app);
+    replay.app.state.platform.autosave_minutes = 5;
+    let output = replay.frame(Vec::new());
+    assert!(
+        says(&output, &format!("{band} Save first.")),
+        "the project has no file: the band says to save first"
+    );
+
+    let folder = unique_temp_dir("plan-held-unsaved-work");
+    assert!(
+        replay
+            .app
+            .state
+            .save_project_to_path(&folder.join("held.rspiceproj")),
+        "the project saves"
+    );
+    assert!(
+        replay.app.state.runs.preflight.held_for_memory.is_some(),
+        "a save leaves the run waiting"
+    );
+    let output = replay.frame(Vec::new());
+    assert!(
+        says(&output, &band),
+        "nothing unsaved, so nothing said of it"
+    );
+    forget_machine_memory_here();
+    let _ = std::fs::remove_dir_all(folder);
 }
 
 /// Stop drops the run held for memory: nothing of it runs, the log says so,

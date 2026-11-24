@@ -49,7 +49,9 @@ mod toast;
 mod tree;
 mod view_switch;
 
-pub use advisory_band::{HeldRunAnswer, HeldRunBand, advisory_band, held_run_band};
+pub use advisory_band::{
+    HeldRunAnswer, HeldRunBand, advisory_band, held_run_band, refused_run_band,
+};
 pub use button::{Button, IconButton, compact_height, control_height};
 pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
 pub use chip::{chip, chip_width, compact_chip};

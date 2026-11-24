@@ -382,21 +382,11 @@ pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 /// machine has free, and what the reader answers there. Nothing while no
 /// run is held.
 fn memory_band(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    use crate::workbench::localization::MessageId;
-    let Some(warning) = cx.runs.preflight.held_for_memory else {
-        return;
-    };
-    let messages = cx.wb.messages();
-    let answer = crate::ui::widgets::held_run_band(
+    let answer = rspice_app_workbench::workbench::surfaces::memory_bands::held_run(
         ui,
-        &crate::ui::widgets::HeldRunBand {
-            numbers: &warning.numbers(),
-            message: &warning.message(),
-            run_anyway: &messages.text(MessageId::NetlistMemoryRunAnyway),
-            run_anyway_hint: &messages.text(MessageId::SimulateMemoryRunAnywayTooltip),
-            stop: &messages.text(MessageId::NetlistMemoryStop),
-            stop_hint: &messages.text(MessageId::NetlistMemoryStopTooltip),
-        },
+        cx.runs,
+        cx.wb.messages(),
+        rspice_simulation::execution::run_memory::RunOf::Design,
     );
     match answer {
         Some(crate::ui::widgets::HeldRunAnswer::RunAnyway) => cx

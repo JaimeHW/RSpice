@@ -37,7 +37,7 @@ use crate::workbench::lifecycle::project_checkpoint::{
     ProjectCheckpointSummary,
 };
 use crate::workbench::lifecycle::project_lifecycle::{
-    self, LifecycleParts, LifecycleSourceMut, PlatformState,
+    self, LifecycleParts, LifecycleSource, LifecycleSourceMut, PlatformState,
 };
 use rspice_app_state::workbench::app_state::model::Model;
 
@@ -376,20 +376,30 @@ fn saved_generation(platform: &PlatformState) -> Option<u64> {
         .map(|receipt| receipt.accepted_generation)
 }
 
-/// Whether the open project has unsaved work an autosave would keep: only a
-/// project with a saved home, which its checkpoints are kept with (beside its
-/// file on the desktop; in the browser, its binding to a file or to the
-/// browser's own storage), and one this session may write.
+/// Whether the open project has unsaved work an autosave would keep.
 fn autosaved_work(parts: &mut LifecycleParts<'_>) -> bool {
+    autosave_home(parts.model, parts.platform) && project_lifecycle::has_unsaved_changes(parts)
+}
+
+/// Whether an autosave keeps the open project's work: only a project with a
+/// saved home, which its checkpoints are kept with (beside its file on the
+/// desktop; in the browser, its binding to a file or to the browser's own
+/// storage), and one this session may write.
+fn autosave_home(model: &Model, platform: &PlatformState) -> bool {
     let saved = if durable_records::browser_records().is_some() {
-        parts.platform.project_lifecycle.binding().is_some()
+        platform.project_lifecycle.binding().is_some()
     } else {
-        parts.model.workspace.content.project.path.is_some()
+        model.workspace.content.project.path.is_some()
     };
-    parts.platform.project_lifecycle.is_open()
-        && saved
-        && !parts.model.safe_mode.project_read_only()
-        && project_lifecycle::has_unsaved_changes(parts)
+    platform.project_lifecycle.is_open() && saved && !model.safe_mode.project_read_only()
+}
+
+/// Whether an autosave written now ([`write_now`]) keeps the open project's
+/// unsaved work: autosave is on and the project has a home to keep it in.
+/// Where not, a crash loses that work.
+pub fn keeps_unsaved_work(state: &dyn LifecycleSource) -> bool {
+    let view = state.lifecycle_view();
+    view.platform.autosave_minutes != 0 && autosave_home(view.model, view.platform)
 }
 
 /// Write an autosave of the open project's unsaved work now, as the browser

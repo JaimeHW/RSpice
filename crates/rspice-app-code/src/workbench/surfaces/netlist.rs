@@ -25,7 +25,7 @@ use egui::Ui;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{HeldRunAnswer, HeldRunBand, advisory_band, held_run_band};
+use crate::ui::widgets::{HeldRunAnswer, advisory_band};
 use crate::workbench::MessageId;
 use crate::workbench::code::SourceFeature;
 use crate::workbench::code::commands::SourceRequest;
@@ -33,9 +33,11 @@ use crate::workbench::design_system::{
     Problem, WorkbenchIcon, empty_state, empty_state_with_actions, paint_problem_mark,
 };
 use crate::workbench::documents::netlist_document::{
-    ExecutedDeckVerification, NetlistRoot, cross_probe,
+    ExecutedDeckVerification, NetlistDocumentState, NetlistRoot, cross_probe,
 };
 use crate::workbench::framework::feature::Cx;
+use rspice_app_workbench::workbench::surfaces::memory_bands;
+use rspice_simulation::execution::run_memory::RunOf;
 
 /// Publish `editor` again once it has drawn, with its owner's history as
 /// `editor` gives it: the editor's own history may have taken or made a step
@@ -288,13 +290,16 @@ pub fn show_prepared(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
     // A run held for more memory than is free asks above the deck, where the
     // run's band speaks: Run anyway, or Stop, which Stop's command carries
     // out as it stops any run.
-    match memory_band(ui, cx.runs, cx.wb.messages()) {
+    match memory_bands::held_run(ui, cx.runs, cx.wb.messages(), RunOf::Deck) {
         Some(HeldRunAnswer::RunAnyway) => cx.wb.outbox.push(SourceRequest::RunAnyway),
         Some(HeldRunAnswer::Stop) => {
             cx.execute(crate::workbench::framework::command_registry::ids::STOP_SIMULATION);
         }
         None => {}
     }
+    // A run refused for more memory than the machine has says so there too,
+    // until the deck is edited or run again.
+    memory_refusal_band(ui, &mut cx.state.netlist);
     // The run's band states the run and reports what was clicked; routing
     // that click is this surface's transaction, not the painter's.
     match run_strip(ui, cx.model, &cx.state.netlist, cx.runs, cx.wb.messages()) {
@@ -969,25 +974,22 @@ const fn verification_chip(
     }
 }
 
-/// The band of a deck's run held because it needs more memory than the
-/// machine has free, in the page's words. Nothing while no run is held.
-fn memory_band(
-    ui: &mut Ui,
-    runs: &rspice_app_runs::workbench::slots::runs::RunsState,
-    messages: crate::workbench::MessageCatalog,
-) -> Option<HeldRunAnswer> {
-    let warning = runs.memory_warning()?;
-    held_run_band(
-        ui,
-        &HeldRunBand {
-            numbers: &warning.numbers(),
-            message: &warning.message(),
-            run_anyway: &messages.text(MessageId::NetlistMemoryRunAnyway),
-            run_anyway_hint: &messages.text(MessageId::NetlistMemoryRunAnywayTooltip),
-            stop: &messages.text(MessageId::NetlistMemoryStop),
-            stop_hint: &messages.text(MessageId::NetlistMemoryStopTooltip),
-        },
-    )
+/// The band of the deck's run refused because it needs more memory than the
+/// machine has installed. It goes once the deck is edited; a run again takes
+/// it away as it is pressed.
+fn memory_refusal_band(ui: &mut Ui, netlist: &mut NetlistDocumentState) {
+    let Some(refusal) = netlist.memory_refusal else {
+        return;
+    };
+    let revision = netlist
+        .open_deck
+        .as_ref()
+        .map(|deck| deck.root.text.revision());
+    if revision != Some(refusal.revision) {
+        netlist.memory_refusal = None;
+        return;
+    }
+    memory_bands::refused_run(ui, &refusal.shortfall, RunOf::Deck);
 }
 
 /// One of the band's routes: the kit's compact button, with what it does on

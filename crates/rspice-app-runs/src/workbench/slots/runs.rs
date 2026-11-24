@@ -29,6 +29,11 @@ pub struct RunsState {
     /// disk, and the run that waits there for more memory than is free.
     /// Runtime only, and boxed so the state stays small to build and clone.
     pub preparing_deck: Option<Box<PreparingDeck>>,
+    /// While a run waits for Run anyway: whether the project holds unsaved
+    /// work that no autosave keeps before it runs, autosave being off or the
+    /// project having no file yet, which a run out of memory loses with the
+    /// application. The shell answers it each frame a run waits.
+    pub held_run_unkept: bool,
 }
 
 /// A deck being prepared: what the press took, which names the deck in what
@@ -108,6 +113,21 @@ impl RunsState {
         &self,
     ) -> Option<rspice_simulation::execution::run_memory::MemoryWarning> {
         self.preparing_deck.as_ref()?.memory
+    }
+
+    /// What the run of `source` waiting for Run anyway needs beyond the
+    /// memory free: the deck's run, prepared, or the plan's, authorized.
+    #[must_use]
+    pub fn held_run(
+        &self,
+        source: rspice_simulation::execution::run_memory::RunOf,
+    ) -> Option<rspice_simulation::execution::run_memory::MemoryWarning> {
+        match source {
+            rspice_simulation::execution::run_memory::RunOf::Deck => self.memory_warning(),
+            rspice_simulation::execution::run_memory::RunOf::Design => {
+                self.preflight.held_for_memory
+            }
+        }
     }
 }
 

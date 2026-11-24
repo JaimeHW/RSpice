@@ -1,6 +1,7 @@
 //! The band a page states one condition of its document in, above the
-//! document, and the band of a run held for more memory than is free, which
-//! the deck's page and the plan's page ask in alike.
+//! document, and the bands of a run held for more memory than is free and of
+//! one refused for more than is installed, which the deck's page and the
+//! plan's page say alike.
 
 use egui::Ui;
 
@@ -58,6 +59,9 @@ pub struct HeldRunBand<'a> {
     pub numbers: &'a str,
     /// The same with what running it anyway does: the words' hover.
     pub message: &'a str,
+    /// What running it anyway risks, when it risks something, in a clause
+    /// after the words, and why: the clause's line on the words' hover.
+    pub caution: Option<(&'a str, &'a str)>,
     pub run_anyway: &'a str,
     pub run_anyway_hint: &'a str,
     pub stop: &'a str,
@@ -84,10 +88,30 @@ pub fn held_run_band(ui: &mut Ui, band: &HeldRunBand<'_>) -> Option<HeldRunAnswe
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 // The mark keeps the gap from the words a run band's dot does.
                 ui.add_space(BAND_MARK_GAP);
-                ui.add(egui::Label::new(band.numbers).truncate())
-                    .on_hover_text(band.message);
+                match band.caution {
+                    Some((clause, why)) => ui
+                        .add(egui::Label::new(format!("{} {clause}", band.numbers)).truncate())
+                        .on_hover_text(format!("{}\n{why}", band.message)),
+                    None => ui
+                        .add(egui::Label::new(band.numbers).truncate())
+                        .on_hover_text(band.message),
+                };
             });
         });
     });
     answer
+}
+
+/// The band of a run refused because it needs more memory than the machine
+/// has installed: the failure's mark and what the run needs against what
+/// the machine has (`numbers`), the whole refusal (`message`) on its hover.
+pub fn refused_run_band(ui: &mut Ui, numbers: &str, message: &str) {
+    advisory_band(ui, Some(Problem::Failure), |ui| {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            // The mark keeps the gap from the words a run band's dot does.
+            ui.add_space(BAND_MARK_GAP);
+            ui.add(egui::Label::new(numbers).truncate())
+                .on_hover_text(message);
+        });
+    });
 }

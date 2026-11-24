@@ -343,6 +343,13 @@ impl MemoryWarning {
         self.message_of(RunOf::Design)
     }
 
+    /// What a design's run needs and what the machine has, as a schematic
+    /// run says it beside its Run anyway.
+    #[must_use]
+    pub fn numbers(&self) -> String {
+        self.numbers_of(RunOf::Design)
+    }
+
     /// What the run of a design or a deck (`run`) needs and what the machine
     /// has, and what running it anyway does.
     #[must_use]

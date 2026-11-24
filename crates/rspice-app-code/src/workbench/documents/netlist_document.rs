@@ -744,6 +744,17 @@ impl Default for NetlistExportDialogState {
     }
 }
 
+/// A deck's run refused because it needs more memory than the machine has
+/// installed, which the band above the deck says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryRefusal {
+    /// The revision of the deck's text the run was refused for: the band
+    /// goes once the deck is edited.
+    pub revision: u64,
+    /// What the run needs against what the machine has.
+    pub shortfall: rspice_simulation::execution::run_memory::MemoryShortfall,
+}
+
 /// Transient state for one netlist document.
 #[derive(Debug, Clone, Default)]
 pub struct NetlistDocumentState {
@@ -764,6 +775,10 @@ pub struct NetlistDocumentState {
     /// open was undone as its read landed, and the shell gives up a project
     /// it made around it.
     pub refused_open: Option<(crate::state::DeckId, String)>,
+    /// The run of the deck in front refused because it needs more memory
+    /// than the machine has installed: the band above the deck says so
+    /// until the deck is edited or run again.
+    pub memory_refusal: Option<MemoryRefusal>,
     /// Whether the reader closed the open deck's tab: the deck stays open,
     /// with any edit not yet saved, until it is shown again.
     pub deck_tab_closed: bool,

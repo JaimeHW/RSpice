@@ -687,6 +687,26 @@ impl RSpiceApp {
         // drawing's unsaved mark and the window title.
         let (project_has_unsaved_changes, front_differs_from_saved) =
             rspice_app_services::workbench::lifecycle::project_lifecycle::unsaved_work(&self.state);
+        // A run waiting for Run anyway, the deck's or the plan's, says whether
+        // Run anyway leaves unsaved work that a run out of memory loses with
+        // the application: there is some, and no autosave keeps it.
+        let held = self.state.runs.memory_warning().is_some()
+            || self.state.runs.preflight.held_for_memory.is_some();
+        self.state.runs.held_run_unkept = held
+            && {
+                let deck_unsaved = self
+                    .state
+                    .code
+                    .netlist
+                    .open_deck
+                    .as_ref()
+                    .and_then(rspice_app_code::workbench::documents::deck_files::OpenDeck::unsaved)
+                    .is_some();
+                (project_has_unsaved_changes || deck_unsaved)
+                && !rspice_app_services::workbench::app_state::session::autosave::keeps_unsaved_work(
+                    &self.state,
+                )
+            };
         // The drawing's mark reads where the project does, from where the
         // drawing stands in its history against the saved project: an undo
         // back to the save clears it. Before a first save, the editor's own

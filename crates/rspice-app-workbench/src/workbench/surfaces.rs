@@ -1,5 +1,7 @@
 //! Canonical task-owner surfaces.
 
+pub mod memory_bands;
+
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, WidgetInfo, WidgetType};
 
 use crate::ui::tokens::Tokens;
