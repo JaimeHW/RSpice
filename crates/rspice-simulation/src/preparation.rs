@@ -47,12 +47,20 @@ pub struct PreparationError {
     /// its own, so a failure stays as small as a `Result` should carry.
     sized_limit: bool,
     refusal: Option<PreparationRefusal>,
+    /// What few failures say beside their message, in one box so a failure
+    /// stays as small as a `Result` should carry.
+    asides: Option<Box<PreparationAsides>>,
+}
+
+/// What a failure rarely says beside its message.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PreparationAsides {
     /// The SPICE directive note line the failure is on, where a note wrote
     /// the card that failed.
-    directive_note: Option<Box<crate::netlist_gen::DirectiveNoteLine>>,
+    directive_note: Option<crate::netlist_gen::DirectiveNoteLine>,
     /// What the machine lacks, when the failure refuses a run that needs
     /// more memory than the machine has installed.
-    shortfall: Option<Box<crate::execution::run_memory::MemoryShortfall>>,
+    shortfall: Option<crate::execution::run_memory::MemoryShortfall>,
 }
 
 /// What a failure that refuses a deck, rather than finding it wrong, says
@@ -80,14 +88,13 @@ impl PreparationError {
             interruption: None,
             sized_limit: false,
             refusal: None,
-            directive_note: None,
-            shortfall: None,
+            asides: None,
         }
     }
 
     /// The same failure, on a line of a SPICE directive note.
     pub fn on_directive_note(mut self, place: crate::netlist_gen::DirectiveNoteLine) -> Self {
-        self.directive_note = Some(Box::new(place));
+        self.asides.get_or_insert_with(Box::default).directive_note = Some(place);
         self
     }
 
@@ -112,7 +119,9 @@ impl PreparationError {
     /// The SPICE directive note line the failure is on, if a note wrote the
     /// card that failed.
     pub fn directive_note(&self) -> Option<&crate::netlist_gen::DirectiveNoteLine> {
-        self.directive_note.as_deref()
+        self.asides
+            .as_ref()
+            .and_then(|asides| asides.directive_note.as_ref())
     }
 
     /// The same failure, as a refusal: the host lacks `capability`, which
@@ -137,7 +146,7 @@ impl PreparationError {
         mut self,
         shortfall: crate::execution::run_memory::MemoryShortfall,
     ) -> Self {
-        self.shortfall = Some(Box::new(shortfall));
+        self.asides.get_or_insert_with(Box::default).shortfall = Some(shortfall);
         self
     }
 
@@ -145,7 +154,9 @@ impl PreparationError {
     /// more memory than the machine has installed: what a host says the
     /// refusal from, of a design or of a deck.
     pub fn memory_shortfall(&self) -> Option<&crate::execution::run_memory::MemoryShortfall> {
-        self.shortfall.as_deref()
+        self.asides
+            .as_ref()
+            .and_then(|asides| asides.shortfall.as_ref())
     }
 
     /// The same failure, said as `message`.
