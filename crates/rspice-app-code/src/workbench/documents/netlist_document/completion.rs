@@ -304,7 +304,7 @@ pub fn show(
 ) -> Option<(usize, usize, String, usize)> {
     let (move_delta, accept, dismiss) = keys;
 
-    if dismiss {
+    if dismiss || state.shown_language_off() {
         state.completion_open = false;
         state.completion_dismissed_at = Some(state.revision);
         return None;

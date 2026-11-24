@@ -409,6 +409,9 @@ fn nothing_newer(messages: MessageCatalog, file: &OpenFile) -> String {
 /// Read the file at `path`.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_file(path: &Path, messages: MessageCatalog) -> Result<OpenFile, String> {
+    if let Some(refused) = super::deck_memory::refusal_before_reading(path, messages) {
+        return Err(refused);
+    }
     let bytes = std::fs::read(path)
         .map_err(|error| unreadable(messages, &path.display().to_string(), &error))?;
     let mut file = OpenFile::from_bytes(path.to_path_buf(), &bytes, messages)?;
@@ -2408,9 +2411,13 @@ impl<T: Send + 'static> ReadAway<T> {
     /// that takes it.
     fn start(read: impl FnOnce() -> T + Send + 'static) -> std::io::Result<Self> {
         let (sender, receiver) = mpsc::channel();
+        #[cfg(any(test, feature = "test-support"))]
+        let memory = super::deck_memory::assumed_machine_memory();
         std::thread::Builder::new()
             .name("deck-read".to_owned())
             .spawn(move || {
+                #[cfg(any(test, feature = "test-support"))]
+                super::deck_memory::assume_machine_memory_here(memory);
                 if sender.send(read()).is_ok()
                     && let Some(wake) = DECK_READ_WAKER.get()
                 {
@@ -2633,6 +2640,7 @@ pub fn land_deck_read(
             if netlist.deck_tab_closed {
                 // Its tab closed while it was read: the deck is open, as a
                 // deck whose tab was closed is, until it is shown again.
+                netlist.language_off = super::deck_memory::LanguageOff::as_opened(&deck);
                 netlist.open_deck = Some(deck);
                 runs.manual_run.edited_lines.clear();
             } else {
@@ -2681,6 +2689,7 @@ pub fn install_open_deck(
     }
     netlist.unreadable_deck = None;
     netlist.reading_deck = None;
+    netlist.language_off = super::deck_memory::LanguageOff::as_opened(&deck);
     netlist.open_deck = Some(deck);
     show_deck(model, netlist);
     runs.manual_run.edited_lines.clear();

@@ -135,7 +135,13 @@ pub(crate) fn show(cx: &mut Cx<'_, SourceFeature>, ui: &mut Ui) {
             messages,
             document_bar_height(viewport.x, viewport.y, cx.wb.coarse_pointer),
         );
-        super::netlist_first::reading_line(ui, messages);
+        match cx.state.netlist.language_off() {
+            Some(off) => {
+                let name = deck_name(cx.model, &cx.state.netlist, messages);
+                ui.label(off.words(&name, messages));
+            }
+            None => super::netlist_first::reading_line(ui, messages),
+        }
         return;
     };
     let cards = setup_cards(&index);

@@ -91,13 +91,17 @@ pub(in crate::workbench) fn netlist(
         return asked;
     }
     if crate::workbench::documents::deck_files::reading_deck_in_front(parts.netlist) {
-        reading_outline(ui, parts, &mut asked);
+        reading_outline(ui, parts, &mut asked, true);
         return asked;
     }
     if let Some(missing) =
         crate::workbench::documents::deck_files::missing_deck_in_front(parts.model, parts.netlist)
     {
         missing_deck_outline(ui, parts, &missing, &mut asked);
+        return asked;
+    }
+    if parts.netlist.shown_language_off() {
+        reading_outline(ui, parts, &mut asked, false);
         return asked;
     }
     let root_label =
@@ -108,7 +112,7 @@ pub(in crate::workbench) fn netlist(
         parts.model,
         parts.netlist,
     ) else {
-        reading_outline(ui, parts, &mut asked);
+        reading_outline(ui, parts, &mut asked, true);
         return asked;
     };
     lib_sections::refresh(parts.model, parts.netlist, parts.source_editing);
@@ -708,13 +712,16 @@ fn missing_deck_outline(
         });
 }
 
-/// The outline while the text in front is read for the first time: the
-/// decks, the Structure header and a busy line where the rows will be, so
-/// the navigator says the text is being read rather than that it is empty.
+/// The outline while the text in front is read for the first time
+/// (`reading`): the decks, the Structure header and a busy line where the
+/// rows will be, so the navigator says the text is being read rather than
+/// that it is empty. Else the deck's language features are off, and the line
+/// says so.
 fn reading_outline(
     ui: &mut Ui,
     parts: &mut NetlistNavigator<'_>,
     asked: &mut NetlistNavigatorAsked,
+    reading: bool,
 ) {
     let messages = parts.messages;
     let height = outline_row_height(ui, parts.coarse_pointer);
@@ -735,8 +742,15 @@ fn reading_outline(
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     ui.add_space(NETLIST_OUTLINE_PADDING_X + NETLIST_OUTLINE_CARET_COLUMN);
-                    crate::ui::widgets::busy_mark(ui, NETLIST_OUTLINE_ICON_SIZE);
-                    ui.label(messages.text(MessageId::NetlistReadingText));
+                    if reading {
+                        crate::ui::widgets::busy_mark(ui, NETLIST_OUTLINE_ICON_SIZE);
+                        ui.label(messages.text(MessageId::NetlistReadingText));
+                    } else {
+                        ui.add(
+                            egui::Label::new(messages.text(MessageId::NetlistDeckLanguageOffShort))
+                                .truncate(),
+                        );
+                    }
                 },
             );
         });

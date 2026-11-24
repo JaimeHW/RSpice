@@ -1,5 +1,6 @@
 //! The bands over a deck's file: a file changed on disk while its tab held
-//! edits, an include's edits the check does not read yet, and in the
+//! edits, an include's edits the check does not read yet, a deck whose
+//! language features are off for want of memory to index it, and in the
 //! browser a deck that is a file on the desktop, which it cannot read or
 //! run. A deck whose file is not where the project says has no band: the
 //! page's body in front of it says so, the one place, and offers the two
@@ -108,6 +109,26 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SourceFeature>) {
         super::advisory_band(ui, None, |ui| {
             ui.label(messages.text(MessageId::NetlistIncludeNotSaved));
         });
+    }
+    if let Some(off) = cx.state.netlist.language_off() {
+        let deck = cx
+            .state
+            .netlist
+            .open_deck
+            .as_ref()
+            .map_or(name, |deck| deck.root.name());
+        let mut pressed = None;
+        super::advisory_band(ui, None, |ui| {
+            pressed = band_row(
+                ui,
+                &off.words(&deck, messages),
+                &[((), messages.text(MessageId::NetlistDeckIndexAnyway))],
+            );
+        });
+        if pressed.is_some() {
+            cx.state.netlist.index_anyway();
+            ui.ctx().request_repaint();
+        }
     }
 }
 

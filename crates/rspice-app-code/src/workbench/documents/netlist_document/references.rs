@@ -146,8 +146,13 @@ pub(crate) fn name_at_caret(
 ) -> Result<NameAtCaret, String> {
     let place_caret = || messages.text(MessageId::NetlistFollowPlaceCaret);
     let still_reading = || messages.text(MessageId::NetlistFollowStillReading);
-    let index = project_index_now(model, netlist)
-        .ok_or_else(|| messages.text(MessageId::NetlistFollowNoNames))?;
+    let index = project_index_now(model, netlist).ok_or_else(|| {
+        if netlist.shown_language_off() {
+            messages.text(MessageId::NetlistDeckLanguageOffShort)
+        } else {
+            messages.text(MessageId::NetlistFollowNoNames)
+        }
+    })?;
     let buffer = &model.simulation.source.netlist_content;
     let file = index
         .file_holding(netlist.front.include(), buffer)

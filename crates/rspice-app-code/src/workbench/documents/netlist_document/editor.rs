@@ -673,6 +673,11 @@ fn refresh_diagnostics(
     if netlist.diag_revision == Some(revision) && netlist.diag_library_folders == folders {
         return;
     }
+    // A deck whose language features are off is checked when Run or Check
+    // asks, not as it is typed.
+    if netlist.shown_language_off() {
+        return;
+    }
     netlist.live_check.stop_unless(revision, folders);
     if netlist.diag_revision.is_some() {
         mark_findings_stale(&mut netlist.diagnostics);

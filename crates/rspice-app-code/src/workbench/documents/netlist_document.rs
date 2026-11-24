@@ -737,6 +737,10 @@ pub struct NetlistDocumentState {
     /// The project deck being read away from the frame, which a later frame
     /// takes: its tab stands in front meanwhile, saying it is reading.
     pub reading_deck: Option<super::deck_files::DeckRead>,
+    /// The open deck's language features, off when it opened with indexes
+    /// the machine had no memory free for, until the reader asks for them.
+    /// Read through [`NetlistDocumentState::language_off`].
+    pub(crate) language_off: Option<super::deck_memory::LanguageOff>,
     /// Whether the reader closed the open deck's tab: the deck stays open,
     /// with any edit not yet saved, until it is shown again.
     pub deck_tab_closed: bool,
@@ -920,6 +924,30 @@ impl NetlistDocumentState {
     /// front for good, as its tab closed.
     pub fn run_the_plan(&mut self) {
         self.run_target = super::netlist_tabs::RunTarget::Plan;
+    }
+
+    /// The open deck's language features while they are off: the outline,
+    /// hover, go to definition, completion and the check of the deck and its
+    /// includes build no index until the reader asks for them.
+    #[must_use]
+    pub fn language_off(&self) -> Option<super::deck_memory::LanguageOff> {
+        let off = self.language_off?;
+        self.open_deck
+            .as_ref()
+            .is_some_and(|deck| deck.id == off.deck)
+            .then_some(off)
+    }
+
+    /// Whether the language features of the text the editor shows are off:
+    /// it is the open deck or one of its includes, and theirs are.
+    pub(crate) fn shown_language_off(&self) -> bool {
+        self.front.root_kind() == NetlistRoot::Deck && self.language_off().is_some()
+    }
+
+    /// Index the open deck anyway, its language features on again, as its
+    /// band offers.
+    pub fn index_anyway(&mut self) {
+        self.language_off = None;
     }
 
     /// Whether the buffer stands where an edit typed in the editor left it,

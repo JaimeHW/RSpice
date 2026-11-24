@@ -1117,6 +1117,9 @@ fn shown_root_in(
     let root = netlist.front.root_kind();
     let key = match root {
         NetlistRoot::Deck => {
+            if netlist.language_off().is_some() {
+                return None;
+            }
             let deck = netlist.open_deck.as_ref()?;
             (deck.tab_id(), netlist.revision, deck.includes.len())
         }
@@ -1496,7 +1499,7 @@ pub(crate) fn value_hover_at_in(
     char_index: usize,
     wait: bool,
 ) -> Option<NetlistValueHover> {
-    if netlist.front.is_comparison() {
+    if netlist.front.is_comparison() || netlist.shown_language_off() {
         return None;
     }
     let revision = netlist.revision;
@@ -1634,6 +1637,16 @@ pub(crate) fn open_project_location_in(
     Ok(())
 }
 
+/// Why an action that reads the project index has none: the deck's language
+/// features are off, or there is no index of the text shown.
+pub(crate) fn no_index(netlist: &NetlistDocumentState, messages: MessageCatalog) -> String {
+    messages.text(if netlist.shown_language_off() {
+        MessageId::NetlistDeckLanguageOffShort
+    } else {
+        MessageId::NetlistSignatureNoIndex
+    })
+}
+
 /// Go to the definition of the symbol at the caret, opening the source it
 /// is in, over the model, the netlist editor's state, the include tabs the
 /// reader opened, the runs and the session.
@@ -1650,8 +1663,7 @@ pub fn go_to_definition_at_cursor_in(
         netlist.cursor_char_index,
     )
     .ok_or_else(|| messages.text(MessageId::NetlistPlaceCaretOnName))?;
-    let index = project_index_now(model, netlist)
-        .ok_or_else(|| messages.text(MessageId::NetlistSignatureNoIndex))?;
+    let index = project_index_now(model, netlist).ok_or_else(|| no_index(netlist, messages))?;
     // The read under the caret binds the definition its scope sees: a
     // subcircuit's own parameter inside it, the deck's outside.
     let bound = index.definition_at(
@@ -1709,8 +1721,8 @@ pub fn show_signature_help_at_cursor(
     {
         Some(directive) => directive,
         None => {
-            let index = project_index_now(model, netlist)
-                .ok_or_else(|| messages.text(MessageId::NetlistSignatureNoIndex))?;
+            let index =
+                project_index_now(model, netlist).ok_or_else(|| no_index(netlist, messages))?;
             match index.signature_at(netlist.front.include(), &source, cursor, messages) {
                 Some(Ok(signature)) => (signature.title, signature.detail),
                 Some(Err(name)) => {
@@ -1737,8 +1749,7 @@ pub(crate) fn open_workspace_symbols(
     workbench: &mut rspice_app_workbench::workbench::state::WorkbenchSession,
 ) -> Result<String, String> {
     let messages = workbench.messages();
-    let index = project_index_now(model, netlist)
-        .ok_or_else(|| messages.text(MessageId::NetlistSignatureNoIndex))?;
+    let index = project_index_now(model, netlist).ok_or_else(|| no_index(netlist, messages))?;
     let count = index.symbol_count();
     workbench.navigator_visible = true;
     workbench.clear_navigator_filter();

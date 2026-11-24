@@ -139,6 +139,7 @@ pub mod workbench {
         pub use rspice_app_workbench::workbench::documents::*;
 
         pub mod deck_files;
+        pub mod deck_memory;
         pub mod editor_font;
         pub mod netlist_document;
         pub mod netlist_tabs;

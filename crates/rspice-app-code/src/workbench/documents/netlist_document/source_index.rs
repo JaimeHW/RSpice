@@ -170,6 +170,9 @@ fn shown_index_in(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Option<(Arc<NetlistSourceIndex>, bool)> {
+    if netlist.shown_language_off() {
+        return None;
+    }
     let typed = netlist.is_being_typed();
     if !typed && netlist.waits_for_indexes() {
         return Some((visible_source_index_now(model, netlist), true));
@@ -230,6 +233,9 @@ pub fn root_deck_source_index(
     model: &Model,
     netlist: &mut NetlistDocumentState,
 ) -> Option<Arc<NetlistSourceIndex>> {
+    if netlist.language_off().is_some() {
+        return None;
+    }
     match root_deck_apart(model, netlist) {
         Some((root, deck)) if netlist.waits_for_indexes() => {
             Some(now_in(&mut netlist.root_deck_index, Some(&root), &deck))
