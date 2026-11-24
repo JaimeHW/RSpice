@@ -32,7 +32,7 @@ use crate::project_technology::ProjectTechnologyInputs;
 use crate::project_veriloga::preparation::{
     deck_hdl, prepared_configuration_veriloga_runtimes, prepared_corner_veriloga_runtimes,
     prepared_model_library_veriloga_runtimes, prepared_pdk_veriloga_runtimes,
-    project_veriloga_runtimes_referenced_by, rebind_project_veriloga_source_keys,
+    project_veriloga_runtimes_referenced_by_parsed, rebind_project_veriloga_source_keys,
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
@@ -1038,12 +1038,12 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
     )?;
     let project_model_sources =
         prepared_project_model_sources_of(inputs.technology.models, &hierarchy)?;
-    let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(
+    let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by_parsed(
         inputs.technology.project.id(),
         inputs.project_sources,
         inputs.compilation,
         &expanded,
-        inputs.execution_limits(),
+        &hierarchy.parsed,
     )?
     .try_merge(external_veriloga_runtimes)
     .and_then(|runtimes| runtimes.try_merge(deck_hdl_runtimes))

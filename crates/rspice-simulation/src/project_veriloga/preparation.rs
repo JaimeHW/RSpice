@@ -31,17 +31,21 @@ pub fn deck_hdl(source: &str, limits: ResourceLimits) -> (Vec<ExternalCell>, Dig
     };
     rspice_core::Netlist::parse_with_options(source, options).map_or_else(
         |_| (Vec::new(), DigitalDelaySelect::Typ),
-        |netlist| {
-            let config = rspice_core::resolve_simulation_config(
-                &rspice_core::SimulationConfig::default(),
-                Some(&netlist.options),
-                &rspice_core::SimulationConfigOverrides::default(),
-            );
-            (
-                rspice_core::engine::hdl_external_cells(&netlist),
-                rspice_core::engine::hdl_delay_select(&config),
-            )
-        },
+        |netlist| deck_hdl_of(&netlist),
+    )
+}
+
+/// [`deck_hdl`] of a deck its run parsed already, as `parsed`.
+#[must_use]
+pub fn deck_hdl_of(parsed: &rspice_core::Netlist) -> (Vec<ExternalCell>, DigitalDelaySelect) {
+    let config = rspice_core::resolve_simulation_config(
+        &rspice_core::SimulationConfig::default(),
+        Some(&parsed.options),
+        &rspice_core::SimulationConfigOverrides::default(),
+    );
+    (
+        rspice_core::engine::hdl_external_cells(parsed),
+        rspice_core::engine::hdl_delay_select(&config),
     )
 }
 
@@ -368,7 +372,36 @@ pub fn project_veriloga_runtimes_referenced_by(
     source: &str,
     limits: ResourceLimits,
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+    runtimes_referenced_by(project_id, sources, retained, source, || {
+        deck_hdl(source, limits)
+    })
+}
+
+/// [`project_veriloga_runtimes_referenced_by`] for a deck its run parsed
+/// already, as `parsed`: its cells and selection are read from that parse.
+pub fn project_veriloga_runtimes_referenced_by_parsed(
+    project_id: ProjectId,
+    sources: &ProjectSourceRegistry,
+    retained: Option<&ProjectCompileReceipt>,
+    source: &str,
+    parsed: &rspice_core::Netlist,
+) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
+    runtimes_referenced_by(project_id, sources, retained, source, || {
+        deck_hdl_of(parsed)
+    })
+}
+
+/// The runtimes `source` names, compiled against the cells and selection
+/// `deck_hdl` reads of it, read once, when a bundle it names needs them.
+fn runtimes_referenced_by(
+    project_id: ProjectId,
+    sources: &ProjectSourceRegistry,
+    retained: Option<&ProjectCompileReceipt>,
+    source: &str,
+    deck_hdl: impl FnOnce() -> (Vec<ExternalCell>, DigitalDelaySelect),
+) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let lines = executable_logical_lines(source);
+    let mut deck_hdl = Some(deck_hdl);
     let mut runtimes = Vec::new();
     // The deck's cells and selection, read once a bundle it names needs them.
     let mut deck = None;
@@ -387,7 +420,8 @@ pub fn project_veriloga_runtimes_referenced_by(
         if !references_bundle {
             continue;
         }
-        let (cells, delay_select) = deck.get_or_insert_with(|| deck_hdl(source, limits));
+        let (cells, delay_select) =
+            deck.get_or_insert_with(|| deck_hdl.take().expect("the deck is read once")());
         let runtime =
             prepared_project_veriloga_runtime(project_id, bundle, retained, cells, *delay_select)?;
         let exact_reference = lines.iter().any(|(_, line)| {
