@@ -336,20 +336,31 @@ pub struct MemoryWarning {
 }
 
 impl MemoryWarning {
-    /// What the run needs and what the machine has, and what running it
-    /// anyway does.
+    /// What a design's run needs and what the machine has, and what running
+    /// it anyway does, as a schematic run says it.
     #[must_use]
     pub fn message(&self) -> String {
-        format!("{} Other programs slow while it runs.", self.numbers())
+        self.message_of(RunOf::Design)
     }
 
-    /// What the run needs and what the machine has: the sentence a band
-    /// beside its Run anyway has room for, whose hover says what running it
-    /// anyway does.
+    /// What the run of a design or a deck (`run`) needs and what the machine
+    /// has, and what running it anyway does.
     #[must_use]
-    pub fn numbers(&self) -> String {
+    pub fn message_of(&self, run: RunOf) -> String {
         format!(
-            "This design's {} devices need about {} of memory; {} of {} is free.",
+            "{} Other programs slow while it runs.",
+            self.numbers_of(run)
+        )
+    }
+
+    /// What the run of a design or a deck (`run`) needs and what the machine
+    /// has: the sentence a band beside its Run anyway has room for, whose
+    /// hover says what running it anyway does.
+    #[must_use]
+    pub fn numbers_of(&self, run: RunOf) -> String {
+        format!(
+            "{} {} devices need about {} of memory; {} of {} is free.",
+            run.possessive(),
             grouped(self.devices),
             memory_words(self.needed_bytes),
             memory_words(self.memory.free_bytes),
@@ -364,6 +375,84 @@ impl MemoryWarning {
             "Needs about {} of memory · {} free",
             memory_words(self.needed_bytes),
             memory_words(self.memory.free_bytes)
+        )
+    }
+}
+
+/// What a run is of, which its sentences name: the design a schematic run
+/// simulates, or the deck the Netlist workspace runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunOf {
+    Design,
+    Deck,
+}
+
+impl RunOf {
+    const fn possessive(self) -> &'static str {
+        match self {
+            Self::Design => "This design's",
+            Self::Deck => "This deck's",
+        }
+    }
+
+    const fn subject(self) -> &'static str {
+        match self {
+            Self::Design => "This design",
+            Self::Deck => "This deck",
+        }
+    }
+}
+
+/// A run that needs more than the memory installed, which no paging makes
+/// room for: what it needs, and what the machine has. A refusal for memory
+/// carries it ([`PreparationError::memory_shortfall`]), so a host says the
+/// refusal of a design or of a deck in its own words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryShortfall {
+    /// The devices of the flattened deck.
+    pub devices: usize,
+    /// The memory the run needs, about.
+    pub needed_bytes: u64,
+    /// The memory the machine has installed.
+    pub installed_bytes: u64,
+}
+
+impl MemoryShortfall {
+    /// The whole refusal of the run of a design or a deck (`run`): what it
+    /// needs, what the machine has, and where to run it.
+    #[must_use]
+    pub fn message_of(&self, run: RunOf) -> String {
+        format!(
+            "{} has {} devices. Running it needs about {} of memory, more than the {} this \
+             computer has. Run it on a computer with more memory.",
+            run.subject(),
+            grouped(self.devices),
+            memory_words(self.needed_bytes),
+            memory_words(self.installed_bytes)
+        )
+    }
+
+    /// What the run of a design or a deck (`run`) needs against what the
+    /// machine has: the sentence a band above the deck has room for, whose
+    /// hover says the whole refusal.
+    #[must_use]
+    pub fn numbers_of(&self, run: RunOf) -> String {
+        format!(
+            "{} {} devices need about {} of memory, more than the {} this computer has.",
+            run.possessive(),
+            grouped(self.devices),
+            memory_words(self.needed_bytes),
+            memory_words(self.installed_bytes)
+        )
+    }
+
+    /// The same in the few words a status line has room for.
+    #[must_use]
+    pub fn status(&self) -> String {
+        format!(
+            "Needs about {} of memory · {} installed",
+            memory_words(self.needed_bytes),
+            memory_words(self.installed_bytes)
         )
     }
 }
@@ -383,16 +472,18 @@ pub fn check_fits(devices: usize, memory: MachineMemory) -> MemoryFit {
             memory,
         });
     }
-    MemoryFit::Refuse(PreparationError::new(
-        PreparationStage::SourceChecks,
-        format!(
-            "This design has {} devices. Running it needs about {} of memory, more than the {} \
-             this computer has. Run it on a computer with more memory.",
-            grouped(devices),
-            memory_words(needed),
-            memory_words(memory.installed_bytes)
-        ),
-    ))
+    let shortfall = MemoryShortfall {
+        devices,
+        needed_bytes: needed,
+        installed_bytes: memory.installed_bytes,
+    };
+    MemoryFit::Refuse(
+        PreparationError::new(
+            PreparationStage::SourceChecks,
+            shortfall.message_of(RunOf::Design),
+        )
+        .short_of_memory(shortfall),
+    )
 }
 
 /// `error` in the reader's words when it went past a limit sized to where

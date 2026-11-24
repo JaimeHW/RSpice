@@ -50,6 +50,9 @@ pub struct PreparationError {
     /// The SPICE directive note line the failure is on, where a note wrote
     /// the card that failed.
     directive_note: Option<Box<crate::netlist_gen::DirectiveNoteLine>>,
+    /// What the machine lacks, when the failure refuses a run that needs
+    /// more memory than the machine has installed.
+    shortfall: Option<Box<crate::execution::run_memory::MemoryShortfall>>,
 }
 
 /// What a failure that refuses a deck, rather than finding it wrong, says
@@ -78,6 +81,7 @@ impl PreparationError {
             sized_limit: false,
             refusal: None,
             directive_note: None,
+            shortfall: None,
         }
     }
 
@@ -125,6 +129,23 @@ impl PreparationError {
     /// deck for one.
     pub fn refusal(&self) -> Option<&PreparationRefusal> {
         self.refusal.as_ref()
+    }
+
+    /// The same failure, as the refusal of a run that needs more memory
+    /// than the machine has installed: `shortfall` says how much.
+    pub(crate) fn short_of_memory(
+        mut self,
+        shortfall: crate::execution::run_memory::MemoryShortfall,
+    ) -> Self {
+        self.shortfall = Some(Box::new(shortfall));
+        self
+    }
+
+    /// What the machine lacks, when this failure refuses a run that needs
+    /// more memory than the machine has installed: what a host says the
+    /// refusal from, of a design or of a deck.
+    pub fn memory_shortfall(&self) -> Option<&crate::execution::run_memory::MemoryShortfall> {
+        self.shortfall.as_deref()
     }
 
     /// The same failure, said as `message`.

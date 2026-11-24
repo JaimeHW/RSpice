@@ -411,7 +411,7 @@ fn engine_cell<'a>(app: &RSpiceApp, readings: &'a StatusReadings) -> Option<Stat
     } else if let Some(warning) = app.state.runs.memory_warning() {
         Cow::Owned(format!(
             "{} Run anyway above the deck runs it; Stop drops it.",
-            warning.message()
+            warning.message_of(rspice_simulation::execution::run_memory::RunOf::Deck)
         ))
     } else if let Some(warning) = app.state.runs.preflight.held_for_memory {
         Cow::Owned(format!(
