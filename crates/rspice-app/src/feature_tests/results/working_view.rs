@@ -433,3 +433,145 @@ fn a_starting_run_opens_on_the_sheet_its_plot_arrives_on() {
     assert_eq!(state.results.results.session.viewer, ResultViewer::Waves);
     controller.abort();
 }
+
+/// A tick the reader makes is one step of the view to undo: undoing it puts
+/// the view and the quick view back as they were before it, and redoing it
+/// takes the tick again.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_undo_after_a_tick_puts_the_quick_view_back() {
+    use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
+    let host = state_with_current_clean_drc();
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.model = host.model;
+    app.state.runs = host.runs;
+    app.state.workbench.activate(Workspace::Results);
+    run_plan(&mut app.state, FIRST_OUT);
+    // Shown from the data browser, as a reader shows a run.
+    assert!(
+        rspice_app_results::workbench::docks::navigator::results_actions::select_result_dataset(
+            &mut app.state.results_parts(),
+            0
+        )
+    );
+    let analysis = {
+        let run = app
+            .state
+            .model
+            .simulation
+            .active_run()
+            .expect("the shown run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    };
+    quick_frame(&mut app.state);
+    let before = view_plots(&app.state);
+    assert_eq!(input_shown(&app.state, analysis), None);
+
+    // Taken off as the data browser takes it off: the reader's own setting.
+    app.state.results.results.session.waveform_visibility.set(
+        SourceWaveformPresentationKey::new(analysis, "V(in)"),
+        Some(false),
+    );
+    quick_frame(&mut app.state);
+    assert!(
+        view_plots(&app.state).contains(&("V(in)".to_owned(), false)),
+        "the view takes the tick"
+    );
+    assert_eq!(input_shown(&app.state, analysis), Some(false));
+
+    assert!(app.command_key_available(WorkbenchCommand::Undo.key()));
+    app.execute_command_key(WorkbenchCommand::Undo.key());
+    quick_frame(&mut app.state);
+    assert_eq!(
+        view_plots(&app.state),
+        before,
+        "the undo puts the view back"
+    );
+    assert_eq!(
+        input_shown(&app.state, analysis),
+        None,
+        "the quick view draws the input as its run does again"
+    );
+
+    app.execute_command_key(WorkbenchCommand::Redo.key());
+    quick_frame(&mut app.state);
+    assert_eq!(
+        input_shown(&app.state, analysis),
+        Some(false),
+        "the redo takes it off again"
+    );
+}
+
+/// An edit of the view made outside the quick view, as another pane makes
+/// one, is drawn on the quick view's next frame, and a frame after it
+/// changes nothing more.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_edit_of_the_view_made_elsewhere_reaches_the_quick_view() {
+    use rspice_app_state::results::visualization_document::DocumentEdit;
+    let host = state_with_current_clean_drc();
+    let mut state = AppState::default();
+    state.model = host.model;
+    state.runs = host.runs;
+    state.workbench.activate(Workspace::Results);
+    run_plan(&mut state, FIRST_OUT);
+    let analysis = show_newest(&mut state);
+    quick_frame(&mut state);
+
+    let view = plan_view(&state);
+    let content = &mut state.model.workspace.content;
+    let document = content
+        .visualization_document(view)
+        .expect("the plan's view");
+    let output = document
+        .traces()
+        .iter()
+        .find(|trace| trace.label == "V(out)")
+        .expect("the output is plotted");
+    let edits = vec![
+        DocumentEdit::SetSignalsPlotted {
+            pane_id: output.pane_id,
+            signals: vec!["V(in)".to_owned()],
+            plotted: false,
+        },
+        DocumentEdit::SetTraceColor {
+            trace_id: output.id,
+            color: Some(ORANGE),
+        },
+    ];
+    let revision = document.revision();
+    content
+        .transact_visualization_document(view, revision, edits)
+        .expect("the edit commits");
+    quick_frame(&mut state);
+
+    let output = SourceWaveformPresentationKey::new(analysis, "V(out)");
+    assert_eq!(
+        input_shown(&state, analysis),
+        Some(false),
+        "the hide is drawn"
+    );
+    assert_eq!(
+        state.results.results.session.waveform_colors.get(&output),
+        Some(&ORANGE),
+        "the colour is drawn"
+    );
+    let revision = state
+        .model
+        .workspace
+        .content
+        .visualization_document(view)
+        .map(|document| document.revision());
+    quick_frame(&mut state);
+    assert_eq!(input_shown(&state, analysis), Some(false));
+    assert_eq!(
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(view)
+            .map(|document| document.revision()),
+        revision,
+        "drawing the edit edits the view no further"
+    );
+}

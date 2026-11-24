@@ -38,11 +38,11 @@ use super::{
     SourceWaveformPresentationKey, WavePanePresentationKey, view_edits,
 };
 
-/// The drawing state of one run's analyses, as the quick view last took it
-/// from the view or wrote it back. A difference from it is the reader's.
+/// The drawing state of one run's analyses besides the reader's ticks, as
+/// the quick view last took it from the view or wrote it back. A difference
+/// from it is the reader's; the ticks keep which signals the reader set.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct ViewScratch {
-    visibility: HashMap<SourceWaveformPresentationKey, bool>,
     expressions: HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
     units: HashMap<(AnalysisPresentationKey, String), String>,
     x_scales: HashMap<AnalysisPresentationKey, XScale>,
@@ -68,6 +68,20 @@ pub(crate) struct QuickViewBinding {
     dataset: DatasetId,
     keys: Vec<(AnalysisPresentationKey, PaneId)>,
     scratch: ViewScratch,
+    /// The content of the view, and the run history, it last drew from.
+    generation: u64,
+    runs: crate::state::RunHistoryRevision,
+    /// The drawing state changed in ways the reader's ticks do not name:
+    /// it is drawn whole from the view again.
+    redraw: bool,
+    /// The reader changed the drawing state since it was drawn, these
+    /// signals among it: it is drawn from the view again, whether or not
+    /// the view took the change.
+    retake: Option<Vec<SourceWaveformPresentationKey>>,
+    /// The view's markers as the quick view drew them. A quick frame leaves
+    /// any saved document's markers, these among them, so each frame puts
+    /// them back.
+    markers: Vec<DocumentMarker>,
 }
 
 /// Whose working view draws `run`.
@@ -241,28 +255,64 @@ fn followed_at(state: ResultsReads<'_>, view: Option<ResultDocumentId>) -> Optio
 }
 
 /// After the quick view drew, or before anything else draws over its state:
-/// write what the reader changed back to the view it drew.
+/// write what the reader changed back to the view it drew. The ticks name
+/// the signals the reader set, and the rest of the drawing state is compared
+/// where it stands, so a frame in which the reader changed nothing costs
+/// next to nothing whatever the view draws.
 pub fn capture(state: &mut ResultsParts<'_>) {
+    let set = state.results.session.waveform_visibility.take_set();
     let Some(mut binding) = state.results.working_view.take() else {
         return;
     };
-    let now = scratch_of(state.results_reads(), &binding.keys);
-    if now != binding.scratch {
-        let edits = capture_edits(state, &binding);
-        if !edits.is_empty()
-            && let Some(revision) = state
-                .model
-                .workspace
-                .content
-                .visualization_document(binding.view)
-                .map(VisualizationDocument::revision)
-            && let Err(error) = view_edits::apply(state, binding.view, revision, edits)
-        {
-            state.prompt(format!("Could not keep this change to the view: {error}"));
-        }
-        binding.scratch = scratch_of(state.results_reads(), &binding.keys);
+    let ticks: Option<Vec<SourceWaveformPresentationKey>> = set.map(|set| {
+        set.into_iter()
+            .filter(|tick| binding.keys.iter().any(|(key, _)| *key == tick.analysis()))
+            .collect()
+    });
+    if ticks.as_ref().is_some_and(Vec::is_empty) && scratch_holds(state.results_reads(), &binding) {
+        state.results.working_view = Some(binding);
+        return;
     }
+    let edits = capture_edits(state, &binding, ticks.as_deref());
+    if !edits.is_empty()
+        && let Some(revision) = state
+            .model
+            .workspace
+            .content
+            .visualization_document(binding.view)
+            .map(VisualizationDocument::revision)
+    {
+        let followed = following_holds(state.results_reads(), binding.view);
+        match view_edits::apply(state, binding.view, revision, edits) {
+            // The reader's edits change nothing following the run reads (its
+            // tracking, the runs its panes read, the signals it drew), so a
+            // follow that changed nothing before still changes nothing.
+            Ok(receipt) => {
+                if followed && let Some(at) = &mut state.results.working_view_followed {
+                    at.revision = Some(receipt.committed_revision);
+                }
+            }
+            Err(error) => state.prompt(format!("Could not keep this change to the view: {error}")),
+        }
+    }
+    // Whatever the view took, the state is drawn from it again: what it
+    // refused or could not hold goes back to what it holds.
+    match ticks {
+        Some(ticks) => binding.retake.get_or_insert_with(Vec::new).extend(ticks),
+        None => binding.redraw = true,
+    }
+    binding.scratch = scratch_of(state.results_reads(), &binding.keys);
     state.results.working_view = Some(binding);
+}
+
+/// Whether following the shown run, when it last changed nothing, would
+/// change nothing still for `view` as it stands.
+fn following_holds(state: ResultsReads<'_>, view: ResultDocumentId) -> bool {
+    state
+        .results
+        .working_view_followed
+        .as_ref()
+        .is_some_and(|at| at.view == Some(view) && followed_at(state, at.view).as_ref() == Some(at))
 }
 
 /// Forget the drawing state the quick view left: something else, a saved
@@ -756,99 +806,103 @@ fn retained_run(
         .find(|run| run.dataset_id == dataset)
 }
 
-/// Draw the retained run `dataset` from `view`.
+/// Draw the retained run `dataset` from `view`. The first time, or once the
+/// run history changed, each pane is drawn whole; after that only what the
+/// view changed since the quick view last drew it, and what the reader
+/// changed that the view may not have taken. A frame in which neither
+/// changed draws nothing.
 fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: DatasetId) {
-    let Some(document) = state
-        .model
-        .workspace
-        .content
-        .visualization_document(view)
-        .cloned()
-    else {
+    let runs = state.model.simulation.retained.runs.revision();
+    let Some(document) = state.model.workspace.content.visualization_document(view) else {
         return;
     };
+    let generation = document.generation();
+    let drawn = state.results.working_view.as_deref().filter(|binding| {
+        binding.view == view
+            && binding.dataset == dataset
+            && binding.runs == runs
+            && !binding.redraw
+    });
+    if drawn.is_some_and(|binding| binding.generation == generation && binding.retake.is_none()) {
+        let results = &mut *state.results;
+        if let Some(binding) = results.working_view.as_deref() {
+            let session = &mut results.session;
+            if session.document_markers != binding.markers {
+                session.project_document_markers(binding.markers.clone());
+            }
+            let panes = binding
+                .keys
+                .iter()
+                .map(|&(analysis, pane_id)| PersistentPaneContext {
+                    document_id: view,
+                    pane_id,
+                    analysis,
+                });
+            if !session.working_view_panes.iter().copied().eq(panes.clone()) {
+                session.working_view_panes = panes.collect();
+            }
+        }
+        return;
+    }
+    // The signals each pane drawn before draws again; a pane it does not
+    // name is drawn whole.
+    let again: Option<HashMap<PaneId, HashSet<String>>> = drawn.and_then(|binding| {
+        let changed = document.signals_changed_since(binding.generation)?;
+        let mut again: HashMap<PaneId, HashSet<String>> = binding
+            .keys
+            .iter()
+            .map(|&(_, pane_id)| (pane_id, HashSet::new()))
+            .collect();
+        for (pane_id, signal) in changed {
+            if let Some(signals) = again.get_mut(&pane_id) {
+                signals.insert(signal.to_owned());
+            }
+        }
+        for tick in binding.retake.iter().flatten() {
+            if let Some((_, pane_id)) = binding.keys.iter().find(|(key, _)| *key == tick.analysis())
+                && let Some(signals) = again.get_mut(pane_id)
+            {
+                signals.insert(tick.source_name().to_owned());
+            }
+        }
+        Some(again)
+    });
     // The run is borrowed where it is kept, not copied: a copy is every
-    // signal's name. A marker's anchor is read through the strip models,
-    // which may be built as it is read, so each pane borrows it afresh.
+    // signal's name.
     let Some(run) = retained_run(state.model, dataset) else {
         return;
     };
-    let panes = bound_panes(&document, run);
+    let panes = bound_panes(document, run);
     let mut markers = Vec::new();
     for &(index, key, pane_id) in &panes {
-        let Some(run) = retained_run(state.model, dataset) else {
-            return;
-        };
         let analysis = &run.analyses[index];
         let Some(pane) = document.panes().iter().find(|pane| pane.id == pane_id) else {
             continue;
         };
-        let traces: Vec<_> = document
-            .traces()
-            .iter()
-            .filter(|trace| trace.pane_id == pane_id)
-            .collect();
         let names = lanes::EventNames::of(analysis);
-        // Each signal the pane draws, and whether every trace of it is shown.
-        let mut drawn = HashMap::<&str, bool>::new();
-        for trace in &traces {
-            *drawn.entry(trace_signal(trace)).or_insert(true) &= trace.visible;
-        }
-        let entry = |waveform: &crate::state::RetainedTrace| {
-            let plotted = drawn.get(waveform.name.as_str()).copied().unwrap_or(false);
-            (waveform.name.clone(), waveform.visible, plotted)
-        };
-        // Only a signal the pane draws or the dataset plots can be plotted
-        // other than where its dataset put it, so with the analysis indexed
-        // only those columns are read, not a million.
-        let mut visibility: Vec<(String, bool, bool)> =
-            match state.results.session.signal_indices.index(
-                &state.model.simulation.retained.runs.revision(),
-                key,
-                &analysis.data,
-            ) {
-                Some(index) => {
-                    let mut columns = index.plotted().to_vec();
-                    for name in drawn.keys() {
-                        columns.extend(index.columns_named(&analysis.data, name));
-                    }
-                    columns.sort_unstable();
-                    columns.dedup();
-                    columns
-                        .into_iter()
-                        .map(|column| entry(&analysis.waveforms[column]))
-                        .collect()
-                }
-                None => analysis.waveforms.iter().map(entry).collect(),
-            };
-        if let Some(names) = names.as_ref() {
-            let listed = lanes::plotted_history_nets(&document, pane_id, names);
-            for name in names.history_only() {
-                let plotted = listed.as_ref().map_or_else(
-                    || {
-                        state.results.session.waveform_visibility(
-                            &SourceWaveformPresentationKey::new(key, name.clone()),
-                            false,
-                        )
-                    },
-                    |listed| listed.contains(name),
+        match again.as_ref().and_then(|again| again.get(&pane_id)) {
+            // A pane of event lanes draws its nets whole: its lanes read them all.
+            Some(signals) if names.is_none() => {
+                project_signals(
+                    state.results,
+                    &runs,
+                    document,
+                    key,
+                    pane_id,
+                    analysis,
+                    signals,
                 );
-                visibility.push((name.clone(), false, plotted));
             }
+            _ => project_traces(
+                state.results,
+                &runs,
+                document,
+                key,
+                pane_id,
+                analysis,
+                names.as_ref(),
+            ),
         }
-        state.results.project_waveform_visibility(key, visibility);
-        state.results.project_waveform_colors(
-            key,
-            traces
-                .iter()
-                .filter_map(|trace| Some((trace_signal(trace).to_owned(), trace.color?))),
-        );
-        state.results.project_waveform_looks(
-            key,
-            traces
-                .iter()
-                .map(|trace| super::trace_style::look_of(trace)),
-        );
 
         let held: Vec<_> = document
             .expression_traces()
@@ -872,7 +926,7 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         if let Some(names) = names {
             let session = &mut state.results.session;
             let layout =
-                lanes::projected_layout(&document, pane_id, &names, session.event_lanes.get(&key));
+                lanes::projected_layout(document, pane_id, &names, session.event_lanes.get(&key));
             if session.event_lanes.get(&key) != Some(&layout) {
                 session.event_lanes.insert(key, layout);
             }
@@ -930,8 +984,8 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         } else {
             session.hidden_strips.remove(&key);
         }
-        readout_pins::project(&mut session.readout_pins, &document, key, pane_id);
-        sheet_settings::project(&mut session.sheet_settings, &document, key, pane_id);
+        readout_pins::project(&mut session.readout_pins, document, key, pane_id);
+        sheet_settings::project(&mut session.sheet_settings, document, key, pane_id);
         if pane.strips.is_empty() {
             session.strip_layouts.remove(&key);
         } else if session.strip_layouts.get(&key) != Some(&pane.strips) {
@@ -958,33 +1012,50 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
             .iter()
             .filter(|marker| marker.pane_id == pane_id)
         {
-            let (Some(trace), TypedValue::Real(x)) = (
-                traces.iter().find(|trace| trace.id == marker.trace_id),
-                &marker.coordinate,
-            ) else {
-                continue;
-            };
-            // A marker on a trace that is not drawn has nothing to sit on.
-            let Some((analysis, anchor)) =
-                super::waves::source_waveform_anchor_in(state, index, trace_signal(trace))
+            let (Some(trace), TypedValue::Real(x)) =
+                (document.trace(marker.trace_id), &marker.coordinate)
             else {
                 continue;
             };
-            markers.push(DocumentMarker {
-                document_id: view,
+            if trace.pane_id != pane_id {
+                continue;
+            }
+            markers.push(MarkerAt {
+                index,
                 pane_id,
                 retained_id: marker.id,
-                analysis,
-                anchor,
+                signal: trace_signal(trace).to_owned(),
                 trace_name: trace.label.clone(),
                 x: *x,
-                kind: super::marker_kind_of_retained(marker.kind),
+                kind: marker.kind,
                 note: super::marker_note(&marker.label, &trace.label),
             });
         }
     }
+    // A marker's anchor is read through the strip models, which may be
+    // built as it is read, once every pane is drawn. A marker on a trace
+    // that is not drawn has nothing to sit on.
+    let mut anchored = Vec::with_capacity(markers.len());
+    for marker in markers {
+        let Some((analysis, anchor)) =
+            super::waves::source_waveform_anchor_in(state, marker.index, &marker.signal)
+        else {
+            continue;
+        };
+        anchored.push(DocumentMarker {
+            document_id: view,
+            pane_id: marker.pane_id,
+            retained_id: marker.retained_id,
+            analysis,
+            anchor,
+            trace_name: marker.trace_name,
+            x: marker.x,
+            kind: super::marker_kind_of_retained(marker.kind),
+            note: marker.note,
+        });
+    }
     let session = &mut state.results.session;
-    session.project_document_markers(markers);
+    session.project_document_markers(anchored.clone());
     session.working_view_panes = panes
         .iter()
         .map(|&(_, analysis, pane_id)| PersistentPaneContext {
@@ -1000,20 +1071,158 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         dataset,
         keys,
         scratch,
+        generation,
+        runs,
+        redraw: false,
+        retake: None,
+        markers: anchored,
     }));
 }
 
-/// The drawing state of the strips `keys` name.
+/// A marker of the view, read off it before its anchor is.
+struct MarkerAt {
+    index: usize,
+    pane_id: PaneId,
+    retained_id: crate::results::visualization_document::MarkerId,
+    signal: String,
+    trace_name: String,
+    x: f64,
+    kind: crate::results::visualization_document::PlotMarkerKind,
+    note: String,
+}
+
+/// Draw each signal pane `pane_id` draws as the view holds it: whether it
+/// is shown, its colour and its look.
+fn project_traces(
+    results: &mut super::ResultsState,
+    runs: &crate::state::RunHistoryRevision,
+    document: &VisualizationDocument,
+    key: AnalysisPresentationKey,
+    pane_id: PaneId,
+    analysis: &crate::state::AnalysisResult,
+    names: Option<&lanes::EventNames>,
+) {
+    let traces: Vec<_> = document
+        .traces()
+        .iter()
+        .filter(|trace| trace.pane_id == pane_id)
+        .collect();
+    // Each signal the pane draws, and whether every trace of it is shown.
+    let mut drawn = HashMap::<&str, bool>::new();
+    for trace in &traces {
+        *drawn.entry(trace_signal(trace)).or_insert(true) &= trace.visible;
+    }
+    let entry = |waveform: &crate::state::RetainedTrace| {
+        let plotted = drawn.get(waveform.name.as_str()).copied().unwrap_or(false);
+        (waveform.name.clone(), waveform.visible, plotted)
+    };
+    // Only a signal the pane draws or the dataset plots can be plotted
+    // other than where its dataset put it, so with the analysis indexed
+    // only those columns are read, not a million.
+    let mut visibility: Vec<(String, bool, bool)> =
+        match results
+            .session
+            .signal_indices
+            .index(runs, key, &analysis.data)
+        {
+            Some(index) => {
+                let mut columns = index.plotted().to_vec();
+                for name in drawn.keys() {
+                    columns.extend(index.columns_named(&analysis.data, name));
+                }
+                columns.sort_unstable();
+                columns.dedup();
+                columns
+                    .into_iter()
+                    .map(|column| entry(&analysis.waveforms[column]))
+                    .collect()
+            }
+            None => analysis.waveforms.iter().map(entry).collect(),
+        };
+    if let Some(names) = names {
+        let listed = lanes::plotted_history_nets(document, pane_id, names);
+        for name in names.history_only() {
+            let plotted = listed.as_ref().map_or_else(
+                || {
+                    results.session.waveform_visibility(
+                        &SourceWaveformPresentationKey::new(key, name.clone()),
+                        false,
+                    )
+                },
+                |listed| listed.contains(name),
+            );
+            visibility.push((name.clone(), false, plotted));
+        }
+    }
+    results.project_waveform_visibility(key, visibility);
+    results.project_waveform_colors(
+        key,
+        traces
+            .iter()
+            .filter_map(|trace| Some((trace_signal(trace).to_owned(), trace.color?))),
+    );
+    results.project_waveform_looks(
+        key,
+        traces
+            .iter()
+            .map(|trace| super::trace_style::look_of(trace)),
+    );
+}
+
+/// Draw `signals` of pane `pane_id` as the view holds them, as
+/// [`project_traces`] draws every signal of the pane: whether each is
+/// shown, its colour and its look, read from its own traces alone.
+fn project_signals(
+    results: &mut super::ResultsState,
+    runs: &crate::state::RunHistoryRevision,
+    document: &VisualizationDocument,
+    key: AnalysisPresentationKey,
+    pane_id: PaneId,
+    analysis: &crate::state::AnalysisResult,
+    signals: &HashSet<String>,
+) {
+    if signals.is_empty() {
+        return;
+    }
+    let index = results
+        .session
+        .signal_indices
+        .index(runs, key, &analysis.data);
+    for signal in signals {
+        let traces = document.traces_reading(pane_id, signal);
+        let column = match &index {
+            Some(index) => index.columns_named(&analysis.data, signal).next(),
+            None => analysis
+                .waveforms
+                .iter()
+                .position(|waveform| waveform.name == *signal),
+        };
+        let presentation = SourceWaveformPresentationKey::new(key, signal.clone());
+        if let Some(column) = column {
+            let dataset_default = analysis.waveforms[column].visible;
+            let plotted = !traces.is_empty() && traces.iter().all(|trace| trace.visible);
+            results.project_waveform_visible(
+                presentation.clone(),
+                (plotted != dataset_default).then_some(plotted),
+            );
+        }
+        let color = traces.iter().rev().find_map(|trace| trace.color);
+        results.draw_waveform_color(presentation.clone(), color);
+        let look = traces
+            .iter()
+            .rev()
+            .map(|trace| super::trace_style::look_of(trace).1)
+            .find(|look| *look != rspice_results_ui::session::WaveformLook::default())
+            .unwrap_or_default();
+        results.draw_waveform_look(presentation, look);
+    }
+}
+
+/// The drawing state of the strips `keys` name, besides the ticks.
 fn scratch_of(state: ResultsReads<'_>, keys: &[(AnalysisPresentationKey, PaneId)]) -> ViewScratch {
     let session = &state.results.session;
     let shown = |analysis: &AnalysisPresentationKey| keys.iter().any(|(key, _)| key == analysis);
     ViewScratch {
-        visibility: session
-            .waveform_visibility
-            .iter()
-            .filter(|(key, _)| shown(&key.analysis()))
-            .map(|(key, visible)| (key.clone(), *visible))
-            .collect(),
         expressions: session
             .analysis_exprs
             .iter()
@@ -1074,8 +1283,80 @@ fn scratch_of(state: ResultsReads<'_>, keys: &[(AnalysisPresentationKey, PaneId)
     }
 }
 
+/// Whether the drawing state of `binding`'s strips, besides the ticks, is
+/// still what the quick view left: compared where it stands, copying none.
+fn scratch_holds(state: ResultsReads<'_>, binding: &QuickViewBinding) -> bool {
+    let session = &state.results.session;
+    let scratch = &binding.scratch;
+    let shown =
+        |analysis: &AnalysisPresentationKey| binding.keys.iter().any(|(key, _)| key == analysis);
+    same_entries(&session.analysis_exprs, &scratch.expressions, shown)
+        && same_entries(&session.expression_units, &scratch.units, |(key, _)| {
+            shown(key)
+        })
+        && same_entries(&session.x_scales, &scratch.x_scales, shown)
+        && session
+            .xy_strips
+            .iter()
+            .filter(|strip| shown(&strip.analysis))
+            .eq(scratch.xy_strips.iter())
+        && same_members(&session.log_y_panes, &scratch.log_y, |pane| {
+            shown(&pane.analysis)
+        })
+        && same_members(&session.hidden_strips, &scratch.hidden, shown)
+        && same_entries(&session.event_lanes, &scratch.lanes, shown)
+        && readout_pins::scratch(&session.readout_pins, &binding.keys) == scratch.pins
+        && sheet_settings::scratch(&session.sheet_settings, &binding.keys) == scratch.settings
+        && same_entries(&session.strip_layouts, &scratch.strips, shown)
+        && same_entries(&session.family_policies, &scratch.family, shown)
+        && session.maximized_strip.filter(|key| shown(key)) == scratch.maximized
+}
+
+/// Whether the entries of `now` that `shown` picks are exactly `then`.
+fn same_entries<K: Eq + std::hash::Hash, V: PartialEq>(
+    now: &HashMap<K, V>,
+    then: &HashMap<K, V>,
+    shown: impl Fn(&K) -> bool,
+) -> bool {
+    let mut picked = 0;
+    for (key, value) in now {
+        if shown(key) {
+            if then.get(key) != Some(value) {
+                return false;
+            }
+            picked += 1;
+        }
+    }
+    picked == then.len()
+}
+
+/// Whether the members of `now` that `shown` picks are exactly `then`.
+fn same_members<K: Eq + std::hash::Hash>(
+    now: &HashSet<K>,
+    then: &HashSet<K>,
+    shown: impl Fn(&K) -> bool,
+) -> bool {
+    let mut picked = 0;
+    for key in now {
+        if shown(key) {
+            if !then.contains(key) {
+                return false;
+            }
+            picked += 1;
+        }
+    }
+    picked == then.len()
+}
+
 /// The edits that make `binding`'s view hold what the quick view drew.
-fn capture_edits(state: &ResultsParts<'_>, binding: &QuickViewBinding) -> Vec<DocumentEdit> {
+///
+/// With `ticks`, the reader set only those signals' ticks since the quick
+/// view drew; without, any of them.
+fn capture_edits(
+    state: &ResultsParts<'_>,
+    binding: &QuickViewBinding,
+    ticks: Option<&[SourceWaveformPresentationKey]>,
+) -> Vec<DocumentEdit> {
     let (Some(document), Some(run)) = (
         state
             .model
@@ -1101,38 +1382,70 @@ fn capture_edits(state: &ResultsParts<'_>, binding: &QuickViewBinding) -> Vec<Do
         let Some(pane) = document.panes().iter().find(|pane| pane.id == pane_id) else {
             continue;
         };
-        // Each signal the pane draws, and whether every trace of it is shown.
-        let mut drawn = HashMap::<&str, bool>::new();
-        for trace in document
-            .traces()
-            .iter()
-            .filter(|trace| trace.pane_id == pane_id)
-        {
-            *drawn.entry(trace_signal(trace)).or_insert(true) &= trace.visible;
-        }
         // However many signals one gesture ticks or unticks, the view takes
-        // them as one edit each way.
+        // them as one edit each way, in the order the run lists them. With
+        // the signals the reader set known, only those are read.
         let (mut ticked, mut unticked) = (Vec::new(), Vec::new());
-        for waveform in &analysis.waveforms {
-            let wanted = session.waveform_visibility(
-                &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
-                waveform.visible,
-            );
-            let plotted = drawn.get(waveform.name.as_str()).copied().unwrap_or(false);
-            if wanted == plotted {
-                continue;
+        let mut differ = |column: usize, name: &str, wanted: bool, plotted: bool| {
+            if wanted != plotted {
+                let to = if wanted { &mut ticked } else { &mut unticked };
+                to.push((column, name.to_owned()));
             }
-            if wanted {
-                ticked.push(waveform.name.clone());
-            } else {
-                unticked.push(waveform.name.clone());
+        };
+        match ticks {
+            Some(ticks) => {
+                let index = session.signal_indices.index(
+                    &state.model.simulation.retained.runs.revision(),
+                    key,
+                    &analysis.data,
+                );
+                for tick in ticks.iter().filter(|tick| tick.analysis() == key) {
+                    let name = tick.source_name();
+                    let column = match &index {
+                        Some(index) => index.columns_named(&analysis.data, name).next(),
+                        None => analysis
+                            .waveforms
+                            .iter()
+                            .position(|waveform| waveform.name == name),
+                    };
+                    let Some(column) = column else {
+                        continue;
+                    };
+                    let traces = document.traces_reading(pane_id, name);
+                    let plotted = !traces.is_empty() && traces.iter().all(|trace| trace.visible);
+                    let wanted =
+                        session.waveform_visibility(tick, analysis.waveforms[column].visible);
+                    differ(column, name, wanted, plotted);
+                }
+            }
+            None => {
+                // Each signal the pane draws, and whether every trace of it
+                // is shown.
+                let mut drawn = HashMap::<&str, bool>::new();
+                for trace in document
+                    .traces()
+                    .iter()
+                    .filter(|trace| trace.pane_id == pane_id)
+                {
+                    *drawn.entry(trace_signal(trace)).or_insert(true) &= trace.visible;
+                }
+                for (column, waveform) in analysis.waveforms.iter().enumerate() {
+                    let wanted = session.waveform_visibility(
+                        &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
+                        waveform.visible,
+                    );
+                    let plotted = drawn.get(waveform.name.as_str()).copied().unwrap_or(false);
+                    differ(column, &waveform.name, wanted, plotted);
+                }
             }
         }
-        for (signals, plotted) in [(ticked, true), (unticked, false)] {
+        for (mut signals, plotted) in [(ticked, true), (unticked, false)] {
             if !signals.is_empty() {
+                signals.sort_unstable_by_key(|(column, _)| *column);
+                signals.dedup_by_key(|(column, _)| *column);
                 edits.push(DocumentEdit::SetSignalsPlotted {
                     pane_id,
-                    signals,
+                    signals: signals.into_iter().map(|(_, name)| name).collect(),
                     plotted,
                 });
             }
