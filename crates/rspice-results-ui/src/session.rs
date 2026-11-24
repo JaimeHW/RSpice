@@ -615,7 +615,7 @@ impl VisibilityOverrides {
     }
 
     fn put(&mut self, key: &SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
-        // The key is copied only for a signal not set before.
+        // The ticks copy the key only for a signal they did not hold.
         let changed = match visible {
             Some(visible) => match self.overrides.get_mut(key) {
                 Some(held) => std::mem::replace(held, visible) != visible,
