@@ -8,7 +8,9 @@
 use super::{plan_view, quick_frame, run_plan_with, show_newest, view_plots};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use rspice_app_results::workbench::docks::navigator::results_actions::select_result_dataset;
+use rspice_app_results::workbench::docks::navigator::results_actions::{
+    select_result_dataset, set_result_quantities_ticked,
+};
 use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
 use rspice_app_results::workbench::documents::result_document::create_document;
 use rspice_app_results::workbench::documents::result_document::document_edit::{
@@ -23,6 +25,7 @@ use rspice_results::document_creation::{ResultDocumentFamily, ResultDocumentLayo
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;
+use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 /// Results over the session's plan, which has not run yet.
 fn app_on_the_plan() -> RSpiceApp {
@@ -117,6 +120,50 @@ fn save_and_reopen(mut state: AppState) -> AppState {
     show_newest(&mut state);
     quick_frame(&mut state);
     state
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_hundred_thousand_signals_ticked_at_once_undo_and_redo_as_one_step() {
+    const SIGNALS: usize = 100_000;
+    let mut app = app_on_the_plan();
+    run_plan_with(&mut app.state, signals(SIGNALS));
+    assert!(select_result_dataset(&mut app.state.results_parts(), 0));
+    quick_frame(&mut app.state);
+    let analysis = shown_analysis(&app.state);
+    let keys: Vec<_> = every_signal(&app.state)
+        .into_iter()
+        .map(|name| {
+            ResultBrowserSelectionKey::Waveform(SourceWaveformPresentationKey::new(analysis, name))
+        })
+        .collect();
+
+    // One gesture, as Plot all makes it.
+    set_result_quantities_ticked(&mut app.state.results_parts(), &keys, true);
+    quick_frame(&mut app.state);
+    assert_eq!(
+        ticked_and_plotted(&app.state),
+        (SIGNALS, SIGNALS),
+        "every tick is kept, in the browser and on the plot"
+    );
+
+    assert!(app.command_key_available(WorkbenchCommand::Undo.key()));
+    app.execute_command_key(WorkbenchCommand::Undo.key());
+    quick_frame(&mut app.state);
+    assert_eq!(
+        ticked_and_plotted(&app.state),
+        (0, 0),
+        "one undo takes every signal off"
+    );
+
+    assert!(app.command_key_available(WorkbenchCommand::Redo.key()));
+    app.execute_command_key(WorkbenchCommand::Redo.key());
+    quick_frame(&mut app.state);
+    assert_eq!(
+        ticked_and_plotted(&app.state),
+        (SIGNALS, SIGNALS),
+        "one redo puts every signal back"
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]

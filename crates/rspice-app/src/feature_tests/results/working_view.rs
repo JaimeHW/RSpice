@@ -75,6 +75,9 @@ fn quick_frame(state: &mut AppState) {
     let mut parts = state.results_parts();
     working_view::sync(&mut parts);
     working_view::capture(&mut parts);
+    // The traces of a large gesture, made away from the frame, are taken
+    // in before the test reads the view.
+    working_view::settle(&mut parts);
 }
 
 /// Show the newest run, first in the history, as Results does when a run

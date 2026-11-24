@@ -457,7 +457,7 @@ pub(crate) fn wake_on_plotted(state: &mut ResultsParts<'_>, ctx: &egui::Context)
 
 /// Have the view take in the traces being made for it, waiting for them:
 /// before anything else changes the view or draws from it.
-pub(crate) fn settle(state: &mut ResultsParts<'_>) {
+pub fn settle(state: &mut ResultsParts<'_>) {
     if state.results.working_view_plotting.pending.is_none() {
         return;
     }
