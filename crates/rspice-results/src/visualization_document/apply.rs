@@ -27,8 +27,12 @@ struct Removal {
 /// anything else (whether it shows, its colour, style or lane) leaves what
 /// a check of it found as it was.
 fn reads_the_same(before: &Trace, now: &Trace) -> bool {
+    before.binding == now.binding && reads_alike(before, now)
+}
+
+/// [`reads_the_same`], whatever content of a dataset each reads.
+fn reads_alike(before: &Trace, now: &Trace) -> bool {
     before.pane_id == now.pane_id
-        && before.binding == now.binding
         && before.signal_key == now.signal_key
         && before.coordinate_key == now.coordinate_key
         && before.row_predicates == now.row_predicates
@@ -1631,12 +1635,39 @@ impl VisualizationDocument {
         let mut traces = Vec::new();
         {
             let dataset = self.dataset_for_binding(next)?;
-            let mut signals_by_analysis = HashMap::<AnalysisInstanceId, SignalNames>::new();
+            // Each analysis's signal names, and its identity spelled as a
+            // predicate spells it.
+            let mut signals_by_analysis =
+                HashMap::<AnalysisInstanceId, (SignalNames, String)>::new();
+            // The analysis the last trace's predicates named, as spelled
+            // there: the traces of one analysis spell it alike, so it is
+            // read once, not once a trace.
+            let mut spelled: Option<(&str, Option<AnalysisInstanceId>)> = None;
             for (index, trace) in self.traces.iter().enumerate() {
                 if trace.binding != previous {
                     continue;
                 }
-                let from = trace.source_analysis().or_else(|| {
+                let named =
+                    trace
+                        .row_predicates
+                        .iter()
+                        .find_map(|coordinate| match &coordinate.value {
+                            TypedValue::Text(analysis)
+                                if coordinate.column == ANALYSIS_ID_COLUMN =>
+                            {
+                                Some(analysis.as_str())
+                            }
+                            _ => None,
+                        });
+                let source = named.and_then(|named| match spelled {
+                    Some((held, analysis)) if held == named => analysis,
+                    _ => {
+                        let analysis = named.parse().ok();
+                        spelled = Some((named, analysis));
+                        analysis
+                    }
+                });
+                let from = source.or_else(|| {
                     let mut bound = self
                         .panes
                         .iter()
@@ -1654,35 +1685,49 @@ impl VisualizationDocument {
                 if let std::collections::hash_map::Entry::Vacant(entry) =
                     signals_by_analysis.entry(to)
                 {
-                    entry.insert(SignalNames::of(dataset, to, describe_next)?);
+                    entry.insert((SignalNames::of(dataset, to, describe_next)?, to.to_string()));
                 }
-                let names = &signals_by_analysis[&to];
-                let predicates = if names.is_wide() {
-                    None
+                let (names, spelled_to) = &signals_by_analysis[&to];
+                let reading = if names.is_wide() {
+                    Reading::Unread
                 } else {
                     // The vector the trace was provisioned from, not what it
                     // is called: a reader who renames a trace has not
                     // repointed it at another signal. A signal a table
                     // lacks keeps its trace, marked missing, naming the
                     // analysis it now stands in; a run says whether it has
-                    // the signal when the trace is drawn.
+                    // the signal when the trace is drawn. Predicates that
+                    // name the signal in a run already are kept.
                     let signal = trace.source_signal().unwrap_or(&trace.label);
-                    Some(match names.predicates(signal, trace_component(trace)) {
-                        Some(predicates) => (predicates.clone(), false),
-                        None if keep_missing || trace.missing => {
-                            (missing_signal_predicates(&trace.row_predicates, to), true)
+                    let component = trace_component(trace);
+                    if matches!(names, SignalNames::Run(_))
+                        && super::run_source::are_run_signal_predicates(
+                            &trace.row_predicates,
+                            spelled_to,
+                            signal,
+                            component,
+                        )
+                    {
+                        Reading::Kept
+                    } else {
+                        match names.predicates(signal, component) {
+                            Some(predicates) => Reading::Read(predicates, false),
+                            None if keep_missing || trace.missing => Reading::Read(
+                                missing_signal_predicates(&trace.row_predicates, to),
+                                true,
+                            ),
+                            None => {
+                                return Err(VisualizationError::InvalidValue {
+                                    field: "trace.row-predicates",
+                                    message: format!(
+                                        "the {describe_next} dataset has no exact display trace named {signal:?}"
+                                    ),
+                                });
+                            }
                         }
-                        None => {
-                            return Err(VisualizationError::InvalidValue {
-                                field: "trace.row-predicates",
-                                message: format!(
-                                    "the {describe_next} dataset has no exact display trace named {signal:?}"
-                                ),
-                            });
-                        }
-                    })
+                    }
                 };
-                traces.push((index, predicates));
+                traces.push((index, reading));
             }
         }
         if panes.is_empty() && traces.is_empty() && !follow {
@@ -1717,16 +1762,25 @@ impl VisualizationDocument {
             }
             expression.datasets.dedup();
         }
-        for (index, predicates) in traces {
-            self.traces.update_at(index, |trace| {
-                if let Some((predicates, missing)) = predicates {
+        for (index, reading) in traces {
+            match reading {
+                Reading::Read(predicates, missing) => self.traces.update_at(index, |trace| {
                     trace.row_predicates = predicates.into();
                     trace.signal_key = "y".into();
                     trace.coordinate_key = "x".into();
                     trace.missing = missing;
-                }
-                trace.binding = next;
-            });
+                    trace.binding = next;
+                }),
+                // Its predicates, and so its signal, stand: it stays under
+                // its key.
+                Reading::Kept => self.traces.update_unkeyed_at(index, |trace| {
+                    trace.missing = false;
+                    trace.binding = next;
+                }),
+                Reading::Unread => self.traces.update_unkeyed_at(index, |trace| {
+                    trace.binding = next;
+                }),
+            }
         }
         Ok(())
     }
@@ -2220,7 +2274,9 @@ impl VisualizationDocument {
         }
         // A trace whose reading did not change holds as it held; one made,
         // or one that reads something else now, is checked, and so is what
-        // reads it.
+        // reads it. One moved onto a newer content of its run, which a trace
+        // reads as it read the content before, reads the same.
+        let grown = self.grown_runs();
         let mut reread = HashSet::new();
         let mut relaned = false;
         let check_trace = |trace: &Trace| -> Result<(), VisualizationError> {
@@ -2236,6 +2292,11 @@ impl VisualizationDocument {
                 && (before.is_some_and(|before| reads_the_same(before, trace))
                     || self.traces.made_checked(trace.id.get()))
             {
+                continue;
+            }
+            if before.is_some_and(|before| {
+                grown.contains(&(before.binding, trace.binding)) && reads_alike(before, trace)
+            }) {
                 continue;
             }
             if before.is_some() {
@@ -2357,6 +2418,26 @@ impl VisualizationDocument {
 
     /// The datasets the running transaction attached, changed or took out:
     /// what reads one of them reads otherwise.
+    /// Each run reference the running transaction replaced with a newer
+    /// content of the same run that a trace reads alike: the same analyses,
+    /// through the same columns. Before and after.
+    fn grown_runs(&self) -> Vec<(DatasetBinding, DatasetBinding)> {
+        let (before, after) = self.datasets.changed();
+        before
+            .iter()
+            .filter_map(|held| {
+                let now = after.iter().find(|now| {
+                    now.binding.dataset_id == held.binding.dataset_id && now.binding != held.binding
+                })?;
+                let (Some(was), Some(is)) = (&held.run, &now.run) else {
+                    return None;
+                };
+                (was.analyses() == is.analyses() && held.columns == now.columns)
+                    .then_some((held.binding, now.binding))
+            })
+            .collect()
+    }
+
     fn changed_datasets(&self) -> HashSet<DatasetBinding> {
         let (before, after) = self.datasets.changed();
         before
@@ -3167,6 +3248,16 @@ impl SignalNames {
 
 /// The part of its signal a trace draws: the display values unless its
 /// predicates name another.
+/// What a trace moved onto another run reads there.
+enum Reading {
+    /// The predicates it holds, which name its signal there already.
+    Kept,
+    /// These predicates, and whether the run lacks the signal.
+    Read(Vec<QueryCoordinate>, bool),
+    /// The dataset names no signals: it reads as it read.
+    Unread,
+}
+
 pub(super) fn trace_component(trace: &Trace) -> SignalComponent {
     trace
         .row_predicates

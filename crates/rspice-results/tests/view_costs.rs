@@ -261,6 +261,42 @@ fn a_hundred_thousand_signals_plotted_at_once_are_one_step() {
     assert!(document.traces().iter().all(|trace| !trace.visible));
 }
 
+/// A view of a hundred thousand traces following its run as the run grows
+/// reads the grown run with every trace in one transaction, and draws no
+/// signal otherwise: each trace reads its signal as it did.
+#[test]
+fn a_large_view_following_its_grown_run_draws_no_signal_otherwise() {
+    const TRACES: usize = 100_000;
+    let mut document = view(TRACES);
+    let held = document.datasets()[0].binding();
+    let analysis = document.panes()[0]
+        .binding
+        .expect("the pane reads the run")
+        .analysis_id;
+    let grown = DatasetBinding::new(held.dataset_id, ContentDigest::from_bytes([2; 32]));
+    let next = SourceDataset::run_reference(
+        grown,
+        "Run",
+        vec![RunSourceAnalysis::new(analysis, AnalysisType::Transient)],
+    )
+    .expect("a run reference");
+    let generation = document.generation();
+    let started = Instant::now();
+    document
+        .transact(document.revision(), vec![DocumentEdit::FollowRun { next }])
+        .expect("the view follows its run");
+    println!(
+        "following the grown run with {TRACES} traces: {:?}",
+        started.elapsed()
+    );
+    assert!(document.traces().iter().all(|trace| trace.binding == grown));
+    assert_eq!(
+        document.signals_changed_since(generation),
+        Some(Vec::new()),
+        "no signal is drawn otherwise"
+    );
+}
+
 /// A view of a hundred thousand traces with a cursor on its pane, and the
 /// cursor.
 fn view_with_cursor(signals: usize) -> (VisualizationDocument, CursorId) {
@@ -436,8 +472,7 @@ fn removing_panes_of_a_large_view_keeps_the_rest_in_order() {
     const PANES: usize = 4;
     const ROUNDS: usize = 10;
     const EACH: usize = 2_500;
-    let analyses: Vec<AnalysisInstanceId> =
-        (0..PANES).map(|_| AnalysisInstanceId::new()).collect();
+    let analyses: Vec<AnalysisInstanceId> = (0..PANES).map(|_| AnalysisInstanceId::new()).collect();
     let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([1; 32]));
     let source = SourceDataset::run_reference(
         binding,
@@ -541,7 +576,10 @@ fn removing_panes_of_a_large_view_keeps_the_rest_in_order() {
             );
             held += 1;
         }
-        assert!(held >= ROUNDS * EACH, "every trace of the pane is tombstoned");
+        assert!(
+            held >= ROUNDS * EACH,
+            "every trace of the pane is tombstoned"
+        );
     }
     assert_eq!(tombstoned.next(), None, "nothing else is taken out");
 }

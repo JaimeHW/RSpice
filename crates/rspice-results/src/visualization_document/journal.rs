@@ -86,11 +86,15 @@ impl VisualizationDocument {
         let mut present = Vec::new();
         let mut gone = Vec::new();
         for (now, before) in self.traces.touched_with_before() {
-            present.push(now.id);
-            if let Some(before) = before
-                && (before.pane_id != now.pane_id || signal_of(before) != signal_of(now))
-            {
-                gone.push((before.pane_id, signal_of(before).to_owned()));
+            match before {
+                Some(before) if draws_alike(before, now) => {}
+                Some(before) => {
+                    present.push(now.id);
+                    if before.pane_id != now.pane_id || signal_of(before) != signal_of(now) {
+                        gone.push((before.pane_id, signal_of(before).to_owned()));
+                    }
+                }
+                None => present.push(now.id),
             }
         }
         for identity in self.traces.taken_out() {
@@ -108,6 +112,43 @@ impl VisualizationDocument {
             }),
         };
     }
+}
+
+/// Whether `now` draws as `before` did: the one change, if any, is a newer
+/// content of the dataset it reads, as a view following its run as the run
+/// grows moves it. Every field is named, so one added is weighed here.
+fn draws_alike(before: &Trace, now: &Trace) -> bool {
+    let Trace {
+        id,
+        pane_id,
+        binding,
+        signal_key,
+        coordinate_key,
+        row_predicates,
+        x_axis_id,
+        y_axis_id,
+        label,
+        visible,
+        color,
+        lane,
+        style,
+        missing,
+    } = before;
+    *id == now.id
+        && *pane_id == now.pane_id
+        && binding.dataset_id == now.binding.dataset_id
+        && *signal_key == now.signal_key
+        && *coordinate_key == now.coordinate_key
+        && (Arc::ptr_eq(row_predicates, &now.row_predicates)
+            || *row_predicates == now.row_predicates)
+        && *x_axis_id == now.x_axis_id
+        && *y_axis_id == now.y_axis_id
+        && *label == now.label
+        && *visible == now.visible
+        && *color == now.color
+        && *lane == now.lane
+        && *style == now.style
+        && *missing == now.missing
 }
 
 /// A number no other content of a document in this process has had.
@@ -451,12 +492,36 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
         result
     }
 
+    /// [`Self::update_at`] for a change that keeps the entity under its
+    /// key, so the index is not read.
+    pub(super) fn update_unkeyed_at<R>(
+        &mut self,
+        index: usize,
+        change: impl FnOnce(&mut T) -> R,
+    ) -> R {
+        let item = &mut self.items[index];
+        keep_present(&mut self.journal, item);
+        #[cfg(debug_assertions)]
+        let before = self.index.key(item);
+        let result = change(item);
+        #[cfg(debug_assertions)]
+        assert!(
+            before == self.index.key(item),
+            "an unkeyed change keeps the key"
+        );
+        result
+    }
+
     /// Put `item` in place of the entity at `index`, which has its
     /// identity: the entity it replaces is kept as it stood, moved rather
     /// than copied.
     fn replace_at(&mut self, index: usize, item: T) {
         let identity = item.identity();
-        debug_assert_eq!(self.items[index].identity(), identity, "a replacement keeps the identity");
+        debug_assert_eq!(
+            self.items[index].identity(),
+            identity,
+            "a replacement keeps the identity"
+        );
         let was = std::mem::replace(&mut self.items[index], item);
         if !self.index.same_key(&was, &self.items[index]) {
             let (before, after) = (self.index.key(&was), self.index.key(&self.items[index]));
@@ -687,9 +752,9 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
     /// Whether the transaction made, changed, put back or took out the
     /// entity `identity`.
     pub(super) fn touches(&self, identity: u64) -> bool {
-        self.journal.as_ref().is_some_and(|journal| {
-            identity >= journal.since || journal.slot(identity).is_some()
-        })
+        self.journal
+            .as_ref()
+            .is_some_and(|journal| identity >= journal.since || journal.slot(identity).is_some())
     }
 
     /// The entity `identity` as it stood before the transaction, when the
@@ -747,7 +812,7 @@ impl EntityList<Trace, SignalIndex> {
             }
             held = true;
             if trace.visible != visible {
-                self.update_at(index, |trace| trace.visible = visible);
+                self.update_unkeyed_at(index, |trace| trace.visible = visible);
             }
         }
         held

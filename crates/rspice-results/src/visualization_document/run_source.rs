@@ -690,6 +690,24 @@ pub(super) fn run_signal_predicates(
     run_signal_predicates_of(&analysis.to_string(), name, component)
 }
 
+/// Whether `predicates` are [`run_signal_predicates_of`] `analysis`, `name`
+/// and `component`, read without making them.
+pub(super) fn are_run_signal_predicates(
+    predicates: &[QueryCoordinate],
+    analysis: &str,
+    name: &str,
+    component: SignalComponent,
+) -> bool {
+    let text = |coordinate: &QueryCoordinate, column: &str, value: &str| {
+        coordinate.column == column
+            && matches!(&coordinate.value, TypedValue::Text(text) if text == value)
+    };
+    matches!(predicates, [named, part, of]
+        if text(named, TRACE_NAME_COLUMN, name)
+            && text(part, COMPONENT_COLUMN, component.key())
+            && text(of, ANALYSIS_ID_COLUMN, analysis))
+}
+
 /// [`run_signal_predicates`] with the analysis already spelled out.
 pub(super) fn run_signal_predicates_of(
     analysis: &str,
