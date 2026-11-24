@@ -12,6 +12,7 @@ use std::cell::RefCell;
 
 use rspice_app_services::io::ProjectSnapshot;
 use rspice_app_services::workbench::app_state::session::browser_session::{self, RestoredRuns};
+#[cfg(any(target_arch = "wasm32", test))]
 use rspice_app_services::workbench::lifecycle::project_checkpoint;
 use rspice_app_state::diagnostics::{LogSeverity, LogSource};
 
