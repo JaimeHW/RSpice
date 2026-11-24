@@ -1158,10 +1158,20 @@ fn phase_sample(
 /// Stable per-trace identity shared by the decimation, range, and
 /// measurement caches. Phase traces fold in the wrapped/continuous choice
 /// so a toggle never serves stale envelopes, ranges, or stats.
+///
+/// It hashes the parts of the trace's [`anchor_key`] where they are: a frame
+/// takes the key of every trace it walks, and making the anchor key copies
+/// the trace's name.
 pub fn trace_key(model: &StripModel, trace: &StripTrace) -> u64 {
     let continuous = trace.kind.is_phase() && model.phase_continuous;
+    let anchor = (
+        &model.analysis_key,
+        trace.source_waveform_name.as_str(),
+        trace.kind as u8,
+        trace.presentation_key,
+    );
     run_mixed_key(
-        stable_hash(&(anchor_key(model, trace), continuous)),
+        stable_hash(&(anchor, continuous)),
         trace.run_id,
         trace.overlay,
     )
