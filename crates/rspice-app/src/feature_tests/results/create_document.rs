@@ -170,8 +170,8 @@ fn commit_is_project_owned_dirty_and_stably_selected() {
     assert_eq!(document.traces().len(), 2);
     assert!(document.traces().iter().all(|trace| {
         trace.label == "V(out)"
-            && trace.coordinate_key == "x"
-            && trace.signal_key == "y"
+            && &*trace.coordinate_key == "x"
+            && &*trace.signal_key == "y"
             && trace.row_predicates.len() == 3
     }));
     assert_eq!(document.tracking(), ResultDocumentTracking::pinned());

@@ -384,7 +384,7 @@ pub(super) fn trace_contains_exact_coordinate(
     let coordinate_index = column_index(dataset, &trace.coordinate_key)?;
     if coordinate.value_type() != dataset.columns[coordinate_index].value_type {
         return Err(VisualizationError::ColumnTypeMismatch {
-            column: trace.coordinate_key.clone(),
+            column: trace.coordinate_key.to_string(),
             expected: dataset.columns[coordinate_index].value_type,
             actual: coordinate.value_type(),
         });
@@ -404,7 +404,7 @@ pub(super) fn trace_contains_exact_coordinate(
         });
     }
     let mut wanted = vec![(coordinate_index, coordinate)];
-    for predicate in &trace.row_predicates {
+    for predicate in trace.row_predicates.iter() {
         wanted.push((column_index(dataset, &predicate.column)?, &predicate.value));
     }
     Ok(document.rows().holds(dataset, &wanted))

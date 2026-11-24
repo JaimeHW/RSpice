@@ -332,5 +332,5 @@ fn a_trace_reads_against_another_signal_column_but_not_against_itself() {
     let reloaded: VisualizationDocument =
         serde_json::from_str(&serde_json::to_string(&document).unwrap()).unwrap();
     assert_eq!(reloaded, document);
-    assert_eq!(reloaded.traces()[0].coordinate_key, "V(in)");
+    assert_eq!(&*reloaded.traces()[0].coordinate_key, "V(in)");
 }

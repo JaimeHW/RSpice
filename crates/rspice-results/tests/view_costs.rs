@@ -194,6 +194,65 @@ fn one_transaction_of_a_hundred_thousand_edits_commits_them_all() {
     assert!(traces.iter().skip(1).step_by(2).all(|trace| !trace.visible));
 }
 
+/// One gesture that plots a hundred thousand more signals on a view of a
+/// hundred thousand is one step: undo takes every one of them off and redo
+/// puts them back in their order. Taking them all off again hides each.
+#[test]
+fn a_hundred_thousand_signals_plotted_at_once_are_one_step() {
+    const TRACES: usize = 100_000;
+    let mut document = view(TRACES);
+    let pane_id = document.panes()[0].id;
+    let names = |from: usize, to: usize| -> Vec<String> {
+        (from..to).map(|index| format!("V(n{index})")).collect()
+    };
+    let started = Instant::now();
+    let (_, step) = document
+        .transact_with_undo(
+            document.revision(),
+            vec![DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals: names(TRACES, 2 * TRACES),
+                plotted: true,
+            }],
+        )
+        .expect("every signal plots");
+    println!(
+        "plotting {TRACES} new signals on a view of {TRACES} traces: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(document.traces().len(), 2 * TRACES);
+    let started = Instant::now();
+    let (_, redo) = document
+        .take_step(document.revision(), step)
+        .expect("the gesture undoes");
+    println!("its undo: {:?}", started.elapsed());
+    assert_eq!(document.traces().len(), TRACES, "undo takes them all off");
+    let started = Instant::now();
+    document
+        .take_step(document.revision(), redo)
+        .expect("and redoes");
+    println!("its redo: {:?}", started.elapsed());
+    let labels: Vec<String> = document
+        .traces()
+        .iter()
+        .map(|trace| trace.label.clone())
+        .collect();
+    assert_eq!(labels, names(0, 2 * TRACES), "redo puts them back in order");
+    let started = Instant::now();
+    document
+        .transact_with_undo(
+            document.revision(),
+            vec![DocumentEdit::SetSignalsPlotted {
+                pane_id,
+                signals: names(0, 2 * TRACES),
+                plotted: false,
+            }],
+        )
+        .expect("every signal comes off");
+    println!("taking {} signals off: {:?}", 2 * TRACES, started.elapsed());
+    assert!(document.traces().iter().all(|trace| !trace.visible));
+}
+
 /// A view of a hundred thousand traces with a cursor on its pane, and the
 /// cursor.
 fn view_with_cursor(signals: usize) -> (VisualizationDocument, CursorId) {

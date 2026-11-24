@@ -1719,9 +1719,9 @@ impl VisualizationDocument {
         for (index, predicates) in traces {
             self.traces.update_at(index, |trace| {
                 if let Some((predicates, missing)) = predicates {
-                    trace.row_predicates = predicates;
-                    trace.signal_key = "y".to_owned();
-                    trace.coordinate_key = "x".to_owned();
+                    trace.row_predicates = predicates.into();
+                    trace.signal_key = "y".into();
+                    trace.coordinate_key = "x".into();
                     trace.missing = missing;
                 }
                 trace.binding = next;
@@ -1756,9 +1756,9 @@ impl VisualizationDocument {
             id,
             pane_id: trace.pane_id,
             binding: trace.binding,
-            signal_key: trace.signal_key,
-            coordinate_key: trace.coordinate_key,
-            row_predicates: trace.row_predicates,
+            signal_key: trace.signal_key.into(),
+            coordinate_key: trace.coordinate_key.into(),
+            row_predicates: trace.row_predicates.into(),
             x_axis_id: trace.x_axis_id,
             y_axis_id: trace.y_axis_id,
             label: trace.label,

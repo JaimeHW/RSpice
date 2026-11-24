@@ -33,6 +33,7 @@ use std::fmt;
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
+use std::sync::Arc;
 
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::ser::SerializeStruct;
@@ -195,6 +196,13 @@ where
     D: Deserializer<'de>,
 {
     BoundedString::<MAX_VISUALIZATION_KEY_BYTES>::deserialize(deserializer).map(|value| value.0)
+}
+
+fn deserialize_shared_key<'de, D>(deserializer: D) -> Result<Arc<str>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_key_string(deserializer).map(Arc::from)
 }
 
 fn deserialize_label_string<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -1247,13 +1255,15 @@ pub struct Trace {
     pub id: TraceId,
     pub pane_id: PaneId,
     pub binding: DatasetBinding,
-    #[serde(deserialize_with = "deserialize_key_string")]
-    pub signal_key: String,
-    #[serde(deserialize_with = "deserialize_key_string")]
-    pub coordinate_key: String,
+    /// The source columns and rows a trace reads are shared by its copies:
+    /// a step that keeps a trace as it stood copies none of them.
+    #[serde(deserialize_with = "deserialize_shared_key")]
+    pub signal_key: Arc<str>,
+    #[serde(deserialize_with = "deserialize_shared_key")]
+    pub coordinate_key: Arc<str>,
     /// Exact coordinate-column predicates selecting this trace's rows from a
     /// lossless long-form source dataset.
-    pub row_predicates: Vec<QueryCoordinate>,
+    pub row_predicates: Arc<[QueryCoordinate]>,
     pub x_axis_id: AxisId,
     pub y_axis_id: AxisId,
     /// What the reader sees, and the one field a rename writes.
