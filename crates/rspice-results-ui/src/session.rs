@@ -522,7 +522,7 @@ pub struct VisibilityOverrides {
     revision: rspice_vocabulary::source_revision::SourceRevision,
     /// The signals [`Self::set`] changed since [`Self::take_set`]; `None`
     /// once a mutable borrow may have changed any of them.
-    set_since: Option<HashSet<SourceWaveformPresentationKey>>,
+    set_since: Option<Vec<SourceWaveformPresentationKey>>,
     /// The signals edited one at a time, oldest first, each with the
     /// revision its edit left. An edit that does not say which signals it
     /// touched empties it.
@@ -559,7 +559,7 @@ impl VisibilityOverrides {
             return false;
         }
         if let Some(set) = &mut self.set_since {
-            set.insert(key);
+            set.push(key);
         }
         true
     }
@@ -607,10 +607,11 @@ impl VisibilityOverrides {
         Some(self.edits[from..].iter().map(|(_, key)| key))
     }
 
-    /// The signals the reader set since this was last asked, and forget
-    /// them: `None` when anything may have changed any signal.
-    pub fn take_set(&mut self) -> Option<HashSet<SourceWaveformPresentationKey>> {
-        self.set_since.replace(HashSet::new())
+    /// The signals the reader set since this was last asked, each as often
+    /// as it was set, and forget them: `None` when anything may have
+    /// changed any signal.
+    pub fn take_set(&mut self) -> Option<Vec<SourceWaveformPresentationKey>> {
+        self.set_since.replace(Vec::new())
     }
 
     fn put(&mut self, key: &SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
@@ -1309,7 +1310,11 @@ impl ResultViewerState {
 
     /// Leave the persistent projection: the pane context and the retained
     /// marker overlay it scopes both belong to the document that was open.
+    /// With none open, the overlay is the working view's, and stays.
     pub fn leave_persistent_document(&mut self) {
+        if self.persistent_pane_context.is_none() && self.document_presentation.is_none() {
+            return;
+        }
         self.persistent_pane_context = None;
         self.document_markers.clear();
         self.document_presentation = None;

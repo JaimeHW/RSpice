@@ -1701,6 +1701,9 @@ pub struct ResultsState {
     /// What the working view last followed the shown run from, when that
     /// changed nothing. Transient.
     pub(crate) working_view_followed: Option<working_view::FollowedAt>,
+    /// The traces the working view is being given away from the frame, and
+    /// the rest of the reader's change they belong to. Transient.
+    pub(crate) working_view_plotting: working_view::PlottingSlot,
     /// The runs a working view read while they were still running, so each
     /// is read again once it finishes. A run opened finished is read as it
     /// is: its samples may be kept another way after a save, not grown.
@@ -2010,6 +2013,7 @@ fn show_with_chrome(
     let family = document_edit::family::quick_view_selection(state.results_reads());
     state.results.set_sample_selection(family);
     prepare_viewer_state(state);
+    working_view::wake_on_plotted(state, ui.ctx());
     working_view::sync(state);
     let plan_before_docbar = state
         .model

@@ -23,7 +23,7 @@ use rspice_results_ui::waves::lanes::EventLaneLayout;
 
 use crate::product::{DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{
-    AxisOrientation, AxisScale, DocumentEdit, NewAxis, PaneId, ResultDocumentTracking,
+    AxisOrientation, AxisScale, DocumentEdit, EntityRef, NewAxis, PaneId, ResultDocumentTracking,
     ResultDocumentTrackingMode, SourceDataset, Strip, TypedValue, VisualizationDocument,
     WorkingPane, WorkingViewSource,
 };
@@ -78,10 +78,6 @@ pub(crate) struct QuickViewBinding {
     /// signals among it: it is drawn from the view again, whether or not
     /// the view took the change.
     retake: Option<Vec<SourceWaveformPresentationKey>>,
-    /// The view's markers as the quick view drew them. A quick frame leaves
-    /// any saved document's markers, these among them, so each frame puts
-    /// them back.
-    markers: Vec<DocumentMarker>,
 }
 
 /// Whose working view draws `run`.
@@ -259,55 +255,327 @@ fn followed_at(state: ResultsReads<'_>, view: Option<ResultDocumentId>) -> Optio
 /// the signals the reader set, and the rest of the drawing state is compared
 /// where it stands, so a frame in which the reader changed nothing costs
 /// next to nothing whatever the view draws.
+///
+/// More new traces than a frame makes itself are made away from it, and
+/// the view takes them in, with the rest of the change, as one step once
+/// they are made; until then the quick view draws the reader's ticks.
 pub fn capture(state: &mut ResultsParts<'_>) {
     let set = state.results.session.waveform_visibility.take_set();
     let Some(mut binding) = state.results.working_view.take() else {
+        take_in(state, None, false);
         return;
     };
+    take_in(state, Some(&mut binding), false);
     let ticks: Option<Vec<SourceWaveformPresentationKey>> = set.map(|set| {
         set.into_iter()
             .filter(|tick| binding.keys.iter().any(|(key, _)| *key == tick.analysis()))
             .collect()
     });
-    if ticks.as_ref().is_some_and(Vec::is_empty) && scratch_holds(state.results_reads(), &binding) {
+    let held = scratch_holds(state.results_reads(), &binding);
+    if ticks.as_ref().is_some_and(Vec::is_empty) && held {
         state.results.working_view = Some(binding);
         return;
     }
-    let edits = capture_edits(state, &binding, ticks.as_deref());
-    if !edits.is_empty()
-        && let Some(revision) = state
+    // What the reader changed is kept after what an earlier change of
+    // theirs is still making, so the steps stand in the order taken.
+    take_in(state, Some(&mut binding), true);
+    let Captured {
+        mut edits,
+        new,
+        normalize,
+    } = capture_edits(state, &binding, ticks.as_deref());
+    let view = binding.view;
+    // Only ticks the view takes as they stand leave the quick view drawing
+    // what it draws: the view's change is the reader's, and nothing else is
+    // drawn from it (a marker on a signal taken off loses its anchor).
+    let normalize = normalize.filter(|_| {
+        held && state
             .model
             .workspace
             .content
-            .visualization_document(binding.view)
-            .map(VisualizationDocument::revision)
-    {
-        let followed = following_holds(state.results_reads(), binding.view);
-        match view_edits::apply(state, binding.view, revision, edits) {
-            // The reader's edits change nothing following the run reads (its
-            // tracking, the runs its panes read, the signals it drew), so a
-            // follow that changed nothing before still changes nothing.
-            Ok(receipt) => {
-                if followed && let Some(at) = &mut state.results.working_view_followed {
-                    at.revision = Some(receipt.committed_revision);
+            .visualization_document(view)
+            .is_some_and(|document| {
+                edits.iter().all(|edit| match edit {
+                    DocumentEdit::SetSignalsPlotted {
+                        pane_id,
+                        plotted: false,
+                        ..
+                    } => !document
+                        .markers()
+                        .iter()
+                        .any(|marker| marker.pane_id == *pane_id),
+                    DocumentEdit::SetSignalsPlotted { .. } => true,
+                    _ => false,
+                })
+            })
+    });
+    let making: usize = new.iter().map(|(_, names)| names.len()).sum();
+    let preparations = (making > FRAME_TRACES)
+        .then(|| {
+            let document = state.model.workspace.content.visualization_document(view)?;
+            new.iter()
+                .map(|(pane_id, _)| document.plot_preparation(*pane_id))
+                .collect::<Option<Vec<_>>>()
+        })
+        .flatten();
+    match preparations {
+        Some(preparations) => {
+            let work: Vec<_> = preparations
+                .into_iter()
+                .zip(new.into_iter().map(|(_, names)| names))
+                .collect();
+            let waker = state.results.working_view_plotting.waker.clone();
+            let spawned = std::thread::Builder::new()
+                .name("plot traces".to_owned())
+                .spawn(move || {
+                    let made = work
+                        .into_iter()
+                        .map(|(preparation, names)| preparation.prepare(names))
+                        .collect();
+                    if let Some(ctx) = waker {
+                        ctx.request_repaint();
+                    }
+                    made
+                });
+            match spawned {
+                Ok(making) => {
+                    state.results.working_view_plotting.pending = Some(Box::new(Plotting {
+                        view,
+                        edits,
+                        ticks,
+                        normalize,
+                        making,
+                    }));
                 }
+                // A thread that cannot start makes nothing: the ticks are
+                // drawn from the view again, as for a change it refused.
+                Err(error) => keep(
+                    state,
+                    view,
+                    Some(&mut binding),
+                    Err(error.to_string()),
+                    ticks,
+                    None,
+                ),
             }
-            Err(error) => state.prompt(format!("Could not keep this change to the view: {error}")),
         }
-    }
-    // Whatever the view took, the state is drawn from it again: what it
-    // refused or could not hold goes back to what it holds.
-    match ticks {
-        Some(ticks) => binding.retake.get_or_insert_with(Vec::new).extend(ticks),
-        None => binding.redraw = true,
+        None => {
+            edits.extend(new.into_iter().map(|(pane_id, signals)| {
+                DocumentEdit::SetSignalsPlotted {
+                    pane_id,
+                    signals,
+                    plotted: true,
+                }
+            }));
+            keep(state, view, Some(&mut binding), Ok(edits), ticks, normalize);
+        }
     }
     binding.scratch = scratch_of(state.results_reads(), &binding.keys);
     state.results.working_view = Some(binding);
 }
 
+/// How many new traces a frame makes itself: each is a few small
+/// allocations, a third of a microsecond, so about this many take a
+/// millisecond. More are made away from the frame. The page has one
+/// thread, and makes them all.
+const FRAME_TRACES: usize = if cfg!(target_arch = "wasm32") {
+    usize::MAX
+} else {
+    3_000
+};
+
+/// A tick the quick view draws other than the view draws it: the reader's
+/// setting as it stood, and the view's.
+type Normal = (SourceWaveformPresentationKey, Option<bool>, Option<bool>);
+
+/// Traces being made away from the frame for one change of the reader's,
+/// and the rest of that change, which the view takes in with them.
+struct Plotting {
+    view: ResultDocumentId,
+    edits: Vec<DocumentEdit>,
+    ticks: Option<Vec<SourceWaveformPresentationKey>>,
+    normalize: Option<Vec<Normal>>,
+    making: std::thread::JoinHandle<
+        Result<
+            Vec<crate::results::visualization_document::PreparedPlot>,
+            crate::results::visualization_document::VisualizationError,
+        >,
+    >,
+}
+
+/// The traces a working view is being given away from the frame, if any,
+/// and the window to wake once they are made.
+#[derive(Default)]
+pub(crate) struct PlottingSlot {
+    pending: Option<Box<Plotting>>,
+    waker: Option<egui::Context>,
+}
+
+impl Clone for PlottingSlot {
+    /// A copy is not given the traces being made: they go to the view of
+    /// the state they were made for. It wakes the same window.
+    fn clone(&self) -> Self {
+        Self {
+            pending: None,
+            waker: self.waker.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for PlottingSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlottingSlot")
+            .field(
+                "pending",
+                &self.pending.as_ref().map(|pending| pending.view),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl PlottingSlot {
+    /// The view traces are being made for, while they are.
+    pub(crate) fn view(&self) -> Option<ResultDocumentId> {
+        self.pending.as_ref().map(|pending| pending.view)
+    }
+
+    /// Make nothing more for `view`, which is gone.
+    pub(crate) fn forget(&mut self, view: ResultDocumentId) {
+        if self.view() == Some(view) {
+            self.pending = None;
+        }
+    }
+}
+
+/// Wake `ctx` when traces made away from the frame are ready for the view.
+pub(crate) fn wake_on_plotted(state: &mut ResultsParts<'_>, ctx: &egui::Context) {
+    let slot = &mut state.results.working_view_plotting;
+    if slot.waker.is_none() {
+        slot.waker = Some(ctx.clone());
+    }
+}
+
+/// Have the view take in the traces being made for it, waiting for them:
+/// before anything else changes the view or draws from it.
+pub(crate) fn settle(state: &mut ResultsParts<'_>) {
+    if state.results.working_view_plotting.pending.is_none() {
+        return;
+    }
+    let mut binding = state.results.working_view.take();
+    take_in(state, binding.as_deref_mut(), true);
+    if state.results.working_view.is_none() {
+        state.results.working_view = binding;
+    }
+}
+
+/// Have the view take in the traces made away from the frame, once they are
+/// made, or with `wait` as soon as they are.
+fn take_in(state: &mut ResultsParts<'_>, binding: Option<&mut QuickViewBinding>, wait: bool) {
+    let slot = &mut state.results.working_view_plotting;
+    if !slot
+        .pending
+        .as_ref()
+        .is_some_and(|pending| wait || pending.making.is_finished())
+    {
+        return;
+    }
+    let Some(pending) = slot.pending.take() else {
+        return;
+    };
+    let Plotting {
+        view,
+        mut edits,
+        ticks,
+        normalize,
+        making,
+    } = *pending;
+    let made = match making.join() {
+        Ok(made) => made,
+        // A preparation that failed fails the frame, as it would have had
+        // the frame made the traces.
+        Err(panic) => std::panic::resume_unwind(panic),
+    };
+    let edits = made
+        .map(|prepared| {
+            edits.extend(prepared.into_iter().map(DocumentEdit::PlotPrepared));
+            edits
+        })
+        .map_err(|error| error.to_string());
+    keep(state, view, binding, edits, ticks, normalize);
+}
+
+/// Write `edits`, what the reader changed since the quick view drew, to
+/// `view`. With `normalize`, the edits are ticks alone: when the view takes
+/// them as the quick view drew it, the quick view goes on drawing what it
+/// draws, each tick as the view would draw it. Otherwise, whatever the view
+/// took, the state is drawn from it again: what it refused or could not
+/// hold goes back to what it holds.
+fn keep(
+    state: &mut ResultsParts<'_>,
+    view: ResultDocumentId,
+    mut binding: Option<&mut QuickViewBinding>,
+    edits: Result<Vec<DocumentEdit>, String>,
+    ticks: Option<Vec<SourceWaveformPresentationKey>>,
+    normalize: Option<Vec<Normal>>,
+) {
+    let drew = binding
+        .as_deref()
+        .map(|binding| (binding.view, binding.generation));
+    let stands = |state: &ResultsParts<'_>| {
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(view)
+            .map(|document| (document.revision(), document.generation()))
+    };
+    let mut drawn = false;
+    match edits {
+        Ok(edits) if edits.is_empty() => {
+            drawn = drew.is_some() && drew == stands(state).map(|(_, at)| (view, at));
+        }
+        Ok(edits) => {
+            if let Some((revision, generation)) = stands(state) {
+                match view_edits::apply(state, view, revision, edits) {
+                    Ok(receipt) => {
+                        drawn = drew == Some((view, generation))
+                            && receipt
+                                .created
+                                .iter()
+                                .all(|entity| matches!(entity, EntityRef::Trace(_)));
+                    }
+                    Err(error) => {
+                        state.prompt(format!("Could not keep this change to the view: {error}"));
+                    }
+                }
+            }
+        }
+        Err(error) => state.prompt(format!("Could not keep this change to the view: {error}")),
+    }
+    let normalize = normalize.filter(|_| drawn);
+    if let Some(normalize) = normalize {
+        if let (Some(binding), Some((_, generation))) = (binding.as_deref_mut(), stands(state)) {
+            binding.generation = generation;
+        }
+        for (key, set, visible) in normalize {
+            // A tick the reader set again since is theirs, kept next.
+            if state.results.session.waveform_visibility.get(&key).copied() == set {
+                state.results.project_waveform_visible(key, visible);
+            }
+        }
+        return;
+    }
+    if let Some(binding) = binding.filter(|binding| binding.view == view) {
+        match ticks {
+            Some(ticks) => binding.retake.get_or_insert_with(Vec::new).extend(ticks),
+            None => binding.redraw = true,
+        }
+    }
+}
+
 /// Whether following the shown run, when it last changed nothing, would
 /// change nothing still for `view` as it stands.
-fn following_holds(state: ResultsReads<'_>, view: ResultDocumentId) -> bool {
+pub(crate) fn following_holds(state: ResultsReads<'_>, view: ResultDocumentId) -> bool {
     state
         .results
         .working_view_followed
@@ -315,11 +583,28 @@ fn following_holds(state: ResultsReads<'_>, view: ResultDocumentId) -> bool {
         .is_some_and(|at| at.view == Some(view) && followed_at(state, at.view).as_ref() == Some(at))
 }
 
+/// After an edit of `view` that changes nothing following the run reads
+/// (its tracking, the runs its panes read, the signals it drew), committed
+/// at `revision`: a follow that changed nothing before, with `followed`,
+/// still changes nothing.
+pub(crate) fn still_followed(
+    state: &mut ResultsParts<'_>,
+    followed: bool,
+    revision: rspice_vocabulary::product::ObjectRevision,
+) {
+    if followed && let Some(at) = &mut state.results.working_view_followed {
+        at.revision = Some(revision);
+    }
+}
+
 /// Forget the drawing state the quick view left: something else, a saved
 /// document's pane, is about to draw over it.
 pub(crate) fn release(state: &mut ResultsParts<'_>) {
     capture(state);
-    state.results.working_view = None;
+    settle(state);
+    if state.results.working_view.take().is_some() {
+        state.results.session.project_document_markers(Vec::new());
+    }
     state.results.session.working_view_panes.clear();
 }
 
@@ -812,6 +1097,13 @@ fn retained_run(
 /// changed that the view may not have taken. A frame in which neither
 /// changed draws nothing.
 fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: DatasetId) {
+    // What is drawn from the view again waits for the traces being made
+    // for it, which the quick view draws already.
+    if state.results.working_view_plotting.view().is_some()
+        && !drawn_as_it_stands(state.results_reads(), view, dataset)
+    {
+        settle(state);
+    }
     let runs = state.model.simulation.retained.runs.revision();
     let Some(document) = state.model.workspace.content.visualization_document(view) else {
         return;
@@ -827,9 +1119,6 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         let results = &mut *state.results;
         if let Some(binding) = results.working_view.as_deref() {
             let session = &mut results.session;
-            if session.document_markers != binding.markers {
-                session.project_document_markers(binding.markers.clone());
-            }
             let panes = binding
                 .keys
                 .iter()
@@ -1055,7 +1344,7 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         });
     }
     let session = &mut state.results.session;
-    session.project_document_markers(anchored.clone());
+    session.project_document_markers(anchored);
     session.working_view_panes = panes
         .iter()
         .map(|&(_, analysis, pane_id)| PersistentPaneContext {
@@ -1075,8 +1364,27 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         runs,
         redraw: false,
         retake: None,
-        markers: anchored,
     }));
+}
+
+/// Whether the quick view draws `view` over the retained run `dataset` as
+/// the view stands, with nothing of the reader's to draw from it again.
+fn drawn_as_it_stands(state: ResultsReads<'_>, view: ResultDocumentId, dataset: DatasetId) -> bool {
+    let Some(document) = state.model.workspace.content.visualization_document(view) else {
+        return false;
+    };
+    state
+        .results
+        .working_view
+        .as_deref()
+        .is_some_and(|binding| {
+            binding.view == view
+                && binding.dataset == dataset
+                && binding.runs == state.model.simulation.retained.runs.revision()
+                && !binding.redraw
+                && binding.generation == document.generation()
+                && binding.retake.is_none()
+        })
 }
 
 /// A marker of the view, read off it before its anchor is.
@@ -1348,6 +1656,18 @@ fn same_members<K: Eq + std::hash::Hash>(
     picked == then.len()
 }
 
+/// What the quick view drew that its view does not hold yet.
+struct Captured {
+    /// The edits that make the view hold it, but for its new traces.
+    edits: Vec<DocumentEdit>,
+    /// The signals each pane plots now that it has no trace of, in the
+    /// order the run lists them.
+    new: Vec<(PaneId, Vec<String>)>,
+    /// With the reader's ticks known, each a signal of its analysis: those
+    /// the quick view draws other than the view draws them.
+    normalize: Option<Vec<Normal>>,
+}
+
 /// The edits that make `binding`'s view hold what the quick view drew.
 ///
 /// With `ticks`, the reader set only those signals' ticks since the quick
@@ -1356,7 +1676,9 @@ fn capture_edits(
     state: &ResultsParts<'_>,
     binding: &QuickViewBinding,
     ticks: Option<&[SourceWaveformPresentationKey]>,
-) -> Vec<DocumentEdit> {
+) -> Captured {
+    let mut normalize = ticks.map(|_| Vec::new());
+    let mut all_new = Vec::new();
     let (Some(document), Some(run)) = (
         state
             .model
@@ -1371,7 +1693,11 @@ fn capture_edits(
             .iter()
             .find(|run| run.dataset_id == binding.dataset),
     ) else {
-        return Vec::new();
+        return Captured {
+            edits: Vec::new(),
+            new: all_new,
+            normalize: None,
+        };
     };
     let session = &state.results.session;
     let mut edits = Vec::new();
@@ -1385,37 +1711,54 @@ fn capture_edits(
         // However many signals one gesture ticks or unticks, the view takes
         // them as one edit each way, in the order the run lists them. With
         // the signals the reader set known, only those are read.
-        let (mut ticked, mut unticked) = (Vec::new(), Vec::new());
-        let mut differ = |column: usize, name: &str, wanted: bool, plotted: bool| {
-            if wanted != plotted {
-                let to = if wanted { &mut ticked } else { &mut unticked };
-                to.push((column, name.to_owned()));
-            }
+        // A signal is drawn when every trace of it is shown; one with no
+        // trace yet is new.
+        let (mut ticked, mut unticked, mut new) = (Vec::new(), Vec::new(), Vec::new());
+        let mut differ = |column: usize, name: &str, wanted: bool, drawn: Option<bool>| {
+            let to = match (wanted, drawn) {
+                (true, None) => &mut new,
+                (true, Some(false)) => &mut ticked,
+                (false, Some(true)) => &mut unticked,
+                _ => return,
+            };
+            to.push((column, name.to_owned()));
         };
         match ticks {
             Some(ticks) => {
-                let index = session.signal_indices.index(
+                let ticks: Vec<&SourceWaveformPresentationKey> =
+                    ticks.iter().filter(|tick| tick.analysis() == key).collect();
+                let names: Vec<&str> = ticks.iter().map(|tick| tick.source_name()).collect();
+                let columns = match session.signal_indices.index(
                     &state.model.simulation.retained.runs.revision(),
                     key,
                     &analysis.data,
-                );
-                for tick in ticks.iter().filter(|tick| tick.analysis() == key) {
-                    let name = tick.source_name();
-                    let column = match &index {
-                        Some(index) => index.columns_named(&analysis.data, name).next(),
-                        None => analysis
-                            .waveforms
-                            .iter()
-                            .position(|waveform| waveform.name == name),
-                    };
+                ) {
+                    Some(index) => index.first_columns(&analysis.data, &names),
+                    None => names
+                        .iter()
+                        .map(|name| {
+                            analysis
+                                .waveforms
+                                .iter()
+                                .position(|waveform| waveform.name == *name)
+                        })
+                        .collect(),
+                };
+                for ((tick, name), column) in ticks.into_iter().zip(names).zip(columns) {
                     let Some(column) = column else {
+                        normalize = None;
                         continue;
                     };
-                    let traces = document.traces_reading(pane_id, name);
-                    let plotted = !traces.is_empty() && traces.iter().all(|trace| trace.visible);
-                    let wanted =
-                        session.waveform_visibility(tick, analysis.waveforms[column].visible);
-                    differ(column, name, wanted, plotted);
+                    let dataset_default = analysis.waveforms[column].visible;
+                    let set = session.waveform_visibility.get(tick).copied();
+                    let wanted = set.unwrap_or(dataset_default);
+                    if let Some(normalize) = &mut normalize {
+                        let drawn = (wanted != dataset_default).then_some(wanted);
+                        if set != drawn {
+                            normalize.push((tick.clone(), set, drawn));
+                        }
+                    }
+                    differ(column, name, wanted, document.signal_drawn(pane_id, name));
                 }
             }
             None => {
@@ -1434,8 +1777,8 @@ fn capture_edits(
                         &SourceWaveformPresentationKey::new(key, waveform.name.clone()),
                         waveform.visible,
                     );
-                    let plotted = drawn.get(waveform.name.as_str()).copied().unwrap_or(false);
-                    differ(column, &waveform.name, wanted, plotted);
+                    let drawn = drawn.get(waveform.name.as_str()).copied();
+                    differ(column, &waveform.name, wanted, drawn);
                 }
             }
         }
@@ -1449,6 +1792,11 @@ fn capture_edits(
                     plotted,
                 });
             }
+        }
+        if !new.is_empty() {
+            new.sort_unstable_by_key(|(column, _)| *column);
+            new.dedup_by_key(|(column, _)| *column);
+            all_new.push((pane_id, new.into_iter().map(|(_, name)| name).collect()));
         }
         if let Some(names) = lanes::EventNames::of(analysis)
             && let Some(layout) = session.event_lanes.get(&key)
@@ -1518,7 +1866,11 @@ fn capture_edits(
             edits.push(DocumentEdit::SetPaneMaximized { pane_id, maximized });
         }
     }
-    edits
+    Captured {
+        edits,
+        new: all_new,
+        normalize,
+    }
 }
 
 /// The unit a pane's axis keeps for a unit pane of the waveform stack: a

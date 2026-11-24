@@ -148,8 +148,11 @@ pub fn set_result_quantities_ticked<'k>(
         ),
         &keys,
     );
+    let mut gesture = Gesture::default();
     for (key, found) in keys.into_iter().zip(found) {
         match (key, found) {
+            (ResultBrowserSelectionKey::Waveform(signal), Some(at))
+                if tick_quick_signal(state, signal, at, ticked, &mut gesture) => {}
             (ResultBrowserSelectionKey::Waveform(signal), Some(at)) => {
                 set_found_signal_plotted(state, signal, at, ticked);
             }
@@ -159,6 +162,96 @@ pub fn set_result_quantities_ticked<'k>(
             }
         }
     }
+    gesture.finish(state);
+}
+
+/// What ticking many signals of the quick view at once leaves to do once
+/// for them all: the strips to bring back, the signals put on last for the
+/// browser's Recent scope, and the drawing state to build again.
+#[derive(Default)]
+struct Gesture<'k> {
+    revealed: Vec<AnalysisPresentationKey>,
+    recent: Vec<&'k SourceWaveformPresentationKey>,
+    changed: bool,
+    forgot: bool,
+}
+
+impl Gesture<'_> {
+    fn finish(self, state: &mut ResultsParts<'_>) {
+        for analysis in self.revealed {
+            reveal_strip(state, analysis);
+        }
+        for key in self.recent {
+            state.results.session.note_recent_signal(key.clone());
+        }
+        if self.changed || self.forgot {
+            state.results.models.invalidate();
+        }
+        if self.forgot {
+            state.results.session.cache.invalidate();
+        }
+    }
+}
+
+/// How many signals the browser's Recent scope lists: of those a gesture
+/// puts on, the last so many are noted.
+const RECENT_SIGNALS: usize = 24;
+
+/// [`set_found_signal_plotted`] for a signal of the shown run drawn from
+/// the quick view's ticks, as one of many a gesture ticks: what is done once
+/// for them all is left to `gesture`. `false`, doing nothing, for any other
+/// signal.
+fn tick_quick_signal<'k>(
+    state: &mut ResultsParts<'_>,
+    key: &'k SourceWaveformPresentationKey,
+    (run_index, analysis_index, waveform_index): (usize, usize, usize),
+    plotted: bool,
+    gesture: &mut Gesture<'k>,
+) -> bool {
+    if state.model.simulation.view.active_run_idx != Some(run_index)
+        || state
+            .results
+            .session
+            .persistent_pane_context
+            .is_some_and(|context| context.analysis == key.analysis())
+    {
+        return false;
+    }
+    let Some(dataset_default) = state.model.simulation.retained.runs[run_index]
+        .analyses
+        .get(analysis_index)
+        .and_then(|analysis| analysis.waveforms.get(waveform_index))
+        .map(|waveform| waveform.visible)
+    else {
+        return true;
+    };
+    let session = &mut state.results.session;
+    if session.waveform_visibility(key, dataset_default) != plotted {
+        // Put on, a signal the dataset hides is shown; taken off, one it
+        // hides is unplotted, not hidden in its pane's legend, and one it
+        // shows is hidden.
+        let set = match (plotted, dataset_default) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            _ => None,
+        };
+        session.waveform_visibility.set(key.clone(), set);
+        gesture.changed = true;
+        gesture.forgot |= !plotted && !dataset_default;
+        if plotted {
+            if gesture.recent.len() == 2 * RECENT_SIGNALS {
+                gesture.recent.drain(..RECENT_SIGNALS);
+            }
+            gesture.recent.push(key);
+        }
+    } else if !plotted && !dataset_default && session.waveform_visibility.get(key) == Some(&false) {
+        session.waveform_visibility.set(key.clone(), None);
+        gesture.forgot = true;
+    }
+    if plotted && gesture.revealed.last() != Some(&key.analysis()) {
+        gesture.revealed.push(key.analysis());
+    }
+    true
 }
 
 /// Where each signal of `keys` is: its run, analysis and column, found as
@@ -175,18 +268,20 @@ fn find_signals(
 ) -> Vec<Option<(usize, usize, usize)>> {
     use std::collections::HashMap;
     let mut found = vec![None; keys.len()];
-    let mut wanted = HashMap::<AnalysisPresentationKey, HashMap<&str, Vec<usize>>>::new();
-    for (index, key) in keys.iter().enumerate() {
+    // Each analysis' signals, with where `keys` holds each: a gesture's keys
+    // come mostly one analysis after another.
+    let mut wanted: Vec<(AnalysisPresentationKey, Vec<(usize, &str)>)> = Vec::new();
+    for (at, key) in keys.iter().enumerate() {
         if let ResultBrowserSelectionKey::Waveform(signal) = key {
-            wanted
-                .entry(signal.analysis())
-                .or_default()
-                .entry(signal.source_name())
-                .or_default()
-                .push(index);
+            let analysis = signal.analysis();
+            let name = (at, signal.source_name());
+            match wanted.iter_mut().rev().find(|(held, _)| *held == analysis) {
+                Some((_, names)) => names.push(name),
+                None => wanted.push((analysis, vec![name])),
+            }
         }
     }
-    for (analysis_key, names) in wanted {
+    for (analysis_key, asked) in wanted {
         let Some((run_index, run)) = runs
             .iter()
             .enumerate()
@@ -198,14 +293,16 @@ fn find_signals(
             continue;
         };
         if let Some(index) = indices.index(revision, analysis_key, &analysis.data) {
-            for (name, keyed) in names {
-                if let Some(column) = index.column(&analysis.data, name) {
-                    for at in keyed {
-                        found[at] = Some((run_index, analysis_index, column));
-                    }
-                }
+            let names: Vec<&str> = asked.iter().map(|&(_, name)| name).collect();
+            let columns = index.columns(&analysis.data, &names);
+            for (&(at, _), column) in asked.iter().zip(columns) {
+                found[at] = column.map(|column| (run_index, analysis_index, column));
             }
             continue;
+        }
+        let mut names = HashMap::<&str, Vec<usize>>::with_capacity(asked.len());
+        for (at, name) in asked {
+            names.entry(name).or_default().push(at);
         }
         let mut columns = HashMap::<&str, Option<usize>>::with_capacity(names.len());
         for (column, waveform) in analysis.waveforms.iter().enumerate() {

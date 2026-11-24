@@ -140,6 +140,18 @@ fn is_reader_edit(edit: &DocumentEdit) -> bool {
     )
 }
 
+/// Whether an edit leaves what following a run reads as it stood: all but
+/// those that change the view's tracking or the runs its panes read.
+fn follows_alike(edit: &DocumentEdit) -> bool {
+    !matches!(
+        edit,
+        DocumentEdit::RetargetTrackedDataset { .. }
+            | DocumentEdit::FollowRun { .. }
+            | DocumentEdit::AddViewPane(_)
+            | DocumentEdit::SetTracking(_)
+    )
+}
+
 /// Keep `document`, a new view, in the project: a run's working view, or a
 /// document saved from one.
 pub(crate) fn create(
@@ -156,6 +168,7 @@ pub(crate) fn create(
 /// Forget the view `document_id` and its steps: a run's working view once
 /// nothing can draw it again.
 pub(crate) fn forget(state: &mut ResultsParts<'_>, document_id: ResultDocumentId) {
+    state.results.working_view_plotting.forget(document_id);
     state
         .model
         .workspace
@@ -171,18 +184,24 @@ pub(crate) fn apply(
     revision: ObjectRevision,
     edits: Vec<DocumentEdit>,
 ) -> Result<VisualizationTransactionReceipt, VisualizationDocumentPersistenceError> {
+    settle(state, document_id);
+    let followed = edits.iter().all(follows_alike)
+        && super::working_view::following_holds(state.results_reads(), document_id);
     if !edits.iter().any(is_reader_edit) {
-        return state
+        let receipt = state
             .model
             .workspace
             .content
-            .transact_visualization_document(document_id, revision, edits);
+            .transact_visualization_document(document_id, revision, edits)?;
+        super::working_view::still_followed(state, followed, receipt.committed_revision);
+        return Ok(receipt);
     }
     let (receipt, undo) = state
         .model
         .workspace
         .content
         .transact_visualization_document_with_undo(document_id, revision, edits)?;
+    super::working_view::still_followed(state, followed, receipt.committed_revision);
     let stamp = state.results.view_edits.tick();
     let history = state
         .results
@@ -203,11 +222,20 @@ pub(crate) fn apply_following(
     revision: ObjectRevision,
     edits: Vec<DocumentEdit>,
 ) -> Result<VisualizationTransactionReceipt, VisualizationDocumentPersistenceError> {
+    settle(state, document_id);
     state
         .model
         .workspace
         .content
         .transact_visualization_document(document_id, revision, edits)
+}
+
+/// Have `document_id` take in the traces being made for it first, so a
+/// change of the view comes after the reader's change they belong to.
+fn settle(state: &mut ResultsParts<'_>, document_id: ResultDocumentId) {
+    if state.results.working_view_plotting.view() == Some(document_id) {
+        super::working_view::settle(state);
+    }
 }
 
 /// Take one undo or redo step of the view `document_id`. A step addresses
@@ -219,6 +247,7 @@ pub(crate) fn step(
     document_id: ResultDocumentId,
     direction: Step,
 ) -> Result<(), String> {
+    settle(state, document_id);
     let Some(revision) = state
         .model
         .workspace
@@ -235,13 +264,19 @@ pub(crate) fn step(
     let Some((_, target)) = history.stack_mut(direction).pop() else {
         return Ok(());
     };
+    // A step takes back or puts back the reader's own edits, which change
+    // nothing following the run reads.
+    let followed = super::working_view::following_holds(state.results_reads(), document_id);
     let reverse = match state
         .model
         .workspace
         .content
         .take_visualization_document_step(document_id, revision, target)
     {
-        Ok((_, reverse)) => reverse,
+        Ok((receipt, reverse)) => {
+            super::working_view::still_followed(state, followed, receipt.committed_revision);
+            reverse
+        }
         Err(error) => {
             return Err(match direction {
                 Step::Undo => format!("This step can no longer be undone: {error}"),
@@ -285,7 +320,14 @@ enum NextStep {
 /// view's and the documents'.
 fn next_step(state: ResultsReads<'_>, direction: Step) -> Option<NextStep> {
     let histories = &state.results.view_edits;
-    let view = shown_view(state).and_then(|document_id| {
+    let shown = shown_view(state);
+    // A change whose traces are still being made is the latest step, and
+    // leaves the view nothing to redo.
+    let making = shown.filter(|view| state.results.working_view_plotting.view() == Some(*view));
+    if let (Some(view), Step::Undo) = (making, direction) {
+        return Some(NextStep::View(view));
+    }
+    let view = shown.filter(|_| making.is_none()).and_then(|document_id| {
         histories
             .views
             .get(&document_id)

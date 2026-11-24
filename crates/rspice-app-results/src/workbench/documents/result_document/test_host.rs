@@ -84,6 +84,9 @@ impl ResultsTestHost {
         super::prepare_viewer_state(&mut parts);
         super::working_view::sync(&mut parts);
         super::working_view::capture(&mut parts);
+        // A test reads the view as the frame left it, traces it was being
+        // given away from the frame and all.
+        super::working_view::settle(&mut parts);
     }
 
     /// The working view the shown run is drawn through.
