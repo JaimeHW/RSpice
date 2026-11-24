@@ -25,6 +25,8 @@
 //! A browser tab cannot say how much memory its machine has; its run has
 //! wasm32's 4 GB of address space, and its limits are sized to that.
 
+#[cfg(test)]
+mod deck_read_tests;
 mod machine;
 
 pub use machine::machine_memory;
