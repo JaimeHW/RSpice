@@ -32,13 +32,13 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::{
 use rspice_app_services::workbench::lifecycle::recovery::unique_temp_dir;
 use rspice_app_state::state::{Cell, CellViewRef, Library, Point, SchematicState, View, ViewType};
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
+use rspice_app_workbench::workbench::framework::command_registry::{WorkbenchCommand, ids};
 use rspice_design::library::folder::{
     CellViewStatus, HostPlatform, LibraryFile, LibraryFileLock, LibraryMode, LibraryPath,
     ReferenceStatus,
 };
 
-use super::dependencies::{expected_said, said_about};
+use super::dependencies::{expected_said, offered, open_menu, paint_until_recorded, said_about};
 use super::recovery_frames::{app_frame, click_on, offscreen, paint_until, painted};
 use super::with_cx;
 
@@ -972,6 +972,65 @@ fn a_folder_holding_another_library_reads_different_library_in_every_place() {
     std::fs::rename(&stray, &folders.folder).expect("other's takes its place");
     let mut app = reopened(app, &folders);
     assert_every_place_says(&mut app, "Different library", Some("Error"));
+}
+
+/// A library kept in a folder of its own is looked after from its row on
+/// Dependencies: it reads Not found once its folder moves, Change… points it
+/// at the folder where it now is, Remove… detaches it after its review and
+/// leaves the folder as it is, and Undo attaches it again.
+#[test]
+fn a_design_library_is_relinked_detached_and_attached_again_from_its_row() {
+    let (mut app, folders) = kept_in_a_folder("library-dependencies-row");
+    let moved = folders.root.join("moved").join(LIBRARY);
+    std::fs::create_dir_all(moved.parent().expect("a folder")).expect("the new folder");
+    std::fs::rename(&folders.folder, &moved).expect("the folder moves");
+    focus(&mut app);
+    assert_every_place_says(&mut app, "Not found", Some("Error"));
+
+    let ctx = offscreen();
+    let menu = open_menu(&ctx, &mut app, LIBRARY, "Design library");
+    assert_eq!(
+        offered(&menu, &["Change\u{2026}", "Remove\u{2026}"]),
+        [Some(true), Some(true)],
+        "a library that cannot be found can be pointed elsewhere or removed"
+    );
+    answer_next_folder_pick(&moved);
+    app_frame(&ctx, &mut app, click_on(&menu, "Change\u{2026}"));
+    paint_until_recorded(&ctx, &mut app, &format!("Relinked library '{LIBRARY}'"));
+    assert_every_place_says(&mut app, "Found", None);
+
+    let menu = open_menu(&ctx, &mut app, LIBRARY, "Design library");
+    app_frame(&ctx, &mut app, click_on(&menu, "Remove\u{2026}"));
+    assert!(
+        app.state.model.library_manager.is_referenced(LIBRARY),
+        "the review detaches it, not the menu"
+    );
+    let review = paint_until(&ctx, &mut app, |text| {
+        text.contains(&format!("Detach library \u{2018}{LIBRARY}\u{2019}"))
+    });
+    let said = painted(&review);
+    assert!(
+        said.contains("The folder and its files stay as they are."),
+        "{said}"
+    );
+    app_frame(&ctx, &mut app, click_on(&review, "Detach"));
+    paint_until_recorded(&ctx, &mut app, &format!("Detached library '{LIBRARY}'"));
+    assert!(
+        !app.state.model.library_manager.is_referenced(LIBRARY),
+        "Detach drops the reference"
+    );
+    assert!(
+        moved.read_dir().expect("the folder").next().is_some(),
+        "the folder and its files stay as they are"
+    );
+
+    assert!(app.command_key_enabled(ids::UNDO));
+    app.execute_command_key(ids::UNDO);
+    assert!(
+        app.state.model.library_manager.is_referenced(LIBRARY),
+        "Undo attaches it again"
+    );
+    assert_every_place_says(&mut app, "Found", None);
 }
 
 /// Every file under `folder`, by its path inside it, as a browser's folder

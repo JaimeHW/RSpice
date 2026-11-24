@@ -489,7 +489,7 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
 }
 
 /// Whether each of `labels` is announced, and can be pressed.
-fn offered(output: &egui::FullOutput, labels: &[&str]) -> Vec<Option<bool>> {
+pub(super) fn offered(output: &egui::FullOutput, labels: &[&str]) -> Vec<Option<bool>> {
     let nodes = &output
         .platform_output
         .accesskit_update
@@ -508,7 +508,12 @@ fn offered(output: &egui::FullOutput, labels: &[&str]) -> Vec<Option<bool>> {
 
 /// The page's menu for the row for `name` of `kind`, opened on a settled
 /// page.
-fn open_menu(ctx: &egui::Context, app: &mut RSpiceApp, name: &str, kind: &str) -> egui::FullOutput {
+pub(super) fn open_menu(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    name: &str,
+    kind: &str,
+) -> egui::FullOutput {
     app_frame(ctx, app, Vec::new());
     let page = app_frame(ctx, app, Vec::new());
     app_frame(ctx, app, menu_on(&page, name, kind));
@@ -516,7 +521,7 @@ fn open_menu(ctx: &egui::Context, app: &mut RSpiceApp, name: &str, kind: &str) -
 }
 
 /// Frames until the Console holds a line that starts with `start`.
-fn paint_until_recorded(ctx: &egui::Context, app: &mut RSpiceApp, start: &str) {
+pub(super) fn paint_until_recorded(ctx: &egui::Context, app: &mut RSpiceApp, start: &str) {
     for _ in 0..500 {
         app_frame(ctx, app, Vec::new());
         if app
