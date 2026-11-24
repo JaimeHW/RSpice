@@ -126,6 +126,8 @@ pub struct ProjectWorkspace {
     /// — whether anything is unsaved — are reused exactly until it changes.
     /// Write a field only when its value changes: an access that changes
     /// nothing still costs the next query a capture of the whole project.
+    /// A result view's transaction is the one write that issues no stamp:
+    /// the view's revision names what it leaves behind.
     pub content: rspice_vocabulary::stamped::Stamped<rspice_project::ProjectWorkspace>,
     pub session: WorkspaceSession,
 }

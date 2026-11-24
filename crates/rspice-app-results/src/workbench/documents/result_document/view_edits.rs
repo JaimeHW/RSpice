@@ -16,6 +16,12 @@
 //! Renaming, duplicating and deleting a saved document are steps too, kept
 //! beside the views' own. Undo and Redo take whichever is latest: the shown
 //! view's step or the documents' step.
+//!
+//! A transaction, or a step taken, moves the view's revision, which names
+//! what it leaves behind, and not the workspace's stamp: whether the project
+//! holds unsaved work reads the views by revision, so a tick of a hundred
+//! thousand signals does not have the whole project captured again. A
+//! transaction keeps a valid view valid and never renames it.
 
 use std::collections::HashMap;
 
@@ -192,6 +198,7 @@ pub(crate) fn apply(
             .model
             .workspace
             .content
+            .unstamped_mut()
             .transact_visualization_document(document_id, revision, edits)?;
         super::working_view::still_followed(state, followed, receipt.committed_revision);
         return Ok(receipt);
@@ -200,6 +207,7 @@ pub(crate) fn apply(
         .model
         .workspace
         .content
+        .unstamped_mut()
         .transact_visualization_document_with_undo(document_id, revision, edits)?;
     super::working_view::still_followed(state, followed, receipt.committed_revision);
     let stamp = state.results.view_edits.tick();
@@ -227,6 +235,7 @@ pub(crate) fn apply_following(
         .model
         .workspace
         .content
+        .unstamped_mut()
         .transact_visualization_document(document_id, revision, edits)
 }
 
@@ -272,6 +281,7 @@ pub(crate) fn step(
         .model
         .workspace
         .content
+        .unstamped_mut()
         .take_visualization_document_step(document_id, revision, target)
     {
         Ok((receipt, reverse)) => {

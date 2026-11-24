@@ -39,21 +39,26 @@ use rspice_app_state::workbench::app_state::model::InPlaceLayout;
 use rspice_project::SnapshotContent;
 use rspice_project::lifecycle::{DirtyBaseline, DirtyComparison};
 use rspice_project::registry::{
-    DocumentFingerprints, ProjectDocumentId, WorkingDocuments, WorkingSource,
+    DocumentFingerprints, ProjectDocumentId, ViewRevision, WorkingDocuments, WorkingSource,
 };
 use rspice_vocabulary::product::ContentDigest;
 
 use super::{LifecycleSource, LifecycleView, ProjectLifecycleError};
 
 /// Everything a capture of the working project reads: each subject by the
-/// stamp its owner issues on every mutable access, the two with no stamp of
-/// their own by content. Equal stamps, equal working content.
+/// stamp its owner issues on every mutable access, the result views by
+/// their revisions, the two with no stamp of their own by content. Equal
+/// stamps, equal working content.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkingStamp {
     /// The workspace content: every buffered schematic, the project
     /// descriptor, configurations, plan payloads, sources, layouts, reports,
-    /// result documents, hardcopy setups, open views and their dirty marks.
+    /// result documents, hardcopy setups, open views and their dirty marks,
+    /// all but what a result view's transaction writes.
     workspace: u64,
+    /// The result views by identity and revision: a view's transaction
+    /// moves its revision and not the workspace's stamp.
+    views: Vec<ViewRevision>,
     /// The schematic in the editor, which a capture takes in place of its
     /// buffered copy.
     active_schematic: u64,
@@ -78,6 +83,7 @@ impl WorkingStamp {
         let model = state.model;
         Self {
             workspace: model.workspace.content.stamp(),
+            views: rspice_project::registry::view_revisions(&model.workspace.content),
             active_schematic: model.schematic.editor_ref().design.content_stamp(),
             libraries: (
                 model.library_manager.content_stamp(),
@@ -98,6 +104,12 @@ impl WorkingStamp {
     /// Whether `self` and `other` differ in nothing but the drawing in the
     /// editor.
     fn differs_only_in_the_drawing(&self, other: &Self) -> bool {
+        self.views == other.views && self.differs_only_in_the_drawing_or_views(other)
+    }
+
+    /// Whether `self` and `other` differ in nothing but the drawing in the
+    /// editor and the result views' transactions.
+    fn differs_only_in_the_drawing_or_views(&self, other: &Self) -> bool {
         self.workspace == other.workspace
             && self.libraries == other.libraries
             && self.simulation_plan == other.simulation_plan
@@ -478,15 +490,14 @@ fn settle(
 
 /// Whether the working project is one a save could write, as a capture
 /// validates it. A capture answers when anything but the editor's drawing
-/// moved since the last one; when only the drawing moved, under a valid
-/// project, only the drawing's own record is checked again.
+/// and the result views moved since the last one; when only those moved,
+/// under a valid project, only the drawing's own record is checked again: a
+/// view's transaction checks what it changed and keeps a valid view valid.
 fn validity(state: &LifecycleView<'_>, stamp: &WorkingStamp) -> Result<(), String> {
     let held = &state.platform.project_lifecycle.dirty_answer.validity;
-    if held
-        .borrow()
-        .as_ref()
-        .is_some_and(|(then, valid)| valid.is_ok() && then.differs_only_in_the_drawing(stamp))
-    {
+    if held.borrow().as_ref().is_some_and(|(then, valid)| {
+        valid.is_ok() && then.differs_only_in_the_drawing_or_views(stamp)
+    }) {
         let workspace = &state.model.workspace.content;
         if !matches!(
             workspace.active_view_type(),

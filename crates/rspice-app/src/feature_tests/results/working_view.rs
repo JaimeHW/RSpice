@@ -581,7 +581,8 @@ fn an_edit_of_the_view_made_elsewhere_reaches_the_quick_view() {
 
 /// A tick is unsaved work, and so is its undo: the undo puts the view's
 /// traces back, but the view a save keeps moved on to a new revision, so the
-/// project still holds work the save did not.
+/// project still holds work the save did not. The frame reads each from the
+/// view's revision, without capturing the project again.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_tick_and_its_undo_are_unsaved_work() {
@@ -629,17 +630,33 @@ fn a_tick_and_its_undo_are_unsaved_work() {
         unsaved
     };
     assert!(!unsaved(&app), "the project as saved holds no unsaved work");
+    // The frame's answer, and the captures of the project it took.
+    let read_by_the_frame = |app: &mut crate::workbench::RSpiceApp| {
+        let captures = || rspice_project::registry::PROJECT_CAPTURES.with(std::cell::Cell::get);
+        let before = captures();
+        quick_frame(&mut app.state);
+        let (unsaved, _) = unsaved_work(&app.state);
+        (unsaved, captures() - before)
+    };
 
     app.state.results.results.session.waveform_visibility.set(
         SourceWaveformPresentationKey::new(analysis, "V(in)"),
         Some(false),
     );
-    quick_frame(&mut app.state);
+    assert_eq!(
+        read_by_the_frame(&mut app),
+        (true, 0),
+        "the tick reads unsaved from the view's revision, with no capture"
+    );
     assert_eq!(input_shown(&app.state, analysis), Some(false));
     assert!(unsaved(&app), "the tick is unsaved work");
 
     app.execute_command_key(WorkbenchCommand::Undo.key());
-    quick_frame(&mut app.state);
+    assert_eq!(
+        read_by_the_frame(&mut app),
+        (true, 0),
+        "the undo reads unsaved from the view's revision, with no capture"
+    );
     assert_eq!(input_shown(&app.state, analysis), None, "the undo is drawn");
     assert!(
         unsaved(&app),

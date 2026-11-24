@@ -29,7 +29,9 @@
 //! baseline does not hold it at, or a view added or taken out, makes the
 //! history unsaved with no digest: a tick on a view of a hundred thousand
 //! traces digests nothing. The history is digested when its views are the
-//! baseline's, and when the next baseline is settled.
+//! baseline's, and when the next baseline is settled. A view's transaction
+//! moves its revision and not the workspace's stamp, so the digests are held
+//! under the views' revisions too, and a tick reads nothing else again.
 
 use std::collections::{HashMap, HashSet};
 
@@ -54,7 +56,8 @@ use crate::{ProjectExecutionContext, ProjectLibraries, ProjectWorkspace};
 #[derive(Clone, Copy)]
 pub struct WorkingSource<'a> {
     pub workspace: &'a ProjectWorkspace,
-    /// Moves on every write to `workspace`.
+    /// Moves on every write to `workspace` but a result view's transaction,
+    /// which moves the view's revision instead.
     pub workspace_stamp: u64,
     /// The drawing in the editor, which stands for the active view's
     /// buffered copy while a schematic or testbench view is active.
@@ -86,6 +89,15 @@ pub fn view_revisions(workspace: &ProjectWorkspace) -> Vec<ViewRevision> {
         .iter()
         .map(|view| (view.id(), view.revision()))
         .collect()
+}
+
+/// Whether `workspace` holds the views `held` names, in its order, at the
+/// revisions it names.
+fn views_stand(held: &[ViewRevision], workspace: &ProjectWorkspace) -> bool {
+    held.iter().copied().eq(workspace
+        .visualization_documents
+        .iter()
+        .map(|view| (view.id(), view.revision())))
 }
 
 /// How the result history reads the views the project keeps.
@@ -162,6 +174,9 @@ struct DrawingPosition {
 #[derive(Debug, Clone)]
 struct Held {
     workspace: u64,
+    /// The result views by identity and revision, which a view's
+    /// transaction moves under an unchanged workspace stamp.
+    views: Vec<ViewRevision>,
     /// The library catalog's stamp and its references'.
     catalog: (u64, u64),
     layouts: u64,
@@ -330,8 +345,8 @@ impl WorkingDocuments {
     /// documents and shares whose stamps moved, and return the documents
     /// whose digest changed, appeared or went. `execution_context` is called
     /// when the plan or model catalog moved, `result_history` when the
-    /// results, the presentation or the workspace did. Any failure forgets
-    /// every digest, so the next update starts whole.
+    /// results, the presentation, the workspace or a view's revision did.
+    /// Any failure forgets every digest, so the next update starts whole.
     pub fn update(
         &mut self,
         source: &WorkingSource<'_>,
@@ -357,6 +372,7 @@ impl WorkingDocuments {
         let held = self.held.as_mut()?;
         let libraries = source.libraries;
         if held.workspace != source.workspace_stamp
+            || !views_stand(&held.views, source.workspace)
             || held.catalog != (libraries.content_stamp(), libraries.references_stamp())
             || held.execution != source.execution_stamp
             || held.results != source.results_stamp
@@ -478,8 +494,10 @@ impl WorkingDocuments {
             execution_moved,
             &mut || model_catalog_digest(Some(&execution_context)),
         )?;
-        let results_moved =
-            workspace_moved || held.is_none_or(|held| held.results != source.results_stamp);
+        let views_moved = held.is_none_or(|held| !views_stand(&held.views, workspace));
+        let results_moved = workspace_moved
+            || views_moved
+            || held.is_none_or(|held| held.results != source.results_stamp);
         let mut result_history = Some(result_history);
         let views = &mut self.views;
         document(ProjectDocumentId::ResultHistory, results_moved, &mut || {
@@ -630,6 +648,7 @@ impl WorkingDocuments {
         self.documents = documents;
         self.held = Some(Held {
             workspace: source.workspace_stamp,
+            views: view_revisions(workspace),
             catalog,
             layouts,
             execution: source.execution_stamp,
