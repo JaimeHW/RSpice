@@ -207,11 +207,15 @@ class BrowserWorkbenchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             browser = Mock(output=Path(directory))
             with (patch("check_browser_workbench.choose_command") as choose,
+                  patch("check_browser_workbench.edit_transient") as edit,
                   patch("check_browser_workbench.controls", return_value=[{"value": "Run 1 finished"}]),
                   patch("check_browser_workbench.time.time_ns", return_value=105_000_000),
                   patch("check_browser_workbench.checkpoint_records",
                         side_effect=[before, before, snapshot_only, published]) as read):
                 result = run_with_saved_provider(browser, decision)
+            # An untouched plan would run an operating point for this steady circuit, so the
+            # check edits the plan's transient before Run.
+            edit.assert_called_once_with(browser, ("Max step", "1u"))
             # Run no longer moves the reader, so the outcome is read on the
             # Simulation workspace the check opens before the History page.
             self.assertEqual([call.args[1] for call in choose.call_args_list],

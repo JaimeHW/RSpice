@@ -943,13 +943,17 @@ def restored_checkpoint_reads_its_run(browser, store):
     if not any(name.startswith("runs/") for name in kept):
         raise AssertionError(f"The save dropped the segment a checkpoint reads: {kept}")
     choose_command(browser, "History")
-    label = "Restore Manual checkpoint into the project"
-    # Checkpoints are listed newest first: the top one holds the run.
-    restores = wait_for(lambda: sorted((c for c in controls(browser.snapshot())
-                                        if c["label"] == label and c["role"] == "button"),
-                                       key=lambda c: c["center"][1]), "the checkpoint holding the run")
-    click_control(browser, restores[0])
-    browser.click("Restore Manual checkpoint", "button")
+    # History is one table, newest first: the top manual checkpoint holds the run. Restore… acts
+    # on the selected row and asks first.
+    rows = wait_for(lambda: sorted((c for c in controls(browser.snapshot())
+                                    if c["label"].startswith("When: ")
+                                    and "Change: Manual checkpoint," in c["label"]),
+                                   key=lambda c: c["center"][1]), "the checkpoint holding the run")
+    click_control(browser, rows[0])
+    browser.click("Restore…", "button")
+    wait_for(lambda: any(c["label"] == "Restore" and c["role"] == "button"
+                         for c in controls(browser.snapshot())), "the restore's question")
+    browser.click("Restore", "button")
     wait_for(lambda: reports(controls(browser.snapshot()), "Restored “Manual checkpoint” from"),
              "the restore of the checkpoint holding the run")
     browser.click("Expand console", "button")
