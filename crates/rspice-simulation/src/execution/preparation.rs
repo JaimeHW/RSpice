@@ -1058,8 +1058,9 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
             payload.specification_definitions.as_slice()
         });
     let measurement_references =
-        crate::measurement_references::PreparedMeasurementReferences::capture(
+        crate::measurement_references::PreparedMeasurementReferences::capture_of_parsed(
             &expanded,
+            &hierarchy.parsed,
             definitions,
             inputs.execution_limits(),
         )

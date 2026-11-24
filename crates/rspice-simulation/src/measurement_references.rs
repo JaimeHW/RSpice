@@ -79,6 +79,36 @@ impl PreparedMeasurementReferences {
         Ok(prepared)
     }
 
+    /// [`Self::capture`] for `source` as its run's preparation parsed it
+    /// (`parsed`): a deck that reads no table there is neither scanned nor
+    /// parsed again.
+    pub fn capture_of_parsed(
+        source: &str,
+        parsed: &rspice_core::Netlist,
+        definitions: &[SpecificationDefinition],
+        limits: rspice_core::ResourceLimits,
+    ) -> Result<Self, String> {
+        if reads_no_table(parsed) {
+            return Ok(Self::default());
+        }
+        Self::capture(source, definitions, limits)
+    }
+
+    /// [`Self::validate_source`] for `source` as its run's preparation
+    /// parsed it (`parsed`): no tables, and a deck that reads none there, is
+    /// neither scanned nor parsed again.
+    pub fn validate_parsed(
+        &self,
+        source: &str,
+        parsed: &rspice_core::Netlist,
+        limits: rspice_core::ResourceLimits,
+    ) -> Result<(), String> {
+        if self.is_empty() && reads_no_table(parsed) {
+            return Ok(());
+        }
+        self.validate_source(source, limits)
+    }
+
     /// Whether `source`, read under `limits`, binds these tables.
     pub fn validate_source(
         &self,
@@ -174,9 +204,63 @@ fn parse(
     .map_err(|error| format!("Cannot bind measurement reference data: {error}"))
 }
 
+/// Whether `parsed`, a deck as its run's preparation parsed it, reads no
+/// reference table however its statistics are read: none of its
+/// measurements reads a file, and it skips no line that a reading at
+/// nominal values, as these tables are bound, could read instead.
+fn reads_no_table(parsed: &rspice_core::Netlist) -> bool {
+    parsed.unread_root_source().next().is_none()
+        && !parsed
+            .measurements
+            .iter()
+            .any(|measurement| matches!(measurement.measure_type, MeasureType::FileError { .. }))
+}
+
 fn may_reference_file(source: &str) -> bool {
     source
         .as_bytes()
         .windows(4)
         .any(|token| token.eq_ignore_ascii_case(b"file"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parsed(deck: &str) -> rspice_core::Netlist {
+        rspice_core::Netlist::parse(deck).expect("the deck parses")
+    }
+
+    /// A deck its parse shows reads no table is answered from the parse, a
+    /// comment that names a file among it; one whose measurement reads a
+    /// file is captured and checked as the deck itself is.
+    #[test]
+    fn the_runs_parse_answers_for_a_deck_that_reads_no_table() {
+        let limits = rspice_core::ResourceLimits::default();
+        let commented = "deck\n* the file this deck was written from\nV1 out 0 1\nR1 out 0 1k\n.tran 1n 10n\n.end\n";
+        let prepared = PreparedMeasurementReferences::capture_of_parsed(
+            commented,
+            &parsed(commented),
+            &[],
+            limits,
+        )
+        .expect("a deck that reads no table captures none");
+        assert!(prepared.is_empty());
+        prepared
+            .validate_parsed(commented, &parsed(commented), limits)
+            .expect("and binds none");
+
+        let reads = "deck\nV1 out 0 1\nR1 out 0 1k\n.tran 1n 10n\n.measure tran fit ERROR V(out) FILE reference.prn DEPVARCOL 2\n.end\n";
+        let error =
+            PreparedMeasurementReferences::capture_of_parsed(reads, &parsed(reads), &[], limits)
+                .expect_err("a measurement that reads a file needs its table");
+        assert!(
+            error.contains("requires one imported reference table"),
+            "{error}"
+        );
+        let error = PreparedMeasurementReferences::default()
+            .validate_parsed(reads, &parsed(reads), limits)
+            .expect_err("a deck that reads a table not kept is refused");
+        assert!(error.contains("not kept with the run"), "{error}");
+    }
 }

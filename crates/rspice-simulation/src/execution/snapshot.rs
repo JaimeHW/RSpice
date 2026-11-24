@@ -1830,7 +1830,7 @@ impl PreparedRunSnapshot {
 
         parts
             .measurement_references
-            .validate_source(&parts.executable_netlist, limits)
+            .validate_parsed(&parts.executable_netlist, &parsed_netlist, limits)
             .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
         let digest = snapshot_digest(&parts, &pvt_points);
         // Converted and checked once: the check below, the dispatch and every receipt share it.

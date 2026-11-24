@@ -169,6 +169,7 @@ pub fn reject_deferred_external_sources_with_abort(
 ) -> Result<(), PreparationError> {
     reject_deferred_external_sources_for_host_with_abort(
         netlist,
+        Some(parsed),
         &UnreadLines::of_parsed(parsed),
         project_runtimes,
         measurement_references,
@@ -191,6 +192,7 @@ pub(crate) fn reject_deferred_external_sources_for_host(
 ) -> Result<(), PreparationError> {
     reject_deferred_external_sources_for_host_with_abort(
         netlist,
+        None,
         &UnreadLines::new(netlist, limits),
         project_runtimes,
         measurement_references,
@@ -201,9 +203,12 @@ pub(crate) fn reject_deferred_external_sources_for_host(
 }
 
 /// [`reject_deferred_external_sources_for_host`], stopped once `abort` is
-/// raised, with `unread` naming the lines the parser skips.
+/// raised, with `unread` naming the lines the parser skips, for a deck its
+/// run's preparation parsed as `parsed`, where it did.
+#[allow(clippy::too_many_arguments)]
 fn reject_deferred_external_sources_for_host_with_abort(
     netlist: &str,
+    parsed: Option<&rspice_core::Netlist>,
     unread: &UnreadLines<'_>,
     project_runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
     measurement_references: &crate::measurement_references::PreparedMeasurementReferences,
@@ -211,14 +216,16 @@ fn reject_deferred_external_sources_for_host_with_abort(
     limits: rspice_core::ResourceLimits,
     abort: &dyn rspice_core::abort_signal::AbortSignal,
 ) -> Result<(), PreparationError> {
-    measurement_references
-        .validate_source(netlist, limits)
-        .map_err(|error| {
-            PreparationError::new(
-                PreparationStage::SourceChecks,
-                format!("The netlist reads a file that is not kept with the run: {error}"),
-            )
-        })?;
+    match parsed {
+        Some(parsed) => measurement_references.validate_parsed(netlist, parsed, limits),
+        None => measurement_references.validate_source(netlist, limits),
+    }
+    .map_err(|error| {
+        PreparationError::new(
+            PreparationStage::SourceChecks,
+            format!("The netlist reads a file that is not kept with the run: {error}"),
+        )
+    })?;
     PreparationError::check_abort(abort)?;
     scan_deferred_external_sources(
         netlist,
