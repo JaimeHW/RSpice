@@ -137,7 +137,6 @@ impl LanguageOff {
             MessageId::NetlistDeckLanguageOff,
             &[
                 ("name", name),
-                ("size", &memory_words(self.deck_bytes)),
                 ("needed", &memory_words(self.needed)),
                 ("free", &memory_words(self.free)),
             ],

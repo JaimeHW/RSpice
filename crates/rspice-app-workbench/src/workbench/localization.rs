@@ -238,7 +238,7 @@ define_messages! {
     NetlistDeckRemove => "Remove",
     NetlistIncludeNotSaved => "Not saved: the check and other tabs read the saved file; Run saves it.",
     NetlistDeckTooLarge => "{name} is {size}. Opening it needs about {needed} of memory, more than the {installed} this computer has. Open it on a computer with more memory.",
-    NetlistDeckLanguageOff => "Outline, hover, go to definition, completion and the check are off: indexing {name} ({size}) needs about {needed} of memory, and this computer had {free} free.",
+    NetlistDeckLanguageOff => "Language features are off: indexing {name} needs about {needed}, and {free} was free.",
     NetlistDeckIndexAnyway => "Index anyway",
     NetlistDeckLanguageOffShort => "Off: indexing this deck needs more memory than is free.",
     NetlistComparisonGeneratedTitle => "Compare with earlier build",
