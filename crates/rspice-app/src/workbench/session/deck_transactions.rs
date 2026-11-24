@@ -725,10 +725,11 @@ impl AppState {
 
     /// The open deck, edited back to the text it was last saved with, reads
     /// as saved again as soon as that is found, without a save. Once its
-    /// text has rested, a worker compares it with the saved text: a deck
-    /// file by the digest of what was last read or written, a deck the
-    /// project keeps with the text the project was last saved or opened
-    /// with. No frame reads the deck whole.
+    /// text has rested, a worker reads it: a deck file's for its digest,
+    /// which the file holds against the digest of what was last read or
+    /// written (`OpenFile::take_digest`); a deck the project keeps against
+    /// the text the project was last saved or opened with. No frame reads
+    /// the deck whole.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn poll_saved_deck_text(&mut self, ctx: &egui::Context) {
         use rspice_app_code::workbench::documents::deck_files;
@@ -742,13 +743,21 @@ impl AppState {
             return;
         };
         if let Some((deck, compared, answer)) = &self.shell.saved_text.running {
-            let Some(&same) = answer.get() else {
+            let Some(&found) = answer.get() else {
                 return;
             };
-            let current = (*deck, *compared) == (id, revision);
+            let (current, compared) = ((*deck, *compared) == (id, revision), *compared);
             self.shell.saved_text.running = None;
-            if same && current {
-                self.read_deck_as_saved();
+            if current {
+                match found {
+                    Found::Digest(digest) => {
+                        if let Some(deck) = self.code.netlist.open_deck.as_mut() {
+                            deck.root.take_digest(compared, digest);
+                        }
+                    }
+                    Found::Kept(true) => self.keep_saved_deck_text(),
+                    Found::Kept(false) => {}
+                }
                 return;
             }
         }
@@ -784,13 +793,13 @@ impl AppState {
         let started = std::thread::Builder::new()
             .name("deck-saved-text".to_owned())
             .spawn(move || {
-                let same = match &saved {
-                    SavedText::File(digest) => deck_files::editor_text_digest(&text) == *digest,
+                let found = match &saved {
+                    SavedText::File => Found::Digest(deck_files::editor_text_digest(&text)),
                     SavedText::Kept(saved) => {
-                        deck_files::written_as(&text, line_ending, saved.as_str())
+                        Found::Kept(deck_files::written_as(&text, line_ending, saved.as_str()))
                     }
                 };
-                let _ = answered.set(same);
+                let _ = answered.set(found);
                 wake.request_repaint();
             });
         if started.is_ok() {
@@ -799,18 +808,15 @@ impl AppState {
     }
 
     /// The text the open deck reads as saved against, while it reads
-    /// unsaved: a deck file's digest, when the deck's file holds edits and
-    /// changed on disk in nothing else, of a text as long as the deck's now;
-    /// for a deck the project keeps, the text the project was last saved or
-    /// opened with, when only the deck's own text differs from it.
+    /// unsaved: a deck file's, when only its digest can tell
+    /// (`OpenFile::wants_digest`); for a deck the project keeps, the text the
+    /// project was last saved or opened with, when only the deck's own text
+    /// differs from it.
     #[cfg(not(target_arch = "wasm32"))]
     fn saved_deck_text(&self) -> Option<SavedText> {
         let deck = self.code.netlist.open_deck.as_ref()?;
         if !deck.is_stored() {
-            let root = &deck.root;
-            let stamp = root.disk.as_ref()?;
-            return (root.dirty && root.disk_change.is_none() && root.text.len() == stamp.text_len)
-                .then_some(SavedText::File(stamp.digest));
+            return deck.root.wants_digest().then_some(SavedText::File);
         }
         let content = &self.model.workspace.content;
         if !content.decks_dirty {
@@ -833,20 +839,21 @@ impl AppState {
         (only_its_text && !kept.text.is(&saved.text)).then(|| SavedText::Kept(saved.text.clone()))
     }
 
-    /// The open deck reads as saved: a deck file's edits are its saved
-    /// text; a deck the project keeps holds the very text the project was
-    /// saved with again, and the project's decks read as they were saved
-    /// unless another differs.
+    /// The open deck, one the project keeps, holds the very text the
+    /// project was saved with again, and the project's decks read as they
+    /// were saved unless another differs.
     #[cfg(not(target_arch = "wasm32"))]
-    fn read_deck_as_saved(&mut self) {
-        let Some(deck) = self.code.netlist.open_deck.as_mut() else {
+    fn keep_saved_deck_text(&mut self) {
+        let Some(id) = self
+            .code
+            .netlist
+            .open_deck
+            .as_ref()
+            .filter(|deck| deck.is_stored())
+            .map(|deck| deck.id)
+        else {
             return;
         };
-        if !deck.is_stored() {
-            deck.root.dirty = false;
-            return;
-        }
-        let id = deck.id;
         let Some(saved) = saved_stored_deck(&self.platform, id).map(|saved| saved.text.clone())
         else {
             return;
@@ -1068,19 +1075,30 @@ pub(crate) struct SavedTextCompare {
     compared: Option<(rspice_app_state::state::DeckId, u64)>,
     /// The deck and the revision its text rests at, and since when.
     resting: Option<(rspice_app_state::state::DeckId, u64, f64)>,
-    /// The comparison running, and its answer once it has one.
+    /// The comparison running, and what it found once it has.
     running: Option<(
         rspice_app_state::state::DeckId,
         u64,
-        std::sync::Arc<std::sync::OnceLock<bool>>,
+        std::sync::Arc<std::sync::OnceLock<Found>>,
     )>,
+}
+
+/// What reading the open deck's text against its saved text found.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy)]
+enum Found {
+    /// A deck file's text's digest, which the file holds against what was
+    /// last read or written.
+    Digest(rspice_app_state::product::ContentDigest),
+    /// Whether a deck the project keeps holds the text it was saved with.
+    Kept(bool),
 }
 
 /// The text a deck reads as saved against.
 #[cfg(not(target_arch = "wasm32"))]
 enum SavedText {
-    /// A deck file's, by the digest of what was last read or written.
-    File(rspice_app_state::product::ContentDigest),
+    /// A deck file's, which its digest tells.
+    File,
     /// A deck the project keeps: the text the project was last saved or
     /// opened with.
     Kept(rspice_app_state::state::DeckText),

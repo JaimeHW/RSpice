@@ -136,6 +136,10 @@ pub struct OpenFile {
     /// What the file on disk became while the tab held edits, until the
     /// reader reloads it, keeps theirs or compares the two.
     pub disk_change: Option<Box<DiskChange>>,
+    /// The digest of the text at a revision, taken away from the frame
+    /// ([`OpenFile::take_digest`]): what tells a text edited back to what was
+    /// last read or written.
+    digest: Option<(u64, crate::product::ContentDigest)>,
 }
 
 /// A file as it stands on disk after something else changed it.
@@ -166,6 +170,7 @@ impl OpenFile {
             disk: None,
             dirty: false,
             disk_change: None,
+            digest: None,
         })
     }
 
@@ -195,6 +200,7 @@ impl OpenFile {
             disk: None,
             dirty: false,
             disk_change: None,
+            digest: None,
         }
     }
 
@@ -203,9 +209,9 @@ impl OpenFile {
         if self.text == text {
             return false;
         }
-        self.text.set(text);
-        self.dirty = true;
-        true
+        let mut edited = self.text.clone();
+        edited.set(text);
+        self.hold(&edited, true)
     }
 
     /// Hold `text`, shared rather than copied; whether that changed it.
@@ -225,10 +231,54 @@ impl OpenFile {
         self.hold(text, changed)
     }
 
+    /// Hold `text`, which `changed` the file's or not. The one rule of
+    /// whether a file holds edits not yet saved: an edit leaves it holding
+    /// some until its text is found to be what was last read from or
+    /// written to disk again.
     fn hold(&mut self, text: &RevisedText, changed: bool) -> bool {
         self.text = text.clone();
-        self.dirty |= changed;
+        self.dirty = (self.dirty || changed) && !self.reads_as_on_disk();
         changed
+    }
+
+    /// Whether the text is what was last read from or written to disk: as
+    /// long, and of the same digest, taken of this revision away from the
+    /// frame. Never while the file changed on disk under the edits, whose
+    /// text is no longer what is on disk.
+    fn reads_as_on_disk(&self) -> bool {
+        let Some(stamp) = &self.disk else {
+            return false;
+        };
+        self.disk_change.is_none()
+            && self.text.len() == stamp.text_len
+            && self.digest == Some((self.text.revision(), stamp.digest))
+    }
+
+    /// Whether the text, holding edits, might be what was last read from or
+    /// written to disk again, which only its digest can tell: it is as long,
+    /// and no digest was taken of this revision yet.
+    #[must_use]
+    pub fn wants_digest(&self) -> bool {
+        self.dirty
+            && self.disk_change.is_none()
+            && self.disk.as_ref().is_some_and(|stamp| {
+                self.text.len() == stamp.text_len
+                    && self
+                        .digest
+                        .is_none_or(|(revision, _)| revision != self.text.revision())
+            })
+    }
+
+    /// Take `digest`, taken away from the frame of the text at `revision`
+    /// ([`editor_text_digest`]): should the text still stand there and be
+    /// what was last read from or written to disk, it reads as saved.
+    pub fn take_digest(&mut self, revision: u64, digest: crate::product::ContentDigest) {
+        if revision != self.text.revision() {
+            return;
+        }
+        self.digest = Some((revision, digest));
+        let text = self.text.clone();
+        self.edit_to(&text);
     }
 
     /// The file's text as the project keeps it, with the file's own
@@ -305,6 +355,7 @@ impl OpenDeck {
                 disk: None,
                 dirty: false,
                 disk_change: None,
+                digest: None,
             },
             includes: Vec::new(),
             stored_files: Some(deck.files.clone()),
@@ -3189,6 +3240,7 @@ pub fn show_include(
                 disk: None,
                 dirty: false,
                 disk_change: None,
+                digest: None,
             });
         } else {
             #[cfg(not(target_arch = "wasm32"))]
@@ -3240,3 +3292,6 @@ pub fn resolve_include(model: &Model, deck: &OpenDeck, requested: &str) -> Optio
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod typed_back_tests;
