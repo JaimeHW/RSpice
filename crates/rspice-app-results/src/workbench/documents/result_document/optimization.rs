@@ -2,7 +2,6 @@
 
 use rspice_results_ui::optimization as presentation;
 use rspice_results_ui::presentation::{panel_note, well_hint};
-#[cfg(test)]
 use std::collections::BTreeMap;
 
 use egui::Ui;
@@ -224,6 +223,44 @@ fn design_expression(value: f64, quantity: DesignVariableQuantity) -> String {
     }
 }
 
+/// Each optimized variable's unit, by its name in the history: the unit of
+/// the active plan's design variable of that name, and none for a variable
+/// the plan does not hold or holds without a unit.
+fn variable_units<'n>(
+    model: &Model,
+    names: impl IntoIterator<Item = &'n str>,
+) -> BTreeMap<String, &'static str> {
+    let payload = model
+        .active_plan_revision()
+        .and_then(|(plan, _)| model.workspace.content.plan_data(plan));
+    names
+        .into_iter()
+        .map(|name| {
+            let unit = payload
+                .and_then(|payload| {
+                    payload
+                        .design_variables
+                        .iter()
+                        .find(|variable| variable.name.eq_ignore_ascii_case(name))
+                })
+                .map_or("", |variable| quantity_unit(variable.quantity));
+            (name.to_owned(), unit)
+        })
+        .collect()
+}
+
+/// The unit a design variable of `quantity` is stated in.
+const fn quantity_unit(quantity: DesignVariableQuantity) -> &'static str {
+    match quantity {
+        DesignVariableQuantity::Resistance => "\u{3a9}",
+        DesignVariableQuantity::Capacitance => "F",
+        DesignVariableQuantity::Voltage => "V",
+        DesignVariableQuantity::Current => "A",
+        DesignVariableQuantity::Temperature => "\u{b0}C",
+        DesignVariableQuantity::Dimensionless => "",
+    }
+}
+
 /// Adopt the writes as one validated plan transaction and one step of the
 /// setup's history, as every plan edit is.
 fn commit_best(
@@ -323,6 +360,8 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 .unwrap_or((0.0, 1.0))
         })
         .collect::<Vec<_>>();
+    let variable_units =
+        variable_units(&*state.model, view.variables.iter().map(|(name, _)| *name));
     let response = presentation::show(
         ui,
         presentation::OptimizationPlot {
@@ -338,6 +377,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             plot_view,
             cost_range: (cost_min, cost_max),
             variable_ranges: &variable_ranges,
+            variable_units: &variable_units,
             table: state.results.session.optimization_table,
             significant_digits,
         },
@@ -355,6 +395,13 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .session
             .plot_view_mut(super::ResultViewer::Optimization, 0)
             .apply(&response.view);
+    }
+    if let Some(axes) = response.axes {
+        state
+            .results
+            .session
+            .drawn_axes
+            .insert(super::ResultViewer::Optimization, axes);
     }
     if let Some(index) = response.selected {
         state.results.session.selected_optimization = Some(OptimizationSelection {
@@ -405,6 +452,7 @@ fn paint_selected_candidate(ui: &mut Ui, state: ResultsReads<'_>) -> bool {
     if index >= iterations.len() {
         return false;
     }
+    let variable_units = variable_units(state.model, best_variables.keys().map(String::as_str));
     presentation::right_panel(
         ui,
         presentation::CandidateView {
@@ -413,6 +461,7 @@ fn paint_selected_candidate(ui: &mut Ui, state: ResultsReads<'_>) -> bool {
             iterations,
             best_cost,
             best_variables,
+            variable_units: &variable_units,
             significant_digits: significant_digits(state),
         },
     );

@@ -25,6 +25,9 @@ pub struct OptimizationPlot<'a> {
     /// Each design variable's least and greatest value, in the history's
     /// order.
     pub variable_ranges: &'a [(f64, f64)],
+    /// Each design variable's unit, by its name in the history: `F`, `Ω`,
+    /// and none for a variable without one.
+    pub variable_units: &'a BTreeMap<String, &'a str>,
     /// The table at the sheet's foot.
     pub table: OptimizationTable,
     /// The reader's displayed significant digits.
@@ -36,6 +39,9 @@ pub struct OptimizationResponse {
     pub fit: bool,
     pub view: plot::ViewChange,
     pub selected: Option<usize>,
+    /// The cost strip's axes as drawn, iteration then cost: the ranges the
+    /// details panel states for the sheet.
+    pub axes: Option<((f64, f64), (f64, f64))>,
 }
 
 /// Exact metadata and index resolved by the host's candidate-selection gate.
@@ -45,6 +51,8 @@ pub struct CandidateView<'a> {
     pub iterations: &'a [f64],
     pub best_cost: &'a f64,
     pub best_variables: &'a BTreeMap<String, f64>,
+    /// Each design variable's unit, by its name in the history.
+    pub variable_units: &'a BTreeMap<String, &'a str>,
     /// The reader's displayed significant digits.
     pub significant_digits: usize,
 }
@@ -54,6 +62,11 @@ pub struct CandidateView<'a> {
 /// would misstate. Full precision belongs to copy and export.
 fn value_text(value: f64, unit: &str, digits: usize) -> String {
     fmt_si_significant(value, unit, digits)
+}
+
+/// `name`'s unit, or none when the host knows of none.
+fn unit_of<'u>(units: &BTreeMap<String, &'u str>, name: &str) -> &'u str {
+    units.get(name).copied().unwrap_or("")
 }
 
 /// What an objective asks of its measurement, in the reader's words.
@@ -67,9 +80,9 @@ fn goal_word(goal: OptimizationObjectiveGoal) -> &'static str {
 
 /// A difference, signed so the direction reads at a glance, in the notation
 /// every other value on the sheet uses.
-fn signed_readout(delta: f64, digits: usize) -> String {
+fn signed_readout(delta: f64, unit: &str, digits: usize) -> String {
     let sign = if delta < 0.0 { "−" } else { "+" };
-    format!("{sign}{}", value_text(delta.abs(), "", digits))
+    format!("{sign}{}", value_text(delta.abs(), unit, digits))
 }
 
 /// An optimizer iteration: a count, never a measurement, so it prints whole
@@ -211,6 +224,7 @@ pub fn show(
         plot_view,
         cost_range,
         variable_ranges,
+        variable_units,
         table,
         significant_digits: digits,
     } = input;
@@ -269,7 +283,7 @@ pub fn show(
         .iter()
         .map(|(name, waveform)| (*name, held(&waveform.y)))
         .collect::<Vec<_>>();
-    let histories = std::iter::once(("cost", &cost[..], cost_range))
+    let histories = std::iter::once(("cost", &cost[..], cost_range, ""))
         .chain(
             variables
                 .iter()
@@ -279,7 +293,9 @@ pub fn show(
                         .copied()
                         .chain(std::iter::repeat((0.0, 1.0))),
                 )
-                .map(|((name, values), range)| (*name, &values[..], range)),
+                .map(|((name, values), range)| {
+                    (*name, &values[..], range, unit_of(variable_units, name))
+                }),
         )
         .collect::<Vec<_>>();
     let auto_x0 = view.iterations[0];
@@ -290,55 +306,79 @@ pub fn show(
         auto_x0.abs().mul_add(0.025, 1.0)
     };
     let (x0, x1) = plot_view.x.unwrap_or((auto_x0 - x_pad, auto_x1 + x_pad));
-    let strip_height = plot_area.height() / histories.len() as f32;
+    // The strips share one iteration axis, written once under the last of
+    // them, as a Waves stack writes time once under its strips.
+    let count = histories.len();
+    let strip_height = (plot_area.height() - plot::X_AXIS_ROW_HEIGHT).max(0.0) / count as f32;
+    let tokens = Tokens::get(ui.ctx());
+    let strips = histories
+        .iter()
+        .enumerate()
+        .map(|(index, &(name, values, range, unit))| HistoryStrip {
+            name,
+            unit,
+            iterations: view.iterations,
+            values,
+            x: (x0, x1),
+            y: if index == 0 {
+                plot_view.y.unwrap_or_else(|| plot::padded_fit(range))
+            } else {
+                plot::padded_fit(range)
+            },
+            best_index,
+            selected,
+            color: tokens.color.traces[index % tokens.color.traces.len()],
+            cache_key: 0x4F50_5400_u64 ^ analysis_id.rotate_left(17) ^ index as u64,
+            digits,
+        })
+        .collect::<Vec<_>>();
+    // One gutter for every strip, the widest any of them needs, so their
+    // iteration grids stand one above another.
+    let gutter = strips
+        .iter()
+        .map(|strip| strip.gutter(ui))
+        .fold(plot::PLOT_GUTTER, f32::max);
     let mut view_change = plot::ViewChange::default();
-    for (strip, &(name, values, range)) in histories.iter().enumerate() {
-        let rect = egui::Rect::from_min_size(
+    let mut axes = None;
+    for (index, strip) in strips.iter().enumerate() {
+        let last = index + 1 == count;
+        let top = strip_height.mul_add(index as f32, plot_area.top());
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(plot_area.left(), top),
             egui::pos2(
-                plot_area.left(),
-                strip_height.mul_add(strip as f32, plot_area.top()),
+                plot_area.right(),
+                if last {
+                    plot_area.bottom()
+                } else {
+                    top + strip_height
+                },
             ),
-            egui::vec2(plot_area.width(), strip_height),
         );
         let mut strip_ui = ui.new_child(
             egui::UiBuilder::new()
-                .id_salt(("rspice.results.optimization-history", strip))
+                .id_salt(("rspice.results.optimization-history", index))
                 .max_rect(rect)
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
-        if strip > 0 {
+        if index > 0 {
             // The cost strip stands under the sheet's own header; each
             // variable's strip names its variable and the value it settled at.
-            let best = values.get(best_index).copied().unwrap_or(f64::NAN);
+            let best = strip.values.get(best_index).copied().unwrap_or(f64::NAN);
             StripHeader::new(
-                name,
-                &format!("design variable · best {}", value_text(best, "", digits)),
+                strip.name,
+                &format!(
+                    "design variable · best {}",
+                    value_text(best, strip.unit, digits)
+                ),
                 &[],
             )
             .maximizable(false)
             .show(&mut strip_ui);
         }
-        let response = history_strip(
-            &mut strip_ui,
-            &HistoryStrip {
-                name,
-                iterations: view.iterations,
-                values,
-                x: (x0, x1),
-                y: if strip == 0 {
-                    plot_view.y.unwrap_or_else(|| plot::padded_fit(range))
-                } else {
-                    plot::padded_fit(range)
-                },
-                best_index,
-                selected,
-                color: Tokens::get(ui.ctx()).color.traces
-                    [strip % Tokens::get(ui.ctx()).color.traces.len()],
-                cache_key: 0x4F50_5400_u64 ^ analysis_id.rotate_left(17) ^ strip as u64,
-                digits,
-            },
-            cache,
-        );
+        let response = history_strip(&mut strip_ui, strip, gutter, last, cache);
+        if index == 0 {
+            axes = Some(response.axes);
+        }
         if let Some(index) = response
             .clicked_x
             .and_then(|iteration| nearest_candidate_index(view.iterations, iteration))
@@ -349,7 +389,7 @@ pub fn show(
             // Only the cost strip's value axis is the reader's to set; the
             // variables' strips each fit their own.
             view_change = plot::ViewChange {
-                y: if strip == 0 { response.view.y } else { None },
+                y: if index == 0 { response.view.y } else { None },
                 ..response.view
             };
         }
@@ -369,6 +409,7 @@ pub fn show(
                     view: &view,
                     cost: &cost,
                     variables: &variables,
+                    units: variable_units,
                     selected,
                     analysis_id,
                     digits,
@@ -388,6 +429,7 @@ pub fn show(
         fit: header.fit_clicked,
         view: view_change,
         selected: requested,
+        axes,
     }
 }
 
@@ -395,6 +437,8 @@ pub fn show(
 /// marked, and the selected one when it is another.
 struct HistoryStrip<'a> {
     name: &'a str,
+    /// The history's unit, none for the cost or a bare variable.
+    unit: &'a str,
     iterations: &'a [f64],
     values: &'a [f64],
     x: (f64, f64),
@@ -406,19 +450,33 @@ struct HistoryStrip<'a> {
     digits: usize,
 }
 
-fn history_strip(
-    ui: &mut Ui,
-    strip: &HistoryStrip<'_>,
-    cache: &mut plot::DecimationCache,
-) -> plot::PlotResponse {
+impl HistoryStrip<'_> {
+    fn accessible_name(&self) -> String {
+        format!("Optimization history of {}", self.name)
+    }
+
+    /// The left gutter this strip's value labels need.
+    fn gutter(&self, ui: &Ui) -> f32 {
+        let name = self.accessible_name();
+        let spec = history_spec(ui, self, &name);
+        plot::plot_rect(ui, &spec).left() - ui.available_rect_before_wrap().left()
+    }
+
+    fn value_at(&self, index: usize) -> f64 {
+        self.values.get(index).copied().unwrap_or(f64::NAN)
+    }
+}
+
+/// The strip's plot: its history as a line through a dot at each candidate,
+/// the best candidate marked, and the selected one when it is another.
+fn history_spec<'s>(ui: &Ui, strip: &HistoryStrip<'s>, accessible_name: &'s str) -> PlotSpec<'s> {
     let digits = strip.digits;
-    let accessible_name = format!("Optimization history of {}", strip.name);
     let mut spec = PlotSpec::new(
         Axis::linear_with(strip.x.0, strip.x.1, "", 7).with_label("iteration"),
         XScale::Linear,
-        Axis::linear_with(strip.y.0, strip.y.1, "", 5).with_label(strip.name),
+        Axis::linear_with(strip.y.0, strip.y.1, strip.unit, 5).with_label(strip.name),
     )
-    .accessible_name(&accessible_name)
+    .accessible_name(accessible_name)
     .accessible_detail("Exact retained value at each evaluated candidate.");
     if strip.values.len() == strip.iterations.len() {
         spec.traces.push(
@@ -432,16 +490,15 @@ fn history_strip(
                 .cache_key(strip.cache_key.rotate_left(1)),
         );
     }
-    let value_at = |index: usize| strip.values.get(index).copied().unwrap_or(f64::NAN);
     if let Some(&best) = strip.iterations.get(strip.best_index) {
         spec.markers.push(plot::Marker {
             x: best,
-            y: value_at(strip.best_index),
+            y: strip.value_at(strip.best_index),
             // The best candidate is a fact, not a success: primary ink.
             color: Tokens::get(ui.ctx()).color.text,
             label: format!(
                 "best {}",
-                value_text(value_at(strip.best_index), "", digits)
+                value_text(strip.value_at(strip.best_index), strip.unit, digits)
             ),
             drop_line: true,
             label_dy: 0.0,
@@ -454,15 +511,36 @@ fn history_strip(
     {
         spec.markers.push(plot::Marker {
             x: iteration,
-            y: value_at(selection),
+            y: strip.value_at(selection),
             color: Tokens::get(ui.ctx()).color.accent,
-            label: format!("selected {}", value_text(value_at(selection), "", digits)),
+            label: format!(
+                "selected {}",
+                value_text(strip.value_at(selection), strip.unit, digits)
+            ),
             drop_line: true,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,
         });
     }
-    let best_value = value_at(strip.best_index);
+    spec
+}
+
+/// Draw `strip` on `gutter`, with the iteration row under it when `x_row`.
+fn history_strip(
+    ui: &mut Ui,
+    strip: &HistoryStrip<'_>,
+    gutter: f32,
+    x_row: bool,
+    cache: &mut plot::DecimationCache,
+) -> plot::PlotResponse {
+    let digits = strip.digits;
+    let accessible_name = strip.accessible_name();
+    let mut spec = history_spec(ui, strip, &accessible_name);
+    spec.left_margin = gutter;
+    if !x_row {
+        spec = spec.without_x_axis_chrome();
+    }
+    let best_value = strip.value_at(strip.best_index);
     let readout = |iteration: f64| {
         nearest_candidate_index(strip.iterations, iteration).map_or_else(Vec::new, |index| {
             vec![
@@ -472,11 +550,11 @@ fn history_strip(
                 ),
                 (
                     strip.name.to_owned(),
-                    value_text(value_at(index), "", digits),
+                    value_text(strip.value_at(index), strip.unit, digits),
                 ),
                 (
                     "Δ best".to_owned(),
-                    signed_readout(value_at(index) - best_value, digits),
+                    signed_readout(strip.value_at(index) - best_value, strip.unit, digits),
                 ),
             ]
         })
@@ -489,6 +567,8 @@ struct CandidateRows<'a, 'v> {
     view: &'a OptimizationView<'v>,
     cost: &'a [f64],
     variables: &'a [(&'v str, HeldColumn)],
+    /// Each variable's unit, by name.
+    units: &'a BTreeMap<String, &'a str>,
     selected: Option<usize>,
     analysis_id: u64,
     digits: usize,
@@ -502,6 +582,7 @@ fn candidates_table(ui: &mut Ui, rows: &CandidateRows<'_, '_>, height: f32) -> O
         view,
         cost,
         variables,
+        units,
         selected,
         analysis_id,
         digits,
@@ -546,12 +627,13 @@ fn candidates_table(ui: &mut Ui, rows: &CandidateRows<'_, '_>, height: f32) -> O
                     Cell::number(iteration_text(iteration, digits))
                         .sort_by(SortKey::Number(iteration)),
                     Cell::number(value_text(cost, "", digits)).sort_by(SortKey::Number(cost)),
-                    Cell::number(signed_readout(cost - view.best_cost, digits))
+                    Cell::number(signed_readout(cost - view.best_cost, "", digits))
                         .sort_by(SortKey::Number(cost - view.best_cost)),
                 ];
-                cells.extend(variables.iter().map(|(_, values)| {
+                cells.extend(variables.iter().map(|(name, values)| {
                     let value = values.get(index).copied().unwrap_or(f64::NAN);
-                    Cell::number(value_text(value, "", digits)).sort_by(SortKey::Number(value))
+                    Cell::number(value_text(value, unit_of(units, name), digits))
+                        .sort_by(SortKey::Number(value))
                 }));
                 let last = index + 1 == candidates;
                 cells.push(if best_index == index {
@@ -682,6 +764,7 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         iterations,
         best_cost,
         best_variables,
+        variable_units,
         significant_digits: digits,
     } = input;
     let cost = analysis
@@ -707,7 +790,7 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
             "Cost from best",
             cost.map_or_else(
                 || "unavailable".to_owned(),
-                |value| signed_readout(value - *best_cost, digits),
+                |value| signed_readout(value - *best_cost, "", digits),
             ),
             true,
         ),
@@ -722,16 +805,17 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         .collect();
     variables.sort_by(|left, right| left.0.cmp(right.0));
     rows.extend(variables.into_iter().map(|(name, value)| {
+        let unit = unit_of(variable_units, name);
         let value = value.map_or_else(
             || "unavailable".to_owned(),
             |value| {
                 best_variables.get(name).map_or_else(
-                    || value_text(value, "", digits),
+                    || value_text(value, unit, digits),
                     |best| {
                         format!(
                             "{} · Δ {}",
-                            value_text(value, "", digits),
-                            signed_readout(value - *best, digits)
+                            value_text(value, unit, digits),
+                            signed_readout(value - *best, unit, digits)
                         )
                     },
                 )
