@@ -454,9 +454,31 @@ def provider_decision_clock(browser):
             "save_and_reload": "passed", "decisions": decisions, "execution": execution}
 
 
+def edit_transient(browser, *edits):
+    """Set the plan's transient fields on the Simulation workspace, each `(label, value)` typed
+    and committed as a reader does, and wait until the page holds each value."""
+    choose_command(browser, "Open simulation workspace")
+    browser.click("Analyses, 1 / 1", "button")
+
+    def field(label):
+        found = [control for control in controls(browser.snapshot())
+                 if control["label"] == label and control["role"] == "textInput"]
+        return found[0]["value"] if len(found) == 1 else None
+
+    wait_for(lambda: field("Stop time") is not None, "the transient's Stop time")
+    for label, value in edits:
+        browser.click(label, "textInput", keyboard=(("a", ("",)), (value, ()), ("", ())))
+        wait_for(lambda: field(label) == value, f"the transient's {label} set to {value}")
+
+
 def run_with_saved_provider(browser, decision):
     # Run the circuit authored above after restoring the model decision,
     # including its multiline audit reason, through the normal project loader.
+    # Run on a plan nobody has edited runs what the drawn sources ask for, and
+    # a steady 5 V source asks for an operating point. This check reads the
+    # plan's 1 ms transient, so it edits that transient first, as a reader who
+    # wants it does; a step bound leaves its stop time as it is.
+    edit_transient(browser, ("Max step", "1u"))
     browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
     # Run leaves the reader on the schematic and opens Results when the run
     # completes there; how fast this deck finishes decides which of the two
@@ -1132,18 +1154,7 @@ def quota_stop_cuts_a_page_run(browser):
     if "error" in estimate:
         raise AssertionError("The storage estimate failed: " + estimate["error"])
     quota = int(estimate["usage"]) + (3 << 20)
-    choose_command(browser, "Open simulation workspace")
-    browser.click("Analyses, 1 / 1", "button")
-
-    def field(label):
-        found = [control for control in controls(browser.snapshot())
-                 if control["label"] == label and control["role"] == "textInput"]
-        return found[0]["value"] if len(found) == 1 else None
-
-    wait_for(lambda: field("Stop time") is not None, "the transient's Stop time")
-    for label, value in (("Stop time", "10m"), ("Max step", "10n")):
-        browser.click(label, "textInput", keyboard=(("a", ("\ue009",)), (value, ()), ("\ue007", ())))
-        wait_for(lambda: field(label) == value, f"the transient's {label} set to {value}")
+    edit_transient(browser, ("Stop time", "10m"), ("Max step", "10n"))
     browser.click("Expand console", "button")
     clear_console(browser)
     browser.click("Collapse console", "button")
@@ -1196,19 +1207,8 @@ def quota_refusal_keeps_nothing(browser):
         raise AssertionError("The storage estimate failed: " + estimate["error"])
     # Less than the store keeps past a segment for closing it, so the segment cannot begin.
     quota = int(estimate["usage"]) + (64 << 10)
-    choose_command(browser, "Open simulation workspace")
-    browser.click("Analyses, 1 / 1", "button")
-
-    def field(label):
-        found = [control for control in controls(browser.snapshot())
-                 if control["label"] == label and control["role"] == "textInput"]
-        return found[0]["value"] if len(found) == 1 else None
-
-    wait_for(lambda: field("Stop time") is not None, "the transient's Stop time")
     # A run the store does not keep already, small enough to finish at once.
-    for label, value in (("Stop time", "3m"), ("Max step", "auto")):
-        browser.click(label, "textInput", keyboard=(("a", ("\ue009",)), (value, ()), ("\ue007", ())))
-        wait_for(lambda: field(label) == value, f"the transient's {label} set to {value}")
+    edit_transient(browser, ("Stop time", "3m"), ("Max step", "auto"))
     browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin, "quotaSize": quota})
     try:
         browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
