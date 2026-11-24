@@ -146,19 +146,23 @@ pub(crate) fn abscissa_choices(
         format!("Plot the {unit} curves against")
     };
     ui.label(egui::RichText::new(heading).weak());
-    let signals = menu
-        .signals
-        .iter()
-        .map(|name| Abscissa::Signal { name: name.clone() });
-    let expressions = menu
-        .expressions
-        .iter()
-        .map(|text| Abscissa::Expression { text: text.clone() });
-    let options: Vec<Abscissa> = signals.chain(expressions).collect();
-    egui::ScrollArea::vertical()
-        .max_height(240.0)
-        .show(ui, |ui| {
-            for option in options {
+    // A strip can hold a hundred thousand signals: only the rows in view are
+    // laid out.
+    let signals = menu.signals.len();
+    let option = |row: usize| match menu.signals.get(row) {
+        Some(name) => Abscissa::Signal { name: name.clone() },
+        None => Abscissa::Expression {
+            text: menu.expressions[row - signals].clone(),
+        },
+    };
+    let row_height = ui.spacing().interact_size.y;
+    egui::ScrollArea::vertical().max_height(240.0).show_rows(
+        ui,
+        row_height,
+        signals + menu.expressions.len(),
+        |ui, rows| {
+            for row in rows {
+                let option = option(row);
                 let label = match &option {
                     Abscissa::Signal { name } => display_name(name),
                     Abscissa::Expression { text } => text.clone(),
@@ -170,7 +174,8 @@ pub(crate) fn abscissa_choices(
                     chosen = Some(option);
                 }
             }
-        });
+        },
+    );
     ui.separator();
     let mut draft = ui.data_mut(|data| data.get_temp::<String>(draft_id).unwrap_or_default());
     let field = ui.add(
