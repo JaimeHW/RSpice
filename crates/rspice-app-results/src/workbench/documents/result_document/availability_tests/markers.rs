@@ -12,6 +12,28 @@ fn view_markers(state: &ResultsTestHost) -> usize {
 }
 
 #[test]
+fn a_frame_with_nothing_changed_puts_no_marker_back() {
+    let mut state = transient_state();
+    state.quick_frame();
+    state.place_marker("V(out)", 0.5).expect("a marker");
+    state.quick_frame();
+    let drawn = &state.results.results.session.document_markers;
+    assert_eq!(drawn.len(), 1, "the view's marker is drawn");
+    let held = drawn.as_ptr();
+    for _ in 0..3 {
+        state.quick_frame();
+    }
+    let drawn = &state.results.results.session.document_markers;
+    assert_eq!(drawn.len(), 1, "the marker is still drawn");
+    // Put back, the markers would be a new list.
+    assert_eq!(
+        drawn.as_ptr(),
+        held,
+        "frames that change nothing leave the drawn markers alone"
+    );
+}
+
+#[test]
 fn an_invalid_placement_puts_nothing_on_the_view() {
     let mut state = transient_state();
     state.quick_frame();
