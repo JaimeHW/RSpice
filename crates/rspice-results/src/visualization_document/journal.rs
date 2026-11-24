@@ -451,6 +451,23 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
         result
     }
 
+    /// Put `item` in place of the entity at `index`, which has its
+    /// identity: the entity it replaces is kept as it stood, moved rather
+    /// than copied.
+    fn replace_at(&mut self, index: usize, item: T) {
+        let identity = item.identity();
+        debug_assert_eq!(self.items[index].identity(), identity, "a replacement keeps the identity");
+        let was = std::mem::replace(&mut self.items[index], item);
+        if !self.index.same_key(&was, &self.items[index]) {
+            let (before, after) = (self.index.key(&was), self.index.key(&self.items[index]));
+            self.index.remove(before, identity);
+            self.index.insert(after, identity);
+        }
+        if let Some(journal) = &mut self.journal {
+            journal.keep(identity, || Some(was));
+        }
+    }
+
     /// Change the entity `identity` with `change`; `None` when the list
     /// holds no such entity.
     pub(super) fn update<R>(
@@ -596,21 +613,28 @@ impl<T: Identified + Clone + PartialEq, I: ListIndex<T>> EntityList<T, I> {
     /// back what it holds, each in its place by identity. An entity another
     /// edit took out since is not missed; one another edit made since stays.
     pub(super) fn put_back(&mut self, changed: Changed<T>) {
+        // Both ascend by identity, as `finish` leaves them, so each is read
+        // in one pass beside the other and the list.
         let Changed { out, back } = changed;
-        let held: HashSet<u64> = back.iter().map(Identified::identity).collect();
-        let taken_out: HashSet<u64> = out
+        debug_assert!(out.is_sorted() && back.is_sorted_by_key(Identified::identity));
+        let mut held = back.iter().map(Identified::identity).peekable();
+        let taken_out: Vec<u64> = out
             .into_iter()
-            .filter(|identity| !held.contains(identity))
+            .filter(|identity| {
+                while held.next_if(|kept| kept < identity).is_some() {}
+                held.peek() != Some(identity)
+            })
             .collect();
         let mut absent = Vec::new();
+        let mut from = 0;
         for item in back {
-            match self.position(item.identity()) {
-                Some(index) => self.update_at(index, |now| *now = item),
+            match position_from(&self.items, &mut from, item.identity()) {
+                Some(index) => self.replace_at(index, item),
                 None => absent.push(item),
             }
         }
         if !taken_out.is_empty() {
-            self.retain(|item| !taken_out.contains(&item.identity()));
+            self.retain(|item| taken_out.binary_search(&item.identity()).is_err());
         }
         self.merge_in(absent);
     }
