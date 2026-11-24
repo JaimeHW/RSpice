@@ -94,12 +94,6 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
         }
         added.sort_unstable();
         added.dedup();
-        changes.push((place, added, taken));
-    }
-    let mut touched = Vec::with_capacity(changes.len());
-    for (place, added, taken) in changes {
-        let model = &mut models[place];
-        let analysis = with.run.analyses[model.analysis_index].as_ref();
         let context = ProjectionContext {
             analysis_key: model.analysis_key,
             run_id: with.run.id,
@@ -111,6 +105,7 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
         let mut fresh = Vec::with_capacity(added.len());
         for column in added {
             let kind = column_kind(analysis, &analysis.waveforms[column], with.options.ac);
+            let before = fresh.len();
             // Placed in the palette once the strip is ranked below.
             append_column_trace(
                 &mut fresh,
@@ -120,7 +115,18 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 (column, kind),
                 (egui::Color32::TRANSPARENT, None),
             );
+            if fresh.len() != before + 1 {
+                // A column drawn as other than one curve is placed in the
+                // palette by a build, which counts its curves by source.
+                return None;
+            }
         }
+        changes.push((place, fresh, taken));
+    }
+    let mut touched = Vec::with_capacity(changes.len());
+    for (place, fresh, taken) in changes {
+        let model = &mut models[place];
+        let analysis = with.run.analyses[model.analysis_index].as_ref();
         if !taken.is_empty() {
             model
                 .traces
