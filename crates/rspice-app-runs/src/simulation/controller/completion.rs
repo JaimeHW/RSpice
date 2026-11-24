@@ -43,7 +43,7 @@ impl SimulationController {
                     self.finishing = Some(Finishing { head, converting });
                     return;
                 }
-                Err(conversion) => conversion,
+                Err(conversion) => *conversion,
             }
         };
         let converted = self.convert_here(conversion);
@@ -817,15 +817,15 @@ impl Finishing {
 #[cfg(not(target_arch = "wasm32"))]
 fn convert_off_frame(
     conversion: Conversion,
-) -> Result<std::thread::JoinHandle<Converted>, Conversion> {
+) -> Result<std::thread::JoinHandle<Converted>, Box<Conversion>> {
     // The thread takes the conversion from here, so a thread that could not
     // start leaves it to be handed back.
-    let job = Arc::new(std::sync::Mutex::new(Some(conversion)));
+    let job = Arc::new(std::sync::Mutex::new(Some(Box::new(conversion))));
     let taken = Arc::clone(&job);
     let spawned = std::thread::Builder::new()
         .name("run completion".to_owned())
         .spawn(move || {
-            let conversion = taken
+            let conversion = *taken
                 .lock()
                 .ok()
                 .and_then(|mut job| job.take())
@@ -844,8 +844,8 @@ fn convert_off_frame(
 #[cfg(target_arch = "wasm32")]
 fn convert_off_frame(
     conversion: Conversion,
-) -> Result<std::thread::JoinHandle<Converted>, Conversion> {
-    Err(conversion)
+) -> Result<std::thread::JoinHandle<Converted>, Box<Conversion>> {
+    Err(Box::new(conversion))
 }
 
 #[cfg(test)]
