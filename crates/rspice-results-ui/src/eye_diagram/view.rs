@@ -374,7 +374,7 @@ fn show_bathtub(
     let mut spec = PlotSpec::new(
         Axis::linear_with(0.0, 1.0, "UI", 6),
         XScale::Linear,
-        Axis::log_decades(floor, 1.0, ""),
+        ber_axis(floor),
     )
     .with_log_y()
     .with_y_without_unit("BER")
@@ -394,6 +394,33 @@ fn show_bathtub(
         label: format!("{rate:e}"),
     });
     plot::show(ui, &spec, cache, None, None);
+}
+
+/// The bathtub's error-rate axis, from `floor` to 1. An error rate is a bare
+/// probability, so its decades are powers of ten spelled as the rate field
+/// and the reference line spell them (1e-3, 1e-12), not SI prefixes.
+fn ber_axis(floor: f64) -> Axis {
+    let mut axis = Axis::log_decades(floor, 1.0, "");
+    for (value, label) in &mut axis.ticks {
+        *label = ber_label(*value);
+    }
+    axis
+}
+
+/// An error rate as a power of ten: "1" for 1, "1e-12" for a decade, and
+/// the scientific spelling for a tick between decades.
+fn ber_label(value: f64) -> String {
+    let power = value.log10().round();
+    if (value / 10f64.powf(power) - 1.0).abs() > 1e-9 {
+        return format!("{value:e}");
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    let power = power as i32;
+    if power == 0 {
+        "1".to_owned()
+    } else {
+        format!("1e{power}")
+    }
 }
 
 /// What the bathtub reads: the opening at the chosen rate and the jitter the
@@ -779,6 +806,24 @@ fn or_unmeasured(value: Option<f64>, format: impl FnOnce(f64) -> String) -> Stri
 mod tests {
     use super::*;
     use crate::eye_diagram::EyeTrace;
+
+    /// The bathtub labels its decades as powers of ten, as its 1e-12
+    /// reference line is labelled, never with SI prefixes.
+    #[test]
+    fn the_bathtub_axis_reads_powers_of_ten() {
+        let labels: Vec<String> = ber_axis(1e-15)
+            .ticks
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect();
+        let decades: Vec<String> = (-15..0)
+            .map(|power| format!("1e{power}"))
+            .chain(["1".to_owned()])
+            .collect();
+        assert_eq!(labels, decades);
+        assert_eq!(ber_label(1e-12), format!("{:e}", 1e-12));
+        assert_eq!(ber_label(2e-3), "2e-3");
+    }
 
     /// The opening and the edges keep the digits the reader asked for.
     #[test]
