@@ -306,6 +306,18 @@ pub fn show(
                 .max_rect(rect)
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
+        if strip > 0 {
+            // The cost strip stands under the sheet's own header; each
+            // variable's strip names its variable and the value it settled at.
+            let best = values.get(best_index).copied().unwrap_or(f64::NAN);
+            StripHeader::new(
+                name,
+                &format!("design variable · best {}", value_text(best, "", digits)),
+                &[],
+            )
+            .maximizable(false)
+            .show(&mut strip_ui);
+        }
         let response = history_strip(
             &mut strip_ui,
             &HistoryStrip {
@@ -410,9 +422,14 @@ fn history_strip(
     .accessible_detail("Exact retained value at each evaluated candidate.");
     if strip.values.len() == strip.iterations.len() {
         spec.traces.push(
+            Trace::new(strip.iterations, strip.values, strip.color).cache_key(strip.cache_key),
+        );
+        // Each candidate is a dot where it was evaluated.
+        spec.traces.push(
             Trace::new(strip.iterations, strip.values, strip.color)
-                .marker_style(0)
-                .cache_key(strip.cache_key),
+                .draw(plot::DrawMode::Points)
+                .width(4.0)
+                .cache_key(strip.cache_key.rotate_left(1)),
         );
     }
     let value_at = |index: usize| strip.values.get(index).copied().unwrap_or(f64::NAN);

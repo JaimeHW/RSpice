@@ -380,18 +380,25 @@ fn draw_plot(
         "Each point's value against the swept quantity, a curve per value of the others.",
     );
     for (index, (curve, (xs, ys))) in curves.iter().zip(&points).enumerate() {
-        let mut trace = Trace::new(
-            xs,
-            ys,
-            curve_color(ui, curve.levels.first().copied().unwrap_or(0)),
-        )
-        .marker_style(curve.levels.get(2).copied().unwrap_or(0))
-        .show_single_point()
-        .cache_key(plot::trace_cache_key(view.cache_key, index));
+        let color = curve_color(ui, curve.levels.first().copied().unwrap_or(0));
+        let mut trace = Trace::new(xs, ys, color)
+            .show_single_point()
+            .cache_key(plot::trace_cache_key(view.cache_key, 2 * index));
         if let Some(&dash) = curve.levels.get(1) {
             trace = trace.dash_style(dash);
         }
+        if let Some(&marker) = curve.levels.get(2) {
+            trace = trace.marker_style(marker);
+        }
         spec.traces.push(trace);
+        // Each point is a dot where it was measured; the line between two
+        // is only the eye's guide.
+        spec.traces.push(
+            Trace::new(xs, ys, color)
+                .draw(plot::DrawMode::Points)
+                .width(4.0)
+                .cache_key(plot::trace_cache_key(view.cache_key, 2 * index + 1)),
+        );
     }
     let readout = |at: f64| {
         curves
