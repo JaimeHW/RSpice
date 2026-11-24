@@ -1409,43 +1409,47 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
         }
         return;
     }
+    // The reader's change drawn again is taken from the binding, which is
+    // made anew below, so the names it holds are read, not copied.
+    let drawn = drawn.map(|binding| (binding.generation, binding.keys.clone()));
+    let retake = state
+        .results
+        .working_view
+        .as_deref_mut()
+        .and_then(|binding| binding.retake.take())
+        .filter(|_| drawn.is_some())
+        .unwrap_or_default();
     // The signals each pane drawn before draws again; a pane it does not
     // name is drawn whole.
-    let again: Option<HashMap<PaneId, HashSet<String>>> = drawn.and_then(|binding| {
-        let changed = document.signals_changed_since(binding.generation)?;
-        let mut again: HashMap<PaneId, HashSet<String>> = binding
-            .keys
+    let again: Option<HashMap<PaneId, HashSet<&str>>> = drawn.as_ref().and_then(|(drawn, keys)| {
+        let changed = document.signals_changed_since(*drawn)?;
+        let mut again: HashMap<PaneId, HashSet<&str>> = keys
             .iter()
             .map(|&(_, pane_id)| (pane_id, HashSet::new()))
             .collect();
         for (pane_id, signal) in changed {
             if let Some(signals) = again.get_mut(&pane_id) {
-                signals.insert(signal.to_owned());
+                signals.insert(signal);
             }
         }
-        for tick in binding.retake.iter().flatten() {
-            if let Some((_, pane_id)) = binding.keys.iter().find(|(key, _)| *key == tick.analysis())
+        for tick in &retake {
+            if let Some((_, pane_id)) = keys.iter().find(|(key, _)| *key == tick.analysis())
                 && let Some(signals) = again.get_mut(pane_id)
             {
-                signals.insert(tick.source_name().to_owned());
+                signals.insert(tick.source_name());
             }
         }
         Some(again)
     });
     // A pane of event lanes draws its lanes again where the view changed
     // them, or an event net they list, or the reader's change is retaken.
-    let lanes_again = drawn.is_none_or(|binding| {
-        document.event_lanes_changed_since(binding.generation) != Some(false)
-    });
-    let retaken: Vec<AnalysisPresentationKey> = drawn
-        .and_then(|binding| binding.retake.as_ref())
-        .map(|ticks| {
-            ticks
-                .iter()
-                .map(SourceWaveformPresentationKey::analysis)
-                .collect()
-        })
-        .unwrap_or_default();
+    let lanes_again = drawn
+        .as_ref()
+        .is_none_or(|(drawn, _)| document.event_lanes_changed_since(*drawn) != Some(false));
+    let retaken: Vec<AnalysisPresentationKey> = retake
+        .iter()
+        .map(SourceWaveformPresentationKey::analysis)
+        .collect();
     // The run is borrowed where it is kept, not copied: a copy is every
     // signal's name.
     let Some(run) = retained_run(state.model, dataset) else {
@@ -1864,12 +1868,12 @@ fn project_signals(
     key: AnalysisPresentationKey,
     pane_id: PaneId,
     analysis: &crate::state::AnalysisResult,
-    signals: &HashSet<String>,
+    signals: &HashSet<&str>,
 ) {
     if signals.is_empty() {
         return;
     }
-    let names: Vec<&str> = signals.iter().map(String::as_str).collect();
+    let names: Vec<&str> = signals.iter().copied().collect();
     let columns = match results
         .session
         .signal_indices
@@ -1888,25 +1892,38 @@ fn project_signals(
         }
     };
     for (signal, column) in names.into_iter().zip(columns) {
-        let traces = document.traces_reading(pane_id, signal);
+        // One pass over the signal's traces: whether each shows, and the
+        // colour and look of the last that has one.
+        let mut held = false;
+        let mut shown = true;
+        let mut color = None;
+        let mut look = None;
+        for trace in document.traces_reading(pane_id, signal) {
+            held = true;
+            shown &= trace.visible;
+            color = trace.color.or(color);
+            let drawn = super::trace_style::trace_look(trace);
+            if drawn != rspice_results_ui::session::WaveformLook::default() {
+                look = Some(drawn);
+            }
+        }
         let presentation = SourceWaveformPresentationKey::new(key, signal);
         if let Some(column) = column {
             let dataset_default = analysis.waveforms[column].visible;
-            let plotted = !traces.is_empty() && traces.iter().all(|trace| trace.visible);
+            let plotted = held && shown;
             results.project_waveform_visible(
                 &presentation,
                 (plotted != dataset_default).then_some(plotted),
             );
         }
-        let color = traces.iter().rev().find_map(|trace| trace.color);
-        results.draw_waveform_color(&presentation, color);
-        let look = traces
-            .iter()
-            .rev()
-            .map(|trace| super::trace_style::trace_look(trace))
-            .find(|look| *look != rspice_results_ui::session::WaveformLook::default())
-            .unwrap_or_default();
-        results.draw_waveform_look(&presentation, look);
+        // A colour or look none is held for, and none drawn, is not looked
+        // up.
+        if color.is_some() || !results.session.waveform_colors.is_empty() {
+            results.draw_waveform_color(&presentation, color);
+        }
+        if look.is_some() || !results.session.waveform_looks.is_empty() {
+            results.draw_waveform_look(&presentation, look.unwrap_or_default());
+        }
     }
 }
 

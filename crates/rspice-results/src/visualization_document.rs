@@ -2693,11 +2693,7 @@ impl VisualizationDocument {
     /// without reading the pane's other traces.
     #[must_use]
     pub fn traces_reading(&self, pane_id: PaneId, signal: &str) -> Vec<&Trace> {
-        self.traces
-            .reading(pane_id, signal)
-            .into_iter()
-            .map(|index| &self.traces[index])
-            .collect()
+        self.traces.reading_items(pane_id, signal)
     }
 
     /// A number that names the content the document holds now: no other

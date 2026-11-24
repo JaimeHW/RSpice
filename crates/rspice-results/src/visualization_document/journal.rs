@@ -836,6 +836,24 @@ impl EntityList<Trace, SignalIndex> {
     }
 
     /// Where each trace of `pane_id` reading `signal` stands, in order.
+    /// [`Self::reading`], the traces themselves, in the list's order.
+    pub(super) fn reading_items(&self, pane_id: PaneId, signal: &str) -> Vec<&Trace> {
+        let key = (pane_id, self.index.hashing.hash_one(signal));
+        let mut found: Vec<&Trace> = self
+            .index
+            .traces
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .filter_map(|identity| self.position(*identity))
+            .map(|index| &self.items[index])
+            .filter(|trace| trace.pane_id == pane_id && signal_of(trace) == signal)
+            .collect();
+        // The list ascends by identity.
+        found.sort_unstable_by_key(|trace| trace.id);
+        found
+    }
+
     pub(super) fn reading(&self, pane_id: PaneId, signal: &str) -> Vec<usize> {
         let key = (pane_id, self.index.hashing.hash_one(signal));
         let mut found: Vec<usize> = self
