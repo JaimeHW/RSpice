@@ -2165,10 +2165,18 @@ pub fn show_plot_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         if sheets.is_empty() && state.model.simulation.retained.has_results() {
             let t = Tokens::get(ui.ctx());
             ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
-            well_hint(
-                ui,
-                "Nothing to plot from this run: its values are on the drawing, and Open in Results shows every sheet",
-            );
+            // An analysis that failed has nothing to plot for that reason:
+            // its card takes the well, as on its sheet in Results.
+            let viewer = state.results.session.viewer;
+            let status = operational_state::classify_viewer(state, viewer);
+            if !(status.blocks_visuals
+                && operational_state::show_result_operational_status(ui, state, &status))
+            {
+                well_hint(
+                    ui,
+                    "Nothing to plot from this run: its values are on the drawing, and Open in Results shows every sheet",
+                );
+            }
         } else if viewer_well_is_open(ui, state) {
             waves::show_compact(ui, state);
         }
