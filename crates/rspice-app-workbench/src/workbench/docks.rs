@@ -444,6 +444,56 @@ pub fn show_console(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: L
     });
 }
 
+/// Claim the dock's splitter over the page, once the page has drawn.
+///
+/// egui registers a panel's splitter before the central panel, so the page
+/// lies on top of the half of the splitter's grab band that reaches over it:
+/// the schematic canvas took a press there for its own, and the dock never
+/// moved. Drawn last, this band takes the press wherever the splitter's
+/// does, and moves the dock as the splitter's drag does, with the
+/// splitter's own cursor and highlighted line.
+pub fn claim_console_splitter(
+    root: &mut egui::Ui,
+    app: &mut impl WorkbenchHost,
+    layout: LayoutSpec,
+) {
+    if !layout.console_resizable {
+        return;
+    }
+    let ctx = root.ctx().clone();
+    let (Some(splitter), Some(dock)) = (
+        splitter_response(&ctx, CONSOLE_PANEL_ID),
+        PanelState::load(&ctx, Id::new(CONSOLE_PANEL_ID)),
+    ) else {
+        return;
+    };
+    let band = root.interact(
+        splitter.rect,
+        Id::new(CONSOLE_PANEL_ID).with("splitter-band"),
+        egui::Sense::drag(),
+    );
+    if !(band.hovered() || band.dragged()) {
+        return;
+    }
+    ctx.set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    let stroke = if band.dragged() {
+        root.visuals().widgets.active.fg_stroke
+    } else {
+        root.visuals().widgets.hovered.fg_stroke
+    };
+    let top = dock.outer_rect.top();
+    root.painter()
+        .hline(dock.outer_rect.x_range(), top - 0.5 * stroke.width, stroke);
+    if band.dragged()
+        && let Some(pointer) = band.interact_pointer_pos()
+    {
+        let height = (dock.outer_rect.bottom() - pointer.y)
+            .clamp(layout.console_min_height, layout.console_max_height);
+        app.workbench_mut().set_dock_height(Some(height));
+        ctx.request_repaint();
+    }
+}
+
 /// The grab band at the top of a phone's console sheet.
 const SHEET_HANDLE_BAND: f32 = 20.0;
 /// How far the grab band is pulled down before the sheet closes.

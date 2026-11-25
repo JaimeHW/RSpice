@@ -200,6 +200,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             show_document(ui, app);
         });
+    docks::claim_console_splitter(root, app, layout);
     app.state
         .workbench
         .pane_focus
@@ -933,6 +934,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             show_document(ui, app);
         });
+    docks::claim_console_splitter(root, app, layout);
     app.state
         .workbench
         .pane_focus
@@ -1051,6 +1053,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             show_document(ui, app);
         });
+    docks::claim_console_splitter(root, app, layout);
     if layout.has_overlay_drawer {
         docks::show_drawers(root, app, layout);
     }
