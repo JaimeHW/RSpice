@@ -321,6 +321,20 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
             RetainedTrace::new("OPT_COST", vec![0.0, 1.0], vec![1.0, 0.25], "#ffbd2e"),
             RetainedTrace::new("OPT_w", vec![0.0, 1.0], vec![1.0e-6, 1.5e-6], "#00aaff"),
         ]);
+    // A `.STEP` held in one analysis: one value per point.
+    let sweep = AnalysisResult::new(24, AnalysisType::Parametric, "STEP")
+        .with_waveforms(vec![RetainedTrace::new(
+            "V(out)",
+            vec![1e3, 2e3, 4e3],
+            vec![0.5, 1.0 / 3.0, 0.2],
+            "#00aaff",
+        )])
+        .with_family_metadata(AnalysisResultFamilyMetadata::Parametric {
+            target: "PARAM r".to_owned(),
+            sweep_values: vec![1e3, 2e3, 4e3],
+            failed_points: 0,
+            member_measurements: Vec::new(),
+        });
 
     for (analysis, family, viewer_id) in [
         (
@@ -337,6 +351,11 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
             optimization,
             ResultDocumentFamily::VerificationAndOptimization,
             "viewer-optimization",
+        ),
+        (
+            sweep,
+            ResultDocumentFamily::WaveformWorksheet,
+            "viewer-sweep",
         ),
     ] {
         let mut app = RSpiceApp::test_instance();

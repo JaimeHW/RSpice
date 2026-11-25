@@ -1741,6 +1741,9 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
                 ))
                 && !analysis.waveforms.is_empty()
         }
+        // A point of a sweep: its siblings in the run make the table the
+        // sheet draws.
+        "viewer-sweep" => rspice_results::sweep_table::is_sweep_point(analysis),
         "viewer-bode" => {
             super::bode_analysis_is_renderable(analysis)
                 || super::bode::ordinary_noise_spectrum_is_renderable(analysis)

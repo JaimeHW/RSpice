@@ -23,6 +23,32 @@
       }
     },
     {
+      "id": "viewer-sweep",
+      "canonical": {
+        "group": "Time & frequency",
+        "art": "scatter",
+        "title": "Sweep",
+        "domain": "STEP · corners · temperature · each point’s measurement",
+        "x": "Swept quantity",
+        "y": "Measured value"
+      },
+      "capability": {
+        "classification": "release-target"
+      },
+      "inputAuthority": {
+        "analysisIds": [
+          "tran",
+          "ac",
+          "dc",
+          "op",
+          "noise",
+          "corner",
+          "temp"
+        ],
+        "externalCapabilityId": null
+      }
+    },
+    {
       "id": "viewer-bode",
       "canonical": {
         "group": "Time & frequency",
@@ -883,6 +909,7 @@
       "defaultViewerId": "viewer-waveform",
       "viewerIds": [
         "viewer-waveform",
+        "viewer-sweep",
         "viewer-tdr",
         "dynamic-droop-viewer",
         "eye-viewer",
@@ -1027,7 +1054,7 @@
     }
   },
   "counts": {
-    "viewerDocuments": 42,
+    "viewerDocuments": 43,
     "creationFamilies": 9
   }
 }

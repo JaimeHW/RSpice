@@ -194,7 +194,8 @@ impl ResultViewer {
     /// document depended on which path asked.
     pub const fn viewer_document_id(self) -> &'static str {
         match self {
-            ResultViewer::Waves | ResultViewer::DcSweep | ResultViewer::Sweep => "viewer-waveform",
+            ResultViewer::Waves | ResultViewer::DcSweep => "viewer-waveform",
+            ResultViewer::Sweep => "viewer-sweep",
             ResultViewer::Bode | ResultViewer::Nyquist | ResultViewer::NoiseContrib => {
                 "viewer-bode"
             }
@@ -228,6 +229,7 @@ impl ResultViewer {
     pub fn from_viewer_document_id(id: &str) -> Option<Self> {
         Some(match id {
             "viewer-waveform" => ResultViewer::Waves,
+            "viewer-sweep" => ResultViewer::Sweep,
             "viewer-bode" => ResultViewer::Bode,
             "viewer-spectrum" => ResultViewer::Fft,
             "viewer-phase-noise" => ResultViewer::PhaseNoise,
@@ -776,6 +778,17 @@ pub struct SignalSetMember {
 
 #[cfg(test)]
 mod tests {
+    /// A result document made from a sweep opens the Sweep sheet, not Waves.
+    #[test]
+    fn the_sweep_sheet_has_a_document_of_its_own() {
+        let id = ResultViewer::Sweep.viewer_document_id();
+        assert_eq!(id, "viewer-sweep");
+        assert_eq!(
+            ResultViewer::from_viewer_document_id(id),
+            Some(ResultViewer::Sweep)
+        );
+    }
+
     use super::*;
 
     /// `viewer_document_id` and `from_viewer_document_id` are one map read in
