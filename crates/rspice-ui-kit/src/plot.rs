@@ -41,7 +41,10 @@ pub use cursor::{CursorId, CursorPair};
 pub use decimate::DecimationWork;
 pub use decimate::TraceView;
 pub use decimate::{BandMember, DecimationCache, SampleInterpolation, display_columns, sample_at};
-pub use format::{fmt_si_signed, fmt_si_significant, si_tick_label, tick_with_unit};
+pub use format::{
+    fmt_column_reading, fmt_complex, fmt_reading, fmt_si_signed, fmt_si_significant,
+    fmt_signed_reading, si_tick_label, tick_with_unit,
+};
 #[cfg(any(test, feature = "test-support"))]
 pub use picture::drawing_off_frame;
 pub use render::{

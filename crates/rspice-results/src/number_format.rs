@@ -178,8 +178,8 @@ pub fn tick_with_unit(label: &str, unit: &str) -> String {
     format!("{mantissa} {prefix}{unit}").trim_end().to_owned()
 }
 
-/// The one spelling of a value a sheet prints: `significant_digits`
-/// significant digits, an SI prefix on the unit, and a true minus sign.
+/// A value in free text: `significant_digits` significant digits, an SI
+/// prefix on the unit, and a true minus sign.
 ///
 /// - A value is rounded once, to the digits asked for; a rounding that
 ///   carries into the next decade drops the digit it no longer has room for
@@ -187,16 +187,234 @@ pub fn tick_with_unit(label: &str, unit: &str) -> String {
 /// - Zeros are printed only as digits of a rounded value. A value that has
 ///   fewer digits than the preference prints the digits it has: a node at
 ///   exactly 4.1 V reads `4.1 V`, not `4.100000 V`, while 1.7999999 V at four
-///   digits reads `1.800 V` because those zeros were resolved.
+///   digits reads `1.800 V` because those zeros were resolved. A column or a
+///   readout list keeps every digit instead ([`fmt_column_reading`]).
 /// - A unit that takes no prefix ([`unit_takes_prefix`]) is never given one:
 ///   a ratio of 0.0012 reads `0.0012`, a damping factor never `316.2 m`, and
 ///   far from unity the decade is an exponent on the number (`4.1e−12`).
+/// - A plane angle stands against its number (`45°`); a temperature keeps
+///   its space (`27 °C`).
 /// - Negative zero reads `0`.
 ///
 /// Engineering export serializes the original `f64` samples, not this text.
 pub fn fmt_si_significant(value: f64, unit: &str, significant_digits: usize) -> String {
-    let (number, prefix) = significant_number(value, significant_digits, unit_takes_prefix(unit));
-    format!("{number} {prefix}{unit}").trim_end().to_owned()
+    let (number, prefix) = significant_number(
+        value,
+        significant_digits,
+        unit_takes_prefix(unit),
+        Zeros::Trim,
+    );
+    joined(&number, prefix, unit)
+}
+
+/// A decibel or plane-angle figure's places: to the hundredth.
+pub const DECIBEL_PLACES: usize = 2;
+
+/// A share's places: to the tenth of a percent.
+pub const SHARE_PLACES: usize = 1;
+
+/// `value` to `decimals` places with a true minus sign and no negative
+/// zero, so every row of a column stands at one precision and its decimal
+/// points align: a decibel to its hundredth, a share to its tenth of a
+/// percent. A value within half a step of zero reads `0.00`, never `−0.00`.
+#[must_use]
+pub fn fixed_places(value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    let unsigned = text.trim_start_matches('-');
+    if unsigned
+        .chars()
+        .all(|character| matches!(character, '0' | '.'))
+    {
+        return unsigned.to_owned();
+    }
+    text.replace('-', "\u{2212}")
+}
+
+/// [`fixed_places`] with an explicit sign on a value that does not read as
+/// zero, for a change: `+1.50`, `−0.60`, `0.00`.
+#[must_use]
+pub fn signed_fixed_places(value: f64, decimals: usize) -> String {
+    let text = fixed_places(value, decimals);
+    if value > 0.0 && text.chars().any(|digit| matches!(digit, '1'..='9')) {
+        format!("+{text}")
+    } else {
+        text
+    }
+}
+
+/// Whether a value in `unit` is read to a fixed resolution rather than to
+/// significant digits: a level in decibels (`dB`, `dBc`, `dBm`, `dBc/Hz`,
+/// `dB/dec`) or a plane angle in degrees. A logarithmic or angular reading
+/// has a resolution, not a magnitude, so `−3.0002 dB` and `−40 dB` both
+/// read to the hundredth.
+#[must_use]
+pub fn reads_at_fixed_places(unit: &str) -> bool {
+    unit == "°"
+        || unit
+            .split('/')
+            .next()
+            .is_some_and(|numerator| numerator.starts_with("dB"))
+}
+
+/// A reading in free text: a decibel or a plane angle to the hundredth
+/// (`−3.00 dB`, `45.00°`), any other value as [`fmt_si_significant`] spells
+/// it.
+#[must_use]
+pub fn fmt_reading(value: f64, unit: &str, significant_digits: usize) -> String {
+    if reads_at_fixed_places(unit) {
+        joined(&fixed_places(value, DECIBEL_PLACES), "", unit)
+    } else {
+        fmt_si_significant(value, unit, significant_digits)
+    }
+}
+
+/// A reading in a table column or a readout list: [`fmt_reading`], with
+/// every one of the reader's `significant_digits`, so a column reads
+/// `8.300 ns` beside `6.917 ns` and its decimal points fall in line.
+#[must_use]
+pub fn fmt_column_reading(value: f64, unit: &str, significant_digits: usize) -> String {
+    if reads_at_fixed_places(unit) {
+        return fmt_reading(value, unit, significant_digits);
+    }
+    let (number, prefix) = significant_number(
+        value,
+        significant_digits,
+        unit_takes_prefix(unit),
+        Zeros::Keep,
+    );
+    joined(&number, prefix, unit)
+}
+
+/// [`fmt_column_reading`] with an explicit sign on a positive value, for a
+/// change or a margin: `+1.50 dB`, `−600.0 µV`, and zero unsigned.
+#[must_use]
+pub fn fmt_signed_reading(value: f64, unit: &str, significant_digits: usize) -> String {
+    let text = fmt_column_reading(value, unit, significant_digits);
+    if value > 0.0 && text.chars().any(|digit| matches!(digit, '1'..='9')) {
+        format!("+{text}")
+    } else {
+        text
+    }
+}
+
+/// A complex value with one unit: `1.200 + 3.400j V`. Both parts stand
+/// under one prefix and at one resolution, the larger part's at
+/// `significant_digits`, so a part far smaller than the other reads as the
+/// zero it is at that resolution (`1.200 + 0.000j V`).
+#[must_use]
+pub fn fmt_complex(real: f64, imaginary: f64, unit: &str, significant_digits: usize) -> String {
+    let larger = real.abs().max(imaginary.abs());
+    let (real, imaginary, prefix) = if larger > 0.0 && larger.is_finite() {
+        let prefixed = unit_takes_prefix(unit);
+        let (text, index) = placed_significant(
+            larger,
+            significant_digits.clamp(1, 17),
+            prefixed,
+            Zeros::Keep,
+        );
+        let decimals = text.split_once('.').map_or(0, |(_, digits)| digits.len());
+        let (exponent, prefix) = decade(index, prefixed);
+        let part = |value: f64| fixed_places(si_scaled(value, index), decimals) + &exponent;
+        (part(real), part(imaginary), prefix)
+    } else {
+        let part = |value: f64| significant_number(value, 1, false, Zeros::Trim).0;
+        (part(real), part(imaginary), "")
+    };
+    let (sign, imaginary) = match imaginary.strip_prefix('\u{2212}') {
+        Some(magnitude) => ('\u{2212}', magnitude.to_owned()),
+        None => ('+', imaginary),
+    };
+    joined(&format!("{real} {sign} {imaginary}j"), prefix, unit)
+}
+
+/// A value whose unit is not known, in the suffix notation SPICE and ADE's
+/// outputs print: `6.917n`. The prefix still states the decade; no unit is
+/// guessed.
+#[must_use]
+pub fn fmt_si_suffixed(value: f64, significant_digits: usize) -> String {
+    let (number, prefix) = significant_number(value, significant_digits, true, Zeros::Keep);
+    format!("{number}{prefix}")
+}
+
+/// A measured scalar in a column, in the unit its measurement implies:
+/// `symbol` is the measurement's unit as the engine records it (`s`, `deg`,
+/// `ohm`, `V/s`, `1`), `None` when it is not known, which reads bare with
+/// its prefix ([`fmt_si_suffixed`]).
+#[must_use]
+pub fn fmt_measured(value: f64, symbol: Option<&str>, significant_digits: usize) -> String {
+    match symbol {
+        Some(symbol) => fmt_column_reading(value, &measured_unit(symbol), significant_digits),
+        None => fmt_si_suffixed(value, significant_digits),
+    }
+}
+
+/// A measurement unit as the engine records it, as a reader reads it:
+/// `deg` is `°`, `degC` is `°C`, `ohm` is `Ω`, `V*s` is `V·s`, and a
+/// dimensionless `1` is no unit at all.
+#[must_use]
+pub fn measured_unit(symbol: &str) -> String {
+    match symbol.trim() {
+        "1" | "ratio" | "unitless" | "dimensionless" | "count" => String::new(),
+        "deg" | "degree" | "degrees" => "°".to_owned(),
+        "degC" | "celsius" => "°C".to_owned(),
+        "ohm" | "ohms" => "Ω".to_owned(),
+        "percent" => "%".to_owned(),
+        symbol => symbol
+            .replace("sqrt(Hz)", "√Hz")
+            .replace("ohm", "Ω")
+            .replace("degC", "°C")
+            .replace("deg", "°")
+            .replace("^2", "²")
+            .replace("^3", "³")
+            .replace('*', "·"),
+    }
+}
+
+/// Whether a printed reading leaves its unit's prefix slot blank: its unit
+/// takes a prefix and the value was printed without one (`1.144 V`, not
+/// `604.8 mV`). A right-aligned column holds the slot's room after such a
+/// reading, so its digits end where a prefixed neighbour's do. A unit that
+/// never takes a prefix (`−3.00 dB`, `45.00°`, `12.5 %`) and a bare number
+/// have no slot.
+#[must_use]
+pub fn leaves_prefix_slot_blank(reading: &str) -> bool {
+    let Some((_, unit)) = reading.trim_end().rsplit_once(' ') else {
+        return false;
+    };
+    // A number after the last space is a part of the value, not its unit:
+    // the imaginary part of `0.540 − 0.452j`.
+    if unit
+        .chars()
+        .next()
+        .is_none_or(|first| first.is_ascii_digit() || matches!(first, '.' | '+' | '-' | '\u{2212}'))
+    {
+        return false;
+    }
+    let mut characters = unit.chars();
+    let prefixed = characters.next().is_some_and(|first| {
+        let rest = characters.as_str();
+        SI_PREFIXES
+            .iter()
+            .any(|prefix| prefix.starts_with(first) && !prefix.is_empty())
+            && !rest.is_empty()
+            && (unit_takes_prefix(rest) || unit_carries_its_decade(unit))
+    });
+    !prefixed && unit_takes_prefix(unit)
+}
+
+/// Whether `unit` names a plane angle, which stands against its number.
+fn is_plane_angle(unit: &str) -> bool {
+    unit == "°" || unit.starts_with("°/")
+}
+
+/// A number and its unit as one reading: a space between them, none before
+/// a plane angle's degree sign, and none after a number with no unit.
+fn joined(number: &str, prefix: &str, unit: &str) -> String {
+    if is_plane_angle(unit) {
+        format!("{number}{unit}")
+    } else {
+        format!("{number} {prefix}{unit}").trim_end().to_owned()
+    }
 }
 
 /// Significant digits a swept coordinate is spelled to: as many as a `.step`
@@ -282,26 +500,49 @@ pub fn fmt_si_signed(value: f64, unit: &str, significant_digits: usize) -> Strin
     }
 }
 
+/// Whether a printed value keeps the zeros its rounding leaves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Zeros {
+    /// Free text: zeros only where the rounding resolved them.
+    Trim,
+    /// A column or a readout list: every one of the reader's digits.
+    Keep,
+}
+
 /// The number part of a value and the prefix its unit takes.
 fn significant_number(
     value: f64,
     significant_digits: usize,
     prefixed: bool,
+    zeros: Zeros,
 ) -> (String, &'static str) {
     let digits = significant_digits.clamp(1, 17);
     if value.is_nan() {
         return ("NaN".to_owned(), "");
     }
     if value.is_infinite() {
-        let text = if value < 0.0 { "−inf" } else { "inf" };
+        let text = if value < 0.0 { "\u{2212}inf" } else { "inf" };
         return (text.to_owned(), "");
     }
     if value == 0.0 {
         return ("0".to_owned(), "");
     }
-    let magnitude = value.abs();
+    let (text, index) = placed_significant(value.abs(), digits, prefixed, zeros);
+    let (exponent, prefix) = decade(index, prefixed);
+    let sign = if value < 0.0 { "\u{2212}" } else { "" };
+    (format!("{sign}{text}{exponent}"), prefix)
+}
+
+/// A positive, finite `magnitude` to `digits` significant digits: its
+/// mantissa's text and the ladder index it is printed under.
+fn placed_significant(
+    magnitude: f64,
+    digits: usize,
+    prefixed: bool,
+    zeros: Zeros,
+) -> (String, i32) {
     let mut index = band_index(magnitude, prefixed);
-    let mut text = significant_mantissa(si_scaled(magnitude, index), digits);
+    let mut text = significant_mantissa(si_scaled(magnitude, index), digits, zeros);
     // A rounding that carries the mantissa out of its band (999.95 → 1000)
     // is printed under the next band, where it has its digits back.
     // The test stays in mantissa space: scaled back, a carry at the top of
@@ -319,17 +560,24 @@ fn significant_number(
             (false, 0) => 2,
             _ => index + 1,
         };
-        text = significant_mantissa(si_scaled(magnitude, index), digits);
+        text = significant_mantissa(si_scaled(magnitude, index), digits, zeros);
     }
+    (text, index)
+}
+
+/// How ladder index `index` is written: the exponent on the number and the
+/// prefix on the unit. A prefixed unit takes the prefix on the ladder and
+/// the exponent past it; a unit that takes no prefix takes the exponent
+/// outside its plain band.
+fn decade(index: i32, prefixed: bool) -> (String, &'static str) {
     let on_ladder = prefixed && (SI_MIN..=SI_MAX).contains(&index);
     let exponent = if index == 0 || on_ladder {
         String::new()
     } else {
-        format!("e{}", 3 * index).replace('-', "−")
+        format!("e{}", 3 * index).replace('-', "\u{2212}")
     };
-    let sign = if value < 0.0 { "−" } else { "" };
     let prefix = if on_ladder { si_prefix(index) } else { "" };
-    (format!("{sign}{text}{exponent}"), prefix)
+    (exponent, prefix)
 }
 
 /// The ladder index a magnitude is printed under: the SI prefix ladder for a
@@ -345,8 +593,8 @@ fn band_index(magnitude: f64, prefixed: bool) -> i32 {
 }
 
 /// `mantissa` (positive) to `digits` significant digits, keeping only the
-/// zeros the rounding resolved.
-fn significant_mantissa(mantissa: f64, digits: usize) -> String {
+/// zeros the rounding resolved unless `zeros` keeps them all.
+fn significant_mantissa(mantissa: f64, digits: usize, zeros: Zeros) -> String {
     let mut decade = mantissa.log10().floor() as i32;
     let mut text = round_to_significant(mantissa, digits, decade);
     // Rounding up to the next power of ten (9.9996 → 10.000) leaves one digit
@@ -357,6 +605,9 @@ fn significant_mantissa(mantissa: f64, digits: usize) -> String {
     {
         decade += 1;
         text = round_to_significant(mantissa, digits, decade);
+    }
+    if zeros == Zeros::Keep {
+        return text;
     }
     let decimals = (digits as i32 - 1 - decade).max(0);
     let trimmed = if text.contains('.') {
@@ -822,7 +1073,7 @@ mod tests {
         assert_eq!(fmt_si_significant(-0.0, "V", 4), "0 V");
         assert_eq!(fmt_si_significant(-0.0, "", 7), "0");
         assert_eq!(fmt_si_significant(-3.0e-3, "V", 4), "\u{2212}3 mV");
-        assert_eq!(fmt_si_significant(-179.999_9, "°", 7), "\u{2212}179.9999 °");
+        assert_eq!(fmt_si_significant(-179.999_9, "°", 7), "\u{2212}179.9999°");
         assert_eq!(
             fmt_si_significant(-4.1e-12, "", 4),
             "\u{2212}4.1e\u{2212}12"
@@ -862,10 +1113,10 @@ mod tests {
         assert_eq!(fmt_si_significant(1.49, "V", 3), "1.49 V");
     }
 
-    /// A panel readout prints the digits the value has, not the digits the
+    /// Free text prints the digits the value has, not the digits the
     /// preference allows: `4.100000 V` is a formatter default, not a reading.
     #[test]
-    fn a_panel_readout_drops_the_zeros_that_only_pad_it_out() {
+    fn free_text_drops_the_zeros_that_only_pad_it_out() {
         assert_eq!(fmt_si_significant(4.1, "V", 7), "4.1 V");
         assert_eq!(fmt_si_significant(0.9, "V", 7), "900 mV");
         assert_eq!(fmt_si_significant(0.0, "A", 7), "0 A");
@@ -874,5 +1125,119 @@ mod tests {
         assert_eq!(fmt_si_significant(96.861_12e-6, "A", 4), "96.86 µA");
         // A bound is the same readout at the compact precision.
         assert_eq!(fmt_si_significant(1.0e7, "Hz", 4), "10 MHz");
+    }
+
+    /// A decibel and a plane angle in degrees read to the hundredth, at any
+    /// digits preference, and a value within half a step of zero reads
+    /// `0.00`, never `−0.00` or a run of exponent digits.
+    #[test]
+    fn decibels_and_degrees_read_to_the_hundredth() {
+        assert_eq!(fmt_reading(-3.0002, "dB", 4), "\u{2212}3.00 dB");
+        assert_eq!(fmt_reading(-40.0, "dB", 4), "\u{2212}40.00 dB");
+        assert_eq!(fmt_reading(-0.004, "dB", 4), "0.00 dB");
+        assert_eq!(fmt_reading(-43.43e-9, "dB", 4), "0.00 dB");
+        assert_eq!(fmt_reading(-91.87e-6, "dB", 7), "0.00 dB");
+        assert_eq!(fmt_reading(-42.0, "dBc", 4), "\u{2212}42.00 dBc");
+        assert_eq!(fmt_reading(-120.456, "dBc/Hz", 4), "\u{2212}120.46 dBc/Hz");
+        assert_eq!(fmt_reading(-20.0, "dB/dec", 4), "\u{2212}20.00 dB/dec");
+        assert_eq!(fmt_reading(45.0, "°", 4), "45.00°");
+        assert_eq!(fmt_reading(-179.999_9, "°", 7), "\u{2212}180.00°");
+        assert_eq!(fmt_column_reading(-3.0002, "dB", 7), "\u{2212}3.00 dB");
+        assert_eq!(fmt_column_reading(45.678, "°", 3), "45.68°");
+        assert_eq!(fmt_signed_reading(1.5, "dB", 4), "+1.50 dB");
+        assert_eq!(fmt_signed_reading(-0.6, "dB", 4), "\u{2212}0.60 dB");
+        assert_eq!(fmt_signed_reading(0.001, "dB", 4), "0.00 dB");
+        assert_eq!(fmt_reading(f64::NEG_INFINITY, "dB", 4), "\u{2212}inf dB");
+        // Every other unit keeps its significant digits.
+        assert_eq!(fmt_reading(0.604_83, "V", 4), "604.8 mV");
+        assert!(!reads_at_fixed_places("°C"));
+        assert!(!reads_at_fixed_places("rad"));
+    }
+
+    /// A plane angle stands against its number; a temperature in degrees
+    /// keeps its space.
+    #[test]
+    fn a_plane_angle_takes_no_space_and_a_temperature_keeps_it() {
+        assert_eq!(fmt_si_significant(45.0, "°", 4), "45°");
+        assert_eq!(fmt_si_significant(3.6, "°/kHz", 4), "3.6°/kHz");
+        assert_eq!(fmt_si_significant(27.0, "°C", 4), "27 °C");
+        assert_eq!(fmt_column_reading(27.0, "°C", 4), "27.00 °C");
+        assert_eq!(fmt_measured(45.0, Some("deg"), 4), "45.00°");
+        assert_eq!(fmt_measured(27.0, Some("degC"), 4), "27.00 °C");
+    }
+
+    /// A complex value names its unit once, both parts under one prefix and
+    /// at the larger part's resolution.
+    #[test]
+    fn a_complex_value_names_its_unit_once() {
+        assert_eq!(fmt_complex(1.2, 3.4, "V", 4), "1.200 + 3.400j V");
+        assert_eq!(fmt_complex(1.2, -3.4, "V", 4), "1.200 \u{2212} 3.400j V");
+        assert_eq!(
+            fmt_complex(-1.2e-3, 3.4e-3, "A", 4),
+            "\u{2212}1.200 + 3.400j mA"
+        );
+        assert_eq!(fmt_complex(604.8e-3, 1.0e-9, "V", 4), "604.8 + 0.0j mV");
+        assert_eq!(fmt_complex(0.540, -0.452, "", 3), "0.540 \u{2212} 0.452j");
+        assert_eq!(fmt_complex(50.0, 25.0, "Ω", 4), "50.00 + 25.00j Ω");
+        assert_eq!(fmt_complex(0.0, -0.0, "V", 4), "0 + 0j V");
+        assert_eq!(fmt_complex(1.0, -1.0e-9, "V", 4), "1.000 + 0.000j V");
+    }
+
+    /// In a column or a readout list a value keeps the reader's digits, so
+    /// its decimal points fall in line; free text may drop them.
+    #[test]
+    fn a_column_keeps_the_readers_digits() {
+        assert_eq!(fmt_column_reading(8.3e-9, "s", 4), "8.300 ns");
+        assert_eq!(fmt_column_reading(6.917e-9, "s", 4), "6.917 ns");
+        assert_eq!(fmt_si_significant(8.3e-9, "s", 4), "8.3 ns");
+        assert_eq!(fmt_column_reading(4.1, "V", 7), "4.100000 V");
+        assert_eq!(fmt_column_reading(0.9, "V", 4), "900.0 mV");
+        assert_eq!(fmt_column_reading(1.0e7, "Hz", 4), "10.00 MHz");
+        assert_eq!(fmt_column_reading(999.95, "V", 4), "1.000 kV");
+        assert_eq!(fmt_column_reading(0.5, "", 4), "0.5000");
+        assert_eq!(fmt_column_reading(-0.0, "V", 4), "0 V");
+        assert_eq!(fmt_column_reading(-2.5e-3, "V", 3), "\u{2212}2.50 mV");
+    }
+
+    /// A measured value names the unit its measurement implies, at the
+    /// reader's digits; an unknown unit stays bare and keeps its prefix, and
+    /// a dimensionless one takes none.
+    #[test]
+    fn a_measured_value_names_its_unit() {
+        assert_eq!(fmt_measured(6.917e-9, Some("s"), 4), "6.917 ns");
+        assert_eq!(fmt_measured(8.3e-9, Some("s"), 4), "8.300 ns");
+        assert_eq!(fmt_measured(1.25e6, Some("V/s"), 4), "1.250 MV/s");
+        assert_eq!(fmt_measured(2.0e3, Some("ohm"), 4), "2.000 kΩ");
+        assert_eq!(fmt_measured(3.3e-9, Some("V*s"), 4), "3.300 nV·s");
+        assert_eq!(fmt_measured(-3.0002, Some("dB"), 4), "\u{2212}3.00 dB");
+        assert_eq!(fmt_measured(0.25, Some("1"), 4), "0.2500");
+        assert_eq!(fmt_measured(6.917e-9, None, 4), "6.917n");
+        assert_eq!(fmt_measured(-1.5e3, None, 3), "\u{2212}1.50k");
+        assert_eq!(fmt_measured(42.0, None, 4), "42.00");
+    }
+
+    /// A reading whose unit takes a prefix but was printed without one leaves
+    /// the prefix slot blank; a prefixed one fills it, and a unit that never
+    /// takes a prefix has none.
+    #[test]
+    fn a_bare_unit_leaves_its_prefix_slot_blank() {
+        assert!(leaves_prefix_slot_blank(&fmt_column_reading(1.144, "V", 4)));
+        assert!(!leaves_prefix_slot_blank(&fmt_column_reading(
+            0.604_8, "V", 4
+        )));
+        assert!(leaves_prefix_slot_blank("50.00 \u{3a9}"));
+        assert!(!leaves_prefix_slot_blank("1.000 k\u{3a9}"));
+        assert!(leaves_prefix_slot_blank("1.000 m"));
+        assert!(!leaves_prefix_slot_blank("1.000 mm"));
+        assert!(!leaves_prefix_slot_blank("2.000 MV/s"));
+        assert!(leaves_prefix_slot_blank("2.000 V/s"));
+        assert!(!leaves_prefix_slot_blank("1786 nV/\u{221a}Hz"));
+        assert!(leaves_prefix_slot_blank("1.200 + 3.400j V"));
+        assert!(!leaves_prefix_slot_blank("0.540 \u{2212} 0.452j"));
+        assert!(!leaves_prefix_slot_blank("\u{2212}3.00 dB"));
+        assert!(!leaves_prefix_slot_blank("45.00\u{b0}"));
+        assert!(!leaves_prefix_slot_blank("12.50 %"));
+        assert!(!leaves_prefix_slot_blank("0.5000"));
+        assert!(!leaves_prefix_slot_blank("6.917n"));
     }
 }
