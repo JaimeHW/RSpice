@@ -206,10 +206,12 @@ pub(super) fn default_print_mapping(
                         SCREEN_STYLES[slot % SCREEN_STYLES.len()],
                     )
                 };
+                // The key is drawn from this name, so it is the name the
+                // sheet's legend gives the trace; its identity stays the id.
                 entries.push(mapping_entry(
                     PrintObjectKind::Trace,
                     format!("trace:{}", trace.trace_id),
-                    trace.label.clone(),
+                    trace.key_label().to_owned(),
                     screen_style,
                     trace_print_ink(slot),
                     redundancy,

@@ -351,6 +351,49 @@ fn a_printed_bode_draws_the_response_the_card_measures() {
     }
 }
 
+/// The print mapping, which the printed key is drawn from, names a Bode
+/// trace as the sheet's legend does, its unit left to the axis.
+#[test]
+fn a_printed_bode_key_names_each_trace_as_the_sheet() {
+    let frequency = vec![1.0, 10.0, 100.0, 1_000.0];
+    let run = completed(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC", 0.0).with_waveforms(vec![
+            RetainedWaveform::new("|V(out)|", frequency.clone(), vec![10.0, 9.0, 1.0, 0.1]),
+            RetainedWaveform::new("phase(V(out))", frequency, vec![0.0, -10.0, -90.0, -170.0]),
+        ]),
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 2, |_| true).unwrap();
+    let presentation: ResultsQuickViewPresentation = serde_json::from_str(
+        r#"{
+        "viewer": "Bode", "fft_selected_source": null,
+        "fft_normalization": "peak", "fft_window": "hanning",
+        "fft_input_fidelity": "reference", "fft_time_window_auto": true,
+        "fft_time_window_start": 0.0, "fft_time_window_end": 1.0,
+        "fft_sample_count_auto": true, "fft_sample_count": 4096,
+        "histogram_selected": 0, "histogram_bin_count": 20,
+        "histogram_custom_range": false, "histogram_custom_min": 0.0,
+        "histogram_custom_max": 1.0, "histogram_mode": "count"
+    }"#,
+    )
+    .unwrap();
+    let resolved = resolve_results_quick_view_parts(
+        "bode".to_owned(),
+        ProjectId::new(),
+        HardcopyScope::ActivePlotDocument,
+        &source,
+        &presentation,
+    )
+    .unwrap();
+    let keys = resolved
+        .default_print_mapping()
+        .entries()
+        .iter()
+        .filter(|entry| entry.object().kind() == rspice_hardcopy_contract::PrintObjectKind::Trace)
+        .map(|entry| entry.object().display_name())
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["|V(out)|", "phase(V(out))"]);
+}
+
 /// The polar page reads as the sheet: angles signed about 0°, and five
 /// rings to the sheet's 1-2-5 rim, each named up the 90° spoke.
 #[test]
