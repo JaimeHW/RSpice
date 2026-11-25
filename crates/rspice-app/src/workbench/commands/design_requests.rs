@@ -11,7 +11,9 @@
 
 use crate::workbench::AppState;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
-use rspice_app_design::schematic::view::{DesignSurfaceRequest, PlotProbedTrace, ProbePlot};
+use rspice_app_design::schematic::view::{
+    DesignSurfaceRequest, PlotProbedDifference, PlotProbedTrace, ProbePlot,
+};
 use rspice_app_results::workbench::commands::schematic_cross_probe::ShowSignalOnSchematic;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -97,6 +99,36 @@ pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: Plot
     });
 }
 
+/// Keep the voltage between two probed nets on the view in front as an
+/// expression, as the calculator's Plot keeps one, so the strip draws it
+/// beside the run's own signals, and say what changed.
+pub(in crate::workbench) fn plot_probed_difference(
+    state: &mut AppState,
+    probed: PlotProbedDifference,
+) {
+    use rspice_app_results::workbench::documents::result_document::keep_plotted_expression;
+
+    let PlotProbedDifference {
+        analysis,
+        expression,
+        display,
+    } = probed;
+    match keep_plotted_expression(&mut state.results_parts(), analysis, expression) {
+        Ok(added) => {
+            // A probe asks to see the signal, as a single net's probe does.
+            if state.workbench.supports_results_split() {
+                state.workbench.show_results_split();
+            }
+            state.prompt(if added {
+                format!("{display} added to the plot.")
+            } else {
+                format!("{display} is already in the plot.")
+            });
+        }
+        Err(error) => state.prompt(format!("{display} was not plotted: {error}")),
+    }
+}
+
 /// Show a result signal read in another occurrence than the tab in front:
 /// land the canvas on the occurrence the design draws for its scope, through
 /// the descent the hierarchy's occurrence rows take, and show the signal
@@ -176,6 +208,11 @@ pub(crate) fn answer_surface_requests(state: &mut AppState) {
         state,
         |state| &mut state.workbench.outbox,
         plot_probed_trace,
+    );
+    drain(
+        state,
+        |state| &mut state.workbench.outbox,
+        plot_probed_difference,
     );
     drain(
         state,

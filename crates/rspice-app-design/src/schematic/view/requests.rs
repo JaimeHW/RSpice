@@ -117,3 +117,19 @@ pub struct PlotProbedTrace {
 impl Request for PlotProbedTrace {
     const DRAIN: Drain = Drain::AfterContribution;
 }
+
+/// The voltage between two nets a two-net probe named, `V(a) - V(b)`, for
+/// the results workspace to keep on `analysis`'s view as an expression, as
+/// the calculator's Plot keeps one, and to say what it did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlotProbedDifference {
+    pub analysis: rspice_results::result_presentation::AnalysisPresentationKey,
+    /// The difference as the run names its signals.
+    pub expression: String,
+    /// The same as the status line names it: the design's spelling.
+    pub display: String,
+}
+
+impl Request for PlotProbedDifference {
+    const DRAIN: Drain = Drain::AfterContribution;
+}

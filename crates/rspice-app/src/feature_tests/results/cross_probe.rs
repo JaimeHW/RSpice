@@ -106,7 +106,7 @@ fn a_noise_contributor_selects_the_part_that_makes_the_noise() {
 /// root draws OUT as wire 91. The run's map keeps both, each read off its
 /// own drawing as it stands.
 fn two_level_design() -> RSpiceApp {
-    let (a, b) = (Point::new(0, 0), Point::new(40, 0));
+    let (a, b) = (Point::new(200, 200), Point::new(240, 200));
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Results);
@@ -114,6 +114,7 @@ fn two_level_design() -> RSpiceApp {
     let drawing = app.state.model.schematic.document_mut_for_test();
     drawing.components.push(placed(101, "XA", "work", "child"));
     drawing.wires.push(Wire::new(91, vec![a, b]));
+    app.state.model.schematic.add_net_label(a, "OUT".to_owned());
     app.state.sync_active_schematic_to_workspace();
     let mut child = SchematicState::default();
     child
@@ -125,6 +126,7 @@ fn two_level_design() -> RSpiceApp {
     leaf.document_mut_for_test()
         .wires
         .push(Wire::new(301, vec![a, b]));
+    leaf.add_net_label(a, "N1".to_owned());
     add_master(&mut app.state.model, "work", "leaf", leaf);
 
     // The leaf's drawing as the run read it: opened once at its occurrence.
@@ -274,4 +276,77 @@ fn a_schematic_probe_puts_its_signal_on_the_working_view() {
         "the probed net is on the view: {:?}",
         view_plots(&app.state)
     );
+}
+
+/// A drag with the probe tool from one net to another puts the voltage
+/// between them on the plan's working view, and the strip reads the two
+/// nets' difference at every sample.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_two_net_probe_plots_the_voltage_between_the_nets() {
+    use super::working_view::{quick_frame, run_plan_with, show_newest, view_expressions};
+    use rspice_app_design::schematic::view::gesture_commits::drag_probe;
+    use rspice_app_results::analysis::calculator::{CalcValue, RealValue, WaveformsContext};
+    use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
+    use rspice_app_state::state::RetainedTrace;
+    use rspice_results::calculator::{evaluator::evaluate, spice_parser::try_parse};
+
+    let host = state_with_current_clean_drc();
+    let mut app = RSpiceApp::test_instance();
+    app.state.model = host.model;
+    app.state.runs = host.runs;
+    app.state.workbench.activate(Workspace::Results);
+    let time = vec![0.0, 0.5, 1.0, 1.5];
+    let (plus, minus) = ([0.2, 1.4, 0.9, -0.3], [0.1, 0.5, 1.25, -0.8]);
+    run_plan_with(
+        &mut app.state,
+        vec![
+            RetainedTrace::new("V(pa)", time.clone(), plus.to_vec(), "#ffffff"),
+            RetainedTrace::new("V(pb)", time.clone(), minus.to_vec(), "#ffffff"),
+        ],
+    );
+    show_newest(&mut app.state);
+    quick_frame(&mut app.state);
+
+    // The nets PA and PB, drawn away from everything else on the sheet.
+    for (y, name) in [(2000, "PA"), (2100, "PB")] {
+        let (a, b) = (Point::new(2000, y), Point::new(2040, y));
+        app.state.model.schematic.add_wire(vec![a, b]);
+        app.state.model.schematic.add_net_label(a, name.to_owned());
+    }
+    app.state.sync_active_schematic_to_workspace();
+    app.state.workbench.activate(Workspace::Design);
+
+    drag_probe(
+        &mut app.state.canvas_frame(),
+        Point::new(2020, 2000),
+        Point::new(2020, 2100),
+    );
+    app.after_contribution();
+    quick_frame(&mut app.state);
+
+    let difference = "V(pa) - V(pb)";
+    assert_eq!(
+        view_expressions(&app.state),
+        vec![(difference.to_owned(), true)],
+        "the difference is on the view; the status line says {:?}",
+        status_line(&app)
+    );
+    assert_eq!(
+        status_line(&app).as_deref(),
+        Some("V(PA) - V(PB) added to the plot.")
+    );
+    let run = app.state.model.simulation.active_run().expect("the run");
+    let expression = try_parse(difference).expect("the view's expression parses");
+    let value = evaluate(
+        &expression,
+        &WaveformsContext::new(&run.analyses[0].waveforms),
+    )
+    .expect("the view's expression evaluates");
+    let CalcValue::Real(RealValue::Waveform(x, y)) = value else {
+        panic!("a waveform, not {value:?}");
+    };
+    assert_eq!(x, time, "on the run's own samples");
+    let expected: Vec<f64> = plus.iter().zip(minus).map(|(p, m)| p - m).collect();
+    assert_eq!(y, expected, "the two nets' difference at every sample");
 }

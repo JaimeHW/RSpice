@@ -34,8 +34,9 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::commands::{
     active_schematic_editor, answer_project_request, answer_surface_request,
-    carry_out_code_hand_off, file_action, open_connectivity_source_map, plot_probed_trace,
-    run_project_file_action, show_signal_in_its_occurrence, source_editor_redirect,
+    carry_out_code_hand_off, file_action, open_connectivity_source_map, plot_probed_difference,
+    plot_probed_trace, run_project_file_action, show_signal_in_its_occurrence,
+    source_editor_redirect,
 };
 use crate::workbench::diagnostic_routes::open_in_verify;
 use crate::workbench::features;
@@ -45,7 +46,9 @@ use rspice_app_code::workbench::code::commands::{
     NetlistEditorRequest, SourceCommand, SourceRequest, VerilogAStripRequest,
 };
 use rspice_app_code::workbench::code::requests as code_requests;
-use rspice_app_design::schematic::view::{DesignSurfaceRequest, PlotProbedTrace};
+use rspice_app_design::schematic::view::{
+    DesignSurfaceRequest, PlotProbedDifference, PlotProbedTrace,
+};
 use rspice_app_design::workbench::app::actions::workspace::HistoryDirection;
 use rspice_app_design::workbench::app::dialogs::design_request::DesignRequest;
 use rspice_app_design::workbench::design::DesignFeature;
@@ -362,6 +365,11 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, probed: PlotProbedTrace| plot_probed_trace(&mut app.state, probed),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, probed: PlotProbedDifference| plot_probed_difference(&mut app.state, probed),
         );
         requests::drain(
             self,

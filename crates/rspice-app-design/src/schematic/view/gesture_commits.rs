@@ -35,6 +35,13 @@ pub fn click_probe(frame: &mut CanvasFrame<'_>, at: Point) {
     interaction::handle_probe_click(&mut frame.parts(), at, &symbols);
 }
 
+/// A drag with the probe tool from `plus` to `minus`: the voltage between
+/// the two nets goes on the plot.
+pub fn drag_probe(frame: &mut CanvasFrame<'_>, plus: Point, minus: Point) {
+    let symbols = schematic_symbol_context(&*frame.model);
+    interaction::probe_difference(&mut frame.parts(), plus, minus, &symbols);
+}
+
 /// Enter on an armed Move whose preview stands at its current delta.
 pub fn commit_move(frame: &mut CanvasFrame<'_>) {
     let symbols = schematic_symbol_context(&*frame.model);

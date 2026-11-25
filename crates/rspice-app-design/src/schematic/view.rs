@@ -17,6 +17,7 @@ use super::symbols::SymbolLibrary;
 pub mod array_interaction;
 mod bus_interaction;
 pub mod context_menu;
+mod difference_probe;
 pub(crate) mod drawing_sheet;
 mod edge_pan;
 mod floating_paste;
@@ -79,7 +80,7 @@ pub use self::parts::{
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use self::parts::{asked_dialog_waits, canvas_facts_lent, canvas_frame_lent};
-pub use self::requests::{DesignSurfaceRequest, PlotProbedTrace, ProbePlot};
+pub use self::requests::{DesignSurfaceRequest, PlotProbedDifference, PlotProbedTrace, ProbePlot};
 pub use self::shelf_drag::{SchematicShelfDragPayload, handle_pre_render_placement_transform};
 
 /// Whether the typed component-shelf payload is currently over the schematic

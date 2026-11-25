@@ -25,7 +25,7 @@ use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_
 use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
 use super::parts::CanvasParts;
-use super::requests::{DesignSurfaceRequest, PlotProbedTrace, ProbePlot};
+use super::requests::{DesignSurfaceRequest, PlotProbedDifference, PlotProbedTrace, ProbePlot};
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{finish_wire_on_active_sheet, with_active_wire_topology_in};
 use super::snap_resolution::resolve_grid_pointer;
@@ -157,6 +157,14 @@ pub fn handle_tool_interactions(
         handle_armed_stretch_selection(ui, response, state, viewport, symbol_context);
     } else if current_tool == Tool::ArraySelection {
         handle_armed_array_selection(ui, response, state, viewport, grid_size, symbol_context);
+    }
+
+    // A Probe-tool drag from one net to another probes the voltage between
+    // them; it owns the pointer until it is let go.
+    if current_tool == Tool::Probe
+        && super::difference_probe::follow_drag(ui, response, state, viewport, symbol_context)
+    {
+        return;
     }
 
     if let Some(pos) = input.shape_double_click {
@@ -2067,6 +2075,126 @@ pub(super) fn handle_probe_click(
 ) {
     let subject = probe_subject_at(state, grid_pos, symbol_context);
     probe_subject(state, grid_pos, subject, symbol_context);
+}
+
+/// Where a Probe-tool press or release at `screen` lands, as a click there
+/// resolves it.
+pub(super) fn probe_point(
+    state: &CanvasParts<'_>,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+    screen: egui::Pos2,
+) -> Option<Point> {
+    match tool_pointer_view(state).action(Tool::Probe, viewport, symbol_context, screen)? {
+        ToolPointerAction::Probe(at) => Some(at),
+        _ => None,
+    }
+}
+
+/// A two-net probe from `plus` to `minus`: the voltage between the nets
+/// under each end, `V(a) - V(b)`, goes on the plot as an expression on the
+/// last run's view. Ground at one end reads the other net's own voltage. A
+/// net the last run does not hold is saved for the next run, on a view that
+/// may write the plan, and the status line says to run again.
+pub(super) fn probe_difference(
+    state: &mut CanvasParts<'_>,
+    plus: Point,
+    minus: Point,
+    symbol_context: &SchematicSymbolContext,
+) {
+    let net_at =
+        |state: &CanvasParts<'_>, at: Point| match probe_signal_at(state, at, symbol_context) {
+            Some(ComponentProbe::Voltage(net)) => Some(net),
+            _ => None,
+        };
+    let (Some(plus_net), Some(minus_net)) = (net_at(state, plus), net_at(state, minus)) else {
+        state.prompt("Nothing probed: a two-net probe goes from one wire to another.");
+        return;
+    };
+    if plus_net.eq_ignore_ascii_case(&minus_net) {
+        state.prompt(format!(
+            "Both ends are on {plus_net}: end the drag on another net to probe the voltage between them."
+        ));
+        return;
+    }
+    let spelled = |state: &CanvasParts<'_>, net: &str| {
+        probe_spelling_for(state.model, net, &format!("V({net})"))
+    };
+    let (plus, minus) = match (spelled(state, &plus_net), spelled(state, &minus_net)) {
+        (Ok(plus), Ok(minus)) => (plus, minus),
+        (Err(reason), _) | (_, Err(reason)) => {
+            state.prompt(format!("Nothing probed: {reason}"));
+            return;
+        }
+    };
+    let ground =
+        |spelling: &OccurrenceProbeSpelling| is_ground_voltage_expression(spelling.engine());
+    // The difference to ground is the other net's own voltage, which the
+    // run already names.
+    if ground(&minus) {
+        let outcome = probe_request(state.schematic_edit_read_only())(state, &plus);
+        report_probe_outcome(state, plus.display(), outcome);
+        return;
+    }
+    let display = if ground(&plus) {
+        format!("-{}", minus.display())
+    } else {
+        format!("{} - {}", plus.display(), minus.display())
+    };
+    let traces = [&plus, &minus].map(|spelling| {
+        (!ground(spelling)).then(|| materialized_probe_trace(state.model, spelling.engine()))
+    });
+    match traces {
+        [Some(Some(plus_trace)), Some(Some(minus_trace))] => {
+            state.workbench.outbox.push(PlotProbedDifference {
+                analysis: plus_trace.analysis_key(),
+                expression: format!(
+                    "{} - {}",
+                    plus_trace.source_name(),
+                    minus_trace.source_name()
+                ),
+                display,
+            });
+        }
+        [None, Some(Some(minus_trace))] => {
+            state.workbench.outbox.push(PlotProbedDifference {
+                analysis: minus_trace.analysis_key(),
+                expression: format!("-{}", minus_trace.source_name()),
+                display,
+            });
+        }
+        _ => {
+            let missing: Vec<&OccurrenceProbeSpelling> = [&plus, &minus]
+                .into_iter()
+                .filter(|spelling| {
+                    !ground(spelling)
+                        && materialized_probe_trace(state.model, spelling.engine()).is_none()
+                })
+                .collect();
+            let names = missing
+                .iter()
+                .map(|spelling| spelling.display())
+                .collect::<Vec<_>>()
+                .join(" and ");
+            if state.schematic_edit_read_only() {
+                state.prompt(format!(
+                    "{display} is not plotted: the last run does not hold {names}."
+                ));
+                return;
+            }
+            for spelling in missing {
+                if let Err(reason) =
+                    ensure_plan_probe_output(state, spelling, SavedOutputOrigin::SchematicProbe)
+                {
+                    state.prompt(format!("{display} is not plotted: {reason}"));
+                    return;
+                }
+            }
+            state.prompt(format!(
+                "Saved {names} for the next run; run again to plot {display}."
+            ));
+        }
+    }
 }
 
 /// The context menu's Probe row. On a wire or a part it probes that object

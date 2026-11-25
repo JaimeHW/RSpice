@@ -444,6 +444,22 @@ pub(super) fn view_plots(state: &AppState) -> Vec<(String, bool)> {
     plots
 }
 
+/// The expressions the plan's view of the shown run keeps, each with
+/// whether it is drawn.
+pub(super) fn view_expressions(state: &AppState) -> Vec<(String, bool)> {
+    let view = plan_view(state);
+    state
+        .model
+        .workspace
+        .content
+        .visualization_document(view)
+        .expect("the plan's view")
+        .expression_traces()
+        .iter()
+        .map(|trace| (trace.text.clone(), trace.visible))
+        .collect()
+}
+
 /// The first run plots the outputs the plan marks Plot and leaves the rest
 /// in the browser; a re-run that adds an output marked Plot plots it too,
 /// while an output the reader took off stays off.
