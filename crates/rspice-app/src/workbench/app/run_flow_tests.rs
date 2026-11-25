@@ -111,33 +111,46 @@ fn open_results_on_the_inspector_opens_that_run_in_results() {
     );
 }
 
-/// From Simulation or Results, a run leaves the reader where they are while
-/// it runs, and when it completes it opens in Results on Waves, whatever
-/// viewer Results last showed.
+/// From Results, a run leaves the reader where they are while it runs, and
+/// when it completes it opens on Waves, whatever viewer Results last showed.
 #[test]
-fn a_finished_run_opens_in_results_on_waves_from_the_setup_pages() {
-    for workspace in [Workspace::Simulate, Workspace::Results] {
+fn a_finished_run_opens_in_results_on_waves_from_results() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Results);
+    user.app.state.results.results.session.viewer = ResultViewer::Op;
+    user.settle();
+
+    user.app.execute_command_key(SimulateCommand::Run.key());
+    user.wait_for("the run", |app| {
+        let ended = run_has_ended(app, 0);
+        if !ended {
+            assert_eq!(app.state.workbench.workspace, Workspace::Results);
+        }
+        ended
+    });
+    user.settle();
+
+    assert_eq!(user.app.state.workbench.workspace, Workspace::Results);
+    assert_eq!(
+        user.app.state.results.results.session.viewer,
+        ResultViewer::Waves
+    );
+    assert_eq!(active_run(&user), Some(newest_run(&user)));
+}
+
+/// A run pressed on the netlist or the plan plots in the dock under it, as a
+/// run pressed on the drawing does: the reader stays on the page.
+#[test]
+fn a_run_from_the_netlist_or_the_plan_plots_in_the_dock_under_it() {
+    for workspace in [Workspace::Netlist, Workspace::Simulate] {
         let mut user = example_project();
         user.app.state.workbench.activate(workspace);
-        user.app.state.results.results.session.viewer = ResultViewer::Op;
         user.settle();
 
-        user.app.execute_command_key(SimulateCommand::Run.key());
-        user.wait_for("the run", |app| {
-            let ended = run_has_ended(app, 0);
-            if !ended {
-                assert_eq!(app.state.workbench.workspace, workspace);
-            }
-            ended
-        });
-        user.settle();
+        run_to_its_end(&mut user);
 
-        assert_eq!(user.app.state.workbench.workspace, Workspace::Results);
-        assert_eq!(
-            user.app.state.results.results.session.viewer,
-            ResultViewer::Waves,
-            "pressed on {workspace:?}"
-        );
+        assert_eq!(user.app.state.workbench.workspace, workspace);
+        assert!(plot_pane_shown(&user), "pressed on {workspace:?}");
         assert_eq!(active_run(&user), Some(newest_run(&user)));
     }
 }
@@ -185,31 +198,66 @@ fn a_run_that_ends_after_the_reader_moved_on_is_announced_in_the_corner() {
     assert_eq!(active_run(&user), Some(1));
 }
 
-/// Whether the plot pane is on screen beside the page.
+/// Whether the dock shows the run's plot under the page: its band's Open in
+/// Results is on screen.
 fn plot_pane_shown(user: &User) -> bool {
-    user.find("Results split pane").is_some()
+    user.app.state.workbench.dock_shows(ConsolePage::Plot) && user.find("Open in Results").is_some()
 }
 
-/// A run pressed on the drawing shows its plot in the pane below it and
-/// leaves the drawing the active page: the reader never leaves the
-/// schematic, as Virtuoso, ADS and KiCad plot beside it.
+/// Where the dock draws its Plot page: the region the dock names after the
+/// page, which is taller than the page's tab.
+fn plot_page(user: &User) -> egui::Rect {
+    user.named
+        .iter()
+        .filter(|(name, _)| name == "Plot")
+        .map(|(_, rect)| *rect)
+        .max_by(|a, b| a.height().total_cmp(&b.height()))
+        .expect("the dock shows its Plot page")
+}
+
+/// Where the dock's strip draws its tab `name`, just above the Plot page.
+fn dock_tab(user: &User, name: &str) -> egui::Rect {
+    let page = plot_page(user);
+    user.named
+        .iter()
+        .find(|(candidate, rect)| {
+            candidate == name
+                && rect.bottom() <= page.top() + 1.0
+                && rect.bottom() >= page.top() - 40.0
+        })
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| panic!("the dock's strip has no {name} tab"))
+}
+
+/// A run pressed on the drawing shows its plot on the dock's Plot page
+/// below it and leaves the drawing the active page: the reader never leaves
+/// the schematic, as Virtuoso, ADS and KiCad plot beside it.
 #[test]
 fn a_run_from_the_drawing_plots_below_it_and_stays_on_the_drawing() {
     let mut user = example_project();
     user.app.state.workbench.activate(Workspace::Design);
     user.app.state.results.results.session.viewer = ResultViewer::Op;
     user.settle();
-    assert!(!plot_pane_shown(&user), "no pane before any run");
+    assert!(!plot_pane_shown(&user), "no plot before any run");
+    assert!(user.find("Plot").is_none(), "nor a Plot tab");
 
     run_to_its_end(&mut user);
 
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
-    assert!(plot_pane_shown(&user), "the first run opens the plot pane");
-    let pane = user.expect("Results split pane");
+    assert!(
+        plot_pane_shown(&user),
+        "the first run opens the dock on Plot"
+    );
+    let page = plot_page(&user);
     let canvas = user.expect("Schematic canvas");
     assert!(
-        pane.top() >= canvas.bottom() - 1.0 && pane.width() >= canvas.width() - 1.0,
-        "the plot sits below the drawing, across its width: {pane:?} under {canvas:?}"
+        page.top() >= canvas.bottom() - 1.0 && page.width() >= canvas.width() - 1.0,
+        "the plot sits below the drawing, across its width: {page:?} under {canvas:?}"
+    );
+    let (plot, console) = (dock_tab(&user, "Plot"), dock_tab(&user, "Console"));
+    assert!(
+        plot.left() < console.left(),
+        "Plot is the strip's first tab: {plot:?} before {console:?}"
     );
     assert_eq!(
         user.app.state.results.results.session.viewer,
@@ -228,45 +276,50 @@ fn a_run_from_the_drawing_plots_below_it_and_stays_on_the_drawing() {
     assert_eq!(
         user.app.state.workbench.workspace,
         Workspace::Results,
-        "the pane's header opens the run in Results"
+        "the page's band opens the run in Results"
     );
     assert_eq!(active_run(&user), Some(newest_run(&user)));
+    assert_eq!(
+        user.app.state.results.results.session.viewer,
+        ResultViewer::Waves,
+        "on the sheet the page showed"
+    );
 }
 
-/// The plot pane is for looking at the run's waveforms beside the drawing:
-/// it spends no row on sheet tabs or on the analysis' name, its own controls
-/// end the row that names its traces, and a drawing the view showed whole
-/// stays whole above it.
+/// The Plot page is for looking at the run's waveforms under the drawing:
+/// one band of tools over the plot, no row spent on Results' sheet tabs or
+/// the analysis' name, and a drawing the view showed whole stays whole
+/// above it.
 #[test]
-fn the_plot_pane_is_one_row_over_its_plot_and_the_drawing_stays_in_sight() {
+fn the_plot_page_is_one_band_over_its_plot_and_the_drawing_stays_in_sight() {
     let mut user = example_project();
     user.app.state.workbench.activate(Workspace::Design);
     user.settle();
     run_to_its_end(&mut user);
 
-    let pane = user.expect("Results split pane");
+    let page = plot_page(&user);
     for tab in ["Waves", "FFT", "Table", "Eye", "Manifest", "TR"] {
         assert!(
             !user
                 .named
                 .iter()
-                .any(|(name, rect)| name == tab && pane.intersects(*rect)),
-            "the pane spends no row on {tab}"
+                .any(|(name, rect)| name == tab && page.intersects(*rect)),
+            "the page spends no row on {tab}"
         );
     }
-    let row = egui::Rect::from_min_size(pane.min, egui::vec2(pane.width(), 25.0));
-    for control in [
-        "V(out)",
-        "Open in Results",
-        "Plot beside the drawing",
-        "Close plot",
-    ] {
+    let band = egui::Rect::from_min_size(page.min, egui::vec2(page.width(), 28.0));
+    for control in ["A|B", "H", "Open in Results"] {
         let rect = user.expect(control);
         assert!(
-            row.contains(rect.center()),
-            "{control} is on the pane's first row: {rect:?} in {row:?}"
+            band.contains(rect.center()),
+            "{control} is on the page's band: {rect:?} in {band:?}"
         );
     }
+    let trace = user.expect("V(out)");
+    assert!(
+        page.contains(trace.center()) && trace.top() >= band.bottom() - 1.0,
+        "the plot's own row names its traces under the band: {trace:?}"
+    );
 
     let canvas = user.expect("Schematic canvas");
     let state = &user.app.state;
@@ -284,28 +337,28 @@ fn the_plot_pane_is_one_row_over_its_plot_and_the_drawing_stays_in_sight() {
     let drawing = egui::Rect::from_two_pos(screen(min_x, min_y), screen(max_x, max_y));
     assert!(
         canvas.contains_rect(drawing),
-        "the drawing stays whole above the pane: {drawing:?} in {canvas:?}"
+        "the drawing stays whole above the dock: {drawing:?} in {canvas:?}"
     );
 }
 
-/// A pane the reader closed stays closed through the next run: the status
-/// bar states the run, and the window's corner offers its plot, which opens
-/// the pane again.
+/// A dock the reader collapsed stays collapsed through the next run: the
+/// status bar states the run, and the window's corner offers its plot, which
+/// opens the dock on Plot again.
 #[test]
-fn a_plot_pane_the_reader_closed_stays_closed_and_the_corner_offers_it() {
+fn a_dock_the_reader_collapsed_stays_collapsed_and_the_corner_offers_the_plot() {
     let mut user = example_project();
     user.app.state.workbench.activate(Workspace::Design);
     run_to_its_end(&mut user);
-    user.click("Close plot");
-    assert!(
-        !plot_pane_shown(&user),
-        "the header's close button closes it"
-    );
+    user.click("Collapse console");
+    assert!(!plot_pane_shown(&user), "the strip's chevron collapses it");
 
     run_to_its_end(&mut user);
 
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
-    assert!(!plot_pane_shown(&user), "a closed pane stays closed");
+    assert!(
+        !user.app.state.workbench.console_visible,
+        "a collapsed dock stays collapsed"
+    );
     assert!(
         user.named
             .iter()
@@ -319,25 +372,96 @@ fn a_plot_pane_the_reader_closed_stays_closed_and_the_corner_offers_it() {
         .map(|(name, _)| name.clone())
         .expect("the corner offers the run's plot");
     user.click(&offer);
-    assert!(plot_pane_shown(&user), "the corner's offer opens the pane");
+    assert!(
+        plot_pane_shown(&user),
+        "the corner's offer opens the dock on Plot"
+    );
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
     assert_eq!(active_run(&user), Some(2));
 }
 
-/// Probing a net always shows its plot, even with the pane closed.
+/// A reader who turned the dock to another page keeps it there through the
+/// next run.
 #[test]
-fn probing_a_net_opens_the_plot_pane() {
+fn a_dock_the_reader_turned_to_another_page_stays_on_it() {
     let mut user = example_project();
     user.app.state.workbench.activate(Workspace::Design);
     run_to_its_end(&mut user);
-    user.click("Close plot");
+    let console = dock_tab(&user, "Console");
+    user.press(console.center(), egui::PointerButton::Primary);
+    user.settle();
+    assert_eq!(user.app.state.workbench.console_page, ConsolePage::Console);
+
+    run_to_its_end(&mut user);
+
+    assert!(user.app.state.workbench.console_visible);
+    assert_eq!(
+        user.app.state.workbench.console_page,
+        ConsolePage::Console,
+        "the run leaves the dock on the reader's page"
+    );
+    assert!(!plot_pane_shown(&user));
+}
+
+/// Probing a net always shows its plot, even with the dock collapsed.
+#[test]
+fn probing_a_net_opens_the_plot_page() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    run_to_its_end(&mut user);
+    user.click("Collapse console");
     assert!(!plot_pane_shown(&user));
 
     probe_out_wire(&mut user);
 
-    assert!(plot_pane_shown(&user), "the probe opens the pane");
+    assert!(plot_pane_shown(&user), "the probe opens the dock on Plot");
     assert!(plotted(&user, "V(out)"));
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
+}
+
+/// Placing a cursor on the Plot page reads it there: the dock stays on the
+/// page, and a cursor placed in Results opens no dock the reader collapsed.
+#[test]
+fn placing_a_cursor_keeps_the_dock_where_the_reader_left_it() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    run_to_its_end(&mut user);
+    user.click("A|B");
+    let page = plot_page(&user);
+    user.press(
+        egui::pos2(page.center().x, page.center().y + 20.0),
+        egui::PointerButton::Primary,
+    );
+    user.settle();
+
+    assert!(
+        user.app.state.results.results.session.cursors.any(),
+        "the click placed a cursor"
+    );
+    assert_eq!(user.app.state.workbench.console_page, ConsolePage::Plot);
+    assert!(plot_pane_shown(&user));
+
+    user.click("Open in Results");
+    user.app.state.workbench.console_visible = false;
+    user.app.state.results.results.session.clear_cursors();
+    user.settle();
+    let plot = user
+        .named
+        .iter()
+        .find(|(name, _)| name.ends_with("result viewer"))
+        .map(|(_, rect)| *rect)
+        .expect("Results shows its sheet");
+    user.press(plot.center(), egui::PointerButton::Primary);
+    user.settle();
+
+    assert!(
+        user.app.state.results.results.session.cursors.any(),
+        "the click placed a cursor"
+    );
+    assert!(
+        !user.app.state.workbench.console_visible,
+        "the collapsed dock stays collapsed"
+    );
 }
 
 /// A re-run updates the plot in place: the signals the reader plotted stay

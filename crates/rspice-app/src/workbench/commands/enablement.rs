@@ -94,7 +94,8 @@ impl ShellCommand {
                     state.workbench.console_view.channel == ConsoleChannel::Session
                         && !state.model.log_buffer.is_empty()
                 }
-                ConsolePage::Problems
+                ConsolePage::Plot
+                | ConsolePage::Problems
                 | ConsolePage::Measurements
                 | ConsolePage::Cursors
                 | ConsolePage::TaskLog

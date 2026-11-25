@@ -155,6 +155,60 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
     });
 }
 
+/// The plot tools a page beside a document offers on its toolbar band, at
+/// the band's control height: the A/B and horizontal cursors, then zoom and
+/// fit on the active strip. Box zoom and pan stay gestures (a right drag, a
+/// Shift drag), and the display toggles stay on the Results sheet.
+pub fn show_plot_tools(ui: &mut Ui, host: &mut impl WaveInstrumentHost) {
+    let availability = InstrumentAvailability {
+        limits_available: false,
+        envelope_available: false,
+        marker_available: false,
+    };
+    let controls: Vec<BarControl> = bar_controls(&availability, &*host)
+        .into_iter()
+        .filter(|control| matches!(control.group, CURSOR_GROUP | ZOOM_GROUP))
+        .collect();
+    let height = ui.spacing().interact_size.y;
+    // The lettered tools stand at one width, the wider one's.
+    let lettered = controls
+        .iter()
+        .filter_map(|control| match &control.kind {
+            ControlKind::Text(label) => Some(rspice_ui_kit::widgets::chip_width(ui, label)),
+            ControlKind::Glyph(_) => None,
+        })
+        .fold(0.0, f32::max);
+    ui.spacing_mut().item_spacing.x = CONTROL_GAP;
+    let mut group = None;
+    for control in &controls {
+        if group.is_some_and(|group| group != control.group) {
+            super::instrument_separator(ui);
+        }
+        group = Some(control.group);
+        let response = match &control.kind {
+            ControlKind::Text(label) => {
+                rspice_ui_kit::widgets::compact_chip(ui, label, control.on, lettered)
+                    .on_hover_text(&control.tooltip)
+            }
+            ControlKind::Glyph(icon) => IconButton::new(*icon)
+                .side(height)
+                .on(control.on)
+                .tooltip(&control.tooltip)
+                .show(ui),
+        };
+        if response.clicked()
+            && let Some(action) = control.action()
+        {
+            host.request(action);
+        }
+    }
+}
+
+/// The groups of the bar's controls a page beside a document offers: the
+/// cursor tools, and zoom and fit.
+const CURSOR_GROUP: u8 = 0;
+const ZOOM_GROUP: u8 = 2;
+
 /// The gap between two controls of the bar.
 const CONTROL_GAP: f32 = 4.0;
 /// The width a separator takes, its gap included.

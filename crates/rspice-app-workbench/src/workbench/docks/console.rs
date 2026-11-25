@@ -30,6 +30,10 @@ pub const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
 const CONSOLE_TOUCH_HEADER_HEIGHT: f32 = 44.0;
 /// The open page's mark along the foot of its tab, over the strip's rule.
 const CONSOLE_TAB_UNDERLINE: f32 = 2.0;
+/// A tab's state glyph after its name, at the size of a toolbar icon, and
+/// the gap before it.
+const CONSOLE_TAB_GLYPH: f32 = 14.0;
+const CONSOLE_TAB_GLYPH_GAP: f32 = 6.0;
 const CONSOLE_ACTION_SIZE: f32 = 27.0;
 const CONSOLE_ACTION_MARGIN_RIGHT: f32 = 3.0;
 pub const CONSOLE_BODY_PADDING_TOP: f32 = 7.0;
@@ -68,20 +72,25 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
         .rect_filled(body_rect, 0.0, Tokens::get(ui.ctx()).color.bg_inset);
     // The page runs from side to side: a table's header band and row fills
     // meet the dock's edges, and each page insets its own text by
-    // `CONSOLE_BODY_PADDING_X` (see `padded`). Top and bottom are inset here,
-    // for every page alike.
+    // `CONSOLE_BODY_PADDING_X` (see `padded`). The top is inset here for
+    // every page alike, under the band a page's toolbar covers it with. The
+    // foot is inset too, except under the plot, whose well meets the dock's
+    // foot as it meets its sides.
+    let foot = if page == ConsolePage::Plot {
+        0.0
+    } else {
+        CONSOLE_BODY_PADDING_BOTTOM
+    };
     let content_rect = egui::Rect::from_min_max(
         egui::pos2(body_rect.left(), body_rect.top() + CONSOLE_BODY_PADDING_TOP),
-        egui::pos2(
-            body_rect.right(),
-            body_rect.bottom() - CONSOLE_BODY_PADDING_BOTTOM,
-        ),
+        egui::pos2(body_rect.right(), body_rect.bottom() - foot),
     );
     let body = ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(content_rect)
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
+            ConsolePage::Plot => app.session_mut().plot_page(ui),
             ConsolePage::Console => {
                 // The command decides what Clear may clear and does the
                 // clearing; the toolbar only offers it.
@@ -118,13 +127,27 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     });
 }
 
-/// The page the dock shows: the one chosen, unless it is the Cursors page
-/// and no sheet with cursors is shown, when it is the console's.
+/// The page the dock shows: the one chosen, unless it is a page the dock
+/// does not offer now (Plot away from the pages that plot in the dock, or
+/// with nothing to plot; Cursors with no sheet that has them), when it is
+/// the console's.
 fn shown_page(app: &impl WorkbenchHost) -> ConsolePage {
     match app.workbench().console_page {
+        ConsolePage::Plot if !plot_offered(app) => ConsolePage::Console,
         ConsolePage::Cursors if !app.session().offers_cursors() => ConsolePage::Console,
         page => page,
     }
+}
+
+/// Whether the dock offers its Plot page now.
+pub fn plot_offered(app: &impl WorkbenchHost) -> bool {
+    app.workbench().offers_plot_page(
+        app.platform().project_lifecycle.is_open(),
+        app.model()
+            .simulation
+            .retained
+            .has_retained_result_dataset(),
+    )
 }
 
 /// The tab strip's height: a touch target under a finger.
@@ -285,17 +308,25 @@ pub fn console_tabs(
     let mut requested = None;
     let mut expand = false;
     let mut focus = None;
-    // The References tab stands for a list, and goes when the list does; the
-    // Cursors tab stands beside Measurements while a sheet with cursors is
-    // shown.
+    // The Plot tab leads while there is a result to plot on a page that plots
+    // in the dock; the References tab stands for a list, and goes when the
+    // list does; the Cursors tab stands beside Measurements while a sheet
+    // with cursors is shown.
+    let plot = plot_offered(app);
+    let plot_status = if plot {
+        app.session_mut().plot_status()
+    } else {
+        None
+    };
     let cursors = app.session().offers_cursors();
-    let pages = ConsolePage::ALL
+    let pages = plot
+        .then_some(ConsolePage::Plot)
         .into_iter()
-        .flat_map(|page| {
+        .chain(ConsolePage::ALL.into_iter().flat_map(|page| {
             std::iter::once(page).chain(
                 (page == ConsolePage::Measurements && cursors).then_some(ConsolePage::Cursors),
             )
-        })
+        }))
         .chain(
             app.workbench()
                 .source_references
@@ -318,7 +349,7 @@ pub fn console_tabs(
                     .measurements_count()
                     .unwrap_or_else(|| active_measurement_count(&app.model().simulation)),
                 ConsolePage::TaskLog => app.model().simulation.retained.runs.len(),
-                ConsolePage::Console | ConsolePage::Cursors => 0,
+                ConsolePage::Plot | ConsolePage::Console | ConsolePage::Cursors => 0,
                 ConsolePage::References => app
                     .workbench()
                     .source_references
@@ -328,9 +359,14 @@ pub fn console_tabs(
             // The badge has room for one number. Which severities that number
             // is made of is said in the tab's name and under the pointer, so
             // the strip can never imply that twelve advisories are twelve
-            // errors.
-            let breakdown =
-                (page == ConsolePage::Problems && count > 0).then(|| problems.announcement());
+            // errors. The Plot tab's mark says the plotted result's state the
+            // same way: its whole sentence is under the pointer.
+            let status = plot_status.as_ref().filter(|_| page == ConsolePage::Plot);
+            let breakdown = match page {
+                ConsolePage::Problems if count > 0 => Some(problems.announcement()),
+                ConsolePage::Plot => status.map(rspice_results_ui::operational::sentence),
+                _ => None,
+            };
             let current = shown_page(app) == page;
             let response = console_tab(
                 ui,
@@ -339,6 +375,7 @@ pub fn console_tabs(
                     current,
                     open,
                     count,
+                    status,
                 },
                 breakdown,
                 height,
@@ -385,7 +422,7 @@ pub fn console_tabs(
         ui.memory_mut(|memory| memory.request_focus(ids[index]));
     }
     if let Some(page) = requested {
-        app.workbench_mut().console_page = page;
+        app.workbench_mut().choose_dock_page(page, plot);
     }
     if expand {
         app.workbench_mut().open_console();
@@ -394,19 +431,22 @@ pub fn console_tabs(
 
 /// What a tab shows of the page it names.
 #[derive(Debug, Clone, Copy)]
-struct TabState {
+struct TabState<'a> {
     /// The dock's current page: the one it shows, or will show when opened.
     current: bool,
     /// Whether the dock shows a page at all.
     open: bool,
     /// The page's badge; zero shows none.
     count: usize,
+    /// The state of what the page shows, as a glyph after its name: the
+    /// plotted result's, when it is not complete.
+    status: Option<&'a rspice_results_ui::operational::ResultOperationalStatus>,
 }
 
 fn console_tab(
     ui: &mut Ui,
     page: ConsolePage,
-    state: TabState,
+    state: TabState<'_>,
     breakdown: Option<String>,
     height: f32,
 ) -> egui::Response {
@@ -414,6 +454,7 @@ fn console_tab(
         current,
         open,
         count,
+        status,
     } = state;
     // Only a page the dock is showing is marked as the open one. The current
     // page's tab stays the strip's keyboard stop while the dock is collapsed.
@@ -429,7 +470,12 @@ fn console_tab(
     } else {
         0.0
     };
-    let width = 20.0 + galley.size().x + count_width;
+    let status_width = if status.is_some() {
+        CONSOLE_TAB_GLYPH + CONSOLE_TAB_GLYPH_GAP
+    } else {
+        0.0
+    };
+    let width = 20.0 + galley.size().x + count_width + status_width;
     let mut sense = Sense::click();
     if !current {
         sense = sense.difference(Sense::focusable_noninteractive());
@@ -467,11 +513,22 @@ fn console_tab(
     } else {
         t.color.text_dim
     };
+    let name_right = rect.left() + 10.0 + galley.size().x;
     ui.painter().galley(
         egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y * 0.5),
         galley,
         text_color,
     );
+    if let Some(status) = status {
+        let glyph = egui::Rect::from_min_size(
+            egui::pos2(
+                name_right + CONSOLE_TAB_GLYPH_GAP,
+                rect.center().y - CONSOLE_TAB_GLYPH * 0.5,
+            ),
+            Vec2::splat(CONSOLE_TAB_GLYPH),
+        );
+        rspice_results_ui::operational::paint_status_glyph(ui, glyph, status);
+    }
     if count > 0 {
         let digits = count.to_string();
         let badge_width = (digits.len() as f32 * 6.5 + 8.0).max(15.0);

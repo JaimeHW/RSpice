@@ -205,10 +205,16 @@ fn run_provenance_lives_in_run_details_not_on_the_panel() {
     );
 }
 
-pub(crate) fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
+/// A Results app over a run whose `V(out)` maps onto the drawing's OUT net;
+/// with `plot_under_design`, the reader left Design with its dock on the
+/// plot.
+pub(crate) fn result_app_with_current_out_map(plot_under_design: bool) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.workbench.split_with_results = split;
+    if plot_under_design {
+        app.state.workbench.activate(Workspace::Design);
+        app.state.workbench.show_plot_page();
+    }
     app.state.workbench.activate(Workspace::Results);
     let project_revision = app.state.model.workspace.content.project.revision();
     let analysis_id = rspice_app_state::product::AnalysisInstanceId::new();
@@ -463,7 +469,11 @@ fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
         status_line(&app).as_deref(),
         Some("Selected conductor OUT from V(out).")
     );
-    assert!(!app.state.workbench.split_with_results);
+    assert!(
+        !app.state.workbench.dock_shows(
+            rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Plot
+        )
+    );
     assert!(
         app.state
             .model
@@ -486,20 +496,22 @@ fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
 }
 
 #[test]
-fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
+fn cross_probe_keeps_the_canonical_result_plotted_under_design() {
     let mut app = result_app_with_current_out_map(true);
 
     assert_eq!(cross_probe(&mut app, "V(out)"), Ok(()));
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(
-        app.state.workbench.results_split_visible(
+        app.state.workbench.offers_plot_page(
             app.state.platform.project_lifecycle.is_open(),
             app.state
                 .model
                 .simulation
                 .retained
                 .has_retained_result_dataset(),
+        ) && app.state.workbench.dock_shows(
+            rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Plot
         )
     );
 }

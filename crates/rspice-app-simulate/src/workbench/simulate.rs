@@ -42,7 +42,7 @@ impl Feature for SimulateFeature {
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
         SimulateCommand::Run.key(),
         SimulateCommand::Stop.key(),
-        ids::TOGGLE_SPLIT_VIEW,
+        ids::SHOW_PLOT,
         SimulateCommand::Preflight.key(),
         SimulateCommand::Options.key(),
         SimulateCommand::ManagePlans.key(),

@@ -157,7 +157,7 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
 /// a prior dataset exists by what they name, and both are drawn whether or not
 /// there is one so the reader is never left guessing that a route exists.
 #[test]
-fn the_plan_heading_offers_its_prior_dataset_and_the_split_stage() {
+fn the_plan_heading_offers_its_prior_dataset_and_the_plot() {
     let empty = render_with(SimulationPage::Analyses, 1400.0, |_| {});
     for gone in ["no prior dataset", "catalog types", "enabled instances"] {
         assert!(
@@ -170,8 +170,8 @@ fn the_plan_heading_offers_its_prior_dataset_and_the_split_stage() {
         "and the route to one is still drawn, disabled:\n{empty}"
     );
     assert!(
-        empty.contains("Split with results"),
-        "the split stage has a visible affordance beside the plan actions:\n{empty}"
+        empty.contains("Show plot"),
+        "the plot has a visible affordance beside the plan actions:\n{empty}"
     );
 
     let retained = render_with(SimulationPage::Analyses, 1400.0, |app| {

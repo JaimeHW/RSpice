@@ -263,10 +263,6 @@ impl Host for RSpiceApp {
                 // has its own answered once it returns.
                 app.after_contribution();
             }
-            Point::SplitResults => {
-                features::show_split::<ResultsFeature>(app, ui);
-                app.after_contribution();
-            }
             // A workspace's navigator, below the heading and the filter field.
             Point::Navigator(workspace) => {
                 use rspice_app_design::workbench::design::DesignFeature;
@@ -615,7 +611,7 @@ impl Host for RSpiceApp {
     }
 
     fn inspector_scope(&self, workspace: Workspace) -> InspectorScope<Workspace> {
-        if split_selected_trace_is_inspected(self) {
+        if plotted_trace_is_inspected(self) {
             InspectorScope::AnyWorkspace
         } else {
             InspectorScope::Workspace(workspace)
@@ -1033,6 +1029,19 @@ impl ConsoleHost for AppState {
         );
     }
 
+    fn plot_status(&mut self) -> Option<rspice_results_ui::operational::ResultOperationalStatus> {
+        rspice_app_results::workbench::documents::result_document::plot_page_status(
+            &mut self.results_parts(),
+        )
+    }
+
+    fn plot_page(&mut self, ui: &mut egui::Ui) {
+        rspice_app_results::workbench::documents::result_document::show_plot_page(
+            ui,
+            &mut self.results_parts(),
+        );
+    }
+
     fn measurements_page(&mut self, ui: &mut egui::Ui) -> bool {
         rspice_app_results::workbench::documents::result_document::waves::measurements_page(
             ui,
@@ -1353,12 +1362,12 @@ impl DocumentHost for AppState {
     }
 }
 
-/// The any-workspace inspector section applies: a trace is selected in the
-/// results split beside the schematic, and the inspector reads it. Something
-/// selected on the drawing comes first: the drawing is the page being
-/// worked on, and a probe or a Plot press that selects its trace must not
-/// take the inspector away from the net it was pressed on.
-fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
+/// The any-workspace inspector section applies: a trace is selected on the
+/// dock's Plot page under the schematic, which shows, and the inspector reads
+/// it. Something selected on the drawing comes first: the drawing is the
+/// page being worked on, and a probe or a Plot press that selects its trace
+/// must not take the inspector away from the net it was pressed on.
+fn plotted_trace_is_inspected(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && app
             .state
@@ -1368,13 +1377,16 @@ fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
             .editor
             .selection
             .is_empty()
-        && app.state.workbench.results_split_visible(
+        && app.state.workbench.offers_plot_page(
             app.state.platform.project_lifecycle.is_open(),
             app.state
                 .model
                 .simulation
                 .retained
                 .has_retained_result_dataset(),
+        )
+        && app.state.workbench.dock_shows(
+            rspice_app_workbench::workbench::state::workbench_session::ConsolePage::Plot,
         )
         && app
             .state
@@ -1489,7 +1501,7 @@ mod tests {
                 ids::RESULT_WAVEFORMS,
                 ResultsCommand::ResultViewer(ResultViewer::Waves),
             ),
-            (ids::TOGGLE_SPLIT_VIEW, ResultsCommand::ToggleResultsSplit),
+            (ids::SHOW_PLOT, ResultsCommand::ShowPlot),
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(ResultsCommand::from_key(id), Some(command), "{command:?}");

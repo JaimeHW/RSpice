@@ -931,12 +931,8 @@ fn a_working_views_markers_are_untouched_by_opening_and_leaving_a_saved_document
 
     // Back on a quick surface the overlay is the working view's again.
     drive_frame(|ui| {
-        super::with_surface_parts(&mut app, |state, run_controller| {
-            rspice_app_results::workbench::documents::result_document::show_compact_split(
-                ui,
-                state,
-                run_controller,
-            )
+        super::with_surface_parts(&mut app, |state, _| {
+            rspice_app_results::workbench::documents::result_document::show_plot_page(ui, state)
         })
     });
     assert!(
@@ -1339,12 +1335,8 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
     // Close: the reader goes back to the dataset quick view, which leaves
     // the persistent projection behind.
     drive_frame(|ui| {
-        super::with_surface_parts(&mut app, |state, run_controller| {
-            rspice_app_results::workbench::documents::result_document::show_compact_split(
-                ui,
-                state,
-                run_controller,
-            )
+        super::with_surface_parts(&mut app, |state, _| {
+            rspice_app_results::workbench::documents::result_document::show_plot_page(ui, state)
         })
     });
     assert!(

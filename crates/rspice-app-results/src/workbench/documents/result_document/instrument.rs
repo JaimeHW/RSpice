@@ -38,6 +38,28 @@ pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     );
 }
 
+/// The Plot page's tools on its band: the cursor tools, zoom and fit, over
+/// the same active pane the Results instrument acts on.
+pub(super) fn show_plot_tools(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let t = Tokens::get(ui.ctx());
+    waves::reconcile_active_pane(state, &t);
+    let active_strip = waves::active_strip_name(state, &t);
+    instrument::show_plot_tools(
+        ui,
+        &mut Host {
+            state,
+            tokens: &t,
+            ctx: ui.ctx().clone(),
+            active_strip,
+        },
+    );
+}
+
+/// The rule between two groups of a bar's controls.
+pub(super) fn separator(ui: &mut Ui) {
+    rspice_results_ui::chrome::instrument_separator(ui);
+}
+
 struct Host<'a, 'p> {
     state: &'a mut ResultsParts<'p>,
     tokens: &'a Tokens,

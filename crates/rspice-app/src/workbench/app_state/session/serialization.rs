@@ -952,15 +952,8 @@ mod tests {
         workbench.navigator_width_custom = true;
         workbench.inspector_width = 287.0;
         workbench.inspector_width_custom = true;
-        workbench.split_with_results = true;
-        // The plot pane as the reader left it: beside the drawing, the
-        // divider dragged, and closed.
-        workbench.results_split =
-            rspice_app_workbench::workbench::state::workbench_session::ResultsSplitLayout {
-                axis: rspice_app_workbench::workbench::state::workbench_session::ResultsSplitAxis::Beside,
-                document_share: 0.35,
-                closed_by_reader: true,
-            };
+        // The plot as the reader left it: put away.
+        workbench.plot_put_away = true;
         state.project.project_library_filter = "afe".to_owned();
         state.simulate.selected_specification = Some("gain".to_owned());
         state.simulate.selected_design_variable = Some("rload".to_owned());

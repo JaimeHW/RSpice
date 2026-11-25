@@ -130,6 +130,16 @@ pub trait ConsoleHost: ProblemsHost + ListingSource {
     /// Draw the Cursors page.
     fn cursors_page(&mut self, _ui: &mut egui::Ui) {}
 
+    /// The state of the result the Plot page draws, when it is one the
+    /// reader should notice, for the page's tab to carry.
+    fn plot_status(&mut self) -> Option<rspice_results_ui::operational::ResultOperationalStatus> {
+        None
+    }
+
+    /// Draw the Plot page: its toolbar band, then the retained result's
+    /// plot, flush to the dock's sides and foot.
+    fn plot_page(&mut self, _ui: &mut egui::Ui) {}
+
     /// Draw the Measurements page over the shown result; `false` when it
     /// draws none, for the console's own page to stand.
     fn measurements_page(&mut self, _ui: &mut egui::Ui) -> bool {

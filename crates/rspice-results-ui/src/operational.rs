@@ -361,13 +361,21 @@ pub fn show_mark<'a>(
 }
 
 /// Everything a state says, as one sentence for a hover.
-fn sentence(status: &ResultOperationalStatus) -> String {
+pub fn sentence(status: &ResultOperationalStatus) -> String {
     [Some(status.state.label()), status.detail.as_deref()]
         .into_iter()
         .flatten()
         .chain([status.state.message(), status.state.recovery()])
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+/// Paint the glyph that stands for `status` in `rect`, in its category's
+/// tone: what a tab carries after its name for the state of what it shows.
+pub fn paint_status_glyph(ui: &Ui, rect: egui::Rect, status: &ResultOperationalStatus) {
+    let t = Tokens::get(ui.ctx());
+    let category = status.state.category();
+    operational_icon(category).paint(ui.painter(), rect, icon_tone(category, &t.color));
 }
 
 /// Name the state to assistive technology on whatever response shows it.

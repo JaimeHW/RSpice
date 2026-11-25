@@ -933,13 +933,6 @@ pub struct FeatureNavigator<F: Feature> {
     pub show: fn(&mut Cx<'_, F>, &mut egui::Ui),
 }
 
-/// The compact projection a feature draws in its context beside another
-/// workspace's document, when the shell splits the stage for it.
-pub struct FeatureSplit<F: Feature> {
-    /// Draw the projection in the split's `Ui`.
-    pub show: fn(&mut Cx<'_, F>, &mut egui::Ui),
-}
-
 /// One tool a feature puts on the context toolbar while its scope shows: a
 /// command it declares, which the toolbar draws as a labelled button and
 /// lays out, answers, dispatches and folds into its overflow like any other.
@@ -1044,7 +1037,6 @@ pub struct FeatureRegistry<F: Feature> {
     inspector: Option<FeatureInspector<F>>,
     surface: Option<FeatureSurface<F>>,
     navigator: Option<FeatureNavigator<F>>,
-    split: Option<FeatureSplit<F>>,
     toolbar: &'static [ToolbarTool],
     toolbars: &'static [(ToolbarId, &'static [ToolbarEntry<F>])],
 }
@@ -1059,7 +1051,6 @@ impl<F: Feature> FeatureRegistry<F> {
             inspector: None,
             surface: None,
             navigator: None,
-            split: None,
             toolbar: &[],
             toolbars: &[],
         };
@@ -1100,17 +1091,6 @@ impl<F: Feature> FeatureRegistry<F> {
     /// The navigator section the feature registered, if it draws one.
     pub fn navigator_section(&self) -> Option<&FeatureNavigator<F>> {
         self.navigator.as_ref()
-    }
-
-    /// Register the projection the feature draws beside another workspace's
-    /// document.
-    pub fn split(&mut self, split: FeatureSplit<F>) {
-        self.split = Some(split);
-    }
-
-    /// The split projection the feature registered, if it draws one.
-    pub fn split_section(&self) -> Option<&FeatureSplit<F>> {
-        self.split.as_ref()
     }
 
     /// Register the tools the feature puts on the context toolbar, in the

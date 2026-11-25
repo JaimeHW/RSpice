@@ -2005,7 +2005,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>, run_controller: &mut Simu
             .request_repaint_after(std::time::Duration::from_millis(30));
     }
     record_key_area(ui, state.results);
-    show_with_chrome(ui, state, run_controller, ResultChrome::Full);
+    show_with_chrome(ui, state, run_controller);
     waves::marker_dialog::show(ui.ctx(), state);
     view_history::observe(ui, state, view_history::WaveSheet::QuickView);
 }
@@ -2121,55 +2121,123 @@ pub fn activate_persistent_document(
     persistent_document::activate(state, document_id)
 }
 
-/// Render the compact upgraded-mockup projection used beside another
-/// engineering document. This is the same canonical retained result state,
-/// not a second result document.
-pub fn show_compact_split(
-    ui: &mut Ui,
-    state: &mut ResultsParts<'_>,
-    run_controller: &mut SimulationController,
-) {
-    // The pane plots; the run's other sheets (its table, spectrum, eye and
-    // manifest) are in Results, a press of the pane's Open in Results away.
+/// The dock's Plot page, on the pages that plot in the dock: its toolbar
+/// band, then the plot, flush to the dock's sides and foot. This is the same
+/// canonical retained result state Results draws, not a second result
+/// document, so Open in Results shows the same view.
+pub fn show_plot_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    // The page plots; the run's other sheets (its table, spectrum, eye and
+    // manifest) are in Results, a press of the band's Open in Results away.
     let sheets = pane_sheets(state.results_reads());
     if let Some(&first) = sheets.first()
         && !sheets.contains(&state.results.session.viewer)
     {
         state.results.session.viewer = first;
     }
-    let pane = ui.available_rect_before_wrap();
-    // The pane has no sheet bar, so its state takes the window place after
-    // its controls.
-    let marked = operational_state::status_beside_viewer(state).is_some();
-    let lead_slots = chrome::bars::compact_pane_control_slots(sheets.len()) + usize::from(marked);
-    if sheets.is_empty() && state.model.simulation.retained.has_results() {
-        let t = Tokens::get(ui.ctx());
-        ui.painter().rect_filled(pane, 0.0, t.color.canvas_bg);
-        well_hint(
-            ui,
-            "Nothing to plot from this run: its values are on the drawing, and Open in Results shows every sheet",
-        );
-    } else {
-        show_with_chrome(
-            ui,
-            state,
-            run_controller,
-            ResultChrome::CompactSplit { lead_slots },
-        );
+    prepare_quick_view(ui, state);
+    let open_in_results = rspice_app_workbench::workbench::docks::console::toolbar(ui, |ui| {
+        plot_page_band(ui, state, &sheets)
+    });
+    crate::ui::plot::set_interaction_mode(
+        ui.ctx(),
+        state.results.session.plot_tool.interaction_mode(),
+    );
+    let well = ui.available_rect_before_wrap();
+    ui.allocate_ui(well.size(), |ui| {
+        ui.set_min_height(well.height());
+        if sheets.is_empty() && state.model.simulation.retained.has_results() {
+            let t = Tokens::get(ui.ctx());
+            ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
+            well_hint(
+                ui,
+                "Nothing to plot from this run: its values are on the drawing, and Open in Results shows every sheet",
+            );
+        } else if viewer_well_is_open(ui, state, true) {
+            waves::show_compact(ui, state);
+        }
+    });
+    working_view::capture_at_frame_end(state);
+    waves::marker_dialog::show(ui.ctx(), state);
+    if open_in_results {
+        state
+            .workbench
+            .activate(rspice_app_state::workbench::workspace::Workspace::Results);
     }
-    show_compact_controls(ui, state, pane, &sheets);
 }
 
-/// The sheets the plot pane beside a document can show for the active run:
-/// the ones that plot it against time, a sweep or frequency.
+/// The Plot page's band: the result's state when it is not complete, the
+/// sheet when the run has more than one to plot, the cursor tools, zoom and
+/// fit, and at its right end what the cursors read and Open in Results.
+/// Returns whether Open in Results was pressed.
+fn plot_page_band(ui: &mut Ui, state: &mut ResultsParts<'_>, sheets: &[ResultViewer]) -> bool {
+    let mut open_in_results = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = PLOT_BAND_GAP;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            open_in_results = crate::ui::widgets::Button::new("Open in Results")
+                .compact()
+                .show(ui)
+                .on_hover_text("Open this plot in Results: measurements, cursors and every sheet")
+                .clicked();
+            let t = Tokens::get(ui.ctx());
+            if let Some(readout) = waves::inline_cursor_readout(state, &t) {
+                ui.label(
+                    egui::RichText::new(readout)
+                        .font(crate::ui::theme::mono(
+                            crate::ui::tokens::FS_0,
+                            crate::ui::theme::FontWeight::Regular,
+                        ))
+                        .color(t.color.text_dim),
+                );
+            }
+            let rest = ui.available_size();
+            ui.allocate_ui_with_layout(
+                rest,
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
+                    if operational_state::show_status_mark(ui, state, true) {
+                        instrument::separator(ui);
+                    }
+                    if sheets.len() > 1 {
+                        let labels: Vec<&str> =
+                            sheets.iter().map(|sheet| sheet.tab_label()).collect();
+                        let mut chosen = sheets
+                            .iter()
+                            .position(|&sheet| sheet == state.results.session.viewer)
+                            .unwrap_or(0);
+                        if rspice_ui_kit::widgets::segmented(
+                            ui,
+                            "results.plot-page.sheet",
+                            &labels,
+                            &mut chosen,
+                            rspice_ui_kit::widgets::SegmentedWidth::Natural,
+                        ) {
+                            state.results.session.viewer = sheets[chosen];
+                        }
+                        instrument::separator(ui);
+                    }
+                    instrument::show_plot_tools(ui, state);
+                },
+            );
+        });
+    });
+    open_in_results
+}
+
+/// The gap between two items of the Plot page's band.
+const PLOT_BAND_GAP: f32 = 6.0;
+
+/// The sheets the dock's Plot page can show for the active run: the ones
+/// that plot it against time, a sweep or frequency.
 pub(crate) fn pane_sheets(state: ResultsReads<'_>) -> Vec<ResultViewer> {
     ResultViewer::all()
         .filter(|&viewer| pane_sheet(viewer) && viewer_availability(state, viewer).available)
         .collect()
 }
 
-/// Whether the plot pane beside a document draws `viewer`: the sheets that
-/// plot a run against time, a sweep or frequency.
+/// Whether the dock's Plot page draws `viewer`: the sheets that plot a run
+/// against time, a sweep or frequency.
 const fn pane_sheet(viewer: ResultViewer) -> bool {
     matches!(
         viewer,
@@ -2180,46 +2248,57 @@ const fn pane_sheet(viewer: ResultViewer) -> bool {
     )
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ResultChrome {
-    Full,
-    /// The plot pane beside a document, whose rows keep `lead_slots` window
-    /// places free for the pane's own controls.
-    CompactSplit {
-        lead_slots: usize,
-    },
+/// The state of the result the dock's Plot page draws, when it is one the
+/// reader should notice, for the page's tab to carry.
+pub fn plot_page_status(
+    state: &mut ResultsParts<'_>,
+) -> Option<rspice_results_ui::operational::ResultOperationalStatus> {
+    let viewer = plot_page_viewer(state.results_reads())?;
+    operational_state::notable_status(state, viewer)
 }
 
-fn show_with_chrome(
-    ui: &mut Ui,
-    state: &mut ResultsParts<'_>,
-    run_controller: &mut SimulationController,
-    chrome: ResultChrome,
-) {
-    // Every quick-style entry into the workspace leaves the persistent
-    // projection here, not just the full one: the compact split renders the
-    // same strips, and a pane context left over from a project-owned document
-    // would scope its plot views, cursors and marker edits onto them.
+/// The sheet the Plot page draws: the one shown when the page can draw it,
+/// else the first the run can plot.
+pub(crate) fn plot_page_viewer(state: ResultsReads<'_>) -> Option<ResultViewer> {
+    let viewer = state.results.session.viewer;
+    let sheets = pane_sheets(state);
+    if sheets.contains(&viewer) {
+        Some(viewer)
+    } else {
+        sheets.first().copied()
+    }
+}
+
+/// Settle the quick view's selection and working view before it draws, in
+/// Results and on the dock's Plot page alike.
+fn prepare_quick_view(ui: &Ui, state: &mut ResultsParts<'_>) {
+    // Every quick-style entry leaves the persistent projection here: the
+    // Plot page renders the same strips, and a pane context left over from a
+    // project-owned document would scope its plot views, cursors and marker
+    // edits onto them.
     state.results.session.leave_persistent_document();
     let family = document_edit::family::quick_view_selection(state.results_reads());
     state.results.set_sample_selection(family);
     prepare_viewer_state(state);
     working_view::wake_on_plotted(state, ui.ctx());
     working_view::sync(state);
+}
+
+fn show_with_chrome(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_controller: &mut SimulationController,
+) {
+    prepare_quick_view(ui, state);
     let plan_before_docbar = state
         .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(|plan| (plan.id(), plan.revision()));
-    match chrome {
-        ResultChrome::Full => {
-            show_docbar(ui, state);
-            if result_stage_bar_visible(state.results_reads()) {
-                show_sheet_bar(ui, state);
-            }
-        }
-        ResultChrome::CompactSplit { .. } => {}
+    show_docbar(ui, state);
+    if result_stage_bar_visible(state.results_reads()) {
+        show_sheet_bar(ui, state);
     }
     crate::ui::plot::set_interaction_mode(
         ui.ctx(),
@@ -2241,7 +2320,7 @@ fn show_with_chrome(
     let available = ui.available_rect_before_wrap();
     ui.allocate_ui(available.size(), |ui| {
         ui.set_min_height(available.height());
-        show_viewer_well(ui, state, run_controller, chrome);
+        show_viewer_well(ui, state, run_controller);
     });
     working_view::capture_at_frame_end(state);
 }
@@ -2356,7 +2435,7 @@ pub fn show_persistent_pane_viewer(
     results.session.hidden_family_traces = hidden;
     prepare_viewer_state(state);
     show_document_viewer(state, viewer);
-    show_viewer_well(ui, state, run_controller, ResultChrome::Full);
+    show_viewer_well(ui, state, run_controller);
 }
 
 /// The run and analysis on screen, by identity, and the kind of analysis.
@@ -2709,54 +2788,12 @@ fn show_viewer_well(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
-    chrome: ResultChrome,
 ) {
-    apply_pending_view_gesture(ui, state);
-    let t = Tokens::get(ui.ctx());
-    // The document well backdrop; viewers paint on top.
-    let well = ui.available_rect_before_wrap();
-    ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
+    let marked_beside = result_stage_bar_visible(state.results_reads());
+    if !viewer_well_is_open(ui, state, marked_beside) {
+        return;
+    }
     let viewer = state.results.session.viewer;
-    let panel = ui.interact(
-        well,
-        ui.id().with(("result-viewer-panel", viewer)),
-        egui::Sense::hover(),
-    );
-    let panel_label = format!("{} result viewer", viewer.tab_label());
-    panel.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &panel_label));
-    ui.ctx().accesskit_node_builder(panel.id, |node| {
-        node.set_role(egui::accesskit::Role::TabPanel);
-        node.set_label(panel_label);
-    });
-
-    // A state the viewer stays readable under is a mark in the sheet bar,
-    // or in the plot pane's first row, and costs the well nothing.
-    let marked_beside = match chrome {
-        ResultChrome::Full => result_stage_bar_visible(state.results_reads()),
-        ResultChrome::CompactSplit { .. } => true,
-    };
-    let operational = operational_state::classify_viewer(state, viewer);
-    if operational_state::show_result_operational_status(ui, state, &operational, marked_beside) {
-        return;
-    }
-
-    if !state.model.simulation.retained.has_results() {
-        let shortcut = state.model.preferences.shortcuts().resolved_label(
-            state.commands,
-            ids::RUN_SIMULATION,
-            runtime_command_platform(ui.ctx()),
-            ui.ctx().os(),
-        );
-        well_hint(ui, &no_results_hint(&shortcut));
-        return;
-    }
-
-    if let ResultChrome::CompactSplit { lead_slots } = chrome
-        && pane_sheet(viewer)
-    {
-        waves::show_compact(ui, state, lead_slots);
-        return;
-    }
     match viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => waves::show(ui, state),
         ResultViewer::Bode => waves::show_bode(ui, state),
@@ -2812,43 +2849,46 @@ fn show_viewer_well(
     }
 }
 
-/// The plot pane's controls, over the right end of its first row: another
-/// sheet, the run opened in Results, the pane moved to the document's other
-/// side, or closed.
-fn show_compact_controls(
-    ui: &mut Ui,
-    state: &mut ResultsParts<'_>,
-    pane: egui::Rect,
-    sheets: &[ResultViewer],
-) {
-    use rspice_app_workbench::workbench::state::workbench_session::ResultsSplitAxis;
-
-    let beside = state.workbench.results_split.axis == ResultsSplitAxis::Beside;
-    let actions =
-        chrome::bars::compact_pane_controls(ui, pane, state.results.session.viewer, sheets, beside);
-    let mark = chrome::bars::compact_pane_status_rect(pane, sheets.len());
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(mark)
-            .id_salt("plot-pane-status"),
-        |ui| {
-            ui.spacing_mut().interact_size.y = mark.height();
-            operational_state::show_status_mark(ui, state, false);
-        },
+/// Paint the viewer well's backdrop and name it, then say whether a viewer
+/// draws in it: not while the result's state takes the well over, nor while
+/// there are no results at all, when the well says so instead.
+/// `marked_beside` says something beside the viewer carries a state the
+/// viewer stays readable under, so the well spends nothing on it.
+fn viewer_well_is_open(ui: &mut Ui, state: &mut ResultsParts<'_>, marked_beside: bool) -> bool {
+    apply_pending_view_gesture(ui, state);
+    let t = Tokens::get(ui.ctx());
+    // The document well backdrop; viewers paint on top.
+    let well = ui.available_rect_before_wrap();
+    ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
+    let viewer = state.results.session.viewer;
+    let panel = ui.interact(
+        well,
+        ui.id().with(("result-viewer-panel", viewer)),
+        egui::Sense::hover(),
     );
-    if let Some(viewer) = actions.viewer {
-        state.results.session.viewer = viewer;
+    let panel_label = format!("{} result viewer", viewer.tab_label());
+    panel.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &panel_label));
+    ui.ctx().accesskit_node_builder(panel.id, |node| {
+        node.set_role(egui::accesskit::Role::TabPanel);
+        node.set_label(panel_label);
+    });
+
+    let operational = operational_state::classify_viewer(state, viewer);
+    if operational_state::show_result_operational_status(ui, state, &operational, marked_beside) {
+        return false;
     }
-    if actions.open_in_results {
-        state
-            .workbench
-            .activate(rspice_app_state::workbench::workspace::Workspace::Results);
-    } else if actions.turn {
-        let split = &mut state.workbench.results_split;
-        split.axis = split.axis.turned();
-    } else if actions.close {
-        state.workbench.close_results_split();
+
+    if !state.model.simulation.retained.has_results() {
+        let shortcut = state.model.preferences.shortcuts().resolved_label(
+            state.commands,
+            ids::RUN_SIMULATION,
+            runtime_command_platform(ui.ctx()),
+            ui.ctx().os(),
+        );
+        well_hint(ui, &no_results_hint(&shortcut));
+        return false;
     }
+    true
 }
 
 fn show_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {

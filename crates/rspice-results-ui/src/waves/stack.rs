@@ -31,13 +31,9 @@ use std::sync::Arc;
 #[derive(Clone, Copy)]
 pub struct StackOptions {
     /// Whether the stack is the Results sheet, with each strip's header row
-    /// and the controls that arrange panes. Without it the stack is the plot
-    /// pane beside a document: each strip is its panes alone, the first row
-    /// of which also carries the pane's own controls.
+    /// and the controls that arrange panes. Without it the stack is the
+    /// dock's Plot page: each strip is its panes alone.
     pub pane_chrome: bool,
-    /// Window places every row keeps free at its right end, in the first
-    /// row for controls the host draws over it.
-    pub lead_slots: usize,
     pub readout: ReadoutPolicy,
     pub quantity: QuantityPresentationPolicy,
     /// Stroke of the active run's traces, in points.
@@ -903,9 +899,7 @@ pub fn show(
                             // control the strips drawn against time carry
                             // beside their close one, so every scale chip
                             // ends on one rule.
-                            let slots = 1
-                                + usize::from(pane_chrome && !maximized && n > 1)
-                                + options.lead_slots;
+                            let slots = 1 + usize::from(pane_chrome && !maximized && n > 1);
                             if show_xy_strip(
                                 ui,
                                 host,
@@ -936,7 +930,7 @@ pub fn show(
                         // and close beside it when several strips are shown.
                         // Each pane's row ends under them.
                         let closable = pane_chrome && !maximized && n > 1;
-                        let window_slots = 1 + usize::from(closable) + options.lead_slots;
+                        let window_slots = 1 + usize::from(closable);
                         // Beside a document the strip is its panes alone:
                         // the pane's axis names the analysis, and the
                         // Results sheet is where strips are told apart.

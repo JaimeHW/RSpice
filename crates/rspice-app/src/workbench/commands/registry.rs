@@ -558,16 +558,16 @@ mod tests {
     }
 
     #[test]
-    fn split_results_owns_the_mockup_shortcut_on_every_platform() {
+    fn show_plot_owns_the_mockup_shortcut_on_every_platform() {
         let catalog = crate::workbench::commands::vocabulary::CommandRegistry;
-        let split = ResultsCommand::ToggleResultsSplit.key();
+        let split = ResultsCommand::ShowPlot.key();
         assert_eq!(catalog.context(split), Some(ShortcutContext::Global));
         for platform in CommandPlatform::ALL {
             let binding = catalog
                 .default_bindings(split)
                 .iter()
                 .find(|binding| binding.supports(platform))
-                .expect("the split is bound on every platform");
+                .expect("Show plot is bound on every platform");
             assert_eq!(binding.chord.label, "Ctrl+\\");
             let owners = catalog
                 .commands()

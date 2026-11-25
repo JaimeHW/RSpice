@@ -467,7 +467,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ShellCommand::ToggleNavigator.key(),
     ShellCommand::ToggleInspector.key(),
     ShellCommand::ToggleConsole.key(),
-    ResultsCommand::ToggleResultsSplit.key(),
+    ResultsCommand::ShowPlot.key(),
     ShellCommand::OpenConsole.key(),
     ShellCommand::OpenProblems.key(),
     ShellCommand::OpenNotifications.key(),

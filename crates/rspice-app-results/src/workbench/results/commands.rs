@@ -22,7 +22,9 @@ pub enum ResultsCommand {
     ExportWaveformsCsv,
     ClearResults,
     ToggleLinkedCursors,
-    ToggleResultsSplit,
+    /// Open the dock on its Plot page, or collapse the dock when it shows
+    /// the plot already.
+    ShowPlot,
     DatasetManifestBrowser,
     /// Activate Results on the selected run's retained dataset. The affordances
     /// that hop into Results — the completion notice, the jobs history, the
@@ -127,8 +129,7 @@ const fn primary(
     }
 }
 
-const TOGGLE_RESULTS_SPLIT: &[ShortcutBinding] =
-    &[primary(Key::Backslash, true, false, false, "Ctrl+\\")];
+const SHOW_PLOT: &[ShortcutBinding] = &[primary(Key::Backslash, true, false, false, "Ctrl+\\")];
 const LINKED_CURSORS: &[ShortcutBinding] = &[primary(Key::C, false, false, true, "Shift+C")];
 // The plot keys, as ViVA's bindkeys give the same commands bare letters.
 // Each acts in Results only, where the sheet in front takes it.
@@ -183,7 +184,7 @@ impl ResultsCommand {
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
-        Self::ToggleResultsSplit,
+        Self::ShowPlot,
         Self::ClearResults,
         Self::ToggleLinkedCursors,
         Self::DatasetManifestBrowser,
@@ -274,7 +275,7 @@ impl ResultsCommand {
             Self::ExportWaveformsCsv => ids::EXPORT_RESULTS,
             Self::ClearResults => CommandKey::new("clear-results"),
             Self::ToggleLinkedCursors => CommandKey::new("toggle-linked-cursors"),
-            Self::ToggleResultsSplit => ids::TOGGLE_SPLIT_VIEW,
+            Self::ShowPlot => ids::SHOW_PLOT,
             Self::DatasetManifestBrowser => CommandKey::new("dataset-browser"),
             Self::OpenRunInResults => ids::OPEN_RUN_IN_RESULTS,
             Self::OpenProducingPlan => CommandKey::new("open-producing-plan"),
@@ -364,12 +365,12 @@ impl ResultsCommand {
                 ShortcutContext::ResultsWorkspace,
                 LINKED_CURSORS,
             ),
-            Self::ToggleResultsSplit => (
-                "Split with results",
+            Self::ShowPlot => (
+                "Show plot",
                 "Window",
                 PROJECT,
                 ShortcutContext::Global,
-                TOGGLE_RESULTS_SPLIT,
+                SHOW_PLOT,
             ),
             Self::DatasetManifestBrowser => (
                 "Data browser",

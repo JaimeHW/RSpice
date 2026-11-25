@@ -176,16 +176,19 @@ pub(crate) fn follow_notification_action(
             }
             selected
         }
-        // The plot beside the drawing, where the reader is still on a page
-        // that can show it; elsewhere, Results, so the offer always shows
-        // the plot it names.
+        // The dock's plot, where the reader is still on a page that plots in
+        // the dock; elsewhere, Results, so the offer always shows the plot
+        // it names.
         NotificationAction::ShowPlot { run_sequence } => {
             if !model.simulation.select_run_by_sequence(run_sequence) {
                 workbench.prompt(RetainedSimulationState::retired_run_message(run_sequence));
                 return false;
             }
-            workbench.show_results_split();
-            !workbench.supports_results_split()
+            if workbench.plots_in_dock() {
+                workbench.show_plot_page();
+                return false;
+            }
+            true
         }
         NotificationAction::ShowInConsole { log_id } => {
             show_session_line(model, workbench, log_id);

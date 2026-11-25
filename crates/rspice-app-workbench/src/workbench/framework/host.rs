@@ -59,8 +59,6 @@ pub enum Point<W, S, L> {
     /// The stage of a workspace: the surface the current route opens, or else
     /// the workspace's own page.
     Surface(W),
-    /// The results pane beside the stage while the results split is showing.
-    SplitResults,
     /// A workspace's navigator, below the heading and filter field the
     /// container draws for it.
     Navigator(W),

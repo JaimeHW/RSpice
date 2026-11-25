@@ -33,7 +33,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, Command
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
-    FeatureSplit, FeatureSurface, Reads, RoutedCommand, Session,
+    FeatureSurface, Reads, RoutedCommand, Session,
 };
 use crate::workbench::framework::requests::{
     ClipboardText, ExportDataset, RevealExecutedDeck, SelectAnalysisInstance,
@@ -83,16 +83,17 @@ impl ResultsFeature {
         cx.execute(ids::OPEN_RUN_IN_RESULTS);
     }
 
-    /// Show the run a press of Run on the drawing finished in the plot pane
-    /// beside it, as Virtuoso, ADS and KiCad plot beside the schematic: the
-    /// drawing stays the active page. The run settles on the analysis it
-    /// opens on, as a run opened in Results does: the one the plan's view
-    /// keeps when the run solved it, else its curves, else its first
-    /// analysis, and the data browser marks it. A pane already showing keeps
-    /// its sheet, signals and zoom while that analysis offers the sheet, so a
-    /// re-run updates the plot in place; a first run opens it on that
-    /// analysis' default sheet. A pane the reader closed stays closed.
-    /// Returns whether the plot is on screen.
+    /// Show the run a press of Run on the drawing, the netlist or the plan
+    /// finished on the dock's Plot page, as Virtuoso, ADS and KiCad plot
+    /// beside the schematic: the page stays the active one. The run settles
+    /// on the analysis it opens on, as a run opened in Results does: the one
+    /// the plan's view keeps when the run solved it, else its curves, else
+    /// its first analysis, and the data browser marks it. A plot already
+    /// showing keeps its sheet, signals and zoom while that analysis offers
+    /// the sheet, so a re-run updates the plot in place; a first run opens it
+    /// on that analysis' default sheet. A dock the reader collapsed, or left
+    /// on another page, stays as they left it. Returns whether the plot is on
+    /// screen.
     pub fn plot_finished_run(cx: &mut Cx<'_, Self>, run_sequence: u64) -> bool {
         if !cx.model.simulation.select_run_by_sequence(run_sequence) {
             return false;
@@ -102,18 +103,17 @@ impl ResultsFeature {
             settle_shown_analysis(&mut cx.state.results, &mut cx.model.simulation, index);
         }
         let viewer = cx.state.results.session.viewer;
-        let keep = cx.wb.split_with_results
+        let keep = cx.wb.dock_shows(crate::workbench::state::ConsolePage::Plot)
             && viewer_is_available(cx.state.reads(cx.model, cx.wb), viewer);
         if !keep {
             let sheet =
                 opening_sheet(cx.state.reads(cx.model, cx.wb)).unwrap_or(ResultViewer::Waves);
             cx.state.results.session.viewer = sheet;
         }
-        if cx.wb.run_opens_results_split() {
-            cx.wb.show_results_split();
-            return true;
+        if cx.wb.run_opens_plot_page() {
+            cx.wb.show_plot_page();
         }
-        false
+        cx.wb.dock_shows(crate::workbench::state::ConsolePage::Plot)
     }
 
     /// Take the navigation offer a notice carried: open Results on the run
@@ -182,7 +182,6 @@ impl Feature for ResultsFeature {
             commit_pending_edit: keep_axis_drafts,
         });
         registry.surface(FeatureSurface { show: show_surface });
-        registry.split(FeatureSplit { show: show_split });
         registry.dialogs(DIALOGS);
     }
 }
@@ -228,23 +227,6 @@ fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
     surface::show(ui, &mut parts, cx.handles.run_controller);
     render_create_result_document(cx, ui.ctx());
     render_result_document_dialog(cx, ui.ctx());
-}
-
-/// The compact Results projection beside another workspace's document, over
-/// the same.
-fn show_split(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
-    let mut parts = cx.state.parts(
-        cx.model,
-        cx.wb,
-        cx.platform,
-        &mut cx.runs.preflight,
-        cx.commands,
-    );
-    crate::workbench::documents::result_document::show_compact_split(
-        ui,
-        &mut parts,
-        cx.handles.run_controller,
-    );
 }
 
 /// The dialogs the feature draws, each under the key the shell lists it by.
@@ -591,8 +573,8 @@ impl CommandSet for ResultsCommand {
                     available_or(retained.has_results(), "no result dataset is available")
                 }
             }
-            Self::ToggleResultsSplit => {
-                if !workbench.supports_results_split() {
+            Self::ShowPlot => {
+                if !workbench.plots_in_dock() {
                     CommandAvailability::Disabled("open Design, Netlist, or Simulation setup")
                 } else {
                     available_or(
@@ -850,20 +832,29 @@ impl CommandSet for ResultsCommand {
                     &mut results_parts(cx),
                 );
             }
-            Self::ToggleResultsSplit => {
-                if cx.wb.split_with_results {
-                    cx.wb.close_results_split();
-                } else if let Some(run_index) = cx
-                    .model
-                    .simulation
-                    .retained
-                    .newest_retained_result_run_index()
-                {
-                    // The split starts on the newest materialized dataset,
-                    // but remains the one canonical Results selection: there
-                    // is no copied run, waveform, or document owner.
-                    cx.model.simulation.select_run(run_index);
-                    cx.wb.show_results_split();
+            Self::ShowPlot => {
+                if cx.wb.dock_shows(crate::workbench::state::ConsolePage::Plot) {
+                    cx.wb.collapse_dock();
+                } else {
+                    // A run already shown stays shown; otherwise the plot
+                    // starts on the newest materialized dataset. Either way it
+                    // is the one canonical Results selection: there is no
+                    // copied run, waveform, or document owner.
+                    let shown = cx
+                        .model
+                        .simulation
+                        .active_run()
+                        .is_some_and(|run| !run.analyses.is_empty());
+                    if !shown
+                        && let Some(run_index) = cx
+                            .model
+                            .simulation
+                            .retained
+                            .newest_retained_result_run_index()
+                    {
+                        cx.model.simulation.select_run(run_index);
+                    }
+                    cx.wb.show_plot_page();
                 }
             }
             Self::DatasetManifestBrowser => open_dataset_browser(&mut results_parts(cx)),
@@ -1041,7 +1032,11 @@ impl CommandSet for ResultsCommand {
 
     fn checked(self, reads: &Reads<'_, ResultsFeature>) -> Option<bool> {
         match self {
-            Self::ToggleResultsSplit => Some(reads.wb.split_with_results),
+            Self::ShowPlot => Some(
+                reads
+                    .wb
+                    .dock_shows(crate::workbench::state::ConsolePage::Plot),
+            ),
             Self::ToggleLinkedCursors => Some(linked_cursors(results_reads(reads))),
             Self::ToggleCursorTool => Some(reads.state.results.session.cursor_tool.is_armed()),
             Self::ToggleMinorGrid => Some(reads.state.results.session.show_minor_grid),

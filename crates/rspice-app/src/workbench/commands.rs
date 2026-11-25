@@ -124,14 +124,21 @@ impl ShellCommand {
                 }
             }
             Self::ToggleConsole => {
-                if app.state.workbench.focus_mode {
-                    app.state.workbench.focus_mode = false;
-                    app.state.workbench.console_visible = true;
+                let workbench = &mut app.state.workbench;
+                if workbench.focus_mode {
+                    workbench.focus_mode = false;
+                    workbench.console_visible = true;
+                } else if workbench.console_visible {
+                    workbench.collapse_dock();
                 } else {
-                    app.state.workbench.console_visible = !app.state.workbench.console_visible;
+                    workbench.console_visible = true;
                 }
-                if !app.state.workbench.console_visible {
-                    app.state.workbench.console_maximized = false;
+                if !workbench.console_visible {
+                    workbench.console_maximized = false;
+                }
+                // A dock opened back onto its plot brings runs back to it.
+                if workbench.dock_shows(ConsolePage::Plot) {
+                    workbench.plot_put_away = false;
                 }
             }
             Self::OpenProblems => {
@@ -158,7 +165,8 @@ impl ShellCommand {
                     app.state.clear_primary_log()
                 }
                 ConsolePage::Console => {}
-                ConsolePage::Problems
+                ConsolePage::Plot
+                | ConsolePage::Problems
                 | ConsolePage::Measurements
                 | ConsolePage::Cursors
                 | ConsolePage::TaskLog

@@ -14,6 +14,7 @@ use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags,
 };
+use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
 #[test]
 fn generic_results_command_opens_the_workspace_without_a_dataset() {
@@ -195,9 +196,9 @@ fn every_result_sheet_is_registered_for_commands_and_shortcuts() {
 }
 
 #[test]
-fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
+fn show_plot_is_truthfully_gated_by_context_and_materialized_evidence() {
     let mut app = RSpiceApp::test_instance();
-    let command = ResultsCommand::ToggleResultsSplit.key();
+    let command = ResultsCommand::ShowPlot.key();
     app.state.workbench.activate(Workspace::Design);
 
     assert_eq!(
@@ -223,8 +224,10 @@ fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
     );
 }
 
+/// Show plot opens the dock on the newest materialized run's plot, without
+/// copying the run, and collapses the dock when it already shows the plot.
 #[test]
-fn enabling_split_selects_latest_materialized_run_without_copying_results() {
+fn show_plot_toggles_the_docks_plot_on_the_latest_materialized_run() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
     let retained_dataset = {
@@ -240,9 +243,9 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
     assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
     let history_len = app.state.model.simulation.retained.runs.len();
 
-    app.execute_command_key(ResultsCommand::ToggleResultsSplit.key());
+    app.execute_command_key(ResultsCommand::ShowPlot.key());
 
-    assert!(app.state.workbench.split_with_results);
+    assert!(app.state.workbench.dock_shows(ConsolePage::Plot));
     assert_eq!(app.state.model.simulation.view.active_run_idx, Some(1));
     assert_eq!(
         app.state
@@ -255,11 +258,17 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
     assert_eq!(
         app.state.model.simulation.retained.runs.len(),
         history_len,
-        "the split projects the canonical dataset instead of cloning it"
+        "the plot projects the canonical dataset instead of cloning it"
     );
 
-    app.execute_command_key(ResultsCommand::ToggleResultsSplit.key());
-    assert!(!app.state.workbench.split_with_results);
+    app.execute_command_key(ResultsCommand::ShowPlot.key());
+    assert!(!app.state.workbench.dock_shows(ConsolePage::Plot));
+    assert!(
+        !app.state.workbench.console_visible,
+        "a second press collapses the dock"
+    );
+    app.execute_command_key(ResultsCommand::ShowPlot.key());
+    assert!(app.state.workbench.dock_shows(ConsolePage::Plot));
 }
 
 #[test]

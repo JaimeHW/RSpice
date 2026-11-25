@@ -473,9 +473,7 @@ fn follow_pressed_run(
     let stayed = app.state.workbench.current_route() == route;
     let mut plot_hidden = None;
     match lifecycle {
-        Lifecycle::Completed
-            if has_results && stayed && route.surface_id() == SurfaceId::Design =>
-        {
+        Lifecycle::Completed if has_results && stayed && app.state.workbench.plots_in_dock() => {
             if !app.plot_finished_run(sequence) {
                 plot_hidden = Some(sequence);
             }
@@ -621,8 +619,9 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     }
 }
 
-/// A run that finished on the drawing with its plot pane closed offers the
-/// plot beside the drawing rather than a trip to Results.
+/// A run that finished on a page that plots in the dock, with the dock put
+/// away or on another page, offers the dock's plot rather than a trip to
+/// Results.
 fn offer_hidden_plot(mut notice: RunNotice, plot_hidden: Option<u64>) -> RunNotice {
     use rspice_app_workbench::ui::widgets::NotificationAction;
 

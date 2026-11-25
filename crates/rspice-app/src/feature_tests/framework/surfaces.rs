@@ -1,11 +1,9 @@
 //! The workspace surfaces: a source write the bundle refuses leaves
-//! the editor as the bundle holds the source, and the Results split stage
-//! stays equal, bounded at narrow widths and named for assistive technology.
+//! the editor as the bundle holds the source.
 
 use crate::workbench::RSpiceApp;
 use egui::Context;
 use rspice_app_code::workbench::documents::source_editing;
-use rspice_app_workbench::workbench::surfaces::register_results_split_region;
 
 /// An application on the page that edits a Verilog-A source, and the owner
 /// of the bundle it edits.
@@ -163,34 +161,4 @@ fn refused_source_write() {
         insert(&typed, at + 1, "y"),
         "Verilog-A: the next edit is stored without the refused paste"
     );
-}
-
-#[test]
-fn results_secondary_pane_is_an_accessible_named_region() {
-    let ctx = egui::Context::default();
-    ctx.enable_accesskit();
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
-            )),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                let rect = ui.available_rect_before_wrap();
-                register_results_split_region(ui, rect);
-            });
-        },
-    );
-
-    let nodes = output
-        .platform_output
-        .accesskit_update
-        .expect("split accessibility tree")
-        .nodes;
-    assert!(nodes.iter().any(|(_, node)| {
-        node.role() == egui::accesskit::Role::Region && node.label() == Some("Results split pane")
-    }));
 }

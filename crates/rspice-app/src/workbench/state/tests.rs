@@ -12,7 +12,9 @@ use rspice_app_workbench::workbench::routing::{
     surface_catalog::SurfaceId,
     surface_route::SurfaceRoute,
 };
-use rspice_app_workbench::workbench::state::workbench_session::{Drawer, WorkbenchSession};
+use rspice_app_workbench::workbench::state::workbench_session::{
+    ConsolePage, Drawer, WorkbenchSession,
+};
 
 /// Every document a sheet claims must exist in the catalog and must accept
 /// the sheet's analysis. Three copies of this map used to exist; one said
@@ -53,16 +55,13 @@ fn workspace_activation_updates_canonical_route_and_recent_history() {
 }
 
 #[test]
-fn results_split_is_limited_to_the_three_mockup_primary_stages() {
-    let mut state = WorkbenchSession {
-        split_with_results: true,
-        ..WorkbenchSession::default()
-    };
+fn the_dock_plots_only_on_the_three_authoring_stages() {
+    let mut state = WorkbenchSession::default();
 
     for workspace in [Workspace::Design, Workspace::Netlist, Workspace::Simulate] {
         state.activate(workspace);
-        assert!(state.supports_results_split(), "{workspace:?}");
-        assert!(state.results_split_visible(true, true), "{workspace:?}");
+        assert!(state.plots_in_dock(), "{workspace:?}");
+        assert!(state.offers_plot_page(true, true), "{workspace:?}");
     }
 
     for workspace in [
@@ -72,21 +71,55 @@ fn results_split_is_limited_to_the_three_mockup_primary_stages() {
         Workspace::Models,
     ] {
         state.activate(workspace);
-        assert!(!state.supports_results_split(), "{workspace:?}");
-        assert!(!state.results_split_visible(true, true), "{workspace:?}");
+        assert!(!state.plots_in_dock(), "{workspace:?}");
+        assert!(!state.offers_plot_page(true, true), "{workspace:?}");
     }
 }
 
 #[test]
-fn remembered_split_never_projects_without_project_and_retained_evidence() {
-    let state = WorkbenchSession {
-        split_with_results: true,
-        ..WorkbenchSession::default()
-    };
+fn the_plot_page_is_never_offered_without_a_project_and_a_result() {
+    let mut state = WorkbenchSession::default();
+    state.activate(Workspace::Design);
 
-    assert!(!state.results_split_visible(false, true));
-    assert!(!state.results_split_visible(true, false));
-    assert!(state.results_split_visible(true, true));
+    assert!(!state.offers_plot_page(false, true));
+    assert!(!state.offers_plot_page(true, false));
+    assert!(state.offers_plot_page(true, true));
+}
+
+/// A run opens the dock on its plot until the reader puts the plot away, by
+/// collapsing the dock or by choosing another page; opening the plot again,
+/// as a probe, Show plot or the Plot tab does, brings runs back to it.
+#[test]
+fn a_plot_the_reader_put_away_stays_away_until_they_open_it() {
+    let mut state = WorkbenchSession::default();
+    state.activate(Workspace::Design);
+    assert!(state.run_opens_plot_page(), "the first run opens the plot");
+
+    state.show_plot_page();
+    assert!(state.dock_shows(ConsolePage::Plot));
+    state.collapse_dock();
+    assert!(!state.dock_shows(ConsolePage::Plot));
+    assert!(
+        !state.run_opens_plot_page(),
+        "a collapsed dock stays collapsed"
+    );
+
+    state.show_plot_page();
+    assert!(
+        state.run_opens_plot_page(),
+        "opening the plot brings runs back"
+    );
+    state.choose_dock_page(ConsolePage::Problems, true);
+    assert!(
+        !state.run_opens_plot_page(),
+        "another page the reader chose stays chosen"
+    );
+    state.choose_dock_page(ConsolePage::Plot, true);
+    assert!(state.run_opens_plot_page());
+
+    // Choosing a page before there is a plot to offer refuses nothing.
+    state.choose_dock_page(ConsolePage::Console, false);
+    assert!(state.run_opens_plot_page());
 }
 
 #[test]

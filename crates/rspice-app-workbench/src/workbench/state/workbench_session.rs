@@ -36,59 +36,6 @@ const NAVIGATION_SCHEMA_VERSION: u8 = 1;
 /// those values must not distort the redesigned schematic workspace forever.
 pub const LAYOUT_SCHEMA_VERSION: u8 = 1;
 
-/// Which side of the document the plot pane takes when the two share the
-/// stage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum ResultsSplitAxis {
-    /// Below the document, across its full width: a time or frequency axis
-    /// wants width more than height.
-    #[default]
-    Below,
-    /// To the right of the document, over its full height.
-    Beside,
-}
-
-impl ResultsSplitAxis {
-    /// The other side.
-    #[must_use]
-    pub const fn turned(self) -> Self {
-        match self {
-            Self::Below => Self::Beside,
-            Self::Beside => Self::Below,
-        }
-    }
-}
-
-/// How the plot pane shares the stage with the document beside it, as the
-/// reader left it: the side it takes, where the divider sits, and whether
-/// they closed it.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ResultsSplitLayout {
-    pub axis: ResultsSplitAxis,
-    /// The share of the stage the document keeps along the axis, 0 to 1.
-    pub document_share: f32,
-    /// The reader closed the pane. A run then leaves it closed and says
-    /// where its plot is; probing a signal or asking for the plot opens it.
-    pub closed_by_reader: bool,
-}
-
-impl ResultsSplitLayout {
-    /// The document's share of the stage before the reader drags the
-    /// divider: the drawing keeps the larger part.
-    pub const DEFAULT_DOCUMENT_SHARE: f32 = 0.6;
-}
-
-impl Default for ResultsSplitLayout {
-    fn default() -> Self {
-        Self {
-            axis: ResultsSplitAxis::Below,
-            document_share: Self::DEFAULT_DOCUMENT_SHARE,
-            closed_by_reader: false,
-        }
-    }
-}
-
 /// Device-local dock composition retained independently for each workspace.
 /// Engineering documents and project state never enter this presentation
 /// snapshot.
@@ -317,6 +264,10 @@ pub enum Drawer {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ConsolePage {
+    /// The retained result's plot, on the pages that author what a run
+    /// solves: the drawing, the netlist and the plan. Results draws its plot
+    /// as its document and has no such page.
+    Plot,
     #[default]
     Console,
     Problems,
@@ -341,6 +292,7 @@ impl ConsolePage {
 
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Plot => "Plot",
             Self::Console => "Console",
             Self::Problems => "Problems",
             Self::Measurements => "Measurements",
@@ -502,15 +454,11 @@ pub struct WorkbenchSession {
     /// The page Run was pressed on, until the run that press asked for ends.
     pub run_press_route: Option<SurfaceRoute>,
     pub focus_mode: bool,
-    /// Device-local presentation toggle for the mockup's equal schematic /
-    /// result stage. The immutable datasets and result-document state remain
-    /// owned by `SimulationState` and `UiSessionState::results`; this flag
-    /// only controls whether that existing document is projected beside an
-    /// eligible primary workspace.
-    pub split_with_results: bool,
-    /// Where the plot pane sits when it shares the stage, and whether the
-    /// reader closed it.
-    pub results_split: ResultsSplitLayout,
+    /// The reader put the dock's Plot page away: they collapsed the dock, or
+    /// chose another of its pages while Plot was offered. A run then leaves
+    /// the dock as it is; a probe, Show plot or a press of the Plot tab opens
+    /// it on Plot again.
+    pub plot_put_away: bool,
     /// Current viewport full-screen intent. Runtime-owned because the host
     /// window, browser, or mobile shell decides whether the request can be
     /// honored and must never restore a stale platform window state.
@@ -653,8 +601,7 @@ impl Default for WorkbenchSession {
             console_maximized: false,
             run_press_route: None,
             focus_mode: false,
-            split_with_results: false,
-            results_split: ResultsSplitLayout::default(),
+            plot_put_away: false,
             full_screen: false,
             full_screen_presentation: false,
             coarse_pointer: false,
@@ -948,12 +895,13 @@ impl WorkbenchSession {
         self.apply_workspace_layout(layout);
     }
 
-    /// Whether the foreground route is one of the three authoring/setup
-    /// stages that the upgraded mockup permits beside a retained result
-    /// document. Checking both route and workspace fails closed while a
-    /// manager or specialist surface temporarily retains an owner workspace.
+    /// Whether the foreground route is one of the three authoring and setup
+    /// stages whose bottom dock carries the retained result's plot: the
+    /// drawing, the netlist and the plan. Checking both route and workspace
+    /// fails closed while a manager or specialist surface temporarily retains
+    /// an owner workspace.
     #[must_use]
-    pub fn supports_results_split(&self) -> bool {
+    pub fn plots_in_dock(&self) -> bool {
         matches!(
             (self.workspace, self.current_route().surface_id()),
             (Workspace::Design, SurfaceId::Design)
@@ -962,36 +910,60 @@ impl WorkbenchSession {
         )
     }
 
-    /// Effective split-stage visibility. A remembered presentation choice
-    /// never creates a blank or misleading secondary pane after the project
-    /// or its retained evidence goes away.
+    /// Whether the dock offers its Plot page: on a page that plots in the
+    /// dock, while a project is open and holds a result to plot. A page with
+    /// nothing to plot offers no tab for it.
     #[must_use]
-    pub fn results_split_visible(&self, project_open: bool, has_retained_result: bool) -> bool {
-        self.split_with_results
-            && project_open
-            && has_retained_result
-            && self.supports_results_split()
+    pub fn offers_plot_page(&self, project_open: bool, has_retained_result: bool) -> bool {
+        project_open && has_retained_result && self.plots_in_dock()
     }
 
-    /// Show the plot pane beside the document. Runs keep it open from now
-    /// on, as they do until the reader closes it.
-    pub fn show_results_split(&mut self) {
-        self.split_with_results = true;
-        self.results_split.closed_by_reader = false;
-    }
-
-    /// Close the plot pane as the reader asked. A run leaves it closed and
-    /// says where its plot is, until the reader shows it again.
-    pub fn close_results_split(&mut self) {
-        self.split_with_results = false;
-        self.results_split.closed_by_reader = true;
-    }
-
-    /// Whether a run that ends on this page opens the plot pane: the first
-    /// run does, and so does every run after it unless the reader closed it.
+    /// Whether the dock shows `page` now: open, out of focus mode, on it.
     #[must_use]
-    pub fn run_opens_results_split(&self) -> bool {
-        self.supports_results_split() && !self.results_split.closed_by_reader
+    pub fn dock_shows(&self, page: ConsolePage) -> bool {
+        (self.console_visible || self.console_maximized)
+            && !self.focus_mode
+            && self.console_page == page
+    }
+
+    /// Open the dock on its Plot page, as a probe, Show plot and a press of
+    /// the Plot tab ask. Runs open it from now on, until the reader puts it
+    /// away again.
+    pub fn show_plot_page(&mut self) {
+        self.open_console();
+        self.console_page = ConsolePage::Plot;
+        self.plot_put_away = false;
+    }
+
+    /// Collapse the dock the reader asked to collapse. On a page that plots
+    /// in the dock, a run then leaves it collapsed until the reader opens
+    /// the plot again.
+    pub fn collapse_dock(&mut self) {
+        self.console_visible = false;
+        self.console_maximized = false;
+        if self.plots_in_dock() {
+            self.plot_put_away = true;
+        }
+    }
+
+    /// The reader chose `page` from the dock's tabs. Choosing Plot brings
+    /// runs back to it; choosing another page while Plot is `offered` puts it
+    /// away, and a run leaves the reader's page alone.
+    pub fn choose_dock_page(&mut self, page: ConsolePage, plot_offered: bool) {
+        self.console_page = page;
+        if page == ConsolePage::Plot {
+            self.plot_put_away = false;
+        } else if plot_offered {
+            self.plot_put_away = true;
+        }
+    }
+
+    /// Whether a run that ends on this page opens the dock on its plot: the
+    /// first run does, and so does every run after it unless the reader put
+    /// the plot away.
+    #[must_use]
+    pub fn run_opens_plot_page(&self) -> bool {
+        self.plots_in_dock() && !self.plot_put_away
     }
 
     /// The route the reader is working on: the current one, or, while the

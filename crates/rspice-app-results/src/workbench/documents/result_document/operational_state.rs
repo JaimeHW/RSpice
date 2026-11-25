@@ -732,12 +732,26 @@ pub(super) fn status_beside_viewer(
     .then_some(status)
 }
 
+/// The state the shown result is in on `viewer` when it is one a reader
+/// should notice: anything but Complete or an empty well, unless the sheet
+/// states its own failure on its first row.
+pub(crate) fn notable_status(
+    state: &mut ResultsParts<'_>,
+    viewer: ResultViewer,
+) -> Option<ResultOperationalStatus> {
+    let status = classify_viewer(state, viewer);
+    (status.state != ResultOperationalState::Complete
+        && status.state.category() != operational::ResultOperationalCategory::Empty
+        && !states_its_own_failure(state.results_reads(), &status))
+    .then_some(status)
+}
+
 /// Draw the quick view's state as a mark where `ui` stands — the sheet
-/// bar's right end, `labelled`, or the plot pane's window place, as a glyph
-/// — and carry out what its popup asked.
-pub(super) fn show_status_mark(ui: &mut Ui, state: &mut ResultsParts<'_>, labelled: bool) {
+/// bar's right end or the Plot page's band, `labelled` — and carry out what
+/// its popup asked. Returns whether there was a state to mark.
+pub(super) fn show_status_mark(ui: &mut Ui, state: &mut ResultsParts<'_>, labelled: bool) -> bool {
     let Some(status) = status_beside_viewer(state) else {
-        return;
+        return false;
     };
     let mut offered = None;
     let response = operational::show_mark(ui, &status, labelled, || {
@@ -745,6 +759,7 @@ pub(super) fn show_status_mark(ui: &mut Ui, state: &mut ResultsParts<'_>, labell
         offered.as_ref().map(OfferedFailureSites::control)
     });
     apply_operational_response(state, &response, offered.as_ref());
+    true
 }
 
 /// A failed solve on its own operating-point sheet: the sheet says so on

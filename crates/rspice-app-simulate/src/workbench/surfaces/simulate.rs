@@ -1235,7 +1235,7 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
         || "Open prior run".to_owned(),
         |prior| format!("Open Run {}", prior.sequence),
     );
-    let split_availability = cx.foreign_availability(ids::TOGGLE_SPLIT_VIEW);
+    let split_availability = cx.foreign_availability(ids::SHOW_PLOT);
     let split_enabled = split_availability.is_available();
     let split_reason = match split_availability {
         crate::workbench::framework::command_registry::CommandAvailability::Disabled(reason) => {
@@ -1244,10 +1244,13 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
         crate::workbench::framework::command_registry::CommandAvailability::Available
         | crate::workbench::framework::command_registry::CommandAvailability::Hidden => None,
     };
-    let split_label = if cx.wb.split_with_results {
-        "Unsplit results"
+    let split_label = if cx
+        .wb
+        .dock_shows(crate::workbench::state::workbench_session::ConsolePage::Plot)
+    {
+        "Hide plot"
     } else {
-        "Split with results"
+        "Show plot"
     };
     let mut manage_plans = false;
     let mut clone_plan = false;
@@ -1399,7 +1402,7 @@ fn plan_heading(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, surface_width: f3
         }
     }
     if toggle_split {
-        cx.execute(ids::TOGGLE_SPLIT_VIEW);
+        cx.execute(ids::SHOW_PLOT);
     }
 }
 
@@ -1450,15 +1453,16 @@ fn prior_run_button(ui: &mut Ui, label: &str, available: bool) -> bool {
         .clicked()
 }
 
-/// Show the retained dataset beside this page instead of instead of it.
+/// Show the retained result's plot in the dock under this page, rather than
+/// leaving the page for it.
 fn split_button(ui: &mut Ui, label: &str, enabled: bool, reason: Option<&str>) -> bool {
     let response = Button::new(label).enabled(enabled).show(ui);
     if !enabled {
-        response.on_hover_text(reason.unwrap_or("the split stage is unavailable for this route"));
+        response.on_hover_text(reason.unwrap_or("the plot is unavailable on this page"));
         return false;
     }
     response
-        .on_hover_text("Show the newest retained result document beside this plan")
+        .on_hover_text("Show the retained result's plot in the dock under this plan")
         .clicked()
 }
 

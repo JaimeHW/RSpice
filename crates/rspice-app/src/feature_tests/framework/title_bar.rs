@@ -1160,7 +1160,7 @@ fn switching_rows_are_checked_while_their_state_is_on() {
         ShellCommand::ToggleNavigator.key(),
         ShellCommand::ToggleInspector.key(),
         ShellCommand::ToggleConsole.key(),
-        ResultsCommand::ToggleResultsSplit.key(),
+        ResultsCommand::ShowPlot.key(),
         ShellCommand::ToggleFocusMode.key(),
         ShellCommand::ToggleFullScreen.key(),
         ResultsCommand::ToggleLinkedCursors.key(),
@@ -1196,11 +1196,15 @@ fn switching_rows_are_checked_while_their_state_is_on() {
     assert_eq!(ShellCommand::ToggleFocusMode.checked(&app), Some(false));
 
     for on in [true, false] {
-        app.state.workbench.split_with_results = on;
+        if on {
+            app.state.workbench.show_plot_page();
+        } else {
+            app.state.workbench.collapse_dock();
+        }
         app.state.workbench.full_screen_presentation = on;
         app.state.results.results.session.linked_cursors = on;
         for key in [
-            ResultsCommand::ToggleResultsSplit.key(),
+            ResultsCommand::ShowPlot.key(),
             ShellCommand::ToggleFullScreen.key(),
             ResultsCommand::ToggleLinkedCursors.key(),
         ] {
@@ -1260,7 +1264,7 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
         (Role::MenuItemCheckBox, Some(Toggled::False))
     );
     assert_eq!(
-        read("Split with results"),
+        read("Show plot"),
         (Role::MenuItemCheckBox, Some(Toggled::False))
     );
     assert_eq!(read("Display options…"), (Role::MenuItem, None));

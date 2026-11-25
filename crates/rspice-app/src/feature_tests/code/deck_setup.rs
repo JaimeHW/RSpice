@@ -87,14 +87,14 @@ fn the_simulate_page_of_a_deck_project_is_one_table_of_its_setup_and_offers_no_p
             "missing {expected:?} in:\n{text}"
         );
     }
-    // Nothing of a plan: no validation, preflight, plan list, clone, split
+    // Nothing of a plan: no validation, preflight, plan list, clone, plot
     // or prior run, and no plan editor.
     for absent in [
         "Validate plan",
         "Run preflight",
         "Plans",
         "Clone plan",
-        "Split with results",
+        "Show plot",
         "Open prior run",
         "Default plan",
         "Add analysis",

@@ -87,10 +87,10 @@ pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: Plot
         tick,
     );
     state.results.select_probed_trace(trace);
-    // A probe asks to see the signal: the plot pane opens beside the
-    // drawing, whether or not the reader closed it before.
-    if tick && state.workbench.supports_results_split() {
-        state.workbench.show_results_split();
+    // A probe asks to see the signal: the dock opens on its plot, whether
+    // or not the reader put the plot away before.
+    if tick && state.workbench.plots_in_dock() {
+        state.workbench.show_plot_page();
     }
     state.prompt(match (plotted, tick) {
         (false, _) => format!("{display} added to the plot."),
