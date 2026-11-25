@@ -391,6 +391,64 @@ fn a4_lays_out_on_an_a4_page() {
     assert!(lines(&a4) > lines(&letter));
 }
 
+/// A table with room on the page sets every cell, and every heading, on
+/// one line: a column as wide as its contents holds them unbroken.
+#[test]
+fn a_table_with_room_sets_each_cell_on_one_line() {
+    let column = |key: &str, heading: &str, unit: Option<&str>| TableColumn {
+        key: key.to_owned(),
+        heading: heading.to_owned(),
+        unit: unit.map(str::to_owned),
+    };
+    let number = |value: f64, unit: &str| TableCell::Number {
+        value,
+        unit: Some(unit.to_owned()),
+    };
+    let table = ReportBlockKind::DataTable(DataTableBlock {
+        title: "Measurements across corners".to_owned(),
+        columns: vec![
+            column("corner", "Corner", None),
+            column("gain", "Gain", Some("dB")),
+            column("margin", "Phase margin", Some("°")),
+            column("thd", "THD", Some("%")),
+        ],
+        rows: [
+            ("Slow, 125 °C", 38.7, 61.0, 1.9),
+            ("Fast, −40 °C", 41.3, 52.4, 1.1),
+        ]
+        .into_iter()
+        .map(|(corner, gain, margin, thd)| {
+            vec![
+                TableCell::Text(corner.to_owned()),
+                number(gain, "dB"),
+                number(margin, "°"),
+                number(thd, "%"),
+            ]
+        })
+        .collect(),
+        reference: frozen(),
+    });
+    for page_size in [
+        ReportPublicationPageSize::A4Portrait,
+        ReportPublicationPageSize::UsLetterPortrait,
+    ] {
+        let layout = lay_out(&report(page_size, vec![table.clone()]));
+        let printed = texts(&layout.pages[0])
+            .into_iter()
+            .map(|(_, _, _, _, text)| text)
+            .collect::<Vec<_>>();
+        for cell in [
+            "Slow, 125 °C",
+            "Fast, −40 °C",
+            "Phase margin",
+            "38.7 dB",
+            "1.9 %",
+        ] {
+            assert!(printed.contains(&cell), "{cell} is broken: {printed:?}");
+        }
+    }
+}
+
 #[test]
 fn columns_narrow_by_wrapping_where_the_page_is_too_narrow() {
     let widths = column_widths(&[50_000, 200_000], &[10_000, 20_000], 150_000, 3_000);

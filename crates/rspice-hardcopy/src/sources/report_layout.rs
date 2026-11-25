@@ -286,10 +286,8 @@ impl Word {
     }
 }
 
-/// `runs` broken into lines no wider than `width_um` when set at `size_um`,
-/// between words; a word wider than a whole line is broken where it fills
-/// one.
-pub(crate) fn wrap_runs(runs: &[Run], size_um: u64, width_um: u64) -> Vec<Vec<Run>> {
+/// The words of `runs`, each knowing whether a space comes before it.
+fn words(runs: &[Run]) -> Vec<Word> {
     let mut words = Vec::<Word>::new();
     let mut word: Option<Word> = None;
     let mut spaced = false;
@@ -315,6 +313,31 @@ pub(crate) fn wrap_runs(runs: &[Run], size_um: u64, width_um: u64) -> Vec<Vec<Ru
         }
     }
     words.extend(word);
+    words
+}
+
+/// How wide `runs` set on one line at `size_um`, measured as `wrap_runs`
+/// measures a line, so that a column this wide holds them unbroken.
+fn unbroken_width(runs: &[Run], size_um: u64) -> u64 {
+    words(runs)
+        .iter()
+        .enumerate()
+        .map(|(index, word)| {
+            let space = if index > 0 && word.spaced {
+                set_width(word.pieces[0].role, " ", size_um)
+            } else {
+                0
+            };
+            space + word.width(size_um)
+        })
+        .sum()
+}
+
+/// `runs` broken into lines no wider than `width_um` when set at `size_um`,
+/// between words; a word wider than a whole line is broken where it fills
+/// one.
+pub(crate) fn wrap_runs(runs: &[Run], size_um: u64, width_um: u64) -> Vec<Vec<Run>> {
+    let words = words(runs);
     let mut lines = Vec::<Vec<Run>>::new();
     let mut line = Vec::<Run>::new();
     let mut used = 0_u64;
@@ -628,8 +651,8 @@ impl Flow {
                 );
                 self.paragraph(&value.summary, 0);
                 let source = match &value.reference.snapshot().source {
-                    ReportSourceId::VisualizationDocument { .. } => "a result view".to_owned(),
-                    ReportSourceId::Dataset { .. } => "a dataset".to_owned(),
+                    ReportSourceId::VisualizationDocument { .. } => "result view".to_owned(),
+                    ReportSourceId::Dataset { .. } => "dataset".to_owned(),
                     ReportSourceId::VerificationEvidence { .. } => {
                         "verification evidence".to_owned()
                     }
@@ -638,17 +661,14 @@ impl Flow {
                     }
                 };
                 let kept = if value.reference.is_frozen() {
-                    "a copy frozen into this report"
+                    "frozen into this report"
                 } else {
                     "linked to its current revision"
                 };
                 self.lines(
                     MARGIN_UM,
                     self.measure(),
-                    &[Run::new(
-                        format!("Evidence from {source}, {kept}."),
-                        Role::Sans,
-                    )],
+                    &[Run::new(format!("Source: {source}, {kept}."), Role::Sans)],
                     SMALL_UM,
                 );
             }
@@ -744,10 +764,11 @@ impl Flow {
         .chain(rows.iter().map(|row| (row.clone(), Role::Sans)));
         for (row, role) in cells {
             for (column, text) in row.iter().enumerate() {
-                natural[column] = natural[column].max(set_width(role, text, TABLE_UM));
-                let longest = text
-                    .split_whitespace()
-                    .map(|word| set_width(role, word, TABLE_UM))
+                let runs = cell_runs(text, role);
+                natural[column] = natural[column].max(unbroken_width(&runs, TABLE_UM));
+                let longest = words(&runs)
+                    .iter()
+                    .map(|word| word.width(TABLE_UM))
                     .max()
                     .unwrap_or(0);
                 least[column] = least[column].max(longest);
