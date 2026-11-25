@@ -16,6 +16,7 @@ use crate::workbench::RSpiceApp;
 use rspice_app_results::workbench::documents::result_document::document_edit::{
     commit_open_dialog, compare,
 };
+use rspice_app_results::workbench::documents::result_document::frame_work::WorkCounts;
 use rspice_app_results::workbench::documents::result_document::test_fixtures::peak_working_set;
 use rspice_app_runs::simulation::controller::test_execution::{
     run_manual_batch_session, run_manual_deck_in,
@@ -70,11 +71,13 @@ fn settle(ctx: &egui::Context, app: &mut RSpiceApp) -> Duration {
     }
 }
 
-/// The frames and settling times of one case, gesture by gesture.
+/// The frames and settling times of one case, gesture by gesture, and the walks of the
+/// dataset each gesture's frame made.
 #[derive(Default)]
 struct Timings {
     frames: Vec<(&'static str, Vec<Duration>)>,
     settled: Vec<(&'static str, Duration)>,
+    walks: Vec<(&'static str, String)>,
 }
 
 impl Timings {
@@ -92,7 +95,12 @@ impl Timings {
         ctx: &egui::Context,
         app: &mut RSpiceApp,
     ) -> Duration {
+        let work = WorkCounts::reset();
         let took = app_frame(ctx, app);
+        let walks = work.since().nonzero();
+        if !walks.is_empty() && !self.walks.iter().any(|(name, _)| *name == gesture) {
+            self.walks.push((gesture, format!("{walks:?}")));
+        }
         self.frame(gesture, took);
         let settled = settle(ctx, app);
         match self.settled.iter_mut().find(|(name, _)| *name == gesture) {
@@ -133,6 +141,9 @@ impl Timings {
                 "  {gesture}: in after {:.1} ms at the slowest\n",
                 millis(*settled)
             ));
+        }
+        for (gesture, walks) in &self.walks {
+            text.push_str(&format!("  {gesture} walked {walks}\n"));
         }
         let peak = peak_working_set().map_or_else(
             || "unmeasured".to_owned(),
@@ -220,6 +231,20 @@ fn five_million_samples(place: Place) {
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(waveforms),
     );
+    // What the open frame's walks of the whole record cost on their own.
+    let started = Instant::now();
+    let _ = run.dataset_content_digest();
+    let digest = started.elapsed();
+    let started = Instant::now();
+    let _ = run.analyses[0].validate_retained_evidence();
+    let validation = started.elapsed();
+    writeln!(
+        std::io::stdout().lock(),
+        "the run's digest alone {:.1} ms, its evidence validation alone {:.1} ms",
+        digest.as_secs_f64() * 1e3,
+        validation.as_secs_f64() * 1e3
+    )
+    .expect("the line is written");
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.simulation.retained.runs = vec![run].into();
@@ -280,7 +305,8 @@ fn five_million_samples(place: Place) {
     );
 }
 
-/// The deck of run `index` of the two hundred: an RC whose resistor each run steps.
+/// The deck of run `index` of the two hundred: an RC whose resistor each run steps. The newest
+/// two are one deck, so the newest has a baseline of its own analysis to compare against.
 fn deck(index: usize) -> String {
     format!(
         "two hundred runs, run {index}\nV1 in 0 PULSE(0 1 0 1u 1u 50u 100u)\nR1 in out {}\nC1 \
@@ -312,8 +338,9 @@ fn two_hundred_runs(place: Place) {
     {
         let mut state: crate::workbench::app_state::AppState = run_manual_batch_session(&deck(0));
         state.open_project_session();
+        state.model.simulation.retained.retained_dataset_limit = Some(RUNS);
         for index in 1..RUNS {
-            let _ = run_manual_deck_in(&mut state, &deck(index));
+            let _ = run_manual_deck_in(&mut state, &deck(index.min(RUNS - 2)));
         }
         assert_eq!(state.model.simulation.retained.runs.len(), RUNS);
         assert!(state.save_project_to_path(&file), "the project saves");
@@ -342,8 +369,16 @@ fn two_hundred_runs(place: Place) {
 
     assert!(app.state.model.simulation.select_run(0));
     timings.gesture("show the newest", &ctx, &mut app);
-    if place == Place::Results {
-        assert!(compare::compare_available(app.state.results_reads()));
+    let offered = compare::compare_available(app.state.results_reads());
+    if !offered {
+        writeln!(
+            std::io::stdout().lock(),
+            "compare not offered: {:?}",
+            compare::compare_availability(app.state.results_reads())
+        )
+        .expect("the line is written");
+    }
+    if place == Place::Results && offered {
         compare::open_compare(&mut app.state.results_parts());
         let Some(ResultDocumentDialog::Compare(mut draft)) =
             app.state.results.result_document_dialog.clone()
