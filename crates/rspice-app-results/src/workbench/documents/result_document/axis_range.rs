@@ -64,16 +64,25 @@ pub(crate) fn format_axis_range(range: (f64, f64), unit: &str) -> String {
 /// first, each one shorter than the last: what a field too narrow for
 /// [`format_axis_range`]'s spelling shows at rest, `−1.76 … 1.76Meg` for
 /// `−1.763 … 1.763Meg`, rather than cutting the interval through its own
-/// ellipsis. The field still edits, and reads on hover, the full spelling.
+/// ellipsis. Past the fewest digits the ellipsis closes up, `−143…−57
+/// dBc/Hz`, and then the unit, which the axis's own ticks state, goes,
+/// `−143 … −57`: a narrow field keeps every digit it shows. The field still
+/// edits, and reads on hover, the full spelling.
 pub(crate) fn shorter_axis_ranges(range: (f64, f64), unit: &str) -> Vec<String> {
     let mut shorter: Vec<String> = Vec::new();
     let mut last = format_axis_range(range, unit);
-    for digits in (MIN_SHORTER_DIGITS..SIGNIFICANT_DIGITS).rev() {
-        let text = written(range, unit, digits);
+    let mut offer = |text: String| {
         if text.chars().count() < last.chars().count() {
             last.clone_from(&text);
             shorter.push(text);
         }
+    };
+    for digits in (MIN_SHORTER_DIGITS..SIGNIFICANT_DIGITS).rev() {
+        offer(written(range, unit, digits));
+    }
+    offer(written(range, unit, MIN_SHORTER_DIGITS).replace(" \u{2026} ", "\u{2026}"));
+    if !unit.is_empty() {
+        offer(written(range, "", MIN_SHORTER_DIGITS));
     }
     shorter
 }
@@ -352,12 +361,12 @@ mod tests {
         assert_eq!(format_axis_range(range, ""), "−1.763Meg … 1.763Meg");
         assert_eq!(
             shorter_axis_ranges(range, ""),
-            ["−1.76Meg … 1.76Meg", "−1.8Meg … 1.8Meg"]
+            ["−1.76Meg … 1.76Meg", "−1.8Meg … 1.8Meg", "−1.8Meg…1.8Meg"]
         );
-        // Nothing is shorter than what already reads whole.
-        assert!(shorter_axis_ranges((4.0, 6.0), "V").is_empty());
+        // What already reads at its fewest digits only closes up.
+        assert_eq!(shorter_axis_ranges((4.0, 6.0), "V"), ["4…6 V"]);
         let shorter = shorter_axis_ranges((0.0, 1.234_5e-3), "s");
-        assert_eq!(shorter.len(), 2);
+        assert_eq!(shorter.len(), 3);
         for text in shorter {
             let (low, high) = parse_axis_range(&text, "s").expect("reads back");
             assert!(low == 0.0 && (high - 1.234_5e-3).abs() < 0.05e-3, "{text}");
@@ -445,6 +454,27 @@ mod tests {
             parse_axis_range("\u{2212}0.5 \u{2026} 0.25 dB", "dB"),
             Some((-0.5, 0.25))
         );
+    }
+
+    /// A phase-noise sheet's level range read `−143 … −… dBc/Hz` in the
+    /// details panel: at its fewest digits it was still a character too
+    /// wide, and the field cut its upper end away. Past the fewest digits the
+    /// ellipsis closes up, then the unit goes; each still reads back.
+    #[test]
+    fn a_range_at_its_fewest_digits_closes_up_then_drops_its_unit() {
+        let range = (-143.2, -56.8);
+        assert_eq!(format_axis_range(range, "dBc/Hz"), "−143.2 … −56.8 dBc/Hz");
+        assert_eq!(
+            shorter_axis_ranges(range, "dBc/Hz"),
+            ["−143 … −57 dBc/Hz", "−143…−57 dBc/Hz", "−143 … −57"]
+        );
+        for text in shorter_axis_ranges(range, "dBc/Hz") {
+            let (low, high) = parse_axis_range(&text, "dBc/Hz").expect("reads back");
+            assert!(
+                (low + 143.2).abs() < 0.5 && (high + 56.8).abs() < 0.5,
+                "{text}"
+            );
+        }
     }
 
     /// `0.88 … 4.12k` reads as 0.88 to 4.12k, which is not what the field
