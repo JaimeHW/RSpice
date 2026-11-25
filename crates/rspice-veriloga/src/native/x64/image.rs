@@ -154,7 +154,7 @@ impl X64Image {
                 bytes.len()
             )));
         }
-        validate_runtime_functions(&runtime_functions, code_len, bytes.len()).map_err(refused)?;
+        validate_runtime_functions(&runtime_functions, &bytes, code_len).map_err(refused)?;
 
         let calls = verify_x64_image_layout(model, &bytes[..code_len], &layout.entry_starts)?;
         if calls.other != 0 {
@@ -208,13 +208,17 @@ impl StorableImage for X64Image {
 }
 
 /// The unwind table of a stored image must describe its own code, in order,
-/// and point into its own unwind data, as `append_windows_x64_unwind_metadata`
-/// writes it. Off Windows an image has none.
+/// and its unwind records must tile the image's tail exactly, as
+/// `append_windows_x64_unwind_metadata` writes them: each on the next
+/// four-byte boundary, the last ending at the image's end. A record cut short
+/// or run past the end is refused, so Windows is never handed unwind data the
+/// image does not hold. Off Windows an image has none.
 fn validate_runtime_functions(
     functions: &[X64RuntimeFunction],
+    bytes: &[u8],
     code_len: usize,
-    image_len: usize,
 ) -> Result<(), String> {
+    let image_len = bytes.len();
     if !cfg!(all(windows, target_arch = "x86_64")) {
         return if functions.is_empty() && code_len == image_len {
             Ok(())
@@ -223,25 +227,43 @@ fn validate_runtime_functions(
         };
     }
     let mut previous_end = 0;
+    let mut unwind_end = code_len;
     for (index, function) in functions.iter().enumerate() {
         let begin = function.begin_address as usize;
         let end = function.end_address as usize;
         let unwind = function.unwind_info_address as usize;
-        if begin < previous_end
-            || end <= begin
-            || end > code_len
-            || unwind < code_len
-            || unwind >= image_len
-            || unwind % 4 != 0
-        {
-            return Err(format!(
-                "runtime function {index} spans {begin}..{end} with unwind data at {unwind} \
-                 for {code_len} code bytes in {image_len}"
-            ));
+        match unwind_record_len(bytes, unwind) {
+            Some(record)
+                if begin >= previous_end
+                    && end > begin
+                    && end <= code_len
+                    && unwind == unwind_end.next_multiple_of(4)
+                    && unwind + record <= image_len =>
+            {
+                previous_end = end;
+                unwind_end = unwind + record;
+            }
+            _ => {
+                return Err(format!(
+                    "runtime function {index} spans {begin}..{end} with unwind data at {unwind} \
+                     for {code_len} code bytes in {image_len}"
+                ));
+            }
         }
-        previous_end = end;
+    }
+    if unwind_end != image_len {
+        return Err(format!(
+            "unwind data ends at byte {unwind_end} of an image of {image_len} bytes"
+        ));
     }
     Ok(())
+}
+
+/// The length of the unwind record at `at`: a version-1 header with no
+/// handler, then its unwind codes, padded to an even count.
+fn unwind_record_len(bytes: &[u8], at: usize) -> Option<usize> {
+    let header = bytes.get(at..at.checked_add(4)?)?;
+    (header[0] == 1).then(|| 4 + 2 * usize::from(header[2]).next_multiple_of(2))
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
