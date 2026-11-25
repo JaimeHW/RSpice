@@ -143,9 +143,7 @@ impl ResultOperationalState {
                 "Only part of this run was saved; the rest is neither shown nor estimated."
             }
             Self::Stale => "The design changed after this run.",
-            Self::Failed => {
-                "The run or the last action on this sheet failed; what the sheet showed before is kept."
-            }
+            Self::Failed => "The run failed; its log says why.",
             Self::Corrupted => {
                 "This result failed its check when it was read, so none of its values are shown."
             }
@@ -172,7 +170,7 @@ impl ResultOperationalState {
             Self::Streaming => "The sheet updates as results arrive.",
             Self::Partial => "Run again for the whole result, or read the part that is here.",
             Self::Stale => "Read it as a past result, compare it with a new run, or run again.",
-            Self::Failed => "Read the message, fix the cause and try again.",
+            Self::Failed => "Fix the cause and run the plan again.",
             Self::Corrupted => "Open another saved copy, or run the simulation again.",
             Self::Unsupported => "Choose another sheet, or an analysis this sheet shows.",
             Self::Offline => "Reconnect to see the rest.",
@@ -196,7 +194,25 @@ pub struct ResultOperationalStatus {
     /// What the status says in place of its state's own label, tone and
     /// message, where those would misstate it.
     pub wording: Option<StatusWording>,
+    /// Whether what the sheet showed before is still on show under a
+    /// failure: a failed action on the sheet leaves it. An analysis or a run
+    /// that failed in its own run has nothing earlier on show.
+    pub earlier_kept: bool,
 }
+
+/// What a status says under its name and detail: what happened, when that
+/// is not the detail alone, then what the reader can do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusLines {
+    pub message: Option<&'static str>,
+    pub recovery: &'static str,
+}
+
+/// A failed action over a sheet that keeps what it showed.
+const FAILED_OVER_KEPT: StatusLines = StatusLines {
+    message: Some("The last action on this sheet failed; what the sheet showed before is kept."),
+    recovery: "Read the message, fix the cause and try again.",
+};
 
 /// A status's words and tone where they are not its state's own: a run that
 /// completed with some of its analyses failed reads as how many failed, in
@@ -216,6 +232,7 @@ impl ResultOperationalStatus {
             blocks_visuals,
             dismissible: false,
             wording: None,
+            earlier_kept: false,
         }
     }
 
@@ -233,11 +250,28 @@ impl ResultOperationalStatus {
             .map_or(self.state.category(), |wording| wording.category)
     }
 
-    /// What the status says happened: its wording's, else its state's.
-    pub fn message(&self) -> &'static str {
-        self.wording
-            .as_ref()
-            .map_or(self.state.message(), |wording| wording.message)
+    /// What the status says under its name and detail. The one place its
+    /// words are picked: the card, a mark's popup, the empty hint, a hover
+    /// and assistive technology all read these.
+    ///
+    /// A failure reads by what failed. An analysis or a run that failed in
+    /// its own run gives its reason as the detail and says to fix the cause
+    /// and run the plan again; only a failed action over a sheet that keeps
+    /// what it showed says that it is kept.
+    pub fn lines(&self) -> StatusLines {
+        if self.state == ResultOperationalState::Failed && self.earlier_kept {
+            return FAILED_OVER_KEPT;
+        }
+        let message = match &self.wording {
+            Some(wording) => Some(wording.message),
+            // The reason is the detail: it is not said twice.
+            None if self.state == ResultOperationalState::Failed && self.detail.is_some() => None,
+            None => Some(self.state.message()),
+        };
+        StatusLines {
+            message,
+            recovery: self.state.recovery(),
+        }
     }
 }
 
@@ -428,12 +462,17 @@ fn mark_width_of(name: &egui::Galley) -> f32 {
 
 /// Everything a state says, as one sentence for a hover.
 pub fn sentence(status: &ResultOperationalStatus) -> String {
-    [Some(status.label()), status.detail.as_deref()]
-        .into_iter()
-        .flatten()
-        .chain([status.message(), status.state.recovery()])
-        .collect::<Vec<_>>()
-        .join(" · ")
+    let lines = status.lines();
+    [
+        Some(status.label()),
+        status.detail.as_deref(),
+        lines.message,
+    ]
+    .into_iter()
+    .flatten()
+    .chain([lines.recovery])
+    .collect::<Vec<_>>()
+    .join(" · ")
 }
 
 /// Paint the glyph that stands for `status` in `rect`, in its category's
@@ -447,12 +486,14 @@ pub fn paint_status_glyph(ui: &Ui, rect: egui::Rect, status: &ResultOperationalS
 /// Name the state to assistive technology on whatever response shows it, in
 /// the words the screen shows: the role says it is a status.
 fn announce_status(ui: &Ui, response: &egui::Response, status: &ResultOperationalStatus) {
-    let accessible = format!(
-        "{}: {} {}",
-        status.label(),
-        status.detail.as_deref().unwrap_or(status.message()),
-        status.state.recovery()
-    );
+    let lines = status.lines();
+    let accessible = [status.detail.as_deref(), lines.message]
+        .into_iter()
+        .flatten()
+        .chain([lines.recovery])
+        .collect::<Vec<_>>()
+        .join(" ");
+    let accessible = format!("{}: {accessible}", status.label());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, accessible.as_str()));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(if status.category() == ResultOperationalCategory::Error {
@@ -513,12 +554,12 @@ fn show_empty_hint(ui: &Ui, status: &ResultOperationalStatus) -> egui::Response 
         t.color.text_dim,
     )];
     let line = theme::sans(EMPTY_HINT_LINE_SIZE, FontWeight::Regular);
+    let lines = status.lines();
     rows.extend(
-        status
-            .detail
-            .as_deref()
+        [status.detail.as_deref(), lines.message]
             .into_iter()
-            .chain([status.message(), status.state.recovery()])
+            .flatten()
+            .chain([lines.recovery])
             .map(|copy| set(copy, line.clone(), t.color.text_faint)),
     );
 
@@ -647,13 +688,16 @@ impl OperationalCard<'_> {
                                 .color(t.color.text),
                         );
                     }
+                    let lines = self.status.lines();
+                    if let Some(message) = lines.message {
+                        ui.label(
+                            egui::RichText::new(message)
+                                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                                .color(t.color.text_dim),
+                        );
+                    }
                     ui.label(
-                        egui::RichText::new(self.status.message())
-                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                    ui.label(
-                        egui::RichText::new(self.status.state.recovery())
+                        egui::RichText::new(lines.recovery)
                             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                             .color(t.color.text_faint),
                     );

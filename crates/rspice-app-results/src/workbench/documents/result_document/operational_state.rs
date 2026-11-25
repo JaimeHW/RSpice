@@ -479,6 +479,8 @@ pub(crate) fn classify_viewer(
                     | ResultRuntimeConditionKind::RendererLoss
             ),
             wording: None,
+            // An action that failed over the sheet leaves what it showed.
+            earlier_kept: run_has_data,
         };
     }
 
@@ -825,6 +827,27 @@ mod tests {
         assert_eq!(ac.state, ResultOperationalState::Failed);
         assert!(ac.blocks_visuals, "the AC sheet has nothing to draw");
         assert_eq!(ac.detail.as_deref(), Some("AC: singular matrix at node n3"));
+        // Its own failure: the reason, then what to do. Nothing earlier is
+        // on show, so nothing is said to be kept.
+        assert_eq!(
+            rspice_results_ui::operational::sentence(&ac),
+            "Failed · AC: singular matrix at node n3 · Fix the cause and run the plan again."
+        );
+
+        // A failed action over the sheet keeps what it showed, and says so.
+        let data_version = state.model.simulation.view.data_version;
+        state.results.results.record_runtime_condition(
+            ResultRuntimeConditionKind::Failed,
+            "The file could not be written.",
+            data_version,
+        );
+        let export = classify_viewer(&mut state.results_parts(), ResultViewer::Waves);
+        assert_eq!(
+            rspice_results_ui::operational::sentence(&export),
+            "Failed · The file could not be written. · The last action on this sheet failed; \
+             what the sheet showed before is kept. · Read the message, fix the cause and try again."
+        );
+        state.results.results.dismiss_runtime_condition();
 
         let mark = RunMark::of(&state.results_parts(), 0, ResultOperationalState::Failed);
         let run = &state.model.simulation.retained.runs[0];
