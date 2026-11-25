@@ -371,7 +371,10 @@ mod tests {
             .into_iter()
             .filter_map(|item| match item {
                 LaidSummary::Row {
-                    header, size, cells, ..
+                    header,
+                    size,
+                    cells,
+                    ..
                 } => Some((header, size, cells)),
                 _ => None,
             })
