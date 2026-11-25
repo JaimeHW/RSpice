@@ -350,3 +350,174 @@ fn a_two_net_probe_plots_the_voltage_between_the_nets() {
     let expected: Vec<f64> = plus.iter().zip(minus).map(|(p, m)| p - m).collect();
     assert_eq!(y, expected, "the two nets' difference at every sample");
 }
+
+/// Run details' Analyses table on the active run, drawn a frame at a time;
+/// each frame returns the route out of the dialog the reader took.
+struct RunDetailsFrames {
+    ctx: egui::Context,
+    /// The clock, a second on each frame, so one frame's click does not
+    /// join the next frame's into a double-click.
+    time: f64,
+}
+
+impl RunDetailsFrames {
+    fn open(app: &mut RSpiceApp) -> Self {
+        use rspice_app_results::workbench::docks::inspector::run_details;
+        let run_id = app.state.model.simulation.active_run().expect("the run").id;
+        run_details::open(
+            &mut app.state.results.run_details,
+            &app.state.model.simulation,
+            run_id,
+        );
+        let ctx = egui::Context::default();
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        let mut frames = Self { ctx, time: 0.0 };
+        // The dialog takes its size over its first frames.
+        for _ in 0..3 {
+            frames.frame(app, Vec::new());
+        }
+        frames
+    }
+
+    /// One frame over `events`: what the dialog returned, and where the
+    /// inventory's rows and their twists were drawn, top first.
+    fn frame(
+        &mut self,
+        app: &mut RSpiceApp,
+        events: Vec<egui::Event>,
+    ) -> (
+        rspice_app_results::workbench::docks::inspector::run_details::RunDetailsRoutes,
+        Vec<egui::Rect>,
+        Vec<Option<egui::Rect>>,
+    ) {
+        use rspice_app_results::workbench::docks::inspector::run_details;
+        self.time += 1.0;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1600.0, 900.0),
+            )),
+            time: Some(self.time),
+            events,
+            ..Default::default()
+        };
+        let _ = rspice_ui_kit::probe::take(&self.ctx);
+        let mut routes = None;
+        let _ = self.ctx.run_ui(input, |ui| {
+            routes = Some(run_details::show(
+                ui.ctx(),
+                &mut app.state.results.run_details,
+                &app.state.model,
+            ));
+        });
+        let probes = rspice_ui_kit::probe::take(&self.ctx);
+        let probe = |key: String| {
+            probes
+                .iter()
+                .find(|(probed, _)| *probed == key)
+                .map(|(_, rect)| *rect)
+        };
+        let lines: Vec<egui::Rect> = (0..)
+            .map_while(|row| probe(format!("table.line.{row}")))
+            .collect();
+        let twists = (0..lines.len())
+            .map(|row| probe(format!("table.twist.{row}")))
+            .collect();
+        (routes.expect("the frame ran"), lines, twists)
+    }
+
+    /// A double-click on the middle of `line`.
+    fn double_click(line: egui::Rect) -> Vec<egui::Event> {
+        let at = line.center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        vec![
+            egui::Event::PointerMoved(at),
+            button(true),
+            button(false),
+            button(true),
+            button(false),
+        ]
+    }
+}
+
+/// The schematic of [`result_app_with_current_out_map`] with a finished run
+/// that kept `V(out)`, from before runs carried a prepared receipt, so the
+/// inventory's rows are the run's own analyses.
+fn finished_run_of_out() -> RSpiceApp {
+    use rspice_app_state::state::{
+        AnalysisResult, AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle,
+    };
+    let mut app = result_app_with_current_out_map(false);
+    let mut run = SimulationRun::new(1);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+        ]),
+    );
+    app.state.results.results.session.selected_trace = None;
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.view.active_analysis_idx = None;
+    app
+}
+
+/// Run details' Analyses table leads where its rows name, in one action: a
+/// double-click on an analysis shows it on Results, and one on a signal the
+/// analysis kept, listed once the analysis is opened, selects its conductor
+/// on the schematic.
+#[test]
+fn run_details_inventory_rows_reach_their_places() {
+    use rspice_app_results::workbench::docks::inspector::run_details::follow_inventory_route;
+
+    let mut app = finished_run_of_out();
+    app.state.workbench.activate(Workspace::Design);
+    let run_id = app.state.model.simulation.active_run().expect("the run").id;
+
+    let mut dialog = RunDetailsFrames::open(&mut app);
+    let (_, lines, _) = dialog.frame(&mut app, Vec::new());
+    let analysis = *lines.first().expect("the analysis is listed");
+    let (routes, ..) = dialog.frame(&mut app, RunDetailsFrames::double_click(analysis));
+    assert_eq!(routes.show_analysis, Some((run_id, 0)));
+    follow_inventory_route(&mut app.state.results_parts(), &routes);
+    app.after_contribution();
+    assert_eq!(app.state.workbench.workspace, Workspace::Results);
+    assert_eq!(app.state.model.simulation.view.active_analysis_idx, Some(0));
+    assert!(
+        app.state.results.run_details.is_none(),
+        "taking a route closes Run details"
+    );
+
+    // Open the analysis to its signals by its twist.
+    let mut dialog = RunDetailsFrames::open(&mut app);
+    let (_, _, twists) = dialog.frame(&mut app, Vec::new());
+    let at = twists[0]
+        .expect("the analysis opens to its signals")
+        .center();
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    dialog.frame(
+        &mut app,
+        vec![egui::Event::PointerMoved(at), button(true), button(false)],
+    );
+    let (_, lines, _) = dialog.frame(&mut app, Vec::new());
+    let signal = *lines.get(1).expect("V(out) is listed under its analysis");
+    let (routes, ..) = dialog.frame(&mut app, RunDetailsFrames::double_click(signal));
+    assert_eq!(routes.show_signal.as_deref(), Some("V(out)"));
+    follow_inventory_route(&mut app.state.results_parts(), &routes);
+    app.after_contribution();
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(
+        status_line(&app).as_deref(),
+        Some("Selected conductor OUT from V(out).")
+    );
+}

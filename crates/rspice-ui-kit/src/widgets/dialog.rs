@@ -117,7 +117,8 @@ pub enum DialogSize {
     DrawingSheetLibrary,
     /// Account, license, and privacy console: one 600 pt reading column,
     /// content-height capped at 760 pt, and a full-viewport sheet at 560 pt
-    /// and below.
+    /// and below. A report in this column that only closes keeps its Close
+    /// in the header, beside Esc, and has no footer.
     AccountManager,
     /// Governed capability matrices: 1040 pt wide, content-height capped at
     /// 760 pt, edge-to-edge at the mockup's 820 pt breakpoint.
@@ -1234,7 +1235,10 @@ impl<'a> Dialog<'a> {
             || t.metrics.is_touch()
             || ctx.input(|input| input.has_touch_screen()))
         .then(|| t.metrics.touch_target());
-        let hide_close_only_footer = self.size == DialogSize::CapabilityReview;
+        let hide_close_only_footer = matches!(
+            self.size,
+            DialogSize::CapabilityReview | DialogSize::AccountManager
+        );
         let _control_height_override = ControlHeightOverride::new(ctx, large_targets);
         let focus_id = id.with("move");
         let focus_state_id = id.with("focus-state");

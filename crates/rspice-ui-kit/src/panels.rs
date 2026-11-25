@@ -1052,6 +1052,10 @@ pub struct Fact<'a> {
     pub label: &'a str,
     pub value: &'a str,
     pub path: bool,
+    /// An identifier, such as a run's ID or a digest: set in mono, where 0
+    /// and O differ, and shortened from the middle, so both its ends stay in
+    /// view.
+    pub code: bool,
     /// A problem the value states: its mark hangs in front of the value,
     /// which stays in the list's one face and ink.
     pub problem: Option<Problem>,
@@ -1070,9 +1074,19 @@ impl<'a> Fact<'a> {
             label,
             value,
             path: false,
+            code: false,
             problem: None,
             whole: None,
             link: None,
+        }
+    }
+
+    /// A fact whose value is an identifier, in mono and shortened from the
+    /// middle.
+    pub const fn code(label: &'a str, value: &'a str) -> Self {
+        Self {
+            code: true,
+            ..Self::new(label, value)
         }
     }
 
@@ -1081,6 +1095,7 @@ impl<'a> Fact<'a> {
             label,
             value,
             path: true,
+            code: false,
             problem: None,
             whole: None,
             link: None,
@@ -1174,8 +1189,15 @@ pub fn fact_rows_on(ui: &mut Ui, facts: &[Fact<'_>], label_width: f32) -> Option
         );
         let elide = if fact.path {
             elide_path_front
+        } else if fact.code {
+            elide_middle
         } else {
             elide_text
+        };
+        let value_font = if fact.code {
+            theme::mono(tokens::FS_1, FontWeight::Regular)
+        } else {
+            font.clone()
         };
         if let Some(problem) = fact.problem {
             // The mark hangs in front of the value, in the room the label
@@ -1194,12 +1216,12 @@ pub fn fact_rows_on(ui: &mut Ui, facts: &[Fact<'_>], label_width: f32) -> Option
                 problem,
             );
         }
-        let value = elide(ui, fact.value, &font, slot.value.width());
+        let value = elide(ui, fact.value, &value_font, slot.value.width());
         let words = painter.with_clip_rect(slot.value).text(
             Pos2::new(slot.value.left(), slot.value.center().y),
             Align2::LEFT_CENTER,
             value,
-            font.clone(),
+            value_font,
             t.color.text,
         );
         if let Some(action) = fact.link {

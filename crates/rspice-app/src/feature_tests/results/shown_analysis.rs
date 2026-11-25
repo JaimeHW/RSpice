@@ -329,14 +329,25 @@ fn run_details_lists_the_inventory_and_no_sheet_does() {
             .find(|(row, _)| row == label)
             .map(|(_, value)| value.as_str())
     };
-    assert!(
-        row("Retained").is_some_and(|value| value.starts_with("2 of 2 tasks")),
-        "the inventory counts what the run kept: {rows:?}"
+    assert_eq!(
+        row("State"),
+        Some("Completed"),
+        "the summary says how the run ended: {rows:?}"
     );
+    // The inventory's table speaks each row as its cells under their heads:
+    // what each analysis kept, and how it ended.
+    let spoken = nodes
+        .iter()
+        .filter_map(|(_, node)| node.label())
+        .collect::<Vec<_>>();
     for analysis in ["Transient", "AC Analysis"] {
         assert!(
-            row(analysis).is_some_and(|value| value.contains("waveform")),
-            "the inventory lists {analysis}: {rows:?}"
+            spoken
+                .iter()
+                .any(|row| row.contains(&format!("Analysis: {analysis}"))
+                    && row.contains("signal")
+                    && row.contains("State: Complete")),
+            "the inventory lists {analysis}: {spoken:?}"
         );
     }
 }

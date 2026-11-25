@@ -478,13 +478,20 @@ fn two_plans_on_two_configurations_run_together_and_each_result_names_its_own() 
         "the inspector names the run's configuration"
     );
 
-    // Run details… states it by identity and revision as well.
+    // Run details… states it by identity and revision as well, with the
+    // run's other identifiers.
     let run_id = app.state.model.simulation.retained.runs[index].id;
     rspice_app_results::workbench::docks::inspector::run_details::open(
         &mut app.state.results.run_details,
         &app.state.model.simulation,
         run_id,
     );
+    app.state
+        .results
+        .run_details
+        .as_mut()
+        .expect("Run details is open")
+        .show_identifiers();
     let output = settle(&ctx, &mut app, Vec::new());
     assert!(
         announces(

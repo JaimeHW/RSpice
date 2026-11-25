@@ -13,41 +13,43 @@
 //! # It reports; the caller asks for the deck
 //!
 //! The record is rendered from a borrow of the run it describes, and opening
-//! the deck mutates the session. So [`record`] returns the run a reader asked
-//! for, and once that borrow is done the caller asks for its executed deck,
-//! which opens it or says by name that it is no longer held.
+//! the deck mutates the session. So the deck's line is a link whose place
+//! [`lines`] returns, and once that borrow is done the caller asks for the
+//! run's executed deck, which opens it or says by name that it is no longer
+//! held.
 
-use egui::Ui;
+use super::Line;
 
-use crate::ui::widgets::Button;
-
-use super::super::super::super::design_system::{property_row, property_row_wrapped};
-
-/// The run's sealed model sources, and the control that opens its deck: the
-/// rows of Run details…'s Executed deck group.
+/// The deck the run executed and the model sources it was sealed under, as
+/// lines of Run details…'s Inputs section; the place of the line that opens
+/// the deck.
 ///
 /// `executed` is `None` when the archive holds no deck for this run. That is
 /// stated rather than papered over: the working deck is a different document
-/// and showing it here would be a confident lie.
-///
-/// It used to be stated as a fact about which session had run the dataset,
-/// which was true only while decks lived on the controller. They are written to
-/// the project file now ([`crate::state::ExecutedDeckArchive`]), so a reopened
-/// project reopens the decks its retained runs executed and a missing one means
-/// something else — which
-/// [`crate::state::absent_deck_reason`] now says once, for every surface that
-/// reports the absence.
-pub(super) fn record(ui: &mut Ui, run_id: u64, executed: Option<&[String]>) -> Option<u64> {
+/// and showing it here would be a confident lie. Decks are written to the
+/// project file ([`crate::state::ExecutedDeckArchive`]), so a reopened project
+/// reopens the decks its retained runs executed, and a missing one was let go
+/// because only the newest runs' decks are kept.
+pub(super) fn lines(lines: &mut Vec<Line>, executed: Option<&[String]>) -> Option<usize> {
     let Some(sources) = executed else {
-        property_row_wrapped(ui, "Deck", crate::state::absent_deck_reason());
+        lines.push(Line::new(
+            "Deck",
+            format!(
+                "Not kept; RSpice keeps the decks of the last {} runs",
+                rspice_results::executed_deck::MAX_RETAINED_RUNS
+            ),
+        ));
         return None;
     };
-    for source in sources {
-        property_row(ui, "Model source", source);
-    }
-    Button::new("Open executed deck")
-        .show(ui)
-        .on_hover_text("Opens the netlist exactly as this run simulated it, read-only.")
-        .clicked()
-        .then_some(run_id)
+    let deck = lines.len();
+    lines.push(
+        Line::new("Deck", "As executed, read-only")
+            .linked("Opens the netlist exactly as this run simulated it, read-only"),
+    );
+    lines.extend(
+        sources
+            .iter()
+            .map(|source| Line::new("Model source", source.as_str())),
+    );
+    Some(deck)
 }

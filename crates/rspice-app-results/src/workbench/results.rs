@@ -349,10 +349,15 @@ fn render_dataset_export(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
 }
 
 /// Run details…, and the route out of it the reader took: the producing
-/// plan, or the deck the run executed.
+/// plan, the deck the run executed, or an analysis or signal of its
+/// inventory.
 fn render_run_details(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
     let routes =
         crate::workbench::docks::show_run_details(ctx, &mut cx.state.run_details, cx.model);
+    crate::workbench::docks::inspector::run_details::follow_inventory_route(
+        &mut results_parts(cx),
+        &routes,
+    );
     if let Some(run_id) = routes.open_deck {
         cx.wb.outbox().push(RevealExecutedDeck {
             seq: run_id,

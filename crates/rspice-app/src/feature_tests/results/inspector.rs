@@ -154,21 +154,37 @@ fn run_provenance_lives_in_run_details_not_on_the_panel() {
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
-    let mut nodes = Vec::new();
-    for _ in 0..2 {
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            run_details::show(
-                ui.ctx(),
-                &mut app.state.results.run_details,
-                &app.state.model,
-            );
-        });
-        nodes = output
-            .platform_output
-            .accesskit_update
-            .map(|update| update.nodes)
-            .unwrap_or_default();
+    let frame = |app: &mut RSpiceApp| {
+        let mut nodes = Vec::new();
+        for _ in 0..2 {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                run_details::show(
+                    ui.ctx(),
+                    &mut app.state.results.run_details,
+                    &app.state.model,
+                );
+            });
+            nodes = output
+                .platform_output
+                .accesskit_update
+                .map(|update| update.nodes)
+                .unwrap_or_default();
+        }
+        nodes
+    };
+    // The identifiers close the dialog, folded until the reader asks.
+    let nodes = frame(&mut app);
+    assert!(labelled(&nodes, "Run"), "Run details lacks the run's name");
+    for folded in ["Dataset ID", "Dataset digest", "Run ID"] {
+        assert!(!labelled(&nodes, folded), "{folded} is not folded away");
     }
+    app.state
+        .results
+        .run_details
+        .as_mut()
+        .expect("Run details is open")
+        .show_identifiers();
+    let nodes = frame(&mut app);
     for present in ["Dataset ID", "Dataset digest", "Run ID"] {
         assert!(labelled(&nodes, present), "Run details lacks {present}");
     }
