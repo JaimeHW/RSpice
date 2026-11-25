@@ -175,8 +175,9 @@ fn archive_subject_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
 }
 
 /// Open a plan: the setup and the plan-owned workspace payload move together,
-/// on a copy installed only once the whole switch validates.
-pub(super) fn commit_activate_plan(
+/// on a copy installed only once the whole switch validates. Every surface
+/// that makes a plan active does it here.
+pub(in crate::workbench) fn commit_activate_plan(
     cx: &mut Cx<'_, SimulateFeature>,
     id: SimulationPlanId,
 ) -> Result<String, String> {

@@ -71,7 +71,6 @@ pub struct LayoutSpec {
     pub show_phone_navigation: bool,
     pub toolbar_labels: bool,
     pub toolbar_tool_limit: Option<usize>,
-    pub show_pvt_selector: bool,
     pub show_run_config_selector: bool,
     pub navigator_resizable: bool,
     pub inspector_resizable: bool,
@@ -247,7 +246,6 @@ impl LayoutSpec {
             // cutoff; only the compact toolbar projects icons alone.
             toolbar_labels: viewport_width > 820.0 && !short_landscape,
             toolbar_tool_limit: toolbar_tool_limit(viewport_width, viewport_height),
-            show_pvt_selector: viewport_width > 820.0 && !short_landscape,
             // The canonical run-configuration summary is present only when
             // both workstation docks fit (the mockup removes it at 1260 px).
             show_run_config_selector: matches!(width_class, WidthClass::Wide) && !short_landscape,

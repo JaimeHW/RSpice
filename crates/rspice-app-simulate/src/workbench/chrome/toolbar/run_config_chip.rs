@@ -1,11 +1,12 @@
-//! The toolbar's run chip: the analysis Run runs, edited in place, and the
-//! product's global entry to the plan manager.
+//! The toolbar's run chip: what Run runs, and where the reader picks it.
 //!
 //! The chip names what a press of Run will do: the analysis and its main
-//! number, over the plan it belongs to. A press opens a popover that changes
-//! the analysis's kind and its main numbers where the reader is, as ADE's
-//! analysis row and ADS's simulation controller do, without a trip to the
-//! Simulate workspace; the plan manager is one row further down.
+//! number, over the plan it belongs to. A press opens a popover that picks
+//! what Run runs where the reader is, without a trip to the Simulate
+//! workspace: which of the project's plans is active, and which of its
+//! analyses take part. It never changes what an analysis is: a row opens the
+//! analysis on the Analyses page, where it is edited, and the analysis
+//! catalogue and the plan manager stand under a rule at its foot.
 //!
 //! The chip is measured, painted, and announced from one derivation of its
 //! copy, because its width, its two clipped lines, and its accessibility label
@@ -13,40 +14,75 @@
 //! kept announcing a fixture plan after a rename, while the live summary beside
 //! it made the stale name read as authoritative.
 
-use egui::Vec2;
+use egui::{Rect, Ui, Vec2, pos2, vec2};
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
-use rspice_simulation_contract::analysis_kind::AnalysisKind;
 use rspice_simulation_contract::plan_model::AnalysisInstance;
+use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
+use super::pvt_temperature_label;
+use crate::product::{AnalysisInstanceId, ProcessCorner, SimulationPlanId};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::table::{
+    CELL_PAD, Cell, Column, DataTable, LineHeights, RowKey, TABLE_EDGE_INSET, TableState,
+    fitted_width,
+};
+use crate::ui::widgets::{Button, SegmentedWidth, compact_height, name_control, segmented};
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{WorkbenchIcon, elide_middle, elide_text};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::layout::RUN_CONFIG_CHIP_MAX_WIDTH;
 
-/// What the reader asked of the run chip this frame.
+/// What the reader asked of the run chip this frame. None of it changes what
+/// an analysis is or whether the plan holds it.
 #[derive(Debug, Clone)]
 pub(in crate::workbench) enum RunChipRequest {
     /// Open the plan manager.
     ManagePlans,
-    /// Run a fresh analysis of this kind in place of the one the chip names.
-    Kind(AnalysisKind),
-    /// The analysis the chip names, with the numbers the reader typed.
-    Draft(Box<AnalysisDraft>),
-    /// A number the reader typed that is not one: what the status line says.
-    Refused(String),
+    /// Open the analysis catalogue, the Analyses page's add flow.
+    AddAnalysis,
+    /// Make this plan the one Run runs.
+    ActivatePlan(SimulationPlanId),
+    /// Run includes this analysis (true) or leaves it out (false).
+    Include(AnalysisInstanceId, bool),
+    /// Open this analysis on Simulate › Analyses.
+    Open(AnalysisInstanceId),
+    /// Make (process, temperature in °C) the reference a plain Run runs at.
+    Reference(ProcessCorner, f64),
+    /// What the reader typed for the reference temperature is not one: why.
+    Unreadable(String),
 }
 
-/// The kinds the chip switches between, with the words it offers them in.
-const KINDS: [(AnalysisKind, &str); 3] = [
-    (AnalysisKind::OperatingPoint, "Operating point"),
-    (AnalysisKind::Transient, "Transient"),
-    (AnalysisKind::Ac, "AC"),
+/// The popover's heads and its words.
+const PLAN_HEAD: &str = "Plan";
+const ANALYSIS_HEAD: &str = "Analysis";
+const REFERENCE_HEAD: &str = "Reference";
+const TEMPERATURE: &str = "Temperature";
+const PROCESS: &str = "Process";
+const CELSIUS: &str = "\u{00b0}C";
+const NO_ANALYSIS: &str = "This plan runs no analysis.";
+const ADD_ANALYSIS: &str = "Add analysis\u{2026}";
+const MANAGE_PLANS: &str = "Manage plans\u{2026}";
+/// Air between the footer's two buttons, and over and under them.
+const FOOTER_GAP: f32 = 8.0;
+const FOOTER_PAD: f32 = 6.0;
+/// Air between a Reference row's label and its control, and between a typed
+/// temperature and its unit.
+const LABEL_GAP: f32 = 8.0;
+const UNIT_GAP: f32 = 4.0;
+/// A field's text inset from its ends.
+const FIELD_PAD: f32 = 8.0;
+/// What the popover keeps clear of the screen's edges.
+const SCREEN_MARGIN: f32 = 8.0;
+/// The processes a reference can name, fast to slow, as a corner table
+/// orders them.
+const PROCESSES: [ProcessCorner; 5] = [
+    ProcessCorner::FF,
+    ProcessCorner::FS,
+    ProcessCorner::TT,
+    ProcessCorner::SF,
+    ProcessCorner::SS,
 ];
-
-/// How wide the popover stands: the three kinds side by side.
-const POPOVER_WIDTH: f32 = 264.0;
 
 /// Every string the run chip measures, paints, and announces.
 struct RunConfigChipCopy {
@@ -58,14 +94,84 @@ struct RunConfigChipCopy {
 fn run_config_chip_copy(model: &Model) -> RunConfigChipCopy {
     let plan = model.sim_setup.active_plan_name().as_str().to_owned();
     let title = analysis_title(model);
-    let pvt_count = configured_pvt_count(model);
+    let pvt = pvt_summary(model);
     RunConfigChipCopy {
         accessibility: format!(
-            "Analysis {title}, plan {plan}; change the analysis or manage simulation plans"
+            "Analysis {title}, plan {plan}, {pvt}; choose the plan, the analyses and \
+             the reference PVT Run runs"
         ),
-        summary: format!("{plan} \u{00b7} {pvt_count} PVT"),
+        summary: format!("{plan} \u{00b7} {pvt}"),
         title,
     }
+}
+
+/// What Run runs at, as the chip's second line says it: the reference,
+/// `TT · 27 °C`, where a plain Run runs at that one point, by its temperature
+/// alone where no model library defines a process to tell it by; how many
+/// points otherwise.
+fn pvt_summary(model: &Model) -> String {
+    let run_set = &model.sim_setup.run_set;
+    let points = configured_pvt_count(model);
+    let at_reference = points == 1
+        && run_set
+            .enabled_dimension_of(RunSetDimensionKind::ProcessSection)
+            .is_none()
+        && run_set
+            .enabled_dimension_of(RunSetDimensionKind::Temperature)
+            .is_none();
+    if !at_reference {
+        return format!("{points} PVT");
+    }
+    let reference = model.sim_setup.reference_pvt;
+    let temperature = pvt_temperature_label(
+        reference.temperature_celsius,
+        model.preferences.quantity_presentation_policy(),
+    );
+    if library_processes(model, reference.process).is_empty() {
+        temperature
+    } else {
+        format!("{} \u{00b7} {temperature}", reference.process.short_name())
+    }
+}
+
+/// `TT · 27 °C`: a reference as the prompt that confirms it names it.
+pub(in crate::workbench) fn reference_label(
+    model: &Model,
+    process: ProcessCorner,
+    celsius: f64,
+) -> String {
+    format!(
+        "{} \u{00b7} {}",
+        process.short_name(),
+        pvt_temperature_label(celsius, model.preferences.quantity_presentation_policy())
+    )
+}
+
+/// The processes a reference can name, fast to slow: each one a model
+/// library of the project declares, as the run looks a process up, and the
+/// current one, which stays offered whatever the libraries say. Empty where
+/// no library defines a corner, so there is nothing to choose among.
+///
+/// A corner whose name is none of the five is not offered: the reference
+/// names one of them.
+fn library_processes(model: &Model, current: ProcessCorner) -> Vec<ProcessCorner> {
+    let catalog = model.model_library_manager.catalog();
+    let declared = |process: ProcessCorner| {
+        catalog
+            .libraries()
+            .any(|library| library.declares_process(process.short_name()))
+    };
+    let defines = catalog
+        .libraries()
+        .any(|library| !library.corners.is_empty())
+        || PROCESSES.into_iter().any(declared);
+    if !defines {
+        return Vec::new();
+    }
+    PROCESSES
+        .into_iter()
+        .filter(|process| *process == current || declared(*process))
+        .collect()
 }
 
 /// The analyses Run is for: the plan's enabled analyses that no other
@@ -90,11 +196,6 @@ fn leading_analyses(model: &Model) -> Vec<&AnalysisInstance> {
     if leading.is_empty() { enabled } else { leading }
 }
 
-/// The analysis the chip names and edits: the first of [`leading_analyses`].
-pub(in crate::workbench) fn lead_analysis(model: &Model) -> Option<&AnalysisInstance> {
-    leading_analyses(model).into_iter().next()
-}
-
 /// The analysis Run runs, as the chip's first line names it: the lead
 /// analysis and its main number, and how many more run beside it.
 fn analysis_title(model: &Model) -> String {
@@ -109,8 +210,8 @@ fn analysis_title(model: &Model) -> String {
     }
 }
 
-/// `Transient · 1 ms`, `AC · 1 Hz to 1 GHz`, `Operating point`: a kind the
-/// chip edits by its main numbers, any other kind by its name.
+/// `Transient · 1 ms`, `AC · 1 Hz to 1 GHz`, `Operating point`: a kind with
+/// main numbers by them, any other kind by its name.
 fn analysis_name(draft: &AnalysisDraft) -> String {
     match draft {
         AnalysisDraft::OperatingPoint(_) => "Operating point".to_owned(),
@@ -123,6 +224,24 @@ fn analysis_name(draft: &AnalysisDraft) -> String {
             spelled(&setup.fstop, "Hz")
         ),
         other => other.kind().label().to_owned(),
+    }
+}
+
+/// What a popover row says after [`analysis_name`]: a transient's step, an
+/// AC sweep's points. `None` for a kind its name says whole, or a number the
+/// plan leaves blank.
+fn analysis_detail(draft: &AnalysisDraft) -> Option<String> {
+    let given = |text: &str| Some(text.trim().to_owned()).filter(|text| !text.is_empty());
+    match draft {
+        AnalysisDraft::Transient(setup) => {
+            given(&setup.step).map(|step| format!("step {}", spelled(&step, "s")))
+        }
+        AnalysisDraft::Ac(setup) => given(&setup.points).map(|points| match setup.sweep {
+            0 => format!("{points} points/decade"),
+            1 => format!("{points} points/octave"),
+            _ => format!("{points} points"),
+        }),
+        _ => None,
     }
 }
 
@@ -142,12 +261,14 @@ fn run_config_chip_width(title_width: f32, summary_width: f32) -> f32 {
 }
 
 /// Draw the run chip over `model`, enabled as `manage`, the dispatcher's
-/// answer for Manage plans, says. A press opens the popover that edits the
-/// analysis; returns what the reader asked of it.
+/// answer for Manage plans, says. A press opens the popover that picks the
+/// plan and the analyses Run runs, whose Add analysis… is enabled as `add`
+/// says; returns what the reader asked of it.
 pub(in crate::workbench) fn run_config_selector(
     ui: &mut egui::Ui,
     model: &Model,
     manage: CommandAvailability,
+    add: CommandAvailability,
     height: f32,
 ) -> Option<RunChipRequest> {
     let t = Tokens::get(ui.ctx());
@@ -254,19 +375,45 @@ pub(in crate::workbench) fn run_config_selector(
         egui::Popup::toggle_id(ui.ctx(), popover);
     }
     let mut request = None;
-    egui::Popup::from_response(&response)
-        .id(popover)
-        .open_memory(None)
-        .align(egui::RectAlign::BOTTOM_END)
-        .width(POPOVER_WIDTH)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            ui.set_min_width(POPOVER_WIDTH);
-            request = analysis_popover(ui, model);
-            if matches!(request, Some(RunChipRequest::ManagePlans)) {
-                ui.close();
-            }
-        });
+    if egui::Popup::is_id_open(ui.ctx(), popover) {
+        let rows = PopoverRows::of(model);
+        // As wide as its rows, within the room left of the chip's right edge,
+        // which the popover's right edge stands under.
+        let room = rect.right() - ui.ctx().content_rect().left() - SCREEN_MARGIN;
+        let width = rows.width(ui).min(room).max(1.0);
+        let commands = Commands {
+            add: add == CommandAvailability::Available,
+            manage: enabled,
+            opening: !open,
+        };
+        egui::Popup::from_response(&response)
+            .id(popover)
+            .open_memory(None)
+            .align(egui::RectAlign::BOTTOM_END)
+            .width(width)
+            .frame(egui::Frame::popup(ui.style()).inner_margin(0.0))
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                ui.set_width(width);
+                request = popover_body(ui, &rows, commands);
+                if matches!(
+                    request,
+                    Some(
+                        RunChipRequest::ManagePlans
+                            | RunChipRequest::AddAnalysis
+                            | RunChipRequest::Open(_)
+                    )
+                ) {
+                    ui.close();
+                }
+            });
+        // Escape hands the keyboard back to the chip it came from.
+        if !egui::Popup::is_id_open(ui.ctx(), popover)
+            && ui.input(|input| input.key_pressed(egui::Key::Escape))
+        {
+            response.request_focus();
+        }
+    }
     if enabled {
         response.on_hover_text(&copy.accessibility);
     } else if let CommandAvailability::Disabled(reason) = availability {
@@ -275,176 +422,578 @@ pub(in crate::workbench) fn run_config_selector(
     request
 }
 
-/// The popover's rows: the analysis's kind, its main numbers, and the plan
-/// manager. Returns what the reader asked of them.
-fn analysis_popover(ui: &mut egui::Ui, model: &Model) -> Option<RunChipRequest> {
-    let t = Tokens::get(ui.ctx());
-    let lead = lead_analysis(model);
-    let mut request = None;
-    ui.spacing_mut().item_spacing.y = 6.0;
-    let mut kind = lead
-        .and_then(|lead| KINDS.iter().position(|(kind, _)| *kind == lead.kind()))
-        .unwrap_or(usize::MAX);
-    let labels = KINDS.map(|(_, label)| label);
-    if crate::ui::widgets::segmented(
-        ui,
-        "workbench.run_chip.kind",
-        &labels,
-        &mut kind,
-        crate::ui::widgets::SegmentedWidth::Equal,
-    ) && let Some((chosen, _)) = KINDS.get(kind)
-    {
-        request = Some(RunChipRequest::Kind(*chosen));
-    }
-    match lead.map(|lead| lead.draft()) {
-        Some(AnalysisDraft::Transient(setup)) => {
-            let mut edited = setup.clone();
-            let stop = number_row(ui, "Stop time", "s", &setup.stop, Number::Positive);
-            let step = number_row(ui, "Step", "s", &setup.step, Number::Positive);
-            request = request.or_else(|| {
-                commit(stop, &mut edited.stop)
-                    .or_else(|| commit(step, &mut edited.step))
-                    .map(|refused| {
-                        refused.unwrap_or(RunChipRequest::Draft(Box::new(
-                            AnalysisDraft::Transient(edited),
-                        )))
-                    })
-            });
-        }
-        Some(AnalysisDraft::Ac(setup)) => {
-            let mut edited = setup.clone();
-            let start = number_row(ui, "Start", "Hz", &setup.fstart, Number::Positive);
-            let stop = number_row(ui, "Stop", "Hz", &setup.fstop, Number::Positive);
-            let per = match setup.sweep {
-                0 => "Points/decade",
-                1 => "Points/octave",
-                _ => "Points",
-            };
-            let points = number_row(ui, per, "", &setup.points, Number::Count);
-            request = request.or_else(|| {
-                commit(start, &mut edited.fstart)
-                    .or_else(|| commit(stop, &mut edited.fstop))
-                    .or_else(|| commit(points, &mut edited.points))
-                    .map(|refused| {
-                        refused
-                            .unwrap_or(RunChipRequest::Draft(Box::new(AnalysisDraft::Ac(edited))))
-                    })
-            });
-        }
-        Some(AnalysisDraft::OperatingPoint(_)) => {
-            popover_note(ui, "The DC solution at the reference PVT.");
-        }
-        Some(other) => {
-            popover_note(
-                ui,
-                &format!("{} is edited on the Analyses page.", other.kind().label()),
-            );
-        }
-        None => popover_note(ui, "The plan runs no analysis."),
-    }
-    ui.add_space(2.0);
-    let (rule, _) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter().rect_filled(rule, 0.0, t.color.border);
-    if crate::ui::widgets::Button::new("Manage plans\u{2026}")
-        .show(ui)
-        .clicked()
-    {
-        request = Some(RunChipRequest::ManagePlans);
-    }
-    request
+/// What the popover's foot can do, and whether it opened this frame.
+#[derive(Clone, Copy)]
+struct Commands {
+    add: bool,
+    manage: bool,
+    /// The popover opened this frame: the keyboard goes into it, and its
+    /// tables start from the active plan.
+    opening: bool,
 }
 
-/// A faint line under the kind, where a kind has no numbers to edit here.
-fn popover_note(ui: &mut egui::Ui, text: &str) {
+/// A plan the popover offers.
+struct PlanRow {
+    id: SimulationPlanId,
+    name: String,
+    active: bool,
+}
+
+/// One analysis of the active plan, in the popover.
+struct AnalysisRow {
+    id: AnalysisInstanceId,
+    name: String,
+    detail: Option<String>,
+    included: bool,
+}
+
+/// What a plain Run runs at, in the popover.
+struct ReferenceRow {
+    process: ProcessCorner,
+    celsius: f64,
+    /// The processes the reader can pick among, fast to slow; empty where
+    /// no model library defines a corner, and the popover shows no process.
+    processes: Vec<ProcessCorner>,
+}
+
+/// What the popover lists: the plans Run can run, the active plan's
+/// analyses in plan order, a prerequisite among them as the Analyses page
+/// lists it, and the reference a plain Run runs at.
+struct PopoverRows {
+    plans: Vec<PlanRow>,
+    analyses: Vec<AnalysisRow>,
+    reference: ReferenceRow,
+}
+
+impl PopoverRows {
+    /// The active plan and every plan the manager would open in its place;
+    /// an archived plan is opened from the manager, so it is not offered.
+    /// By name, so picking a plan leaves every row where it was.
+    fn of(model: &Model) -> Self {
+        let setup = &model.sim_setup;
+        let plan = setup.stable_analysis_plan().ok();
+        let mut plans: Vec<PlanRow> = plan
+            .map(|plan| PlanRow {
+                id: plan.id(),
+                name: setup.active_plan_name().to_string(),
+                active: true,
+            })
+            .into_iter()
+            .chain(
+                setup
+                    .inactive_plans()
+                    .iter()
+                    .filter(|stored| !stored.archived())
+                    .map(|stored| PlanRow {
+                        id: stored.id(),
+                        name: stored.name().to_string(),
+                        active: false,
+                    }),
+            )
+            .collect();
+        plans.sort_by_cached_key(|row| row.name.to_lowercase());
+        let analyses = plan.map_or_else(Vec::new, |plan| {
+            plan.instances()
+                .iter()
+                .map(|instance| AnalysisRow {
+                    id: instance.id(),
+                    name: analysis_name(instance.draft()),
+                    detail: analysis_detail(instance.draft()),
+                    included: instance.enabled(),
+                })
+                .collect()
+        });
+        let reference = setup.reference_pvt;
+        Self {
+            plans,
+            analyses,
+            reference: ReferenceRow {
+                process: reference.process,
+                celsius: reference.temperature_celsius,
+                processes: library_processes(model, reference.process),
+            },
+        }
+    }
+
+    /// A plan's row: its name, and which plan is active where there is more
+    /// than one to tell it from.
+    fn plan_cell(&self, row: usize) -> Cell {
+        let plan = &self.plans[row];
+        let cell = Cell::text(plan.name.as_str());
+        if plan.active && self.plans.len() > 1 {
+            cell.state("Active", None)
+        } else {
+            cell
+        }
+    }
+
+    /// An analysis's row: whether Run includes it, its kind and main numbers.
+    fn analysis_cell(&self, row: usize) -> Cell {
+        let analysis = &self.analyses[row];
+        let cell = Cell::text(analysis.name.as_str()).check(analysis.included);
+        match &analysis.detail {
+            Some(detail) => cell.suffix(detail.as_str()),
+            None => cell,
+        }
+    }
+
+    /// The width every row, head, line and button shows whole in.
+    fn width(&self, ui: &mut Ui) -> f32 {
+        let t = Tokens::get(ui.ctx());
+        // A table's only column has the table's edge inset on both sides of
+        // its words where a column has its pads.
+        let edges = 2.0 * (TABLE_EDGE_INSET - CELL_PAD);
+        let plans: Vec<Cell> = (0..self.plans.len())
+            .map(|row| self.plan_cell(row))
+            .collect();
+        let analyses: Vec<Cell> = (0..self.analyses.len())
+            .map(|row| self.analysis_cell(row))
+            .collect();
+        let rows =
+            fitted_width(ui, PLAN_HEAD, &plans).max(fitted_width(ui, ANALYSIS_HEAD, &analyses))
+                + edges;
+        let empty = ui
+            .painter()
+            .layout_no_wrap(
+                NO_ANALYSIS.to_owned(),
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                t.color.text_faint,
+            )
+            .size()
+            .x
+            + 2.0 * TABLE_EDGE_INSET;
+        let button = Button::new(ADD_ANALYSIS)
+            .compact()
+            .measured_width(ui)
+            .max(Button::new(MANAGE_PLANS).compact().measured_width(ui));
+        let footer = 2.0 * button + FOOTER_GAP + 2.0 * TABLE_EDGE_INSET;
+        rows.max(empty)
+            .max(footer)
+            .max(self.reference_width(ui))
+            .ceil()
+    }
+
+    /// The Reference rows' labels, whole.
+    fn reference_labels(&self) -> &'static [&'static str] {
+        if self.reference.processes.is_empty() {
+            &[TEMPERATURE]
+        } else {
+            &[TEMPERATURE, PROCESS]
+        }
+    }
+
+    /// The width the Reference rows' labels show whole in.
+    fn reference_label_width(&self, ui: &Ui) -> f32 {
+        let t = Tokens::get(ui.ctx());
+        self.reference_labels()
+            .iter()
+            .map(|label| {
+                ui.painter()
+                    .layout_no_wrap(
+                        (*label).to_owned(),
+                        theme::sans(tokens::FS_0, FontWeight::Regular),
+                        t.color.text_dim,
+                    )
+                    .size()
+                    .x
+            })
+            .fold(0.0, f32::max)
+            .ceil()
+    }
+
+    /// The width the Reference section shows whole in: its labels, then the
+    /// coldest temperature the reference takes and its unit, or every
+    /// process with its padding, whichever is wider.
+    fn reference_width(&self, ui: &Ui) -> f32 {
+        let t = Tokens::get(ui.ctx());
+        let measured = |text: &str, font: egui::FontId| {
+            ui.painter()
+                .layout_no_wrap(text.to_owned(), font, t.color.text)
+                .size()
+                .x
+        };
+        let field = 2.0 * FIELD_PAD
+            + measured("\u{2212}273.15", theme::field_mono())
+            + UNIT_GAP
+            + measured(CELSIUS, theme::field_mono());
+        let processes: f32 = self
+            .reference
+            .processes
+            .iter()
+            .map(|process| {
+                2.0 * FIELD_PAD
+                    + measured(
+                        process.short_name(),
+                        theme::sans(tokens::FS_0, FontWeight::Regular),
+                    )
+            })
+            .sum();
+        let head = fitted_width(ui, REFERENCE_HEAD, &[]) + 2.0 * (TABLE_EDGE_INSET - CELL_PAD);
+        (2.0 * TABLE_EDGE_INSET + self.reference_label_width(ui) + LABEL_GAP + field.max(processes))
+            .max(head)
+    }
+}
+
+/// The popover's tables and foot. Returns what the reader asked of them.
+fn popover_body(ui: &mut Ui, rows: &PopoverRows, commands: Commands) -> Option<RunChipRequest> {
     let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(text)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
+    ui.spacing_mut().item_spacing = Vec2::ZERO;
+    let footer_h = compact_height(&t.metrics) + 2.0 * FOOTER_PAD;
+    let reference_h = LineHeights::grid(&t).head
+        + t.metrics.row_h * rows.reference_labels().len() as f32;
+    // Below the chip the tables have the rest of the screen, less the
+    // Reference rows and the foot: the plans up to half of it, the analyses
+    // what the plans leave.
+    let room = (ui.ctx().content_rect().bottom()
+        - ui.cursor().top()
+        - reference_h
+        - footer_h
+        - SCREEN_MARGIN)
+        .max(LineHeights::grid(&t).row * 4.0);
+    let top = ui.cursor().top();
+    let mut request = None;
+
+    let plan_columns = [Column::name(PLAN_HEAD, 0.0).unsortable()];
+    let plans = DataTable::new("workbench.run_chip.plans", &plan_columns, rows.plans.len())
+        .max_height(room * 0.5);
+    if rows.plans.len() > 1 {
+        // A plan is picked by a click, or by Enter on the row the arrows reached.
+        let keys: Vec<RowKey> = rows
+            .plans
+            .iter()
+            .map(|plan| RowKey::from(format!("{:?}", plan.id)))
+            .collect();
+        let memory = ui.id().with("workbench.run_chip.plans");
+        let active = rows.plans.iter().position(|plan| plan.active);
+        let mut state = table_state(ui, memory, commands.opening, active, &keys);
+        let response = plans
+            .state(&mut state)
+            .keys(&keys)
+            .focus(commands.opening)
+            .show(ui, |row| vec![rows.plan_cell(row)]);
+        ui.data_mut(|data| data.insert_temp(memory, state));
+        if let Some(plan) = response
+            .activate
+            .or(response.clicked)
+            .and_then(|row| rows.plans.get(row))
+            .filter(|plan| !plan.active)
+        {
+            request = Some(RunChipRequest::ActivatePlan(plan.id));
+        }
+    } else {
+        // One plan: its name, and nothing to pick.
+        let _ = plans.show(ui, |row| vec![rows.plan_cell(row)]);
+    }
+
+    let analysis_columns = [Column::name(ANALYSIS_HEAD, 0.0).unsortable()];
+    let keys: Vec<RowKey> = rows
+        .analyses
+        .iter()
+        .map(|analysis| RowKey::from(analysis.id.to_string()))
+        .collect();
+    let memory = ui.id().with("workbench.run_chip.analyses");
+    let mut state = table_state(ui, memory, commands.opening, None, &keys);
+    let response = DataTable::new(
+        "workbench.run_chip.analyses",
+        &analysis_columns,
+        rows.analyses.len(),
+    )
+    .state(&mut state)
+    .keys(&keys)
+    .focus(commands.opening && rows.plans.len() <= 1 && !rows.analyses.is_empty())
+    .max_height((room - (ui.cursor().top() - top)).max(LineHeights::grid(&t).row * 2.0))
+    .show(ui, |row| vec![rows.analysis_cell(row)]);
+    ui.data_mut(|data| data.insert_temp(memory, state));
+    // A row's check box is whether Run includes it; the rest of the row opens
+    // it where it is edited.
+    if let Some((row, included)) = response.checked
+        && let Some(analysis) = rows.analyses.get(row)
+    {
+        request = Some(RunChipRequest::Include(analysis.id, included));
+    } else if let Some(analysis) = response
+        .activate
+        .or(response.clicked)
+        .and_then(|row| rows.analyses.get(row))
+    {
+        request = Some(RunChipRequest::Open(analysis.id));
+    }
+    if rows.analyses.is_empty() {
+        empty_line(ui, NO_ANALYSIS);
+    }
+    if let Some(asked) = reference_section(ui, rows) {
+        request = Some(asked);
+    }
+    let focus_add = commands.opening && rows.plans.len() <= 1 && rows.analyses.is_empty();
+    footer(ui, commands, focus_add).or(request)
+}
+
+/// The Reference section, what a plain Run runs at: its temperature, and
+/// its process where a model library defines corners to pick among. Returns
+/// the reference the reader asked for, or why what they typed is not one.
+fn reference_section(ui: &mut Ui, rows: &PopoverRows) -> Option<RunChipRequest> {
+    let reference = &rows.reference;
+    // A table of no rows: the section's head band is the tables' own.
+    let columns = [Column::name(REFERENCE_HEAD, 0.0).unsortable()];
+    let _ = DataTable::new("workbench.run_chip.reference", &columns, 0).show(ui, |_| Vec::new());
+    let label_width = rows.reference_label_width(ui);
+    let field = reference_row(ui, TEMPERATURE, label_width);
+    let typed = temperature_field(ui, field, reference.celsius);
+    let picked = if reference.processes.is_empty() {
+        None
+    } else {
+        let field = reference_row(ui, PROCESS, label_width);
+        process_choice(ui, field, reference)
+    };
+    match (typed, picked) {
+        (Some(Err(words)), _) => Some(RunChipRequest::Unreadable(words)),
+        (None, None) => None,
+        (typed, picked) => Some(RunChipRequest::Reference(
+            picked.unwrap_or(reference.process),
+            typed.and_then(Result::ok).unwrap_or(reference.celsius),
+        )),
+    }
+}
+
+/// One Reference row, a row tall: `label` in the label column `label_width`
+/// wide, ruled at its foot as a table's row is. Returns where its control
+/// goes: the rest of the row, at a compact control's height.
+fn reference_row(ui: &mut Ui, label: &str, label_width: f32) -> Rect {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), t.metrics.row_h),
+        egui::Sense::hover(),
+    );
+    let height = compact_height(&t.metrics);
+    // The row's last point is its rule; the control takes the rest, with
+    // equal air over and under it.
+    let top = rect.top() + ((rect.height() - 1.0 - height) * 0.5).max(0.0);
+    let field = Rect::from_min_max(
+        pos2(
+            rect.left() + TABLE_EDGE_INSET + label_width + LABEL_GAP,
+            top,
+        ),
+        pos2(rect.right() - TABLE_EDGE_INSET, top + height),
+    );
+    ui.painter().text(
+        pos2(rect.left() + TABLE_EDGE_INSET, field.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    field
+}
+
+/// The reference temperature's field, in °C, filling `rect`. It holds what
+/// the reader types while they type; Enter, Tab or a click away asks for it,
+/// and Escape leaves the reference as it was. Returns the temperature asked
+/// for, or why the words are not one.
+fn temperature_field(ui: &mut Ui, rect: Rect, celsius: f64) -> Option<Result<f64, String>> {
+    let t = Tokens::get(ui.ctx());
+    let id = ui.id().with("workbench.run_chip.temperature");
+    let draft = id.with("typed");
+    let shown = celsius_text(celsius);
+    let mut text = if ui.memory(|memory| memory.has_focus(id)) {
+        ui.data(|data| data.get_temp::<String>(draft))
+            .unwrap_or_else(|| shown.clone())
+    } else {
+        ui.data_mut(|data| data.remove::<String>(draft));
+        shown.clone()
+    };
+    let font = theme::field_mono();
+    let unit = ui
+        .painter()
+        .layout_no_wrap(CELSIUS.to_owned(), font.clone(), t.color.text_dim);
+    let trailing = (FIELD_PAD + unit.size().x + UNIT_GAP)
+        .ceil()
+        .min(f32::from(i8::MAX)) as i8;
+    let mut field = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    let response = field.add_sized(
+        rect.size(),
+        egui::TextEdit::singleline(&mut text)
+            .id(id)
+            .font(font)
+            .text_color(t.color.text)
+            .vertical_align(egui::Align::Center)
+            .margin(egui::Margin {
+                left: FIELD_PAD as i8,
+                right: trailing,
+                top: 0,
+                bottom: 0,
+            }),
+    );
+    let unit_size = unit.size();
+    ui.painter().galley(
+        pos2(
+            response.rect.right() - FIELD_PAD - unit_size.x,
+            response.rect.center().y - unit_size.y * 0.5,
+        ),
+        unit,
+        t.color.text_dim,
+    );
+    name_control(ui, &response, "Reference temperature in \u{00b0}C");
+    if response.has_focus() {
+        ui.data_mut(|data| data.insert_temp(draft, text.clone()));
+    } else if !response.lost_focus() {
+        // Reached by Tab or a click, the field's words are selected, so the
+        // first key typed replaces them.
+        let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(text.chars().count()),
+            )));
+        egui::TextEdit::store_state(ui.ctx(), id, state);
+    }
+    if !response.lost_focus() {
+        return None;
+    }
+    ui.data_mut(|data| data.remove::<String>(draft));
+    if ui.input(|input| input.key_pressed(egui::Key::Escape)) || text.trim() == shown {
+        return None;
+    }
+    Some(read_celsius(&text))
+}
+
+/// A reference temperature as the field shows it: plain digits, `27`,
+/// `-40`, `27.5`.
+fn celsius_text(celsius: f64) -> String {
+    format!("{celsius}")
+}
+
+/// The temperature in °C that `text` states, a number with or without the
+/// unit after it, or why it states none.
+fn read_celsius(text: &str) -> Result<f64, String> {
+    let trimmed = text.trim();
+    let number = ["\u{00b0}C", "\u{2103}", "C", "c", "\u{00b0}"]
+        .iter()
+        .find_map(|unit| trimmed.strip_suffix(unit))
+        .unwrap_or(trimmed)
+        .trim()
+        .replace('\u{2212}', "-");
+    rspice_app_state::quantity::parse_engineering_value(&number)
+        .map_err(|_| format!("\u{201c}{trimmed}\u{201d} is not a temperature in \u{00b0}C"))
+}
+
+/// The reference process as one segmented group filling `rect`. Returns the
+/// process the reader picked, when it is another.
+fn process_choice(ui: &mut Ui, rect: Rect, reference: &ReferenceRow) -> Option<ProcessCorner> {
+    let labels: Vec<&str> = reference
+        .processes
+        .iter()
+        .map(|process| process.short_name())
+        .collect();
+    let mut chosen = reference
+        .processes
+        .iter()
+        .position(|process| *process == reference.process)?;
+    let mut field = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    // The group stands at the row's control height, as the field above it.
+    field.spacing_mut().interact_size.y = rect.height();
+    segmented(
+        &mut field,
+        "workbench.run_chip.process",
+        &labels,
+        &mut chosen,
+        SegmentedWidth::Equal,
+    )
+    .then(|| reference.processes[chosen])
+    .filter(|process| *process != reference.process)
+}
+
+/// A popover table's memory while the popover stays open. Each opening
+/// starts afresh, its selection on row `selected`.
+fn table_state(
+    ui: &Ui,
+    memory: egui::Id,
+    opening: bool,
+    selected: Option<usize>,
+    keys: &[RowKey],
+) -> TableState {
+    if opening {
+        let mut state = TableState::default();
+        if let Some(row) = selected {
+            state.select(row, keys.get(row).cloned());
+        }
+        state
+    } else {
+        ui.data(|data| data.get_temp::<TableState>(memory))
+            .unwrap_or_default()
+    }
+}
+
+/// One faint line where a table has no rows, a row tall and ruled as a row.
+fn empty_line(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(ui.available_width(), LineHeights::grid(&t).row),
+        egui::Sense::hover(),
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    ui.painter().text(
+        pos2(rect.left() + TABLE_EDGE_INSET, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
     );
 }
 
-/// What a number row takes.
-#[derive(Clone, Copy)]
-enum Number {
-    /// A quantity above zero, in engineering notation.
-    Positive,
-    /// A whole count of one or more.
-    Count,
-}
-
-/// What a number row's field gave up this frame.
-enum Typed {
-    /// Nothing: the field still has focus, or what it holds is what it showed.
-    Nothing,
-    /// The reader left the field holding this, a number it takes.
-    Number(String),
-    /// The reader left the field holding something it does not take.
-    Refused(String),
-}
-
-/// One labelled field over `current`, committed when the reader leaves it.
-///
-/// While the field has focus it keeps what is typed; once it loses focus it
-/// shows the plan again, so a refused entry never stands in place of the
-/// value the plan runs.
-fn number_row(ui: &mut egui::Ui, label: &str, unit: &str, current: &str, takes: Number) -> Typed {
-    let id = ui.make_persistent_id(("workbench.run_chip.field", label));
-    let mut text = ui
-        .data(|data| data.get_temp::<String>(id))
-        .unwrap_or_else(|| current.to_owned());
-    let response = crate::ui::widgets::input_row(ui, &with_unit(label, unit), &mut text);
-    if response.has_focus() {
-        ui.data_mut(|data| data.insert_temp(id, text));
-        return Typed::Nothing;
-    }
-    ui.data_mut(|data| data.remove::<String>(id));
-    if !response.lost_focus() || text.trim() == current.trim() {
-        return Typed::Nothing;
-    }
-    let text = text.trim().to_owned();
-    let (taken, wanted) = match takes {
-        Number::Positive => (
-            rspice_app_state::quantity::parse_engineering_value(&text)
-                .is_ok_and(|value| value.is_finite() && value > 0.0),
-            if unit == "Hz" {
-                "a frequency above zero, such as 1k"
-            } else {
-                "a time above zero, such as 1m"
-            },
-        ),
-        Number::Count => (
-            text.parse::<u32>().is_ok_and(|count| count > 0),
-            "a whole number of one or more",
-        ),
+/// The foot under the tables' last rule: Add analysis… and Manage plans…,
+/// equal halves of the popover's width. Returns which was pressed.
+fn footer(ui: &mut Ui, commands: Commands, focus_add: bool) -> Option<RunChipRequest> {
+    let t = Tokens::get(ui.ctx());
+    let height = compact_height(&t.metrics);
+    let (band, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), height + 2.0 * FOOTER_PAD),
+        egui::Sense::hover(),
+    );
+    let width = ((band.width() - 2.0 * TABLE_EDGE_INSET - FOOTER_GAP) * 0.5).max(1.0);
+    let first = Rect::from_min_size(
+        pos2(band.left() + TABLE_EDGE_INSET, band.top() + FOOTER_PAD),
+        vec2(width, height),
+    );
+    let second = first.translate(vec2(width + FOOTER_GAP, 0.0));
+    let button = |ui: &mut Ui, rect: Rect, label: &str, enabled: bool| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            Button::new(label)
+                .compact()
+                .min_width(rect.width())
+                .enabled(enabled)
+                .show(ui)
+        })
+        .inner
     };
-    if taken {
-        Typed::Number(text)
-    } else {
-        Typed::Refused(format!("{label} takes {wanted}, not \"{text}\"."))
+    let add = button(ui, first, ADD_ANALYSIS, commands.add);
+    let manage = button(ui, second, MANAGE_PLANS, commands.manage);
+    if focus_add {
+        add.request_focus();
     }
-}
-
-/// `Stop time, s`, as the inspector's rows carry their unit.
-fn with_unit(label: &str, unit: &str) -> String {
-    if unit.is_empty() {
-        label.to_owned()
+    if add.clicked() {
+        Some(RunChipRequest::AddAnalysis)
+    } else if manage.clicked() {
+        Some(RunChipRequest::ManagePlans)
     } else {
-        format!("{label}, {unit}")
-    }
-}
-
-/// Write what `typed` holds into `field`: `None` when it holds nothing,
-/// `Some(None)` when the field took it, `Some(Some(refusal))` when it did not.
-fn commit(typed: Typed, field: &mut String) -> Option<Option<RunChipRequest>> {
-    match typed {
-        Typed::Nothing => None,
-        Typed::Number(text) => {
-            *field = text;
-            Some(None)
-        }
-        Typed::Refused(words) => Some(Some(RunChipRequest::Refused(words))),
+        None
     }
 }
 
@@ -567,11 +1116,14 @@ mod tests {
             .expect("rename the active plan");
         let copy = run_config_chip_copy(&model);
 
-        assert_eq!(copy.summary, "Automotive temperature sweep \u{00b7} 1 PVT");
+        assert_eq!(
+            copy.summary,
+            "Automotive temperature sweep \u{00b7} 27 \u{00b0}C"
+        );
         assert_eq!(
             copy.accessibility,
-            "Analysis Transient \u{00b7} 1 ms, plan Automotive temperature sweep; \
-             change the analysis or manage simulation plans"
+            "Analysis Transient \u{00b7} 1 ms, plan Automotive temperature sweep, \
+             27 \u{00b0}C; choose the plan, the analyses and the reference PVT Run runs"
         );
         assert!(!copy.summary.contains("Default plan"));
         assert!(!copy.accessibility.contains("Default plan"));

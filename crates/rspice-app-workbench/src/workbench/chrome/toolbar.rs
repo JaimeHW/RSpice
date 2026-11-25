@@ -90,7 +90,6 @@ pub fn show<H: WorkbenchHost>(root: &mut Ui, app: &mut H, layout: LayoutSpec) {
                             outer_gap,
                             show_simulation_context,
                             reserved_run_control_width(ui, app, layout),
-                            reserved_pvt_selector_width(ui, app),
                         ),
                     };
                 ui.data_mut(|data| {
@@ -294,26 +293,6 @@ fn reserved_run_control_width(ui: &egui::Ui, app: &impl WorkbenchHost, layout: L
     primary_width + menu_width
 }
 
-fn reserved_pvt_selector_width(ui: &egui::Ui, app: &impl WorkbenchHost) -> f32 {
-    let reference = app.model().sim_setup.reference_pvt;
-    let quantity_policy = app.model().preferences.quantity_presentation_policy();
-    let label = format!(
-        "{} · {}",
-        reference.process.short_name(),
-        pvt_temperature_label(reference.temperature_celsius, quantity_policy),
-    );
-    let t = Tokens::get(ui.ctx());
-    ui.painter()
-        .layout_no_wrap(
-            label,
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            t.color.text_dim,
-        )
-        .size()
-        .x
-        + 42.0
-}
-
 /// Where the run controls' width, as they drew it in a layout like
 /// `layout`, is kept from one frame to the next. What they draw depends on
 /// which of them the layout shows and how tall it makes them, so each such
@@ -321,7 +300,6 @@ fn reserved_pvt_selector_width(ui: &egui::Ui, app: &impl WorkbenchHost) -> f32 {
 fn run_controls_width_id(layout: LayoutSpec) -> egui::Id {
     egui::Id::new((
         "workbench.context_toolbar.run_controls_width",
-        layout.show_pvt_selector,
         layout.show_run_config_selector,
         layout.run_control_height.to_bits(),
         layout.toolbar_control_height.to_bits(),
@@ -373,16 +351,9 @@ pub fn context_tools_width(
     outer_gap: f32,
     show_simulation_context: bool,
     run_width: f32,
-    pvt_width: f32,
 ) -> f32 {
     (available_width
-        - trailing_controls_width(
-            layout,
-            outer_gap,
-            show_simulation_context,
-            run_width,
-            pvt_width,
-        )
+        - trailing_controls_width(layout, outer_gap, show_simulation_context, run_width)
         - right_padding)
         .max(1.0)
 }
@@ -392,17 +363,12 @@ pub fn trailing_controls_width(
     outer_gap: f32,
     show_simulation_context: bool,
     run_width: f32,
-    pvt_width: f32,
 ) -> f32 {
     let mut width = 0.0;
     let mut controls: usize = 0;
     if show_simulation_context {
         width += run_width;
         controls += 1;
-        if layout.show_pvt_selector {
-            width += pvt_width;
-            controls += 1;
-        }
         if layout.show_run_config_selector {
             width += RUN_CONFIG_CHIP_MAX_WIDTH;
             controls += 1;

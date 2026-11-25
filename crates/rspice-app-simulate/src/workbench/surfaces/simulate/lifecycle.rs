@@ -217,7 +217,7 @@ pub(super) fn contextual_dependency_error(
         })
 }
 
-pub(in crate::workbench) fn commit_draft(
+pub(super) fn commit_draft(
     cx: &mut Cx<'_, SimulateFeature>,
     id: AnalysisInstanceId,
     draft: AnalysisDraft,
@@ -237,124 +237,6 @@ pub(in crate::workbench) fn commit_draft(
             record_receipt(cx, &receipt);
         }
         Err(error) => record_failure(cx, "Edit", &error),
-    }
-}
-
-/// Run a fresh analysis of `kind` in the place of `id`, as one step: the run
-/// chip's choice of kind. The prerequisites only `id` ran go with it, and the
-/// new analysis gets the ones it needs, so an AC sweep brings its operating
-/// point and a transient that replaces the sweep leaves none behind. What is
-/// replaced keeps its runs' results, as a removal on this page does, and one
-/// another analysis is bound to is refused by name rather than replaced.
-pub(in crate::workbench) fn replace_analysis_kind(
-    cx: &mut Cx<'_, SimulateFeature>,
-    id: AnalysisInstanceId,
-    kind: AnalysisKind,
-) {
-    let runs_of = |model: &Model, instance: AnalysisInstanceId| -> Vec<_> {
-        model
-            .simulation
-            .retained
-            .runs
-            .iter()
-            .filter(|run| run.find_analysis_by_source_instance(instance).is_some())
-            .map(|run| run.run_id)
-            .collect()
-    };
-    let Ok(plan) = cx.model.sim_setup.stable_analysis_plan() else {
-        return;
-    };
-    // `id` and every prerequisite nothing but it runs, dependents first.
-    let mut replaced = vec![id];
-    let mut position = plan
-        .instances()
-        .iter()
-        .position(|instance| instance.id() == id);
-    if let Some(lead) = plan.instance(id) {
-        for dependency in lead.dependencies() {
-            let target = dependency.target();
-            let shared = plan.instances().iter().any(|other| {
-                other.id() != id
-                    && other
-                        .dependencies()
-                        .iter()
-                        .any(|dependency| dependency.target() == target)
-            });
-            if !shared {
-                replaced.push(target);
-                if let Some(at) = plan
-                    .instances()
-                    .iter()
-                    .position(|instance| instance.id() == target)
-                {
-                    position = Some(position.map_or(at, |lead| lead.min(at)));
-                }
-            }
-        }
-    }
-    let position = position.unwrap_or(0);
-    let prior: Vec<_> = replaced
-        .iter()
-        .map(|instance| runs_of(cx.model, *instance))
-        .collect();
-    let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
-    // Every half lands or none does: the candidate takes the insert, the
-    // prerequisites and the removals, and only a candidate that took them all
-    // becomes the plan.
-    let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
-        Ok(plan) => {
-            let mut candidate = plan.clone();
-            let mut receipts = Vec::new();
-            let outcome = (|| {
-                let (inserted, receipt) = candidate
-                    .insert_at(kind, position)
-                    .map_err(|error| RemovalFailure::Unavailable(error.to_string()))?;
-                receipts.push(receipt);
-                if !candidate.required_prerequisite_roles(inserted).is_empty() {
-                    let (_, receipt) = candidate
-                        .repair_dependencies(inserted)
-                        .map_err(|error| RemovalFailure::Unavailable(error.to_string()))?;
-                    receipts.push(receipt);
-                }
-                for (index, (instance, runs)) in replaced.iter().zip(prior).enumerate() {
-                    match candidate.remove(*instance, runs) {
-                        Ok(receipt) => receipts.push(receipt),
-                        // The analysis itself must go; a prerequisite the new
-                        // analysis now runs stays.
-                        Err(error) if index == 0 => return Err(RemovalFailure::Refused(error)),
-                        Err(_) => {}
-                    }
-                }
-                Ok(inserted)
-            })();
-            outcome.map(|inserted| {
-                *plan = candidate;
-                (inserted, receipts)
-            })
-        }
-        Err(error) => Err(RemovalFailure::Unavailable(error)),
-    };
-    cx.model
-        .record_setup_change(SimulationPage::Analyses.label(), step);
-    match result {
-        Ok((inserted, receipts)) => {
-            refresh_analysis_projections(cx);
-            if cx
-                .state
-                .active_analysis_instance
-                .is_some_and(|active| replaced.contains(&active))
-            {
-                cx.state.active_analysis_instance = Some(inserted);
-            }
-            for receipt in &receipts {
-                record_receipt(cx, receipt);
-            }
-        }
-        Err(RemovalFailure::Unavailable(error)) => record_failure(cx, "Change kind", &error),
-        Err(RemovalFailure::Refused(error)) => {
-            let message = removal_refusal_naming_instances(cx.model, &error);
-            record_failure(cx, "Change kind", &message);
-        }
     }
 }
 

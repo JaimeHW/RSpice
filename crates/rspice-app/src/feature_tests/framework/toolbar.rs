@@ -386,41 +386,33 @@ impl Desk {
         });
     }
 
-    /// The plan chip and the PVT chip draw what the model holds: the last
-    /// frame named each the way the model now says it.
+    /// The run chip draws what the model holds: the last frame named it over
+    /// the active plan and the reference temperature the model now holds.
     fn assert_chips_paint_the_model(&self) {
         let model = &self.app.state.model;
         let reference = model.sim_setup.reference_pvt;
-        let plan_chip = format!(
-            ", plan {}; change the analysis or manage simulation plans",
-            model.sim_setup.active_plan_name().as_str()
+        let plan = format!(", plan {}, ", model.sim_setup.active_plan_name().as_str());
+        let temperature = pvt_temperature_label(
+            reference.temperature_celsius,
+            model.preferences.quantity_presentation_policy(),
         );
         assert!(
-            self.named
-                .iter()
-                .any(|(name, _)| name.starts_with("Analysis ") && name.ends_with(&plan_chip)),
-            "the frame names the run chip over {plan_chip:?}: {:?}",
-            self.named
-        );
-        let chip = format!(
-            "{} \u{00b7} {}",
-            reference.process.short_name(),
-            pvt_temperature_label(
-                reference.temperature_celsius,
-                model.preferences.quantity_presentation_policy()
-            )
-        );
-        assert!(
-            self.named.iter().any(|(name, _)| *name == chip),
-            "the frame names {chip:?}: {:?}",
+            self.named.iter().any(|(name, _)| {
+                name.starts_with("Analysis ")
+                    && name.contains(&plan)
+                    && name.contains(&temperature)
+                    && name
+                        .ends_with("; choose the plan, the analyses and the reference PVT Run runs")
+            }),
+            "the frame names the run chip over {plan:?} at {temperature:?}: {:?}",
             self.named
         );
     }
 }
 
 /// The trailing group raises what it pressed and the shell answers it once
-/// the group has drawn, so the plan chip and the PVT chip beside the run
-/// control draw the state from before the command on the press frame. The
+/// the group has drawn, so the run chip beside the run control draws the
+/// state from before the command on the press frame. The
 /// press frame asks for the next one at once, and that frame draws what the
 /// command left.
 #[test]

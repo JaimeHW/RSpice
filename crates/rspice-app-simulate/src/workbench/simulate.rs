@@ -35,10 +35,10 @@ impl Feature for SimulateFeature {
     /// on the Netlist workspace the shell runs that page's deck in place
     /// of the active plan. The Analyses route's heading states why the
     /// split stage will not open, in the dispatcher's own words. The
-    /// toolbar's run controls and plan chip offer Run or Stop, Preflight,
-    /// Options and Manage plans as the dispatcher answers them, its guards
-    /// included, and the deck chip that stands in for the plan chip where
-    /// Run runs a deck offers Show deck.
+    /// toolbar's run controls and run chip offer Run or Stop, Preflight,
+    /// Options, Manage plans and Add analysis as the dispatcher answers them,
+    /// its guards included, and the deck chip that stands in for the run chip
+    /// where Run runs a deck offers Show deck.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
         SimulateCommand::Run.key(),
         SimulateCommand::Stop.key(),
@@ -46,6 +46,7 @@ impl Feature for SimulateFeature {
         SimulateCommand::Preflight.key(),
         SimulateCommand::Options.key(),
         SimulateCommand::ManagePlans.key(),
+        SimulateCommand::AddAnalysis.key(),
         ids::SHOW_RUN_DECK,
     ];
 
