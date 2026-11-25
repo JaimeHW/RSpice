@@ -280,6 +280,9 @@ pub fn semantic_result_summary<W: AsRef<RetainedWaveform>>(
             let Some(AnalysisResultPayload::TransferFunction {
                 input_source,
                 output_expression,
+                input_quantity,
+                output_quantity,
+                normalization,
                 gain,
                 input_resistance,
                 output_resistance,
@@ -294,14 +297,20 @@ pub fn semantic_result_summary<W: AsRef<RetainedWaveform>>(
                 title: format!("{output_expression} / {input_source}"),
                 columns: vec!["Quantity".to_owned(), "Value".to_owned()],
                 rows: vec![
-                    vec!["Gain".to_owned(), format_optional_scalar(*gain)],
+                    vec![
+                        "Gain".to_owned(),
+                        format_optional_scalar(
+                            *gain,
+                            transfer_gain_unit(*normalization, *input_quantity, *output_quantity),
+                        ),
+                    ],
                     vec![
                         "Input resistance".to_owned(),
-                        format_optional_scalar(*input_resistance),
+                        format_optional_scalar(*input_resistance, "\u{3a9}"),
                     ],
                     vec![
                         "Output resistance".to_owned(),
-                        format_optional_scalar(*output_resistance),
+                        format_optional_scalar(*output_resistance, "\u{3a9}"),
                     ],
                 ],
             });
@@ -1056,21 +1065,51 @@ fn exact_number(value: f64) -> String {
     format!("{value:.17e}")
 }
 
+/// The unit a transfer function's gain reads in, as the sheet states it: a
+/// gain relative to its nominal is a bare number.
+fn transfer_gain_unit(
+    normalization: rspice_results::transfer_function::TransferFunctionNormalizationEvidence,
+    input: rspice_results::transfer_function::TransferFunctionQuantityEvidence,
+    output: rspice_results::transfer_function::TransferFunctionQuantityEvidence,
+) -> &'static str {
+    use rspice_results::transfer_function::TransferFunctionNormalizationEvidence as Normalization;
+    use rspice_results::transfer_function::TransferFunctionQuantityEvidence::{Current, Voltage};
+    if normalization == Normalization::RelativeToNominal {
+        return "1";
+    }
+    match (input, output) {
+        (Voltage, Voltage) => "V/V",
+        (Voltage, Current) => "A/V",
+        (Current, Voltage) => "V/A",
+        (Current, Current) => "A/A",
+    }
+}
+
+/// A transfer function's scalar as the sheet spells it: four significant
+/// digits with its unit, a ratio of like quantities without a prefix, and an
+/// unbounded one as +∞ or −∞.
 fn format_optional_scalar(
     scalar: Option<rspice_results::transfer_function::TransferFunctionScalarEvidence>,
+    unit: &str,
 ) -> String {
+    use rspice_results::number_format::fmt_si_significant;
+    use rspice_results::transfer_function::TransferFunctionScalarEvidence as Scalar;
+    let with_unit = |number: String| {
+        if unit == "1" {
+            number
+        } else {
+            format!("{number} {unit}")
+        }
+    };
     scalar.map_or_else(
         || "not requested".to_owned(),
         |value| match value {
-            rspice_results::transfer_function::TransferFunctionScalarEvidence::Finite(value) => {
-                exact_number(value)
-            }
-            rspice_results::transfer_function::TransferFunctionScalarEvidence::PositiveInfinity => {
-                "+infinity".to_owned()
-            }
-            rspice_results::transfer_function::TransferFunctionScalarEvidence::NegativeInfinity => {
-                "-infinity".to_owned()
-            }
+            Scalar::Finite(value) => match unit {
+                "1" | "V/V" | "A/A" => with_unit(fmt_si_significant(value, "", 4)),
+                _ => fmt_si_significant(value, unit, 4),
+            },
+            Scalar::PositiveInfinity => with_unit("+\u{221e}".to_owned()),
+            Scalar::NegativeInfinity => with_unit("\u{2212}\u{221e}".to_owned()),
         },
     )
 }
