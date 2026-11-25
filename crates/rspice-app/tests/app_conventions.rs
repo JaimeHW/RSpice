@@ -1503,6 +1503,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "results_actions"),
             ("lib.rs", "results_rows"),
             ("lib.rs", "run_details"),
+            ("lib.rs", "schematic_cross_probe"),
             ("lib.rs", "session"),
             ("lib.rs", "slots"),
             ("lib.rs", "state"),
