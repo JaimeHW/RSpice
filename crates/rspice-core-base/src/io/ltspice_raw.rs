@@ -512,6 +512,46 @@ fn in_plot(plot_number: usize, error: RawParseError) -> RawParseError {
 /// is informational and ignored, as ngspice ignores it.
 const UNREAD_LAYOUT_FLAGS: [&str; 1] = ["unpadded"];
 
+/// The index, name and declared type of a variable line, in that order, then its attributes.
+///
+/// The writers separate the fields with tabs, and a name may hold a space (`V(in put)`), so a
+/// tabbed line splits at its tabs. A line spaced throughout splits at its spaces; a name there
+/// that holds a space is the words between the index and the type, which is the last word that
+/// is not a `key=value` attribute.
+fn variable_fields(line: &str) -> Vec<String> {
+    let attribute = |word: &str| word.contains('=');
+    if line.contains('\t') {
+        let mut fields = line
+            .split('\t')
+            .map(str::trim)
+            .filter(|field| !field.is_empty());
+        let mut parts = fields
+            .by_ref()
+            .take(2)
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        // The type field may carry the attributes after a space.
+        let rest = fields.collect::<Vec<_>>().join(" ");
+        parts.extend(rest.split_whitespace().map(str::to_owned));
+        return parts;
+    }
+    let words = line.split_whitespace().collect::<Vec<_>>();
+    let Some(kind) = words
+        .iter()
+        .rposition(|word| !attribute(word))
+        .filter(|&kind| kind >= 2)
+    else {
+        return words.into_iter().map(str::to_owned).collect();
+    };
+    let mut parts = vec![
+        words[0].to_owned(),
+        words[1..kind].join(" "),
+        words[kind].to_owned(),
+    ];
+    parts.extend(words[kind + 1..].iter().map(|word| (*word).to_owned()));
+    parts
+}
+
 /// Parse a header decoded by [`header_text::decode_header`]: its lines end
 /// with the `Binary:` or `Values:` line.
 fn parse_header(
@@ -539,8 +579,9 @@ fn parse_header(
         }
 
         if in_variables && !line.is_empty() {
-            // Parse variable line: "index name type"
-            let parts: Vec<&str> = line.split_whitespace().collect();
+            // Parse variable line: "index name type", then any `key=value` attributes
+            // ngspice appends.
+            let parts = variable_fields(line);
             if parts.len() < 3 {
                 return Err(RawParseError::InvalidHeader(format!(
                     "line {line_number}: Malformed variable definition: {line}"
@@ -564,8 +605,8 @@ fn parse_header(
             })?;
             variables.push(RawVariable {
                 index,
-                name: parts[1].to_string(),
-                var_type: parts[2].to_string(),
+                name: parts[1].clone(),
+                var_type: parts[2].clone(),
             });
             continue;
         }
@@ -1523,6 +1564,29 @@ mod tests {
         assert_eq!(parsed.waveforms[1].y, [1.0, 2.5]);
         assert_eq!(parsed.waveforms[2].y, [0.0, 1.0]);
         assert_eq!(parsed.waveforms[2].x, [0.0, 1.0e-9]);
+    }
+
+    #[test]
+    fn a_variable_name_keeps_its_spaces_and_the_type_it_declares() {
+        let source = "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 4\n\
+                      No. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tV(in put)\tvoltage\n\
+                      \t2\ti(v1)\tcurrent max=2\n 3 I(R 1) device_current grid=3\nValues:\n\
+                      0 0.0\n 1.0\n 2.0\n 3.0\n";
+        let file = parse_plots(source.as_bytes().to_vec()).unwrap();
+        assert_eq!(
+            file.plots[0]
+                .variables
+                .iter()
+                .map(|variable| (variable.name.as_str(), variable.var_type.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("time", "time"),
+                ("V(in put)", "voltage"),
+                ("i(v1)", "current"),
+                ("I(R 1)", "device_current")
+            ]
+        );
+        assert_eq!(file.plots[0].waveforms[3].y, [3.0]);
     }
 
     fn parse_plots(bytes: Vec<u8>) -> Result<RawFile, RawParseError> {
