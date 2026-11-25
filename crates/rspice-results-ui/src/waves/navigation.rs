@@ -15,7 +15,11 @@ pub use jump::{
     place_stepping_cursor, prepare_jump, stepping_from,
 };
 
-pub const WAVE_SHARED_X_HEIGHT: f32 = 57.0;
+/// The ruler ends just under its overview lane, by the gap its cursor carets
+/// keep above it. It used to run eight points on, an empty band of canvas
+/// between the lane and whatever is drawn below the panes.
+pub const WAVE_SHARED_X_HEIGHT: f32 =
+    SHARED_X_LANE_TOP + SHARED_X_LANE_HEIGHT + SHARED_X_LANE_BOTTOM_GAP;
 
 /// The shared-X strip's three bands, offset from the strip's top edge.
 ///
@@ -27,6 +31,8 @@ const SHARED_X_FLAG_TOP: f32 = plot::X_AXIS_ROW_HEIGHT;
 const SHARED_X_FLAG_HEIGHT: f32 = 13.0;
 const SHARED_X_LANE_TOP: f32 = 35.0;
 const SHARED_X_LANE_HEIGHT: f32 = 14.0;
+const SHARED_X_LANE_BOTTOM_GAP: f32 =
+    SHARED_X_LANE_TOP - SHARED_X_FLAG_TOP - SHARED_X_FLAG_HEIGHT - RULER_CARET;
 
 /// Points the overview lane's mini-trace is drawn from, whatever the run
 /// retained. The lane is fourteen pixels tall and a plot wide, so a denser

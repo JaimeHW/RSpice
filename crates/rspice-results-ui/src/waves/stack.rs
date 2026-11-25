@@ -295,10 +295,10 @@ const WAVE_MIN_PLOT_HEIGHT: f32 = 24.0;
 /// a scale of one value.
 const LEAST_PLOT_HEIGHT: f32 = 40.0;
 
-/// Between two strips: a gap of canvas, then a hairline in border ink on top
-/// of the next strip's header. A strip's overview track then plainly ends its
-/// own strip, and the next header plainly starts a new one.
-const STRIP_GAP: f32 = 8.0;
+/// Between two strips: a hairline in border ink on top of the next strip's
+/// header. The ruler ends just under its overview track, so the track plainly
+/// ends its own strip and the next header plainly starts a new one; a band of
+/// canvas between them read as a gap in the sheet, not as a seam.
 const STRIP_DIVIDER: f32 = 1.0;
 /// What an analysis' block takes beside its strips: its header and the
 /// shared X axis under them.
@@ -842,7 +842,7 @@ pub fn show(
             )
         })
         .collect();
-    let separators = rows.len().saturating_sub(1) as f32 * (STRIP_GAP + STRIP_DIVIDER);
+    let separators = rows.len().saturating_sub(1) as f32 * STRIP_DIVIDER;
     let share = (avail.height() - separators) / rows.len() as f32;
     // An analysis' block grows with its strips, each kept readable, and the
     // stack scrolls once the blocks outgrow the window.
@@ -885,12 +885,10 @@ pub fn show(
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             for (position, &(model, xy)) in rows.iter().enumerate() {
                 if position > 0 {
-                    let (seam, _) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), STRIP_GAP + STRIP_DIVIDER),
+                    let (divider, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), STRIP_DIVIDER),
                         egui::Sense::hover(),
                     );
-                    let (gap, divider) = seam.split_top_bottom_at_y(seam.top() + STRIP_GAP);
-                    ui.painter().rect_filled(gap, 0.0, t.color.canvas_bg);
                     ui.painter().rect_filled(divider, 0.0, t.color.border);
                 }
                 let strip_height = row_heights[position];
