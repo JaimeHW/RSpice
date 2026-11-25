@@ -1389,3 +1389,113 @@ fn a_stepped_rawfile_read_without_its_log_names_its_runs_from_the_log_chosen_aft
         ]
     );
 }
+
+/// A damaged or hostile file of each format, as a person might pick one: the refusal says what
+/// is wrong in words, never a parser's debug form or an internal limit's key.
+#[test]
+fn every_refusal_of_a_damaged_file_is_in_plain_words() {
+    let npy = |descr: &str| {
+        let mut header = format!("{{'descr': '{descr}', 'fortran_order': False, 'shape': (2,), }}");
+        while (10 + header.len() + 1) % 64 != 0 {
+            header.push(' ');
+        }
+        header.push('\n');
+        let mut bytes = b"\x93NUMPY\x01\x00".to_vec();
+        bytes.extend_from_slice(&u16::try_from(header.len()).unwrap().to_le_bytes());
+        bytes.extend_from_slice(header.as_bytes());
+        bytes.extend_from_slice(&[0; 16]);
+        bytes
+    };
+    let npz = zip_bytes(&[("time.npy", &npy("<f8")), ("v.npy", &npy("<f8"))]);
+    let bundle = native_bundle(ResultImportFormat::RSpiceResultBundle);
+    let fst = generated_fst();
+    let raw_header = "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\n\
+                      No. Points: 5\nVariables:\n\t0\ttime\ttime\n\t1\tV(a)\tvoltage\nBinary:\n";
+    let with_tail = |head: &str, tail: &[u8]| [head.as_bytes(), tail].concat();
+    let hostile: Vec<(&str, Vec<u8>)> = vec![
+        ("table.parquet", b"PAR1 not a footer PAR1".to_vec()),
+        ("table.arrow", b"ARROW1\0\0 not a schema".to_vec()),
+        (
+            "table.feather",
+            b"\xff\xff\xff\xff\x10\0\0\0 not a message".to_vec(),
+        ),
+        ("objects.npy", npy("|O")),
+        ("text.npy", npy("<U8")),
+        ("dates.npy", npy("<M8[ns]")),
+        ("cut.npy", npy("<f8")[..40].to_vec()),
+        ("cut.npz", npz[..npz.len() - 20].to_vec()),
+        ("cut.rspiceresult", bundle[..bundle.len() / 2].to_vec()),
+        ("cut.fst", fst[..fst.len() / 2].to_vec()),
+        ("cut.raw", with_tail(raw_header, &[0; 12])),
+        ("cut.qraw", with_tail(raw_header, &[0; 12])),
+        (
+            "noise.raw",
+            b"Title: t\nPlotname: x\nVariables:\n0 a\n".to_vec(),
+        ),
+        ("cut.tr0", b"0002000000000000    9601* title".to_vec()),
+        (
+            "letters.tr0",
+            with_tail(
+                &format!(
+                    "{:<256}1       1       TIME            v(a             $&%#",
+                    "00010001000000009601"
+                ),
+                b"0.10000E+01abcdefghijk",
+            ),
+        ),
+        (
+            "words.mt0",
+            b"$DATA1 SOURCE='HSPICE'\n.TITLE 'x'\nalpha beta\none\n".to_vec(),
+        ),
+        (
+            "bad.vcd",
+            b"$timescale 1 ns $end\n$var wire 1 ! a $end\n$enddefinitions $end\n#0\nq!\n".to_vec(),
+        ),
+        (
+            "bad.mat",
+            [
+                b"MATLAB 5.0 MAT-file".as_slice(),
+                &[b' '; 109],
+                &[0, 1, b'I', b'M'],
+                &[0xff; 24],
+            ]
+            .concat(),
+        ),
+        (
+            "bad.h5",
+            [b"\x89HDF\r\n\x1a\n".as_slice(), &[0xff; 40]].concat(),
+        ),
+        (
+            "bad.psfascii",
+            b"HEADER\n\"PSFversion\" \"1.00\"\nSWEEP\n".to_vec(),
+        ),
+        ("bad.csv", b"time,V(out)\n0,abc\n1,2\n".to_vec()),
+        ("bad.s2p", b"# Hz S MA R 50\n1 2 3\n".to_vec()),
+        ("binary.txt", vec![0, 159, 146, 150, 0, 1, 2]),
+    ];
+    // What only a parser's debug form or a crate's internals would spell.
+    let debug = [
+        "::",
+        "Error(",
+        "Error {",
+        "Some(",
+        "None",
+        "Callback",
+        "external_data",
+        "result_values",
+        "Object0",
+        "ZipCentral",
+        "Utf8Error",
+        "kind: ",
+        "{:?}",
+    ];
+    for (name, bytes) in hostile {
+        let error = match parse_result_dataset(name, &bytes) {
+            Ok(_) => continue,
+            Err(error) => error,
+        };
+        for marker in debug {
+            assert!(!error.contains(marker), "{name}: '{marker}' in: {error}");
+        }
+    }
+}

@@ -86,6 +86,28 @@ pub fn decode_native_bundle_with_member(
     kind: NativeBundleKind,
     limits: NativeBundleReadLimits,
 ) -> Result<(DecodedNumericDataset, Option<NativeBundleMember>), NativeBundleError> {
+    read_native_bundle(bytes, kind, limits).map(|read| (read.dataset, read.member))
+}
+
+/// A bundle, read.
+#[derive(Debug)]
+pub struct NativeBundleRead {
+    pub dataset: DecodedNumericDataset,
+    /// The member of a `.step` sweep or Monte Carlo study the dataset is, when the bundle names
+    /// one.
+    pub member: Option<NativeBundleMember>,
+    /// The archive's members besides the manifest and the dataset, in name order: what a later
+    /// version wrote that this one does not read.
+    pub unread_members: Vec<String>,
+}
+
+/// [`decode_native_bundle_with_member`], with the members the bundle holds that this version
+/// does not read, so the import can say they were left out.
+pub fn read_native_bundle(
+    bytes: &[u8],
+    kind: NativeBundleKind,
+    limits: NativeBundleReadLimits,
+) -> Result<NativeBundleRead, NativeBundleError> {
     let max_members = limits.max_members;
     let max_expanded_bytes = limits.max_expanded_bytes;
     let mut archive =
@@ -93,7 +115,7 @@ pub fn decode_native_bundle_with_member(
             use crate::zip::reader::ArchiveReadError;
             match error {
                 ArchiveReadError::Zip(source) => NativeBundleError::Zip {
-                    context: "invalid ZIP container".into(),
+                    context: "the bundle is not a readable ZIP archive".into(),
                     source,
                 },
                 ArchiveReadError::MemberCount { members, limit } => NativeBundleError::InvalidData(
@@ -157,6 +179,11 @@ pub fn decode_native_bundle_with_member(
             "manifest must bind the canonical dataset.json member".into(),
         ));
     }
+    let mut unread_members = names
+        .into_iter()
+        .filter(|name| name != "manifest.json" && *name != manifest.dataset_member)
+        .collect::<Vec<_>>();
+    unread_members.sort();
     let dataset_bytes = read_zip_member(
         &mut archive,
         &manifest.dataset_member,
@@ -262,7 +289,11 @@ pub fn decode_native_bundle_with_member(
     decoded
         .normalize_coordinate_unit()
         .map_err(NativeBundleError::InvalidData)?;
-    Ok((decoded, dataset.member))
+    Ok(NativeBundleRead {
+        dataset: decoded,
+        member: dataset.member,
+        unread_members,
+    })
 }
 
 pub(super) fn read_zip_member(
@@ -273,7 +304,7 @@ pub(super) fn read_zip_member(
     let file = archive
         .by_name(name)
         .map_err(|error| NativeBundleError::Zip {
-            context: format!("missing '{name}'"),
+            context: format!("the bundle holds no {name}"),
             source: error,
         })?;
     if file.size() > max_member_bytes {

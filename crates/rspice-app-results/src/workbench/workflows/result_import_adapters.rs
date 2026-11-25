@@ -80,7 +80,7 @@ pub(super) fn parse_native_bundle(
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
     use rspice_formats::native_bundle::{
-        NativeBundleKind, NativeBundleReadLimits, decode_native_bundle_with_member,
+        NativeBundleKind, NativeBundleRead, NativeBundleReadLimits, read_native_bundle,
     };
 
     let kind = match format {
@@ -88,7 +88,11 @@ pub(super) fn parse_native_bundle(
         ResultImportFormat::RSpiceDatasetBundle => NativeBundleKind::Dataset,
         _ => unreachable!(),
     };
-    let (dataset, member) = decode_native_bundle_with_member(
+    let NativeBundleRead {
+        dataset,
+        member,
+        unread_members,
+    } = read_native_bundle(
         bytes,
         kind,
         NativeBundleReadLimits {
@@ -102,6 +106,18 @@ pub(super) fn parse_native_bundle(
     )
     .map_err(|error| adapter_error(format, error))?;
     let mut parsed = finish_numeric_dataset(format, dataset)?;
+    if !unread_members.is_empty() {
+        let (holds, them) = if unread_members.len() == 1 {
+            ("a member", "it was")
+        } else {
+            ("members", "they were")
+        };
+        parsed.notes.push(format!(
+            "The bundle also holds {holds} this version of RSpice does not read ({}); {them} \
+             left out.",
+            unread_members.join(", ")
+        ));
+    }
     // A bundle of one member of a `.step` sweep or Monte Carlo study reads back as that member,
     // titled the way every route titles one: `Transient · r=2k`.
     if let Some(member) = member.map(|member| member.into_family_member()) {
@@ -506,10 +522,11 @@ pub(super) fn parse_psf_ascii(
         .signal_names
         .into_iter()
         .zip(decoded.signal_values)
-        .map(|(name, real)| ImportedSignal {
+        .zip(decoded.signal_imag)
+        .map(|((name, real), imag)| ImportedSignal {
             name,
             real,
-            imag: None,
+            imag,
             unit: None,
         })
         .collect();

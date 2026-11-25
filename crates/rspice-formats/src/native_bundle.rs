@@ -11,7 +11,10 @@ mod writer;
 
 use std::borrow::Cow;
 
-pub use reader::{NativeBundleReadLimits, decode_native_bundle, decode_native_bundle_with_member};
+pub use reader::{
+    NativeBundleRead, NativeBundleReadLimits, decode_native_bundle,
+    decode_native_bundle_with_member, read_native_bundle,
+};
 pub use writer::encode_native_bundle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,7 +162,15 @@ impl std::fmt::Display for NativeBundleError {
                 "signal '{name}' must provide either values or both real and imag"
             ),
             Self::Json { context, source } => write!(formatter, "{context}: {source}"),
-            Self::Zip { context, source } => write!(formatter, "{context}: {source}"),
+            Self::Zip {
+                context,
+                source: zip::result::ZipError::FileNotFound,
+            } => formatter.write_str(context),
+            Self::Zip { context, source } => write!(
+                formatter,
+                "{context}: {}",
+                crate::zip::plain_zip_error(source)
+            ),
             Self::Io { context, source } => write!(formatter, "{context}: {source}"),
         }
     }

@@ -584,6 +584,48 @@ fn a_family_member_needs_version_four_and_named_finite_values() {
     );
 }
 
+#[test]
+fn a_bundle_names_the_members_it_does_not_read_and_a_damaged_one_says_so_plainly() {
+    use sha2::Digest as _;
+    let source = r#"{"schema":"rspice-waveform-dataset/1","analysis":"tran","coordinate":{"name":"time","values":[0.0,1.0]},"signals":[{"name":"V(out)","values":[0.0,1.0]}]}"#;
+    let manifest = serde_json::to_vec(&serde_json::json!({
+        "schema": NativeBundleKind::Result.manifest_schema(),
+        "dataset_member": "dataset.json",
+        "dataset_sha256": format!("{:x}", sha2::Sha256::digest(source.as_bytes())),
+    }))
+    .unwrap();
+    let bytes = zip_bytes(&[
+        ("manifest.json", &manifest),
+        ("dataset.json", source.as_bytes()),
+        ("events.json", b"{}"),
+        ("annotations/notes.txt", b"later"),
+    ]);
+    let read = read_native_bundle(&bytes, NativeBundleKind::Result, limits()).unwrap();
+    assert_eq!(
+        read.unread_members,
+        ["annotations/notes.txt", "events.json"]
+    );
+    assert_eq!(read.dataset.signals[0].name, "V(out)");
+
+    let cut = &bytes[..bytes.len() - 30];
+    let error = decode_native_bundle(cut, NativeBundleKind::Result, limits())
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        error,
+        "the bundle is not a readable ZIP archive: the archive is damaged or cut short: its \
+         directory of members cannot be read"
+    );
+    let error = decode_native_bundle(
+        &zip_bytes(&[("dataset.json", source.as_bytes())]),
+        NativeBundleKind::Result,
+        limits(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert_eq!(error, "the bundle holds no manifest.json");
+}
+
 fn pack_dataset(document: &serde_json::Value) -> Vec<u8> {
     pack_source(
         &serde_json::to_string(document).unwrap(),

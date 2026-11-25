@@ -98,7 +98,26 @@ impl std::fmt::Display for NumpyReadFailure {
             Self::Values(source) => write!(f, "could not decode NPY values: {source}"),
             Self::InexactInteger(source) => source.fmt(f),
             Self::UnsupportedDtype { kind, size } => {
-                write!(f, "unsupported NPY dtype {kind:?}{size}")
+                let held = match kind {
+                    npyz::TypeChar::Object => "Python objects".to_owned(),
+                    npyz::TypeChar::ByteStr | npyz::TypeChar::UnicodeStr => "text".to_owned(),
+                    npyz::TypeChar::TimeDelta | npyz::TypeChar::DateTime => {
+                        "dates or durations".to_owned()
+                    }
+                    npyz::TypeChar::RawData => "raw bytes".to_owned(),
+                    npyz::TypeChar::Float => format!("{}-bit floats", size * 8),
+                    npyz::TypeChar::Complex => format!("{}-bit complex numbers", size * 8),
+                    npyz::TypeChar::Int | npyz::TypeChar::Uint => {
+                        format!("{}-bit integers", size * 8)
+                    }
+                    npyz::TypeChar::Bool => format!("{size}-byte booleans"),
+                    _ => "values of a type numpy added later".to_owned(),
+                };
+                write!(
+                    f,
+                    "the array holds {held}, which a waveform cannot; save it as numbers \
+                     (float64, or complex128 for a complex signal)"
+                )
             }
             Self::NonVector { name, shape } => {
                 write!(f, "NPZ array '{name}' has non-vector shape {shape:?}")
@@ -109,12 +128,17 @@ impl std::fmt::Display for NumpyReadFailure {
             Self::WaveformBounds { shape, .. } => {
                 write!(f, "NPY waveform shape {shape:?} exceeds import bounds")
             }
-            Self::Archive(source) => write!(f, "invalid NPZ archive: {source}"),
+            Self::Archive(source) => f.write_str(&crate::zip::plain_zip_error(source)),
             Self::MemberCount { members, limit } => {
                 write!(f, "archive has {members} members; the limit is {limit}")
             }
             Self::ArchiveMember { index, source } => {
-                write!(f, "invalid archive member {index}: {source}")
+                write!(
+                    f,
+                    "member {} of the archive cannot be read: {}",
+                    index + 1,
+                    crate::zip::plain_zip_error(source)
+                )
             }
             Self::UnsafeMember(name) => write!(f, "unsafe archive member '{name}'"),
             Self::UnsupportedMember(name) => write!(

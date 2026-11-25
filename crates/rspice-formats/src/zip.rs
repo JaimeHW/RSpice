@@ -23,6 +23,30 @@ impl std::fmt::Display for StoredZipError {
 
 impl std::error::Error for StoredZipError {}
 
+/// Why a ZIP archive (an `.npz`, a result bundle) could not be read, in words for the person
+/// who chose it rather than the ZIP reader's internals.
+pub(crate) fn plain_zip_error(error: &zip::result::ZipError) -> String {
+    use zip::result::ZipError;
+    match error {
+        ZipError::Io(_) | ZipError::InvalidArchive(_) => {
+            "the archive is damaged or cut short: its directory of members cannot be read"
+                .to_owned()
+        }
+        ZipError::UnsupportedArchive(ZipError::PASSWORD_REQUIRED) | ZipError::InvalidPassword => {
+            "the archive is encrypted".to_owned()
+        }
+        ZipError::UnsupportedArchive(feature) => {
+            format!("the archive uses a ZIP feature this importer does not read: {feature}")
+        }
+        ZipError::CompressionMethodNotSupported(method) => format!(
+            "a member is compressed with ZIP method {method}, which this importer does not \
+             read; stored and deflated members read"
+        ),
+        ZipError::FileNotFound => "the archive does not hold the member".to_owned(),
+        other => format!("the archive could not be read: {other}"),
+    }
+}
+
 /// The files of the ZIP archive `bytes`, stored or deflated, each by its
 /// path in the archive; folders are left out. More than `max_members`
 /// members, a name given twice, or more than `max_bytes` of files once
@@ -35,9 +59,7 @@ pub fn read_zip_files(
     use std::io::Read as _;
     let mut archive =
         reader::open_unique_archive(bytes, max_members).map_err(|error| match error {
-            reader::ArchiveReadError::Zip(error) => {
-                format!("the archive could not be read: {error}")
-            }
+            reader::ArchiveReadError::Zip(error) => plain_zip_error(&error),
             reader::ArchiveReadError::MemberCount { members, limit } => {
                 format!("the archive holds {members} members; at most {limit} are read")
             }
@@ -50,7 +72,7 @@ pub fn read_zip_files(
     for index in 0..archive.len() {
         let member = archive
             .by_index(index)
-            .map_err(|error| format!("the archive could not be read: {error}"))?;
+            .map_err(|error| plain_zip_error(&error))?;
         if member.is_dir() {
             continue;
         }
