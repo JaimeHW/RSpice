@@ -246,10 +246,10 @@ pub fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
             &mut selection,
             &mut intent,
         );
-        // What is left under the header, above the page's bottom inset. The
-        // detail region takes its share of it only where a row of the table
-        // still shows above it; where it would not, it yields, and a selected
-        // row is still marked in the table.
+        // What is left under the header, down to the dock's foot. The detail
+        // region takes its share of it only where a row of the table still
+        // shows above it; where it would not, it yields, and a selected row
+        // is still marked in the table.
         let room = if shows_table {
             (ui.available_height() - note_height).max(0.0)
         } else {
@@ -259,12 +259,14 @@ pub fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
         let wanted = selection
             .listed
             .and_then(|_| detail::height(ui, room - pitch));
-        // Whole rows: at rest, the body's bottom edge falls between two rows
-        // rather than through one. The detail region takes what the whole
-        // rows leave, so a line of the finding that fits is shown rather than
-        // left under empty space; with no region, what is left stays empty
-        // above the page's bottom inset.
-        let table_height = ((room - wanted.unwrap_or(0.0)) / pitch).floor().max(0.0) * pitch;
+        // With no detail region the table runs to the dock's foot, its last
+        // row cut by it as a scrolled list's is. With one, the table keeps
+        // whole rows and the region takes what they leave, so a line of the
+        // finding that fits is shown rather than left under empty space.
+        let table_height = match wanted {
+            Some(wanted) => ((room - wanted) / pitch).floor().max(0.0) * pitch,
+            None => room,
+        };
         let detail_height = wanted.map_or(0.0, |_| room - table_height);
         // What the table's height was reserved against. A click inside the
         // table can select a row the height was not reserved for, and drawing

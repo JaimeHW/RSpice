@@ -293,7 +293,7 @@ fn verbs(
 ///
 /// The view ends where a line ends: in a region shorter than what it holds,
 /// the line the bottom would have cut is left to the scroll, and the space it
-/// would have taken stays empty above the page's bottom inset.
+/// would have taken stays empty above the dock's foot.
 fn lines(
     ui: &mut Ui,
     row: &DiagnosticRow<'_>,

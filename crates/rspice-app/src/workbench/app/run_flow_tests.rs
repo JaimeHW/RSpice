@@ -9,6 +9,7 @@ use rspice_app_results::workbench::documents::result_document::waveform_plotted;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
 use rspice_app_state::workbench::examples::EXAMPLES;
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::docks::console::CONSOLE_BODY_PADDING_TOP;
 use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 
@@ -307,7 +308,11 @@ fn the_plot_page_is_one_band_over_its_plot_and_the_drawing_stays_in_sight() {
             "the page spends no row on {tab}"
         );
     }
-    let band = egui::Rect::from_min_size(page.min, egui::vec2(page.width(), 28.0));
+    // The band reaches back over the page's top inset, to the strip's rule.
+    let band = egui::Rect::from_min_size(
+        page.min - egui::vec2(0.0, CONSOLE_BODY_PADDING_TOP),
+        egui::vec2(page.width(), 28.0),
+    );
     for control in ["A|B", "H", "Open in Results"] {
         let rect = user.expect(control);
         assert!(
@@ -514,7 +519,17 @@ fn placing_a_cursor_keeps_the_dock_where_the_reader_left_it() {
     let mut user = example_project();
     user.app.state.workbench.activate(Workspace::Design);
     run_to_its_end(&mut user);
-    user.click("A|B");
+    if !user
+        .app
+        .state
+        .results
+        .results
+        .session
+        .cursor_tool
+        .is_armed()
+    {
+        user.click("A|B");
+    }
     let page = plot_page(&user);
     user.press(
         egui::pos2(page.center().x, page.center().y + 20.0),

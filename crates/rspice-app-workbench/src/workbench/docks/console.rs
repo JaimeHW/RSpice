@@ -70,20 +70,16 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     let body_rect = ui.available_rect_before_wrap();
     ui.painter()
         .rect_filled(body_rect, 0.0, Tokens::get(ui.ctx()).color.bg_inset);
-    // The page runs from side to side: a table's header band and row fills
-    // meet the dock's edges, and each page insets its own text by
-    // `CONSOLE_BODY_PADDING_X` (see `padded`). The top is inset here for
-    // every page alike, under the band a page's toolbar covers it with. The
-    // foot is inset too, except under the plot, whose well meets the dock's
-    // foot as it meets its sides.
-    let foot = if page == ConsolePage::Plot {
-        0.0
-    } else {
-        CONSOLE_BODY_PADDING_BOTTOM
-    };
+    // The page runs from side to side and down to the dock's foot: a
+    // table's header band and row fills meet the dock's edges, its last row
+    // cut by the foot as a scrolled list's is, and the plot's well meets
+    // them too. Each page insets its own text by `CONSOLE_BODY_PADDING_X`
+    // (see `padded`), and prose keeps the foot's inset as well (see
+    // `prose`). The top is inset here for every page alike, under the band
+    // a page's toolbar covers it with.
     let content_rect = egui::Rect::from_min_max(
         egui::pos2(body_rect.left(), body_rect.top() + CONSOLE_BODY_PADDING_TOP),
-        egui::pos2(body_rect.right(), body_rect.bottom() - foot),
+        body_rect.right_bottom(),
     );
     let body = ui.scope_builder(
         egui::UiBuilder::new()
@@ -104,7 +100,7 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 // The transcript is prose, and keeps the inset on every side.
                 ui.add_space(CONSOLE_BODY_PADDING_TOP);
                 if prose_fits(ui) {
-                    padded(ui, |ui| transcript::console(ui, app.session_mut()));
+                    prose(ui, |ui| transcript::console(ui, app.session_mut()));
                 }
             }
             ConsolePage::Problems => {
@@ -121,9 +117,17 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
             ConsolePage::References => references::references(ui, app),
         },
     );
+    // The page's region is the whole of what it owns, whatever it drew in
+    // it: a screen reader, and a test, reads where the page stands.
     ui.ctx().accesskit_node_builder(body.response.id, |node| {
         node.set_role(egui::accesskit::Role::TabPanel);
         node.set_label(page.label());
+        node.set_bounds(egui::accesskit::Rect {
+            x0: content_rect.min.x.into(),
+            y0: content_rect.min.y.into(),
+            x1: content_rect.max.x.into(),
+            y1: content_rect.max.y.into(),
+        });
     });
 }
 
@@ -1273,16 +1277,14 @@ fn measurement_table(ui: &mut Ui, rows: &[MeasurementTableRow]) {
         x += width + 2.0 * CONSOLE_CELL_INSET;
     }
 
-    // The header shows only over at least one whole row, and the body holds
-    // whole rows: a dock dragged short cuts neither a row nor the band, and
-    // leaves its bottom inset empty.
-    let pitch = CONSOLE_ROW_MIN_HEIGHT + ui.spacing().item_spacing.y;
+    // The header shows only over at least one whole row, so a dock dragged
+    // short never cuts the band. The body runs to the dock's foot, its last
+    // row cut by it as a scrolled list's is.
     if ui.available_height() + 0.5 < CONSOLE_TABLE_HEADER_HEIGHT + CONSOLE_ROW_MIN_HEIGHT {
         return;
     }
     let (_, header) = ui.allocate_space(Vec2::new(band.span(), CONSOLE_TABLE_HEADER_HEIGHT));
-    let body_height =
-        ((ui.available_height() + ui.spacing().item_spacing.y) / pitch).floor() * pitch;
+    let body_height = ui.available_height();
     paint_header_band(ui, header, &starts[1..], None);
     for (start, heading) in starts.iter().zip(MEASUREMENT_HEADINGS) {
         ui.painter().text(
@@ -1624,6 +1626,21 @@ pub fn padded<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     .inner
 }
 
+/// Run `add` as a page's prose: in the text column, short of the dock's foot
+/// by `CONSOLE_BODY_PADDING_BOTTOM`. Prose keeps the inset on every side; a
+/// table and the plot run to the foot.
+pub fn prose<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let page = ui.available_rect_before_wrap();
+    let text = page.with_max_y((page.bottom() - CONSOLE_BODY_PADDING_BOTTOM).max(page.top()));
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(text)
+            .layout(Layout::top_down(Align::Min)),
+        |ui| padded(ui, add),
+    )
+    .inner
+}
+
 /// A page's toolbar: its controls in the text column, on a band of the
 /// panel's own fill ruled off from the page under it, as the tab strip is.
 /// The page's well starts under the rule; the controls used to stand on the
@@ -1669,11 +1686,12 @@ pub fn toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     inner
 }
 
-/// Whether one whole row fits in what is left of the page. A dock dragged
-/// shorter than a page's toolbar and one row shows the toolbar alone, rather
-/// than a line cut by its bottom edge.
+/// Whether one whole line of prose fits in what is left of the page, above
+/// the inset prose keeps at the dock's foot. A dock dragged shorter than a
+/// page's toolbar and one line shows the toolbar alone, rather than a line
+/// cut by its bottom edge.
 pub fn prose_fits(ui: &Ui) -> bool {
-    ui.available_height() + 0.5 >= CONSOLE_ROW_MIN_HEIGHT
+    ui.available_height() + 0.5 >= CONSOLE_ROW_MIN_HEIGHT + CONSOLE_BODY_PADDING_BOTTOM
 }
 
 /// The line a page paints instead of rows.
