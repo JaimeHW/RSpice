@@ -71,9 +71,9 @@ pub fn decode_touchstone(
     };
     if identified_format != parsed_format {
         return Err(format!(
-            "the source was identified as '{}' but declares '{}'; refusing an ambiguous import",
-            identified_format.canonical_id(),
-            parsed_format.canonical_id()
+            "the source was identified as {} but declares {}; refusing an ambiguous import",
+            identified_format.label(),
+            parsed_format.label()
         )
         .into());
     }

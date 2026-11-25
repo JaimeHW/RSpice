@@ -140,11 +140,11 @@ impl std::fmt::Display for ExactIntegerError {
         match self {
             Self::Signed { identity, value } => write!(
                 f,
-                "'{identity}' integer {value} cannot be represented exactly as f64"
+                "'{identity}' holds {value}, a whole number past 2^53 that cannot be represented exactly"
             ),
             Self::Unsigned { identity, value } => write!(
                 f,
-                "'{identity}' integer {value} cannot be represented exactly as f64"
+                "'{identity}' holds {value}, a whole number past 2^53 that cannot be represented exactly"
             ),
         }
     }

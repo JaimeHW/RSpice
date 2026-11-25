@@ -30,9 +30,9 @@ impl std::fmt::Display for ResultFormatError {
                 signature_format,
             } => write!(
                 f,
-                "the .{extension} extension identifies '{}' but the file signature identifies '{}'; refusing an ambiguous import",
-                extension_format.canonical_id(),
-                signature_format.canonical_id()
+                "the .{extension} extension names a {} file but the file's contents are {}; refusing an ambiguous import",
+                extension_format.label(),
+                signature_format.label()
             ),
             Self::UnknownBinary => f.write_str(
                 "the file is neither text nor a result container this importer reads",

@@ -44,7 +44,7 @@ impl<'de, const NULLABLE: bool> Deserialize<'de> for Samples<NULLABLE> {
                             && source != format!("{value:.0}")
                         {
                             return Err(A::Error::custom(format!(
-                                "integer sample {} cannot be represented exactly as f64",
+                                "sample {} is a whole number past 2^53 that cannot be represented exactly",
                                 values.len()
                             )));
                         }

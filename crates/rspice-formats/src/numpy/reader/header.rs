@@ -118,7 +118,7 @@ pub(super) fn preflight(bytes: &[u8], format: &str) -> Result<(Vec<usize>, usize
                 return Err(invalid(format, "NPY dimensions must be integers"));
             };
             let dimension = u64::try_from(integer)
-                .map_err(|_| invalid(format, "NPY dimension is outside the u64 range"))?;
+                .map_err(|_| invalid(format, "an array dimension is negative or too large"))?;
             usize::try_from(dimension)
                 .map_err(|_| read_error(format, NumpyReadFailure::DimensionTooLarge(dimension)))
         })

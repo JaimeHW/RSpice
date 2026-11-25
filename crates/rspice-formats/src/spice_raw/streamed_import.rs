@@ -294,7 +294,7 @@ fn take_block(
 
 /// A rawfile reader's failure in the import's words.
 fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
-    format!("{} import: {detail}", format.canonical_id())
+    format!("{} import: {detail}", format.label())
 }
 
 /// A refusal of the rows is already in its own words; the reader's is the rawfile's.

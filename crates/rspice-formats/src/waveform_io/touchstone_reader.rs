@@ -608,8 +608,9 @@ pub fn read_touchstone_bytes_with_limit(
 fn validate_port_count(ports: usize) -> Result<(), TouchstoneError> {
     if ports == 0 || ports > MAX_TOUCHSTONE_PORTS {
         return Err(format!(
-            "Touchstone port count {ports} is outside the supported range 1..={MAX_TOUCHSTONE_PORTS}"
-        ).into());
+            "the file declares {ports} ports; a Touchstone import takes 1 to {MAX_TOUCHSTONE_PORTS}"
+        )
+        .into());
     }
     Ok(())
 }

@@ -63,20 +63,15 @@ impl std::fmt::Display for DigitalReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidData { format, detail } => {
-                write!(f, "{} import: {detail}", format.canonical_id())
+                write!(f, "{} import: {detail}", format.label())
             }
             Self::Vcd {
                 format,
                 source: rspice_core::io::VcdError::ResourceLimit(limit),
-            } => write!(
-                f,
-                "{} import: {}",
-                format.canonical_id(),
-                plain_limit(limit)
-            ),
-            Self::Vcd { format, source } => write!(f, "{} import: {source}", format.canonical_id()),
+            } => write!(f, "{} import: {}", format.label(), plain_limit(limit)),
+            Self::Vcd { format, source } => write!(f, "{} import: {source}", format.label()),
             Self::EventProjection { format, source } => {
-                write!(f, "{} import: {source}", format.canonical_id())
+                write!(f, "{} import: {source}", format.label())
             }
             Self::EventTimeCount {
                 format,
@@ -85,13 +80,13 @@ impl std::fmt::Display for DigitalReadError {
                 max,
             } => write!(
                 f,
-                "{} import: digital trace has {count} distinct event times; expected {min}..={max}",
-                format.canonical_id()
+                "{} import: the dump changes at {count} distinct times; a trace takes {min} to {max}",
+                format.label()
             ),
             Self::InexactTimestamp { format, tick } => write!(
                 f,
-                "{} import: digital timestamp tick {tick} cannot be represented exactly as f64",
-                format.canonical_id()
+                "{} import: tick {tick} is a time past 2^53 ticks that cannot be represented exactly",
+                format.label()
             ),
             #[cfg(feature = "fst")]
             Self::Fst(source) => source.fmt(f),
@@ -423,31 +418,30 @@ pub fn decode_fst(
     let mut events = Vec::new();
     let mut recorded: Vec<Vec<rspice_core::io::VcdChange>> = Vec::new();
     let mut unknown_changes = 0_usize;
-    let decoded =
-        crate::fst::decode_fst(bytes, fst_limits(policy), format.canonical_id(), |event| {
-            if recorded.len() <= event.signal {
-                recorded.resize_with(event.signal + 1, Vec::new);
-            }
-            let value = match event.raw {
-                crate::fst::FstRawValue::Logic(bits) => rspice_core::io::VcdValue::Logic(
-                    bits.iter().copied().map(fst_bit).collect::<Vec<_>>(),
-                ),
-                crate::fst::FstRawValue::Real(value) => rspice_core::io::VcdValue::Real(value),
-            };
-            recorded[event.signal].push(rspice_core::io::VcdChange {
-                tick: event.tick,
-                value,
-            });
-            events.push(DigitalEvent {
-                tick: event.tick,
-                signal: event.signal,
-                value: event.sample.unwrap_or_else(|| {
-                    unknown_changes += 1;
-                    UNKNOWN_LOGIC_LEVEL
-                }),
-            });
-        })
-        .map_err(DigitalReadError::Fst)?;
+    let decoded = crate::fst::decode_fst(bytes, fst_limits(policy), format.label(), |event| {
+        if recorded.len() <= event.signal {
+            recorded.resize_with(event.signal + 1, Vec::new);
+        }
+        let value = match event.raw {
+            crate::fst::FstRawValue::Logic(bits) => rspice_core::io::VcdValue::Logic(
+                bits.iter().copied().map(fst_bit).collect::<Vec<_>>(),
+            ),
+            crate::fst::FstRawValue::Real(value) => rspice_core::io::VcdValue::Real(value),
+        };
+        recorded[event.signal].push(rspice_core::io::VcdChange {
+            tick: event.tick,
+            value,
+        });
+        events.push(DigitalEvent {
+            tick: event.tick,
+            signal: event.signal,
+            value: event.sample.unwrap_or_else(|| {
+                unknown_changes += 1;
+                UNKNOWN_LOGIC_LEVEL
+            }),
+        });
+    })
+    .map_err(DigitalReadError::Fst)?;
     recorded.resize_with(decoded.signals.len(), Vec::new);
     let signals = decoded
         .signals
@@ -947,7 +941,7 @@ mod tests {
             "{error}"
         );
         assert!(
-            error.starts_with("vcd import: the file holds more than the 2 values"),
+            error.starts_with("VCD import: the file holds more than the 2 values"),
             "{error}"
         );
     }
@@ -1087,7 +1081,7 @@ mod tests {
             decode_vcd(vcd, ResultImportFormat::Vcd, policy)
                 .unwrap_err()
                 .to_string()
-                .contains("2 distinct event times; expected 1..=1")
+                .contains("changes at 2 distinct times; a trace takes 1 to 1")
         );
     }
 
@@ -1101,6 +1095,6 @@ mod tests {
         assert_eq!(*format, ResultImportFormat::Vcd);
         assert!(matches!(source, rspice_core::io::VcdError::Encoding(_)));
         assert!(error.source().unwrap().is::<rspice_core::io::VcdError>());
-        assert_eq!(error.to_string(), format!("vcd import: {source}"));
+        assert_eq!(error.to_string(), format!("VCD import: {source}"));
     }
 }

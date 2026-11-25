@@ -36,7 +36,7 @@ pub struct ImportedWaveforms {
 }
 
 fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
-    format!("{} import: {detail}", format.canonical_id())
+    format!("{} import: {detail}", format.label())
 }
 
 /// Check source shape, precision and resource policy, preserving validation order.
@@ -838,7 +838,7 @@ mod tests {
                 limits,
             )
             .unwrap_err(),
-            "numpy-npz import: duplicate signal identity 'v(OUT)'"
+            "NumPy .npz import: duplicate signal identity 'v(OUT)'"
         );
     }
 }

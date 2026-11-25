@@ -21,7 +21,7 @@ fn archive_expanded_bytes() -> u64 {
 }
 
 pub(super) fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
-    format!("{} import: {detail}", format.canonical_id())
+    format!("{} import: {detail}", format.label())
 }
 
 fn finish_dataset(
@@ -143,7 +143,7 @@ pub(super) fn parse_hdf5(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
-    let decoded = rspice_formats::hdf5::decode_hdf5(bytes, hdf5_limits(), format.canonical_id())
+    let decoded = rspice_formats::hdf5::decode_hdf5(bytes, hdf5_limits(), format.label())
         .map_err(|error| error.to_string())?;
     finish_numeric_dataset(format, decoded)
 }
@@ -153,9 +153,8 @@ pub(super) fn parse_matlab_v73(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
-    let decoded =
-        rspice_formats::hdf5::decode_matlab_v73(bytes, hdf5_limits(), format.canonical_id())
-            .map_err(|error| error.to_string())?;
+    let decoded = rspice_formats::hdf5::decode_matlab_v73(bytes, hdf5_limits(), format.label())
+        .map_err(|error| error.to_string())?;
     finish_numeric_dataset(format, decoded)
 }
 
@@ -176,7 +175,7 @@ pub(super) fn parse_arrow_ipc(
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
     let table =
-        rspice_formats::columnar::decode_arrow_ipc(bytes, columnar_limits(), format.canonical_id())
+        rspice_formats::columnar::decode_arrow_ipc(bytes, columnar_limits(), format.label())
             .map_err(|error| error.to_string())?;
     finish_numeric_dataset(format, table)
 }
@@ -186,9 +185,8 @@ pub(super) fn parse_parquet(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
-    let table =
-        rspice_formats::columnar::decode_parquet(bytes, columnar_limits(), format.canonical_id())
-            .map_err(|error| error.to_string())?;
+    let table = rspice_formats::columnar::decode_parquet(bytes, columnar_limits(), format.label())
+        .map_err(|error| error.to_string())?;
     finish_numeric_dataset(format, table)
 }
 
@@ -222,14 +220,13 @@ pub(super) fn parse_npy(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
-    let array =
-        rspice_formats::numpy::reader::decode_npy(bytes, source_capacity(), format.canonical_id())
-            .map_err(|error| error.to_string())?;
+    let array = rspice_formats::numpy::reader::decode_npy(bytes, source_capacity(), format.label())
+        .map_err(|error| error.to_string())?;
     let decoded = rspice_formats::numpy::reader::npy_matrix_to_dataset(
         array,
         source_capacity(),
         source_capacity(),
-        format.canonical_id(),
+        format.label(),
     )
     .map_err(|error| error.to_string())?;
     finish_numeric_dataset(format, decoded)
@@ -248,7 +245,7 @@ pub(super) fn parse_npz(
             max_numeric_values: source_capacity(),
         },
         &RESULT_COORDINATE_NAMES,
-        format.canonical_id(),
+        format.label(),
     )
     .map_err(|error| error.to_string())?;
     finish_numeric_dataset(format, decoded)
@@ -291,7 +288,7 @@ pub(super) fn parse_matlab_v5(
             min_rows: MIN_RESULT_ROWS,
             coordinate_names: &RESULT_COORDINATE_NAMES,
         },
-        format.canonical_id(),
+        format.label(),
     )
     .map_err(|error| error.to_string())?;
     let mut parsed = finish_numeric_dataset(format, decoded.dataset)?;

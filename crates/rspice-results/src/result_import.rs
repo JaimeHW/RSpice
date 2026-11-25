@@ -104,6 +104,33 @@ impl ResultImportFormat {
         }
     }
 
+    /// The format as a reader names it, for messages about one of its files.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RSpiceResultBundle => "RSpice result bundle",
+            Self::RSpiceDatasetBundle => "RSpice dataset bundle",
+            Self::CsvRfc4180 => "CSV",
+            Self::Tsv => "TSV",
+            Self::TouchstoneV1 => "Touchstone v1",
+            Self::TouchstoneV2 => "Touchstone v2",
+            Self::Hdf5 => "HDF5",
+            Self::ArrowIpc => "Arrow IPC",
+            Self::Parquet => "Parquet",
+            Self::NumpyNpy => "NumPy .npy",
+            Self::NumpyNpz => "NumPy .npz",
+            Self::MatlabV4 => "MATLAB v4",
+            Self::MatlabV5 => "MATLAB v5",
+            Self::MatlabV73 => "MATLAB v7.3",
+            Self::SpiceRaw => "SPICE rawfile",
+            Self::QspiceRaw => "QSPICE .qraw",
+            Self::Hspice => "HSPICE waveform",
+            Self::HspiceMeasure => "HSPICE measure",
+            Self::PsfAscii => "Spectre PSF",
+            Self::Vcd => "VCD",
+            Self::Fst => "FST",
+        }
+    }
+
     pub fn from_canonical_id(id: &str) -> Option<Self> {
         Self::ALL
             .into_iter()

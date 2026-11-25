@@ -107,7 +107,7 @@ impl std::fmt::Display for ColumnarReadFailure {
                 max_columns,
             } => write!(
                 f,
-                "the table has {fields} fields; expected 2..={max_columns}"
+                "the table has {fields} columns; an import takes 2 to {max_columns}"
             ),
             Self::SchemaChanged => f.write_str("record-batch schema changed within the source"),
             Self::RowCountOverflow => f.write_str("row count overflow"),
@@ -1000,7 +1000,7 @@ mod tests {
         );
         assert_eq!(
             error.to_string(),
-            "arrow_ipc import: 'count' integer 9007199254740993 cannot be represented exactly as f64"
+            "arrow_ipc import: 'count' holds 9007199254740993, a whole number past 2^53 that cannot be represented exactly"
         );
         assert!(
             std::error::Error::source(&error.reason)

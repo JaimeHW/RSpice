@@ -1248,7 +1248,7 @@ fn an_hspice_swept_transient_imports_one_analysis_per_sweep_value() {
     let error = parse_result_dataset("rc.tr0", &bytes[..bytes.len() - 12]).expect_err("cut");
     assert_eq!(
         error,
-        "hspice import: the file ends inside a table, before the value that closes it"
+        "HSPICE waveform import: the file ends inside a table, before the value that closes it"
     );
 }
 
@@ -1488,6 +1488,10 @@ fn every_refusal_of_a_damaged_file_is_in_plain_words() {
         "Utf8Error",
         "kind: ",
         "{:?}",
+        "..=",
+        "f64",
+        "u64",
+        "usize",
     ];
     for (name, bytes) in hostile {
         let error = match parse_result_dataset(name, &bytes) {
@@ -1496,6 +1500,13 @@ fn every_refusal_of_a_damaged_file_is_in_plain_words() {
         };
         for marker in debug {
             assert!(!error.contains(marker), "{name}: '{marker}' in: {error}");
+        }
+        for format in ResultImportFormat::ALL {
+            let id = format.canonical_id();
+            assert!(
+                !error.contains(&format!("{id} import")),
+                "{name}: '{id}' in: {error}"
+            );
         }
     }
 }

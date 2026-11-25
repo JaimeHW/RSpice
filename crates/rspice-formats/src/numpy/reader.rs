@@ -786,11 +786,7 @@ mod tests {
         assert!(
             matches!(&error.reason, NumpyReadFailure::InexactInteger(crate::numeric::ExactIntegerError::Unsigned { value, .. }) if *value == crate::numeric::MAX_EXACT_F64_INTEGER + 1)
         );
-        assert!(
-            error
-                .to_string()
-                .contains("cannot be represented exactly as f64")
-        );
+        assert!(error.to_string().contains("cannot be represented exactly"));
     }
 
     #[test]

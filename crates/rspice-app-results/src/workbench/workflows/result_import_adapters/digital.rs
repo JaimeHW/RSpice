@@ -55,7 +55,7 @@ pub(super) fn preflight_fst_for_test(
             max_values: source_capacity(),
             max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
         },
-        format.canonical_id(),
+        format.label(),
     )
     .map(drop)
     .map_err(|error| error.to_string())
