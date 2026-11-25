@@ -25,7 +25,9 @@ use super::bus_interaction::{BusTapCandidateError, resolve_bus_tap_candidate_on_
 use super::move_interaction::handle_armed_move_selection;
 use super::navigation::primary_pan_gesture_active;
 use super::parts::CanvasParts;
-use super::requests::{DesignSurfaceRequest, PlotProbedDifference, PlotProbedTrace, ProbePlot};
+use super::requests::{
+    DesignSurfaceRequest, DifferencePlot, PlotProbedDifference, PlotProbedTrace, ProbePlot,
+};
 use super::selection_drag::handle_select_dragging;
 use super::sheet_visibility::{finish_wire_on_active_sheet, with_active_wire_topology_in};
 use super::snap_resolution::resolve_grid_pointer;
@@ -2092,22 +2094,28 @@ pub(super) fn probe_point(
 }
 
 /// A two-net probe from `plus` to `minus`: the voltage between the nets
-/// under each end, `V(a) - V(b)`, goes on the plot as an expression on the
-/// last run's view. Ground at one end reads the other net's own voltage. A
-/// net the last run does not hold is saved for the next run, on a view that
-/// may write the plan, and the status line says to run again.
+/// under each end, `V(a) - V(b)`, goes on the plot as an expression, each
+/// net spelled as the plot names its trace. On a view that may write the
+/// design, each end keeps a marker with its sign, which saves its net for the
+/// next run; the difference stays on the shown run's view, or with no run
+/// shown waits for the plan's next run, and plots once a run holds both nets.
+/// Ground at the minus end is a probe of the other net, with its marker;
+/// ground at the plus end reads the other net negated.
 pub(super) fn probe_difference(
     state: &mut CanvasParts<'_>,
-    plus: Point,
-    minus: Point,
+    plus_at: Point,
+    minus_at: Point,
     symbol_context: &SchematicSymbolContext,
 ) {
+    use crate::state::DifferenceEnd;
+
     let net_at =
         |state: &CanvasParts<'_>, at: Point| match probe_signal_at(state, at, symbol_context) {
             Some(ComponentProbe::Voltage(net)) => Some(net),
             _ => None,
         };
-    let (Some(plus_net), Some(minus_net)) = (net_at(state, plus), net_at(state, minus)) else {
+    let (Some(plus_net), Some(minus_net)) = (net_at(state, plus_at), net_at(state, minus_at))
+    else {
         state.prompt("Nothing probed: a two-net probe goes from one wire to another.");
         return;
     };
@@ -2127,74 +2135,130 @@ pub(super) fn probe_difference(
             return;
         }
     };
+    let read_only = state.schematic_edit_read_only();
     let ground =
         |spelling: &OccurrenceProbeSpelling| is_ground_voltage_expression(spelling.engine());
-    // The difference to ground is the other net's own voltage, which the
-    // run already names.
+    // The difference to ground is the plus net's own voltage, which the run
+    // already names: a single net's probe, marker and all.
     if ground(&minus) {
-        let outcome = probe_request(state.schematic_edit_read_only())(state, &plus);
-        report_probe_outcome(state, plus.display(), outcome);
+        let outcome = probe_request(read_only)(state, &plus);
+        finish_probe(state, plus_at, &plus, outcome, read_only);
         return;
     }
-    let display = if ground(&plus) {
-        format!("-{}", minus.display())
-    } else {
-        format!("{} - {}", plus.display(), minus.display())
-    };
-    let traces = [&plus, &minus].map(|spelling| {
-        (!ground(spelling)).then(|| materialized_probe_trace(state.model, spelling.engine()))
+    let ends = [
+        (plus_at, &plus, DifferenceEnd::Plus),
+        (minus_at, &minus, DifferenceEnd::Minus),
+    ];
+    let traces = ends.map(|(_, spelling, _)| {
+        (!ground(spelling))
+            .then(|| materialized_probe_trace(state.model, spelling.engine()))
+            .flatten()
     });
-    match traces {
-        [Some(Some(plus_trace)), Some(Some(minus_trace))] => {
-            state.workbench.outbox.push(PlotProbedDifference {
-                analysis: plus_trace.analysis_key(),
-                expression: format!(
-                    "{} - {}",
-                    plus_trace.source_name(),
-                    minus_trace.source_name()
-                ),
-                display,
-            });
+    // Each net reads as the plot names its trace: the run's name for it, in
+    // the case the drawing writes it, so `V(PA) - V(PB)` stands beside the
+    // traces `V(PA)` and `V(PB)`.
+    let notations = crate::state::bus_notations(&state.model.workspace, &state.model.schematic);
+    let operand = |index: usize| {
+        let name = traces[index]
+            .as_ref()
+            .map_or_else(|| ends[index].1.engine(), |trace| trace.source_name());
+        notations.display(name).into_owned()
+    };
+    let expression = if ground(&plus) {
+        format!("-{}", operand(1))
+    } else {
+        format!("{} - {}", operand(0), operand(1))
+    };
+    let missing: Vec<&OccurrenceProbeSpelling> = ends
+        .iter()
+        .zip(&traces)
+        .filter(|((_, spelling, _), trace)| !ground(spelling) && trace.is_none())
+        .map(|((_, spelling, _), _)| *spelling)
+        .collect();
+    let shown = shown_analysis(state.model);
+    if read_only {
+        // A view that may not write the design plots what the run holds.
+        match shown.filter(|_| missing.is_empty()) {
+            Some(analysis) => state.workbench.outbox.push(PlotProbedDifference {
+                on: DifferencePlot::Analysis(analysis),
+                expression,
+                saved: Vec::new(),
+            }),
+            None => state.prompt(format!(
+                "{expression} is not plotted: the last run does not hold {}.",
+                missing
+                    .iter()
+                    .map(|spelling| spelling.display())
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            )),
         }
-        [None, Some(Some(minus_trace))] => {
-            state.workbench.outbox.push(PlotProbedDifference {
-                analysis: minus_trace.analysis_key(),
-                expression: format!("-{}", minus_trace.source_name()),
-                display,
-            });
-        }
-        _ => {
-            let missing: Vec<&OccurrenceProbeSpelling> = [&plus, &minus]
-                .into_iter()
-                .filter(|spelling| {
-                    !ground(spelling)
-                        && materialized_probe_trace(state.model, spelling.engine()).is_none()
-                })
-                .collect();
-            let names = missing
-                .iter()
-                .map(|spelling| spelling.display())
-                .collect::<Vec<_>>()
-                .join(" and ");
-            if state.schematic_edit_read_only() {
-                state.prompt(format!(
-                    "{display} is not plotted: the last run does not hold {names}."
-                ));
+        return;
+    }
+    let on = match shown {
+        Some(analysis) => DifferencePlot::Analysis(analysis),
+        None => match state.model.sim_setup.stable_analysis_plan() {
+            Ok(plan) => DifferencePlot::NextRunOf(plan.id()),
+            Err(reason) => {
+                state.prompt(format!("{expression} is not plotted: {reason}"));
                 return;
             }
-            for spelling in missing {
-                if let Err(reason) =
-                    ensure_plan_probe_output(state, spelling, SavedOutputOrigin::SchematicProbe)
-                {
-                    state.prompt(format!("{display} is not plotted: {reason}"));
-                    return;
-                }
+        },
+    };
+    // Each end's marker owns the output that saves its net, as a single
+    // net's marker does, so the net is saved for as long as the marker
+    // stands.
+    let mut saved = Vec::new();
+    for spelling in &missing {
+        match ensure_plan_probe_output(state, spelling, SavedOutputOrigin::SchematicProbe) {
+            Ok(_) => saved.push(spelling.display().to_owned()),
+            Err(reason) => {
+                state.prompt(format!("{expression} is not plotted: {reason}"));
+                return;
             }
-            state.prompt(format!(
-                "Saved {names} for the next run; run again to plot {display}."
-            ));
         }
     }
+    state
+        .model
+        .schematic
+        .begin_operation("probe the voltage between two nets");
+    let mut kept = Vec::new();
+    for (at, spelling, end) in ends {
+        if ground(spelling) {
+            continue;
+        }
+        let binding = current_probe_output_binding(state, spelling.engine());
+        match retain_probe_flag(state, at, Some(spelling), binding) {
+            Ok(id) => {
+                state.model.schematic.mark_probe_difference_end(id, end);
+                kept.push(id);
+            }
+            Err(reason) => state.prompt(format!("Probe marker not kept: {reason}")),
+        }
+    }
+    state.model.schematic.end_operation();
+    let selection = &mut state.model.schematic.session.editor.selection;
+    selection.clear();
+    for id in kept {
+        selection.select_probe(id);
+    }
+    state.sync_active_schematic_to_workspace();
+    state.workbench.outbox.push(PlotProbedDifference {
+        on,
+        expression,
+        saved,
+    });
+}
+
+/// The shown run's analysis, as the results workspace keys it.
+fn shown_analysis(
+    model: &Model,
+) -> Option<rspice_results::result_presentation::AnalysisPresentationKey> {
+    let run = model.simulation.active_run()?;
+    let analysis = model.simulation.active_analysis()?;
+    Some(
+        rspice_results::result_presentation::AnalysisPresentationKey::new(run.dataset_id, analysis),
+    )
 }
 
 /// The context menu's Probe row. On a wire or a part it probes that object

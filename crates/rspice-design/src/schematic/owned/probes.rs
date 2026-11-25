@@ -1,5 +1,5 @@
 //! Probe flags are durable document edits; editor selection remains above them.
-use super::super::probe::SchematicProbe;
+use super::super::probe::{DifferenceEnd, SchematicProbe};
 use super::{DocumentEdit, Schematic};
 use rspice_design_model::Point;
 use rspice_vocabulary::product::{SavedOutputId, SimulationPlanId};
@@ -62,6 +62,21 @@ impl Schematic {
         if let Some(live) = self.document.probes.iter_mut().find(|probe| probe.id == id) {
             live.enabled = enabled;
             live.plot_on_materialization = plot_on_materialization;
+            mutated = true;
+        }
+        DocumentEdit {
+            value: mutated,
+            committed: self.end_operation(),
+        }
+    }
+    /// Make probe `id` the `end` of a two-net probe. Its net is saved for
+    /// the voltage between the ends and is not plotted on its own.
+    pub fn mark_probe_difference_end(&mut self, id: u64, end: DifferenceEnd) -> DocumentEdit<bool> {
+        self.begin_operation("mark two-net probe end");
+        let mut mutated = false;
+        if let Some(live) = self.document.probes.iter_mut().find(|probe| probe.id == id) {
+            live.difference_end = Some(end);
+            live.plot_on_materialization = false;
             mutated = true;
         }
         DocumentEdit {

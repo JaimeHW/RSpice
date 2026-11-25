@@ -288,7 +288,7 @@ fn a_two_net_probe_plots_the_voltage_between_the_nets() {
     use rspice_app_design::schematic::view::gesture_commits::drag_probe;
     use rspice_app_results::analysis::calculator::{CalcValue, RealValue, WaveformsContext};
     use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
-    use rspice_app_state::state::RetainedTrace;
+    use rspice_app_state::state::{DifferenceEnd, RetainedTrace};
     use rspice_results::calculator::{evaluator::evaluate, spice_parser::try_parse};
 
     let host = state_with_current_clean_drc();
@@ -325,7 +325,10 @@ fn a_two_net_probe_plots_the_voltage_between_the_nets() {
     app.after_contribution();
     quick_frame(&mut app.state);
 
-    let difference = "V(pa) - V(pb)";
+    // The run names the nets `V(pa)` and `V(pb)`, and its traces read
+    // `V(PA)` and `V(PB)` as the drawing writes the nets: so does the
+    // difference.
+    let difference = "V(PA) - V(PB)";
     assert_eq!(
         view_expressions(&app.state),
         vec![(difference.to_owned(), true)],
@@ -335,6 +338,14 @@ fn a_two_net_probe_plots_the_voltage_between_the_nets() {
     assert_eq!(
         status_line(&app).as_deref(),
         Some("V(PA) - V(PB) added to the plot.")
+    );
+    assert_eq!(
+        difference_ends(&app),
+        vec![
+            (Point::new(2020, 2000), DifferenceEnd::Plus),
+            (Point::new(2020, 2100), DifferenceEnd::Minus),
+        ],
+        "a marker with its sign at each end"
     );
     let run = app.state.model.simulation.active_run().expect("the run");
     let expression = try_parse(difference).expect("the view's expression parses");
@@ -349,6 +360,87 @@ fn a_two_net_probe_plots_the_voltage_between_the_nets() {
     assert_eq!(x, time, "on the run's own samples");
     let expected: Vec<f64> = plus.iter().zip(minus).map(|(p, m)| p - m).collect();
     assert_eq!(y, expected, "the two nets' difference at every sample");
+}
+
+/// Where the sheet's two-net probe ends stand, and which end each is.
+fn difference_ends(app: &RSpiceApp) -> Vec<(Point, rspice_app_state::state::DifferenceEnd)> {
+    app.state
+        .model
+        .schematic
+        .document()
+        .probes
+        .iter()
+        .filter_map(|probe| Some((probe.position, probe.difference_end?)))
+        .collect()
+}
+
+/// A two-net probe before any run: a marker with its sign at each end
+/// saves its net, and the difference plots once the next run holds both,
+/// as a single net's probe plots once the run saves it.
+#[test]
+fn a_two_net_probe_before_any_run_plots_after_the_next_run() {
+    use super::working_view::{quick_frame, run_plan_with, show_newest, view_expressions};
+    use rspice_app_design::schematic::view::gesture_commits::drag_probe;
+    use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
+    use rspice_app_state::state::{DifferenceEnd, RetainedTrace};
+
+    let host = state_with_current_clean_drc();
+    let mut app = RSpiceApp::test_instance();
+    app.state.model = host.model;
+    app.state.runs = host.runs;
+    for (y, name) in [(2000, "PA"), (2100, "PB")] {
+        let (a, b) = (Point::new(2000, y), Point::new(2040, y));
+        app.state.model.schematic.add_wire(vec![a, b]);
+        app.state.model.schematic.add_net_label(a, name.to_owned());
+    }
+    app.state.sync_active_schematic_to_workspace();
+    app.state.workbench.activate(Workspace::Design);
+    assert!(app.state.model.simulation.active_run().is_none());
+
+    drag_probe(
+        &mut app.state.canvas_frame(),
+        Point::new(2020, 2000),
+        Point::new(2020, 2100),
+    );
+    app.after_contribution();
+    assert_eq!(
+        status_line(&app).as_deref(),
+        Some("Saved V(PA) and V(PB) for the next run; V(PA) - V(PB) plots once it runs.")
+    );
+    assert_eq!(
+        difference_ends(&app),
+        vec![
+            (Point::new(2020, 2000), DifferenceEnd::Plus),
+            (Point::new(2020, 2100), DifferenceEnd::Minus),
+        ],
+        "a marker with its sign at each end"
+    );
+    assert!(
+        app.state
+            .model
+            .schematic
+            .document()
+            .probes
+            .iter()
+            .all(|probe| !probe.plot_on_materialization),
+        "an end saves its net for the difference, not to plot it alone"
+    );
+
+    let time = vec![0.0, 1.0];
+    run_plan_with(
+        &mut app.state,
+        vec![
+            RetainedTrace::new("V(pa)", time.clone(), vec![1.0, 2.0], "#ffffff"),
+            RetainedTrace::new("V(pb)", time, vec![0.5, 0.5], "#ffffff"),
+        ],
+    );
+    show_newest(&mut app.state);
+    quick_frame(&mut app.state);
+    assert_eq!(
+        view_expressions(&app.state),
+        vec![("V(PA) - V(PB)".to_owned(), true)],
+        "the next run's view plots the difference"
+    );
 }
 
 /// Run details' Analyses table on the active run, drawn a frame at a time;

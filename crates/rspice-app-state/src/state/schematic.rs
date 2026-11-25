@@ -120,7 +120,7 @@ pub use placement_authority::PlacementAuthority;
 #[cfg(any(test, feature = "test-support"))]
 pub use port::{PendingPortPlacement, PortDirectionType, PortSignalType};
 pub use port::{PendingPortSequence, PortContract, PortDirection, PortDiscipline, PortSpec};
-pub use probe::SchematicProbe;
+pub use probe::{DifferenceEnd, SchematicProbe};
 pub use replacement::parse_replacement_parameters_strict;
 pub use replacement::{
     SchematicReplacementAuthority, SchematicReplacementError, SchematicReplacementParameter,

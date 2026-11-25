@@ -42,6 +42,19 @@ pub struct SchematicProbe {
     /// Whether a newly materialized quantity should be shown initially.
     #[serde(default = "enabled_by_default")]
     pub plot_on_materialization: bool,
+    /// The end of a two-net probe this marker is, when it is one. It saves
+    /// its net as any probe does; the voltage between the ends is what is
+    /// plotted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub difference_end: Option<DifferenceEnd>,
+}
+
+/// Which end of a two-net probe a marker is: the net the voltage is read
+/// on, or the net it is read against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DifferenceEnd {
+    Plus,
+    Minus,
 }
 
 impl SchematicProbe {
@@ -60,6 +73,7 @@ impl SchematicProbe {
             saved_output_id: None,
             enabled: true,
             plot_on_materialization: true,
+            difference_end: None,
         };
         probe.validate()?;
         Ok(probe)
@@ -190,5 +204,6 @@ mod tests {
         assert!(restored.plot_on_materialization);
         assert!(restored.plan_id.is_none());
         assert!(restored.saved_output_id.is_none());
+        assert!(restored.difference_end.is_none(), "a single net's probe");
     }
 }

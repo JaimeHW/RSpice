@@ -24,9 +24,9 @@ use rspice_results_ui::waves::lanes::EventLaneLayout;
 
 use crate::product::{DatasetBinding, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{
-    AnnotationAnchor, AxisOrientation, AxisScale, DocumentEdit, EntityRef, NewAxis, PaneId,
-    ResultDocumentTracking, ResultDocumentTrackingMode, SourceDataset, Strip, TypedValue,
-    VisualizationDocument, WorkingPane, WorkingViewSource,
+    AnnotationAnchor, AxisOrientation, AxisScale, DocumentEdit, EntityRef, ExpressionTrace,
+    NewAxis, PaneId, ResultDocumentTracking, ResultDocumentTrackingMode, SourceDataset, Strip,
+    TypedValue, VisualizationDocument, WorkingPane, WorkingViewSource,
 };
 use crate::state::SimulationRun;
 use crate::ui::plot::XScale;
@@ -245,6 +245,7 @@ fn follow_shown(state: &mut ResultsParts<'_>) -> Option<ResultDocumentId> {
         follow(state, view, shown);
         reread_grown(state, view, shown);
         plot_marked_outputs(state, view, shown);
+        take_in_next_run_expressions(state, view, shown);
     }
     // A run still being digested is followed again on a later frame.
     let after = followed_at(state.results_reads(), view)
@@ -1104,6 +1105,76 @@ fn plot_marked_outputs(state: &mut ResultsParts<'_>, view: ResultDocumentId, sho
     if let Err(error) = view_edits::apply_following(state, view, revision, edits) {
         state.prompt(format!(
             "The view could not plot what {label} plots: {error}"
+        ));
+    }
+}
+
+/// Give `view` the differences a two-net probe left for its plan's next run
+/// while no run was shown, on each pane that reads `shown`, and let them
+/// go. Until the view reads a run of the plan they wait.
+fn take_in_next_run_expressions(
+    state: &mut ResultsParts<'_>,
+    view: ResultDocumentId,
+    shown: DatasetId,
+) {
+    let Some(WorkingViewSource::Plan { plan_id }) = retained_run(state.model, shown).map(source_of)
+    else {
+        return;
+    };
+    let texts: Vec<String> = state
+        .results
+        .next_run_expressions
+        .iter()
+        .filter(|(plan, _)| *plan == plan_id)
+        .map(|(_, text)| text.clone())
+        .collect();
+    if texts.is_empty() {
+        return;
+    }
+    let Some(document) = state.model.workspace.content.visualization_document(view) else {
+        return;
+    };
+    let mut reads_shown = false;
+    let mut edits = Vec::new();
+    for pane in document.panes() {
+        let Some(binding) = pane
+            .binding
+            .filter(|binding| binding.dataset.dataset_id == shown)
+        else {
+            continue;
+        };
+        reads_shown = true;
+        for text in &texts {
+            if document
+                .expression_traces()
+                .iter()
+                .any(|trace| trace.pane_id == pane.id && trace.text == *text)
+            {
+                continue;
+            }
+            edits.push(DocumentEdit::AddExpressionTrace(ExpressionTrace {
+                pane_id: pane.id,
+                text: text.clone(),
+                datasets: vec![binding.dataset],
+                unit: None,
+                visible: true,
+            }));
+        }
+    }
+    if !reads_shown {
+        return;
+    }
+    state
+        .results
+        .next_run_expressions
+        .retain(|(plan, _)| *plan != plan_id);
+    if edits.is_empty() {
+        return;
+    }
+    let revision = document.revision();
+    if let Err(error) = view_edits::apply_following(state, view, revision, edits) {
+        state.prompt(format!(
+            "The view could not plot the probed difference: {error}"
         ));
     }
 }

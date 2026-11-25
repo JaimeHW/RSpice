@@ -1044,6 +1044,26 @@ pub fn keep_plotted_expression(
     Ok(added)
 }
 
+/// Keep `text`, the difference a two-net probe named while no run was
+/// shown, for the view of `plan`'s next run, which plots it once it reads
+/// that run, as a single net's probe plots once a run saves its net.
+/// `false` when it already waits.
+pub fn keep_for_next_run(
+    state: &mut ResultsParts<'_>,
+    plan: crate::product::SimulationPlanId,
+    text: String,
+) -> bool {
+    let waiting = &mut state.results.next_run_expressions;
+    if waiting
+        .iter()
+        .any(|(held, held_text)| *held == plan && *held_text == text)
+    {
+        return false;
+    }
+    waiting.push((plan, text));
+    true
+}
+
 /// Give the trace of `signal` on `analysis`'s strip the colour `color`, or
 /// with `None` its signal's own colour again, on the view that keeps the
 /// strip: the saved document's pane, or the run's working view. The run is
@@ -1874,6 +1894,9 @@ pub struct ResultsState {
     /// is: its samples may be kept another way after a save, not grown.
     /// Transient.
     pub(crate) read_while_running: HashSet<DatasetId>,
+    /// The differences a two-net probe named while no run was shown, by the
+    /// plan whose next run's view takes them in. Transient.
+    pub(crate) next_run_expressions: Vec<(crate::product::SimulationPlanId, String)>,
     /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
     pub analysis_expr_cache:

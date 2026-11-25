@@ -16,7 +16,7 @@ use rspice_design::schematic::{
     component_type::ComponentType,
     drawing_metrics,
     label_layout::{self, LayoutPoint, TextEdge},
-    probe::SchematicProbe,
+    probe::{DifferenceEnd, SchematicProbe},
     wire::{Wire, WireBridge},
 };
 use rspice_design_model::{
@@ -622,6 +622,14 @@ pub fn draw_probe(
     }
     painter.circle_filled(center, radius, palette.canvas_bg);
     painter.circle_stroke(center, radius, Stroke::new(ring, status_color));
+    // A single net's probe is a sight across its ring. Each end of a
+    // two-net probe carries its sign inside the ring instead, as a meter's
+    // terminals do, so the pair reads as the voltage between them.
+    let (half_span, upright) = match probe.difference_end {
+        None => (half_span, true),
+        Some(DifferenceEnd::Plus) => (radius * 0.55, true),
+        Some(DifferenceEnd::Minus) => (radius * 0.55, false),
+    };
     painter.line_segment(
         [
             center - Vec2::new(half_span, 0.0),
@@ -629,13 +637,15 @@ pub fn draw_probe(
         ],
         Stroke::new(crosshair, status_color),
     );
-    painter.line_segment(
-        [
-            center - Vec2::new(0.0, half_span),
-            center + Vec2::new(0.0, half_span),
-        ],
-        Stroke::new(crosshair, status_color),
-    );
+    if upright {
+        painter.line_segment(
+            [
+                center - Vec2::new(0.0, half_span),
+                center + Vec2::new(0.0, half_span),
+            ],
+            Stroke::new(crosshair, status_color),
+        );
+    }
     // Below the floor the label hides and the marker stays.
     if let Some(size) = lod::annotation_size(SMALL_TEXT_WORLD, viewport.zoom, ppp) {
         painter.text(

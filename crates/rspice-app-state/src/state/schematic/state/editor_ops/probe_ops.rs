@@ -1,7 +1,7 @@
 //! Probe edits with the same document-local history and selection semantics.
 
 use crate::product::{SavedOutputId, SimulationPlanId};
-use crate::state::{Point, SchematicState};
+use crate::state::{DifferenceEnd, Point, SchematicState};
 
 impl SchematicState {
     pub fn bind_probe_saved_output(
@@ -61,5 +61,18 @@ impl SchematicState {
             self.finish_document_edit(edit.committed);
         }
         edit.committed
+    }
+
+    /// Make probe `id` the `end` of a two-net probe. Its net is saved for
+    /// the voltage between the ends and is not plotted on its own.
+    pub fn mark_probe_difference_end(&mut self, id: u64, end: DifferenceEnd) -> bool {
+        if self.session.read_only {
+            return false;
+        }
+        let edit = self.design.mark_probe_difference_end(id, end);
+        if edit.value || edit.committed {
+            self.finish_document_edit(edit.committed);
+        }
+        edit.value
     }
 }

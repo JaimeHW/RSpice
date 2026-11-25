@@ -12,7 +12,7 @@
 use crate::workbench::AppState;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use rspice_app_design::schematic::view::{
-    DesignSurfaceRequest, PlotProbedDifference, PlotProbedTrace, ProbePlot,
+    DesignSurfaceRequest, DifferencePlot, PlotProbedDifference, PlotProbedTrace, ProbePlot,
 };
 use rspice_app_results::workbench::commands::schematic_cross_probe::ShowSignalOnSchematic;
 use rspice_app_state::state::VerificationPage;
@@ -99,33 +99,56 @@ pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: Plot
     });
 }
 
-/// Keep the voltage between two probed nets on the view in front as an
-/// expression, as the calculator's Plot keeps one, so the strip draws it
-/// beside the run's own signals, and say what changed.
+/// Keep the voltage between two probed nets as an expression, as the
+/// calculator's Plot keeps one: on the view in front, so the strip draws it
+/// beside the run's own signals, or, with no run shown, for the view of the
+/// plan's next run. Say what changed.
 pub(in crate::workbench) fn plot_probed_difference(
     state: &mut AppState,
     probed: PlotProbedDifference,
 ) {
-    use rspice_app_results::workbench::documents::result_document::keep_plotted_expression;
+    use rspice_app_results::workbench::documents::result_document::{
+        keep_for_next_run, keep_plotted_expression,
+    };
 
     let PlotProbedDifference {
-        analysis,
+        on,
         expression,
-        display,
+        saved,
     } = probed;
-    match keep_plotted_expression(&mut state.results_parts(), analysis, expression) {
-        Ok(added) => {
+    let waiting = (!saved.is_empty()).then(|| {
+        format!(
+            "Saved {} for the next run; {expression} plots once it runs.",
+            saved.join(" and ")
+        )
+    });
+    let analysis = match on {
+        DifferencePlot::Analysis(analysis) => analysis,
+        DifferencePlot::NextRunOf(plan) => {
+            keep_for_next_run(&mut state.results_parts(), plan, expression.clone());
+            state.prompt(
+                waiting.unwrap_or_else(|| format!("{expression} plots after the next run.")),
+            );
+            return;
+        }
+    };
+    let kept = keep_plotted_expression(&mut state.results_parts(), analysis, expression.clone());
+    match (kept, waiting) {
+        // The run shown lacks a net: the view keeps the difference, and the
+        // run that saves the net draws it.
+        (Ok(_), Some(waiting)) => state.prompt(waiting),
+        (Ok(added), None) => {
             // A probe asks to see the signal, as a single net's probe does.
             if state.workbench.supports_results_split() {
                 state.workbench.show_results_split();
             }
             state.prompt(if added {
-                format!("{display} added to the plot.")
+                format!("{expression} added to the plot.")
             } else {
-                format!("{display} is already in the plot.")
+                format!("{expression} is already in the plot.")
             });
         }
-        Err(error) => state.prompt(format!("{display} was not plotted: {error}")),
+        (Err(error), _) => state.prompt(format!("{expression} was not plotted: {error}")),
     }
 }
 

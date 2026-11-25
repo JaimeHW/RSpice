@@ -119,15 +119,27 @@ impl Request for PlotProbedTrace {
 }
 
 /// The voltage between two nets a two-net probe named, `V(a) - V(b)`, for
-/// the results workspace to keep on `analysis`'s view as an expression, as
-/// the calculator's Plot keeps one, and to say what it did.
+/// the results workspace to keep as an expression, as the calculator's Plot
+/// keeps one, and to say what it did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlotProbedDifference {
-    pub analysis: rspice_results::result_presentation::AnalysisPresentationKey,
-    /// The difference as the run names its signals.
+    pub on: DifferencePlot,
+    /// The difference, each net spelled as the plot names its trace.
     pub expression: String,
-    /// The same as the status line names it: the design's spelling.
-    pub display: String,
+    /// The nets the next run saves for it, as the status line names them:
+    /// none when the run shown holds both.
+    pub saved: Vec<String>,
+}
+
+/// Where a two-net probe's difference is kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DifferencePlot {
+    /// On the view of the shown run's analysis, which follows the plan's
+    /// next run: what the run does not hold yet, that run draws.
+    Analysis(rspice_results::result_presentation::AnalysisPresentationKey),
+    /// With no run shown, by the plan, for the view of its next run to take
+    /// in, as a single net's probe plots once a run saves its net.
+    NextRunOf(crate::product::SimulationPlanId),
 }
 
 impl Request for PlotProbedDifference {

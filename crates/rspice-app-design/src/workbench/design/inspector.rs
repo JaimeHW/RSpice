@@ -890,7 +890,12 @@ pub fn probe_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, id: u64) {
         return;
     };
     let bound = probe.source_expression.as_deref();
-    object_title(ui, &probe.reference, Some("Probe"), None);
+    let kind = match probe.difference_end {
+        None => "Probe",
+        Some(crate::state::DifferenceEnd::Plus) => "Two-net probe, plus end",
+        Some(crate::state::DifferenceEnd::Minus) => "Two-net probe, minus end",
+    };
+    object_title(ui, &probe.reference, Some(kind), None);
     section_block_gap(ui);
     // A probe that names no signal saves nothing; that is the one thing about
     // it to act on.

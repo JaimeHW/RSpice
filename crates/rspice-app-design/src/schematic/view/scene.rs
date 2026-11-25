@@ -278,21 +278,26 @@ fn probe_visual_status(
     if probe.source_expression.is_none() || statuses.stranded.contains(&probe.id) {
         return ProbeVisualStatus::NotConnected;
     }
-    if let Some(status) = probe
+    let status = probe
         .saved_output_id
         .and_then(|output_id| statuses.by_output_id.get(&output_id).copied())
-    {
-        return status;
+        .or_else(|| {
+            probe.source_expression.as_deref().and_then(|expression| {
+                statuses
+                    .by_expression
+                    .get(&normalized_probe_expression(expression))
+                    .copied()
+            })
+        })
+        .unwrap_or(ProbeVisualStatus::Pending);
+    // An end of a two-net probe saves its net for the voltage between the
+    // ends, which is what is plotted: its net off the plot is no news.
+    match status {
+        ProbeVisualStatus::Hidden if probe.difference_end.is_some() => {
+            ProbeVisualStatus::Materialized
+        }
+        status => status,
     }
-    if let Some(status) = probe.source_expression.as_deref().and_then(|expression| {
-        statuses
-            .by_expression
-            .get(&normalized_probe_expression(expression))
-            .copied()
-    }) {
-        return status;
-    }
-    ProbeVisualStatus::Pending
 }
 
 /// Why the last run could not produce `probe`'s signal, as its receipt says.
