@@ -418,7 +418,6 @@ fn cursors_toolbar(
     };
     let mut outcome = ToolbarOutcome::default();
     ui.horizontal(|ui| {
-        ui.set_min_height(Tokens::get(ui.ctx()).metrics.ctl_h);
         ui.spacing_mut().item_spacing.x = 6.0;
         // Add reads as its own name, and a pick places what it names.
         let choices: Vec<String> = rspice_results_ui::waves::cursor_table::ADD_CHOICES

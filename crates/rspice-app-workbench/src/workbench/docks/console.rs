@@ -1574,17 +1574,34 @@ pub fn padded<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 /// separated them from the rows they filter.
 ///
 /// The band starts at the tab strip's rule, over the body's top inset, and
-/// leaves as much space under the controls as over them. Every page with a
-/// toolbar draws it here, at the same height, so moving between them does
-/// not move it. A table's header band meets the rule; a page that writes
-/// prose under it insets that by the body's top padding.
+/// is one row of the design's row height: its last point is the rule, and
+/// the compact controls on it keep an equal gap above and below, as on the
+/// sheet's own bar. A standard control on it stands at the compact height
+/// too. The band used to pad a full control height with the body's inset on
+/// both sides, which left it half again as tall as what it holds. Every
+/// page with a toolbar draws it here, at the same height, so moving between
+/// them does not move it. A table's header band meets the rule; a page that
+/// writes prose under it insets that by the body's top padding.
 pub fn toolbar<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let band = ui.painter().add(egui::Shape::Noop);
-    let top = ui.cursor().top() - CONSOLE_BODY_PADDING_TOP;
-    let inner = padded(ui, add);
-    ui.add_space(CONSOLE_BODY_PADDING_TOP);
     let t = Tokens::get(ui.ctx());
-    let rect = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
+    let control = crate::ui::widgets::compact_height(&t.metrics);
+    let gap = ((t.metrics.row_h - 1.0 - control) * 0.5).max(0.0);
+    let top = ui.cursor().top() - CONSOLE_BODY_PADDING_TOP;
+    let x = ui.max_rect().x_range();
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_x_y_ranges(
+                x,
+                top + gap..=ui.max_rect().bottom().max(top + gap),
+            ))
+            .layout(Layout::top_down(Align::Min)),
+    );
+    row.spacing_mut().interact_size.y = control;
+    let inner = padded(&mut row, add);
+    let bottom = (row.min_rect().bottom() + gap + 1.0).max(top + t.metrics.row_h);
+    ui.advance_cursor_after_rect(egui::Rect::from_x_y_ranges(x, ui.cursor().top()..=bottom));
+    let rect = egui::Rect::from_x_y_ranges(x, top..=bottom);
     ui.painter()
         .set(band, egui::Shape::rect_filled(rect, 0.0, t.color.bg_panel));
     ui.painter().hline(

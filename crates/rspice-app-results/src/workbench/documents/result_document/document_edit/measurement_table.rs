@@ -13,7 +13,6 @@
 use egui::Ui;
 use rspice_app_workbench::workbench::docks::console;
 use rspice_results::visualization_document::{MeasurementId, MeasurementWindow};
-use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::table::{
     CELL_PAD, Cell, CellEditor, Column, DataTable, EditOutcome, Group, TableState,
 };
@@ -321,7 +320,6 @@ pub fn measurements_page(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     let page = page(ui, state.results_reads());
     let (add, copy) = console::toolbar(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.set_min_height(Tokens::get(ui.ctx()).metrics.ctl_h);
             ui.spacing_mut().item_spacing.x = 6.0;
             let label = "Add measurement\u{2026}";
             let add = compact_chip(ui, label, false, chip_width(ui, label))
