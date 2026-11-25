@@ -234,8 +234,13 @@ fn phase_noise_quick_view_never_exports_ordinary_periodic_noise_as_l_of_f() {
     };
     assert_eq!(plot.viewer, ResultViewer::PhaseNoise);
     assert_eq!(plot.traces.len(), 1);
-    assert!(plot.traces[0].label.contains("phase_noise"));
-    assert!(plot.traces[0].label.contains("dBc/Hz"));
+    assert_eq!(plot.traces[0].label, "phase_noise");
+    assert!(
+        plot.axis_ticks
+            .iter()
+            .any(|tick| tick.axis == SemanticAxisKind::Vertical && tick.label.ends_with("dBc/Hz")),
+        "the ordinate reads in dBc/Hz"
+    );
 }
 
 #[test]

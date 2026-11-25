@@ -73,7 +73,16 @@ fn zero_noise_density_remains_available_in_results_and_hardcopy() {
                 panic!("expected noise amplitude-density plot");
             };
             assert_eq!(plot.traces.len(), 1);
-            assert_eq!(plot.traces[0].label, format!("onoise ({amplitude_unit})"));
+            // The trace is named as the sheet names it; its unit stands on
+            // the ordinate's top value.
+            assert_eq!(plot.traces[0].label, "onoise");
+            assert!(
+                plot.axis_ticks
+                    .iter()
+                    .any(|tick| tick.axis == SemanticAxisKind::Vertical
+                        && tick.label.ends_with(amplitude_unit)),
+                "the ordinate reads in {amplitude_unit}"
+            );
             let expected = [1.0_f64, 10.0, 100.0]
                 .into_iter()
                 .zip(density)
@@ -170,7 +179,13 @@ fn noise_quick_view_prefers_input_reference_exactly_like_the_results_instrument(
         panic!("expected semantic noise plot")
     };
     assert_eq!(plot.traces.len(), 1);
-    assert_eq!(plot.traces[0].label, "inoise (nA/√Hz)");
+    assert_eq!(plot.traces[0].label, "inoise");
+    assert!(
+        plot.axis_ticks
+            .iter()
+            .any(|tick| tick.axis == SemanticAxisKind::Vertical && tick.label.ends_with("nA/√Hz")),
+        "the ordinate reads in nA/√Hz"
+    );
     let density = f64::from_bits(plot.traces[0].source_samples[1].1);
     assert!((density - 2.0).abs() < 1.0e-12);
 }
@@ -204,7 +219,13 @@ fn noise_quick_view_falls_back_to_the_first_renderable_noise_analysis() {
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
         panic!("expected semantic noise plot")
     };
-    assert_eq!(plot.traces[0].label, "onoise (nV/√Hz)");
+    assert_eq!(plot.traces[0].label, "onoise");
+    assert!(
+        plot.axis_ticks
+            .iter()
+            .any(|tick| tick.axis == SemanticAxisKind::Vertical && tick.label.ends_with("nV/√Hz")),
+        "the ordinate reads in nV/√Hz"
+    );
 }
 
 #[test]
