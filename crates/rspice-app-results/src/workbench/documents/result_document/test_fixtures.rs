@@ -612,3 +612,55 @@ pub fn generated_fst() -> Vec<u8> {
     let _ = std::fs::remove_file(&path);
     bytes
 }
+
+/// The process's peak working set: the most physical memory it has held at once.
+#[cfg(windows)]
+pub fn peak_working_set() -> Option<u64> {
+    use std::ffi::c_void;
+
+    /// `PROCESS_MEMORY_COUNTERS`.
+    #[repr(C)]
+    #[derive(Default)]
+    struct Counters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> *mut c_void;
+        fn K32GetProcessMemoryInfo(process: *mut c_void, counters: *mut Counters, cb: u32) -> i32;
+    }
+
+    let cb = u32::try_from(std::mem::size_of::<Counters>()).ok()?;
+    let mut counters = Counters {
+        cb,
+        ..Counters::default()
+    };
+    // SAFETY: the current process's pseudo-handle needs no closing, and `counters` is a
+    // `PROCESS_MEMORY_COUNTERS` of the `cb` bytes it is said to be.
+    let read = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, cb) };
+    (read != 0).then_some(counters.peak_working_set_size as u64)
+}
+
+/// The process's peak resident set: the most physical memory it has held at once.
+#[cfg(target_os = "linux")]
+pub fn peak_working_set() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn peak_working_set() -> Option<u64> {
+    None
+}
