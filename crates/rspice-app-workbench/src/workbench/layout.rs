@@ -197,7 +197,8 @@ impl LayoutSpec {
                 // viewport-relative height instead of a desktop resize.
                 maximum
             } else {
-                state.console_height
+                // The Plot page asks for its own share of the stage.
+                state.dock_height(center_stack_height)
             };
             (minimum, maximum, requested.clamp(minimum, maximum))
         } else {

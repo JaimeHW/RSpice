@@ -408,6 +408,102 @@ fn a_dock_the_reader_turned_to_another_page_stays_on_it() {
     assert!(!plot_pane_shown(&user));
 }
 
+/// The dock's top edge: where egui centres its splitter.
+fn dock_top(user: &User) -> f32 {
+    user.expect("Resize console and diagnostics").center().y
+}
+
+/// Where the dock's strip draws its tab `name`, whatever page it shows.
+fn strip_tab(user: &User, name: &str) -> egui::Rect {
+    let top = dock_top(user);
+    user.named
+        .iter()
+        .find(|(candidate, rect)| {
+            candidate == name && rect.top() >= top - 1.0 && rect.top() <= top + 40.0
+        })
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| panic!("the dock's strip has no {name} tab"))
+}
+
+/// A run opens the Plot page tall enough to read its plot: until the reader
+/// sets the dock's height on that page, it stands at two fifths of the
+/// stage, never shorter than the dock was. Once they drag the splitter, the
+/// page keeps their height through the next run, and every other page keeps
+/// the dock's own.
+#[test]
+fn a_run_opens_the_plot_page_tall_until_the_reader_sizes_it() {
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    user.settle();
+    let own = user.app.state.workbench.console_height;
+    run_to_its_end(&mut user);
+    let grown = dock_top(&user);
+
+    user.press(
+        strip_tab(&user, "Console").center(),
+        egui::PointerButton::Primary,
+    );
+    user.settle();
+    // The dock's foot stays put; the Console stands at the dock's own height.
+    let foot = dock_top(&user) + own;
+    let canvas = user.expect("Schematic canvas");
+    let share = (foot - grown) / (foot - canvas.top());
+    assert!(
+        (share - 0.4).abs() < 0.03 && foot - grown > own + 1.0,
+        "the Plot page stands at two fifths of the stage: {share} of it, from y={grown}"
+    );
+    user.press(
+        strip_tab(&user, "Plot").center(),
+        egui::PointerButton::Primary,
+    );
+    user.settle();
+    assert!((dock_top(&user) - grown).abs() <= 1.0);
+
+    // The reader drags the splitter up.
+    let grip = user.expect("Resize console and diagnostics").center();
+    let to = grip - egui::vec2(0.0, 80.0);
+    user.frame(vec![egui::Event::PointerMoved(grip)]);
+    user.frame(vec![egui::Event::PointerButton {
+        pos: grip,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    user.frame(vec![egui::Event::PointerMoved(
+        grip - egui::vec2(0.0, 40.0),
+    )]);
+    user.frame(vec![egui::Event::PointerMoved(to)]);
+    user.frame(vec![egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    user.settle();
+    let dragged = dock_top(&user);
+    assert!(
+        dragged < grown - 60.0,
+        "the drag sets the page's height: its top at y={dragged}, from y={grown}"
+    );
+
+    run_to_its_end(&mut user);
+    assert!(plot_pane_shown(&user));
+    assert!(
+        (dock_top(&user) - dragged).abs() <= 1.0,
+        "the next run keeps the reader's height: its top at y={}, dragged to y={dragged}",
+        dock_top(&user)
+    );
+    user.press(
+        strip_tab(&user, "Console").center(),
+        egui::PointerButton::Primary,
+    );
+    user.settle();
+    assert!(
+        (dock_top(&user) + own - foot).abs() <= 1.0,
+        "the Console still keeps the dock's own height"
+    );
+}
+
 /// Probing a net always shows its plot, even with the dock collapsed.
 #[test]
 fn probing_a_net_opens_the_plot_page() {

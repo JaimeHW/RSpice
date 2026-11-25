@@ -319,6 +319,8 @@ pub(crate) struct WorkbenchWire {
     #[serde(default = "default_console_height")]
     console_height: f32,
     #[serde(default)]
+    plot_height: Option<f32>,
+    #[serde(default)]
     workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
     #[serde(default)]
     workspace_preset: WorkspacePreset,
@@ -419,6 +421,8 @@ pub(crate) struct WorkbenchWireRef<'a> {
     inspector_width_custom: &'a bool,
     #[serde(default = "default_console_height")]
     console_height: &'a f32,
+    #[serde(default)]
+    plot_height: &'a Option<f32>,
     #[serde(default)]
     workspace_layouts: &'a HashMap<Workspace, WorkspaceLayoutState>,
     #[serde(default)]
@@ -547,6 +551,7 @@ impl<'a> WorkbenchWireRef<'a> {
             inspector_width,
             inspector_width_custom,
             console_height,
+            plot_height,
             workspace_layouts,
             workspace_preset,
             console_page,
@@ -594,6 +599,7 @@ impl<'a> WorkbenchWireRef<'a> {
             inspector_width,
             inspector_width_custom,
             console_height,
+            plot_height,
             workspace_layouts,
             workspace_preset,
             console_page,
@@ -643,6 +649,7 @@ impl<'a> WorkbenchWireRef<'a> {
             inspector_width: *self.inspector_width,
             inspector_width_custom: *self.inspector_width_custom,
             console_height: *self.console_height,
+            plot_height: *self.plot_height,
             workspace_layouts: self.workspace_layouts.clone(),
             workspace_preset: *self.workspace_preset,
             console_page: *self.console_page,
@@ -693,6 +700,7 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
             inspector_width: &wire.inspector_width,
             inspector_width_custom: &wire.inspector_width_custom,
             console_height: &wire.console_height,
+            plot_height: &wire.plot_height,
             workspace_layouts: &wire.workspace_layouts,
             workspace_preset: &wire.workspace_preset,
             console_page: &wire.console_page,
@@ -775,6 +783,7 @@ impl WorkbenchWire {
             inspector_width,
             inspector_width_custom,
             console_height,
+            plot_height,
             workspace_layouts,
             workspace_preset,
             console_page,
@@ -821,6 +830,7 @@ impl WorkbenchWire {
         *inspector_width = self.inspector_width;
         *inspector_width_custom = self.inspector_width_custom;
         *console_height = self.console_height;
+        *plot_height = self.plot_height;
         *workspace_layouts = self.workspace_layouts;
         *workspace_preset = self.workspace_preset;
         *console_page = self.console_page;

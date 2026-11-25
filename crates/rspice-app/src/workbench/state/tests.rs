@@ -410,6 +410,21 @@ fn workspace_switches_restore_independent_dock_compositions() {
     assert_eq!(state.console_height, 275.0);
 }
 
+/// The height the reader gave the Plot page is part of its workspace's
+/// composition: another workspace keeps its own, and coming back restores it.
+#[test]
+fn the_plot_pages_height_is_kept_with_its_workspace() {
+    let mut state = WorkbenchSession::default();
+    state.activate(Workspace::Design);
+    state.plot_height = Some(330.0);
+
+    state.activate(Workspace::Results);
+    assert_eq!(state.plot_height, None);
+
+    state.activate(Workspace::Design);
+    assert_eq!(state.plot_height, Some(330.0));
+}
+
 #[test]
 fn full_screen_request_is_consumed_exactly_once() {
     let mut session = WorkbenchSession::default();

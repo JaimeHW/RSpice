@@ -407,12 +407,15 @@ pub fn show_console(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: L
     app.workbench_mut()
         .pane_focus
         .record(ctx, Pane::BottomDock, &dock);
+    // The splitter sets the height of the page the dock shows: the Plot
+    // page's own, or the dock's.
     if layout.console_resizable && splitter_is_dragged(ctx, CONSOLE_PANEL_ID) {
-        app.workbench_mut().console_height = shown
+        let height = shown
             .response
             .rect
             .height()
             .clamp(layout.console_min_height, layout.console_max_height);
+        app.workbench_mut().set_dock_height(Some(height));
     }
     if layout.console_resizable
         && let Some(response) = splitter_response(ctx, CONSOLE_PANEL_ID)
@@ -421,16 +424,15 @@ pub fn show_console(root: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: L
             ctx,
             &response,
             "Resize console and diagnostics",
-            app.workbench().console_height,
+            layout.console_height,
             layout.console_min_height,
             layout.console_max_height,
             16.0,
         );
         if let Some(action) = vertical_splitter_action(ctx, &response) {
-            app.workbench_mut().console_height =
-                apply_splitter_step(app.workbench().console_height, action, 16.0)
-                    .unwrap_or(crate::workbench::state::default_console_height())
-                    .clamp(layout.console_min_height, layout.console_max_height);
+            let height = apply_splitter_step(layout.console_height, action, 16.0)
+                .map(|height| height.clamp(layout.console_min_height, layout.console_max_height));
+            app.workbench_mut().set_dock_height(height);
             app.workbench_mut().console_maximized = false;
             app.workbench_mut().console_visible = true;
             ctx.request_repaint();

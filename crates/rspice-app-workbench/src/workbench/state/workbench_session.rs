@@ -51,6 +51,8 @@ pub struct WorkspaceLayoutState {
     pub inspector_width: f32,
     pub inspector_width_custom: bool,
     pub console_height: f32,
+    /// The dock's height on the Plot page, once the reader set it.
+    pub plot_height: Option<f32>,
 }
 
 impl Default for WorkspaceLayoutState {
@@ -65,6 +67,7 @@ impl Default for WorkspaceLayoutState {
             inspector_width: default_inspector_width(),
             inspector_width_custom: false,
             console_height: default_console_height(),
+            plot_height: None,
         }
     }
 }
@@ -481,6 +484,11 @@ pub struct WorkbenchSession {
     /// mockup's responsive 22vw clamp remains authoritative.
     pub inspector_width_custom: bool,
     pub console_height: f32,
+    /// The dock's height on the Plot page, once the reader dragged it there.
+    /// Until then the page stands at [`PLOT_DOCK_STAGE_SHARE`] of the stage,
+    /// or at the dock's own height where that is taller; the Console and the
+    /// other pages keep `console_height` either way.
+    pub plot_height: Option<f32>,
     /// Independent device-local dock snapshots for every visited workspace.
     pub workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
     /// The composition a workspace with no snapshot above opens with.
@@ -585,6 +593,11 @@ pub const fn default_console_height() -> f32 {
     208.0
 }
 
+/// The share of the stage the dock takes on its Plot page until the reader
+/// sets its height there: a run's plot needs more than the 150 points the
+/// Console's height leaves it.
+pub const PLOT_DOCK_STAGE_SHARE: f32 = 0.4;
+
 impl Default for WorkbenchSession {
     fn default() -> Self {
         Self {
@@ -610,6 +623,7 @@ impl Default for WorkbenchSession {
             inspector_width: default_inspector_width(),
             inspector_width_custom: false,
             console_height: default_console_height(),
+            plot_height: None,
             workspace_layouts: HashMap::new(),
             workspace_preset: WorkspacePreset::default(),
             console_page: ConsolePage::Console,
@@ -958,6 +972,38 @@ impl WorkbenchSession {
         }
     }
 
+    /// Whether the dock stands at its Plot page's height: Plot is the chosen
+    /// page, on a page that plots in the dock.
+    #[must_use]
+    pub fn dock_on_plot(&self) -> bool {
+        self.console_page == ConsolePage::Plot && self.plots_in_dock()
+    }
+
+    /// The height the dock asks for over a stage `stage_height` tall. On the
+    /// Plot page it is the reader's height there, else
+    /// [`PLOT_DOCK_STAGE_SHARE`] of the stage, at least the dock's own; on
+    /// every other page it is the dock's own.
+    #[must_use]
+    pub fn dock_height(&self, stage_height: f32) -> f32 {
+        if self.dock_on_plot() {
+            self.plot_height
+                .unwrap_or((stage_height * PLOT_DOCK_STAGE_SHARE).max(self.console_height))
+        } else {
+            self.console_height
+        }
+    }
+
+    /// The reader set the dock's height to `height`, or reset it with
+    /// `None`: on the Plot page that height is the page's from now on, kept
+    /// with the workspace's composition; on any other page it is the dock's.
+    pub fn set_dock_height(&mut self, height: Option<f32>) {
+        if self.dock_on_plot() {
+            self.plot_height = height;
+        } else {
+            self.console_height = height.unwrap_or(default_console_height());
+        }
+    }
+
     /// Whether a run that ends on this page opens the dock on its plot: the
     /// first run does, and so does every run after it unless the reader put
     /// the plot away.
@@ -1194,6 +1240,7 @@ impl WorkbenchSession {
             inspector_width: self.inspector_width,
             inspector_width_custom: self.inspector_width_custom,
             console_height: self.console_height,
+            plot_height: self.plot_height,
         }
     }
 
@@ -1213,6 +1260,7 @@ impl WorkbenchSession {
         self.inspector_width = layout.inspector_width;
         self.inspector_width_custom = layout.inspector_width_custom;
         self.console_height = layout.console_height;
+        self.plot_height = layout.plot_height;
         self.close_drawer();
     }
 
