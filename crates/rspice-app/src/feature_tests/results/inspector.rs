@@ -811,3 +811,95 @@ fn deferred_output_app() -> RSpiceApp {
 /// The inspector's default width on a wide window and its floor in every
 /// window class (`workbench::layout::inspector_width_bounds`).
 pub(crate) const INSPECTOR_DEFAULT_WIDTH: f32 = 312.0;
+
+/// The Phase Noise sheet's range fields state the units its axes read in,
+/// as the waveform sheets' do: an offset in hertz with its prefix, and a
+/// level in dBc/Hz written as it stands, never on a prefix. The curve is a
+/// −20 dB/decade line through −80 dBc/Hz at 10 kHz, from 1 kHz to 10 MHz.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_phase_noise_range_fields_state_their_units() {
+    use rspice_app_results::workbench::documents::result_document::test_fixtures::{
+        completed_prepared_run, digest, stored_transient,
+    };
+    use rspice_app_state::state::{
+        AnalysisResultFamilyMetadata, AnalysisType, PeriodicNoiseOutputQuantity,
+    };
+    let offsets: Vec<f64> = (0..=40)
+        .map(|step| 1.0e3 * 10f64.powf(f64::from(step) / 10.0))
+        .collect();
+    let level: Vec<f64> = offsets
+        .iter()
+        .map(|offset| -80.0 - 20.0 * (offset / 1.0e4).log10())
+        .collect();
+    let (mut stored, _) = stored_transient(
+        offsets,
+        vec![("phase_noise(vco)".to_owned(), level)],
+        Some([0x3d; 32]),
+    );
+    stored.analysis_type = AnalysisType::Pnoise;
+    stored.label = "PNOISE".to_owned();
+    stored.family_metadata = Some(AnalysisResultFamilyMetadata::PeriodicNoise {
+        output_quantity: PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+        carrier_frequency_hz: Some(2.4e9),
+    });
+    let mut run = completed_prepared_run(
+        rspice_app_state::product::SimulationPlanId::new(),
+        rspice_app_state::product::ObjectRevision::INITIAL,
+        digest(0x3d),
+    );
+    run.add_analysis(stored);
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
+    app.state.workbench.activate(Workspace::Results);
+    app.state.results.results.session.viewer = ResultViewer::PhaseNoise;
+
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut nodes = Vec::new();
+    for index in 0..4 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 900.0))),
+                time: Some(0.1 * f64::from(index)),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut app, ui, &mut frame),
+        );
+        nodes = output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default();
+    }
+    let value_of = |label: &str| {
+        nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label) && node.value().is_some())
+            .and_then(|(_, node)| node.value())
+            .unwrap_or_else(|| panic!("no {label:?} field"))
+            .to_owned()
+    };
+    let (x, y) = (value_of("X range"), value_of("Y range"));
+    assert_eq!(x, "1 kHz \u{2026} 10 MHz");
+    // The drawn interval holds the line's −60 … −140 dBc/Hz, whatever the
+    // fit's headroom adds.
+    let level = y
+        .strip_suffix(" dBc/Hz")
+        .unwrap_or_else(|| panic!("{y:?} states no dBc/Hz"));
+    let (low, high) = level
+        .split_once(" \u{2026} ")
+        .unwrap_or_else(|| panic!("{y:?} is no interval"));
+    let read = |end: &str| -> f64 {
+        end.replace('\u{2212}', "-")
+            .parse()
+            .unwrap_or_else(|_| panic!("{end:?} in {y:?} is not written as it stands"))
+    };
+    assert!(read(low) <= -140.0 && read(high) >= -60.0, "{y:?}");
+}

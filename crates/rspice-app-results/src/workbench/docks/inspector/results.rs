@@ -400,14 +400,23 @@ fn axis_limit_row(
     let current = active_axis_range(state.results_reads(), facts, axis);
     let pinned = active_axis_is_pinned(state.results_reads(), axis);
     // The unit the field writes after its numbers, and strips before reading
-    // them back. Only the waveform stack knows its axes' units; every other
-    // sheet's field states bare engineering numbers, as it always has.
-    let unit = match axis {
-        PaneAxis::X => facts.x_unit.as_deref(),
-        PaneAxis::Y => facts.unit.as_deref(),
+    // them back: the active pane's on the waveform stack, and on any other
+    // sheet the unit its plot's ticks state, `100 Hz … 100 MHz`,
+    // `−154 … −35.2 dBc/Hz`.
+    let drawn_units = state.results.session.drawn_units.get(&viewer);
+    let unit = if crate::workbench::documents::result_document::viewer_uses_wave_stack(viewer) {
+        match axis {
+            PaneAxis::X => facts.x_unit.clone(),
+            PaneAxis::Y => facts.unit.clone(),
+        }
+    } else {
+        drawn_units.map(|(x, y)| match axis {
+            PaneAxis::X => x.clone(),
+            PaneAxis::Y => y.clone(),
+        })
     }
-    .filter(|_| crate::workbench::documents::result_document::viewer_uses_wave_stack(viewer))
     .unwrap_or_default();
+    let unit = unit.as_str();
     let committed = current
         .map(|range| format_axis_range(range, unit))
         .unwrap_or_default();

@@ -21,7 +21,13 @@
 use crate::quantity::engineering::{
     EngineeringPrecision, format_engineering_value_with, parse_engineering_value,
 };
-use rspice_results_ui::waves::unit_carries_its_decade;
+
+/// Whether a value in `unit` is written as it stands, never on a prefix: a
+/// level in decibels, an angle, a percentage, or a density that already
+/// names its decade (`−154 dBc/Hz`, `1786 nV/√Hz`).
+fn stands_as_written(unit: &str) -> bool {
+    !unit.is_empty() && !rspice_results::number_format::unit_takes_prefix(unit)
+}
 
 /// Significant digits of the interval's width both ends are written to; an
 /// end on its own decade keeps as many of the smaller of itself and the
@@ -127,7 +133,7 @@ fn shared_decade_range(
     let large_decade = large.log10().floor() as i32;
     // Past positional digits the ends keep their exponents, and past the
     // unit's own decade each end carries its own prefix.
-    if unit_carries_its_decade(unit) {
+    if stands_as_written(unit) {
         if !(-6..15).contains(&large_decade) {
             return None;
         }
@@ -241,7 +247,7 @@ impl AxisValue {
         } else {
             rounded
         };
-        if value.is_finite() && !unit_carries_its_decade(unit) {
+        if value.is_finite() && !stands_as_written(unit) {
             let decimals = (decade_of(value) - step).clamp(0, MAX_DECIMALS);
             let spice = format_engineering_value_with(
                 value,
@@ -417,6 +423,28 @@ mod tests {
         );
         // A bare number keeps SPICE's spelling, where a lone M is milli.
         assert_eq!(format_axis_range((0.0, 2.0e6), ""), "0 \u{2026} 2Meg");
+    }
+
+    /// A level in decibels is written as it stands, as its ticks are: never
+    /// `−500 mdB`, which no reader writes, and it reads back as written.
+    #[test]
+    fn a_unit_that_takes_no_prefix_is_written_as_it_stands() {
+        assert_eq!(
+            format_axis_range((-154.0, -35.2), "dBc/Hz"),
+            "\u{2212}154 \u{2026} \u{2212}35.2 dBc/Hz"
+        );
+        assert_eq!(
+            format_axis_range((-0.5, 0.25), "dB"),
+            "\u{2212}0.5 \u{2026} 0.25 dB"
+        );
+        assert_eq!(
+            parse_axis_range("\u{2212}154 \u{2026} \u{2212}35.2 dBc/Hz", "dBc/Hz"),
+            Some((-154.0, -35.2))
+        );
+        assert_eq!(
+            parse_axis_range("\u{2212}0.5 \u{2026} 0.25 dB", "dB"),
+            Some((-0.5, 0.25))
+        );
     }
 
     /// `0.88 … 4.12k` reads as 0.88 to 4.12k, which is not what the field

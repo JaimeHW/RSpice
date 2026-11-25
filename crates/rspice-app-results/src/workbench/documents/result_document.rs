@@ -2613,6 +2613,10 @@ pub(super) fn record_drawn_axes(
     response: &crate::ui::plot::PlotResponse,
 ) {
     results.session.drawn_axes.insert(viewer, response.axes);
+    results
+        .session
+        .drawn_units
+        .insert(viewer, response.units.clone());
 }
 
 /// The interval the active sheet's axis is showing, pinned or fitted.

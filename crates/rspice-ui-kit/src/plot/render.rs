@@ -92,6 +92,11 @@ pub struct PlotResponse {
     /// explicit axis limits has to seed itself from what the reader can
     /// see, and only the renderer knows that for certain.
     pub axes: ((f64, f64), (f64, f64)),
+    /// The unit each axis states its interval in, X then Y, for a field that
+    /// writes the drawn interval as the ticks read it: empty where the axis
+    /// states none, or where its ticks label a transformed value rather than
+    /// the data-space one `axes` holds.
+    pub units: (String, String),
     /// Where the X axis' own label was painted, so a surface can let the
     /// reader click it to change what the axis is drawn against.
     pub x_label_rect: Option<Rect>,
@@ -110,6 +115,16 @@ pub fn plot_rect(ui: &Ui, spec: &PlotSpec<'_>) -> Rect {
         inner_rect(ui.available_rect_before_wrap(), spec, left_margin(ui, spec)),
         ui.pixels_per_point(),
     )
+}
+
+/// The unit `axis` states a data-space value in: its own, unless its ticks
+/// label a transformed value.
+fn data_space_unit(axis: &Axis) -> String {
+    if axis.display_scale == 1.0 && axis.display_offset == 0.0 {
+        axis.unit.clone()
+    } else {
+        String::new()
+    }
 }
 
 /// `plot` with its bottom edge on a pixel boundary at or above where it
@@ -1202,6 +1217,7 @@ pub fn show(
         plot_rect,
         view: ViewChange::default(),
         axes: ((spec.x.min, spec.x.max), (spec.y.min, spec.y.max)),
+        units: (data_space_unit(&spec.x), data_space_unit(&spec.y)),
         x_label_rect: None,
         y_caption: None,
     };

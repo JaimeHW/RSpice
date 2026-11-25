@@ -1011,6 +1011,10 @@ pub struct ResultViewerState {
     /// of several panes is active — something a last-drawn record cannot.
     /// Transient.
     pub drawn_axes: std::collections::HashMap<ResultViewer, DrawnAxes>,
+    /// The unit each of those axes states its interval in, X then Y, as
+    /// the plot's ticks read it: what the axis-limit editor writes after its
+    /// numbers. Empty where the plot states none. Transient.
+    pub drawn_units: std::collections::HashMap<ResultViewer, (String, String)>,
     /// A viewport gesture asked for from outside the drawing pass.
     ///
     /// Menus, the command palette and shortcuts all reach the workspace
