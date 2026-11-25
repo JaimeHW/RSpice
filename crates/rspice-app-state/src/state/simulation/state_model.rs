@@ -282,8 +282,7 @@ impl RetainedSimulationState {
     }
 
     /// Index of the newest run that owns at least one retained analysis.
-    /// Run history is newest-first, so this is also the exact dataset the
-    /// split-results stage should initially track.
+    /// Run history is newest-first.
     pub fn newest_retained_result_run_index(&self) -> Option<usize> {
         self.runs.newest_retained_result_run_index()
     }

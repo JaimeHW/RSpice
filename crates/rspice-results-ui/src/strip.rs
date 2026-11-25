@@ -478,9 +478,9 @@ impl<'a> StripHeader<'a> {
         self
     }
 
-    /// Show or hide the trailing pane controls. Compact split-results panes
-    /// keep the selectable/toggleable legend but omit maximize, close and
-    /// fit actions exactly like the upgraded workbench contract.
+    /// Show or hide the trailing pane controls. The dock's Plot page keeps
+    /// the selectable, toggleable legend and omits maximize, close and fit:
+    /// its band fits, and its dock maximizes.
     pub fn pane_actions(mut self, visible: bool) -> Self {
         self.pane_actions = visible;
         self
