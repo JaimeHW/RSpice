@@ -692,8 +692,10 @@ pub fn tick_label_with_step(value: f64, step: f64) -> String {
 /// comparing two neighbours. The axis takes one: the prefix of its largest
 /// tick, or the one either side of it when that states every tick in fewer
 /// characters or with fewer leading zeros, so a window across 1000 reads
-/// `999.8, 1000, 1000.2`, one from zero to 150 m reads `0, 50m, 100m, 150m`
-/// and one from 200 to 1000 reads `200, 400, … 1000`, never `0.2k`.
+/// `999.8, 1000, 1000.2` and one from zero to 150 m reads `0, 50m, 100m,
+/// 150m`. Where the axis reaches the next prefix, the ticks that reach it
+/// read in it, as [`across_prefix_boundary`] says: one from 200 to 1000
+/// reads `200, 400, … 800, 1k`, never `0.2k` and never `1000`.
 pub fn axis_tick_labels(values: &[f64], step: f64) -> Vec<String> {
     let largest = values
         .iter()
@@ -720,22 +722,54 @@ pub fn axis_tick_labels(values: &[f64], step: f64) -> Vec<String> {
     };
     [base, base + 1, base - 1]
         .into_iter()
-        .map(|index| {
-            let decimals = step_decimals(si_scaled(step, index));
-            values
-                .iter()
-                .map(|value| {
-                    if *value == 0.0 || !value.is_finite() {
-                        tick_label(*value)
-                    } else {
-                        trimmed(format!("{:.*}", decimals, si_scaled(*value, index)))
-                            + &tick_scale(index)
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
-        .min_by_key(cost)
+        .map(|index| (index, labels_under(values, step, index)))
+        .min_by_key(|(_, labels)| cost(labels))
+        .map(|(index, labels)| across_prefix_boundary(values, step, index, labels))
         .unwrap_or_default()
+}
+
+/// The labels of `values`, ticks `step` apart, under the prefix `index`.
+fn labels_under(values: &[f64], step: f64, index: i32) -> Vec<String> {
+    let decimals = step_decimals(si_scaled(step, index));
+    values
+        .iter()
+        .map(|value| {
+            if *value == 0.0 || !value.is_finite() {
+                tick_label(*value)
+            } else {
+                trimmed(format!("{:.*}", decimals, si_scaled(*value, index))) + &tick_scale(index)
+            }
+        })
+        .collect()
+}
+
+/// `labels`, ticks `step` apart under the prefix `index`, with every tick
+/// that reads a thousand or more of that prefix restated in the next one
+/// up, where each such tick reads shorter so: the top of a current axis
+/// that reaches a milliampere reads `1m`, not `1000µ`, and its other ticks
+/// keep `800µ`. A window only just across a boundary keeps its digits
+/// (`999.9, 1000, 1000.1`), since `1.0001k` would read longer.
+fn across_prefix_boundary(
+    values: &[f64],
+    step: f64,
+    index: i32,
+    labels: Vec<String>,
+) -> Vec<String> {
+    let decimals = step_decimals(si_scaled(step, index));
+    let thousand = 1_000.0 - 0.5 * 10f64.powi(-(decimals as i32));
+    let up = index + 1;
+    let mut restated = labels.clone();
+    for ((value, label), slot) in values.iter().zip(&labels).zip(restated.iter_mut()) {
+        if !value.is_finite() || si_scaled(value.abs(), index) < thousand {
+            continue;
+        }
+        let shorter = labels_under(&[*value], step, up).remove(0);
+        if shorter.chars().count() >= label.chars().count() {
+            return labels;
+        }
+        *slot = shorter;
+    }
+    restated
 }
 
 /// The labels of an offset axis' ticks, each a signed distance from the
@@ -997,7 +1031,7 @@ mod tests {
         );
         assert_eq!(
             ticks(&[200.0, 400.0, 600.0, 800.0, 1000.0], 200.0),
-            ["200", "400", "600", "800", "1000"]
+            ["200", "400", "600", "800", "1k"]
         );
         assert_eq!(
             ticks(&[-1.0, -0.5, 0.0, 0.5, 1.0], 0.5),
@@ -1009,15 +1043,43 @@ mod tests {
                 .map(|index| f64::from(index) * step)
                 .collect::<Vec<_>>();
             let labels = ticks(&values, step);
-            let prefixes = labels[1..]
+            // Every tick but one the next prefix up names whole.
+            let prefixes = labels[1..labels.len() - 1]
                 .iter()
                 .map(|label| label.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.'))
                 .collect::<std::collections::BTreeSet<_>>();
             assert_eq!(prefixes.len(), 1, "{labels:?}");
+            for label in &labels {
+                let digits = label.trim_end_matches(|c: char| !c.is_ascii_digit());
+                assert!(digits.parse::<f64>().unwrap() < 1_000.0, "{labels:?}");
+            }
         }
         assert_eq!(
             offset_tick_labels(&[-0.0002, 0.0, 0.0002], 0.0002),
             ["\u{2212}200\u{b5}", "0", "+200\u{b5}"]
+        );
+    }
+
+    /// A current axis that reaches a milliampere names its top tick 1 m, as
+    /// its other ticks stay in microamperes; a window just across a
+    /// thousand keeps its digits.
+    #[test]
+    fn a_tick_that_reaches_the_next_prefix_reads_in_it() {
+        let values = (-4..=5)
+            .map(|index| f64::from(index) * 2.0e-4)
+            .collect::<Vec<_>>();
+        let labels = axis_tick_labels(&values, 2.0e-4);
+        assert_eq!(labels.last().unwrap(), "1m");
+        assert_eq!(labels[labels.len() - 2], "800\u{b5}");
+        assert_eq!(labels[0], "\u{2212}800\u{b5}");
+        assert_eq!(
+            axis_tick_labels(&[999.9, 1000.0, 1000.1], 0.1),
+            ["999.9", "1000", "1000.1"]
+        );
+        // An axis its largest tick's own prefix states as briefly keeps it.
+        assert_eq!(
+            axis_tick_labels(&[-1.0e-3, -5.0e-4, 0.0, 5.0e-4, 1.0e-3], 5.0e-4),
+            ["\u{2212}1m", "\u{2212}0.5m", "0", "0.5m", "1m"]
         );
     }
 
