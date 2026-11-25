@@ -524,3 +524,127 @@ fn a_five_corner_ac_run_draws_five_named_curves_on_one_strip() {
         .collect();
     assert_eq!(colours.len(), 5, "each corner its own colour");
 }
+
+/// One run of a divider whose upper leg steps through 1k, 2k and 4k over a
+/// 1 kΩ lower leg, driven at `supply`: each point's `V(out)` is
+/// `supply · 1k / (r + 1k)`. Each point is solved as the task `instances`
+/// names, as every run of one plan solves it.
+fn stepped_divider(
+    id: u64,
+    supply: f64,
+    instances: &[AnalysisInstanceId],
+) -> SimulationRun<AnalysisResult<RetainedTrace>> {
+    use rspice_results::provenance::AnalysisResultStepCoordinate;
+    let mut run = SimulationRun::new(id, 0.0, ExecutionTarget::LocalDesktop);
+    for (index, (r, instance)) in [1e3, 2e3, 4e3].into_iter().zip(instances).enumerate() {
+        let member = AnalysisResultFamilyMember::StepPoint {
+            index,
+            coordinate: vec![AnalysisResultStepCoordinate {
+                name: "r".to_owned(),
+                value: r,
+                unit: String::new(),
+            }],
+        };
+        let provenance = AnalysisResultProvenance::new(
+            *instance,
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([7; 32]),
+            Vec::new(),
+        )
+        .unwrap()
+        .with_family_member(Some(member.clone()))
+        .unwrap();
+        let out = supply * 1e3 / (r + 1e3);
+        run.analyses.push(
+            AnalysisResult::new(
+                index as u64 + 1,
+                AnalysisType::Transient,
+                format!("Transient · {}", member.label()),
+                0.0,
+            )
+            .with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 1e-5], vec![out, out], "").with_unit("V"),
+            ])
+            .with_provenance(provenance),
+        );
+    }
+    run
+}
+
+/// A stepped run overlaid on another of the same plan is compared member for
+/// member, as ViVA and ADS overlay every subtrace of a swept dataset: each
+/// stepped value's curve of the overlaid run reads that run's own solve of
+/// the value, in the value's colour and under its name.
+#[test]
+fn a_stepped_run_overlays_every_member_on_its_own_counterpart() {
+    let instances = [
+        AnalysisInstanceId::new(),
+        AnalysisInstanceId::new(),
+        AnalysisInstanceId::new(),
+    ];
+    let shown = stepped_divider(1, 1.0, &instances);
+    let earlier = stepped_divider(2, 2.0, &instances);
+    let built = build_models(
+        &[&shown, &earlier],
+        &ExecutedDeckArchive::default(),
+        &mut DerivedSeries::default(),
+        &Tokens::default(),
+        ProjectionOptions {
+            phase_continuous: false,
+            complex_display: Default::default(),
+            ac: Default::default(),
+            selection: None,
+            hidden_family_traces: &HashSet::new(),
+            waveform_visibility: &Default::default(),
+            signals: None,
+        },
+        |_| None,
+    );
+    let [strip] = built.as_slice() else {
+        panic!("one strip for the family, got {}", built.len());
+    };
+    assert_eq!(strip.subtitle, "Transient · 3 points · +1 run overlaid");
+    let read = |overlay: bool| -> Vec<(String, f64, [u8; 4])> {
+        strip
+            .traces
+            .iter()
+            .filter(|trace| trace.overlay == overlay)
+            .map(|trace| {
+                (
+                    trace.name.clone(),
+                    trace.y.in_memory().unwrap()[0],
+                    trace.color.to_array(),
+                )
+            })
+            .collect()
+    };
+    let (own, overlaid) = (read(false), read(true));
+    let expected = |supply: f64| -> Vec<(String, f64)> {
+        [("1k", 1e3), ("2k", 2e3), ("4k", 4e3)]
+            .into_iter()
+            .map(|(spelled, r)| (format!("V(out) · r={spelled}"), supply * 1e3 / (r + 1e3)))
+            .collect()
+    };
+    let named = |traces: &[(String, f64, [u8; 4])]| -> Vec<(String, f64)> {
+        traces
+            .iter()
+            .map(|(name, value, _)| (name.clone(), *value))
+            .collect()
+    };
+    assert_eq!(named(&own), expected(1.0));
+    assert_eq!(
+        named(&overlaid),
+        expected(2.0),
+        "every member of the overlaid run, each from its own solve"
+    );
+    for (own, overlaid) in own.iter().zip(&overlaid) {
+        assert_eq!(own.2, overlaid.2, "{}: the member's colour", own.0);
+    }
+    assert!(
+        strip
+            .traces
+            .iter()
+            .filter(|trace| trace.overlay)
+            .all(|trace| trace.run_id == 2)
+    );
+}

@@ -943,13 +943,18 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 member_family::member_traces(traces, members, &run.analyses, derived, &projection);
         }
         let signal_trace_count = traces.len();
-        // An overlay run is compared member for member: its first member
-        // against this run's first.
+        // An overlay run is compared member for member: each member's curve
+        // against the overlay run's own solve of that member, as ViVA and
+        // ADS overlay a swept dataset's every subtrace.
         let overlay_signals = traces[..signal_trace_count]
             .iter()
-            .filter(|trace| family.is_none() || trace.family_group_ordinal == Some(0))
             .map(|trace| {
+                let source = family
+                    .zip(trace.family_group_ordinal)
+                    .and_then(|(members, ordinal)| members.members.get(ordinal))
+                    .map_or(analysis_index, |member| member.analysis);
                 (
+                    source,
                     trace.source_waveform_name.clone(),
                     trace.base_name.clone(),
                     trace.name.clone(),
@@ -974,15 +979,43 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
         let mut rejected_overlay_count = 0usize;
         for overlay_run in overlay_runs {
             let overlay_run = (*overlay_run).as_ref();
-            let overlay_analysis = matching_overlay_analysis(analysis, overlay_run);
-            let Some(overlay_analysis) = overlay_analysis else {
+            // The overlay run's counterpart of each analysis a curve reads:
+            // the host's, and with a family every member's. A member the
+            // overlay run did not solve draws no overlay curve.
+            let mut counterparts: Vec<(usize, Option<&AnalysisResult<RetainedTrace>>)> = Vec::new();
+            let mut counterpart = |source: usize| match counterparts
+                .iter()
+                .find(|(analysis, _)| *analysis == source)
+            {
+                Some(&(_, found)) => found,
+                None => {
+                    let found = run
+                        .analyses
+                        .get(source)
+                        .and_then(|own| matching_overlay_analysis(own.as_ref(), overlay_run));
+                    counterparts.push((source, found));
+                    found
+                }
+            };
+            let Some(overlay_analysis) = counterpart(analysis_index).or_else(|| {
+                overlay_signals
+                    .iter()
+                    .find_map(|signal| counterpart(signal.0))
+            }) else {
                 continue;
             };
-            if (analysis.imported_coordinate().is_some()
-                || overlay_analysis.imported_coordinate().is_some())
-                && analysis.waveform_coordinate_unit()
-                    != overlay_analysis.waveform_coordinate_unit()
-            {
+            let coordinates_differ =
+                |own: &AnalysisResult<RetainedTrace>, overlay: &AnalysisResult<RetainedTrace>| {
+                    (own.imported_coordinate().is_some() || overlay.imported_coordinate().is_some())
+                        && own.waveform_coordinate_unit() != overlay.waveform_coordinate_unit()
+                };
+            if overlay_signals.iter().any(|signal| {
+                counterpart(signal.0).is_some_and(|overlay| {
+                    run.analyses
+                        .get(signal.0)
+                        .is_some_and(|own| coordinates_differ(own.as_ref(), overlay))
+                })
+            }) {
                 rejected_overlay_count += 1;
                 continue;
             }
@@ -1007,6 +1040,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             let mut projected_overlay_traces = Vec::new();
             let mut incompatible_source = false;
             for (
+                source,
                 source_name,
                 base_name,
                 signal_name,
@@ -1021,11 +1055,14 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                 family_style,
             ) in &overlay_signals
             {
-                let Some((overlay_index, overlay_waveform)) = overlay_analysis
-                    .waveforms
-                    .iter()
-                    .enumerate()
-                    .find(|(_, waveform)| waveform.name == *source_name)
+                let Some((overlay_index, overlay_waveform)) =
+                    counterpart(*source).and_then(|overlay_analysis| {
+                        overlay_analysis
+                            .waveforms
+                            .iter()
+                            .enumerate()
+                            .find(|(_, waveform)| waveform.name == *source_name)
+                    })
                 else {
                     continue;
                 };
@@ -1037,7 +1074,9 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                     break;
                 }
 
-                let base_key = (analysis_index as u64) << 32 | overlay_index as u64;
+                // Keyed by the analysis the curve reads, so each member's
+                // projection of the overlay is its own.
+                let base_key = (*source as u64) << 32 | overlay_index as u64;
                 let derived_key = run_mixed_key(base_key, overlay_run.id, true);
                 let source_y = match *signal_kind {
                     TraceKind::MagnitudeDb => derived.db(derived_key, &overlay_waveform.y),
