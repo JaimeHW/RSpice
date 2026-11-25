@@ -405,10 +405,11 @@ impl Cell {
     }
 
     /// A reading with its unit in mono (`604.8 mV`), its unit's prefix in a
-    /// fixed slot: a reading printed without a prefix leaves the slot blank,
-    /// so in a right-aligned column `1.144 V` ends its digits where
-    /// `604.8 mV` ends its own. The words are the reading as printed; the
-    /// slot is room, not a character.
+    /// fixed slot: a reading printed without a prefix leaves the slot blank
+    /// before its unit, so in a right-aligned column `1.144 V` sets as
+    /// `1.144  V` under `604.8 mV`, digits over digits and unit under unit.
+    /// The words are the reading as printed; the slot is room, not a
+    /// character.
     pub fn quantity(text: impl Into<String>) -> Self {
         let mut cell = Self::with(text, true, Ink::Plain);
         cell.prefix_slot = true;
@@ -2035,18 +2036,52 @@ struct Words<'a> {
     align: Align,
     color: egui::Color32,
     problem: Option<Problem>,
-    /// Room kept after the words on the right edge: a blank prefix slot.
+    /// Room kept blank before the words' unit: a blank prefix slot.
     slot: f32,
 }
 
-/// The room a blank prefix slot keeps after a reading set in `font`: one
-/// prefix glyph's advance, or none when `prefix_slot` is off or the reading
-/// fills its slot ([`Cell::quantity`]).
-fn prefix_slot_room(ui: &Ui, text: &str, font: &egui::FontId, prefix_slot: bool) -> f32 {
-    if !prefix_slot || !rspice_results::number_format::leaves_prefix_slot_blank(text) {
+/// The room a blank prefix slot keeps in a reading set in `font`: one
+/// prefix glyph's advance when the reading's unit takes a prefix and the
+/// reading prints none (`1.144 V`), else none.
+pub fn prefix_slot_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
+    if !rspice_results::number_format::leaves_prefix_slot_blank(text) {
         return 0.0;
     }
     ui.fonts_mut(|fonts| fonts.glyph_width(font, 'm'))
+}
+
+/// [`prefix_slot_width`] for a cell that asked for a slot
+/// ([`Cell::quantity`]); none for any other.
+fn prefix_slot_room(ui: &Ui, text: &str, font: &egui::FontId, prefix_slot: bool) -> f32 {
+    if prefix_slot {
+        prefix_slot_width(ui, text, font)
+    } else {
+        0.0
+    }
+}
+
+/// A reading's layout with `slot` of blank room before its unit: `1.144 V`
+/// set as `1.144  V`, so it ends its digits where `604.8 mV` ends its own
+/// and its unit stands under theirs. The words stay as printed. A zero slot
+/// lays the words out as they are; `wrap` is the width they wrap at.
+pub fn reading_layout(
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    slot: f32,
+    wrap: f32,
+) -> egui::text::LayoutJob {
+    let format = egui::TextFormat::simple(font, color);
+    let mut job = egui::text::LayoutJob::default();
+    match text.rfind(' ').filter(|_| slot > 0.0) {
+        Some(space) => {
+            job.append(&text[..=space], 0.0, format.clone());
+            job.append(&text[space + 1..], slot, format);
+        }
+        None => job.append(text, 0.0, format),
+    }
+    job.wrap.max_width = wrap;
+    job
 }
 
 /// Where a cell's words landed, and whether they were cut short to fit.
@@ -2077,10 +2112,12 @@ fn paint_words(
         return None;
     }
     let mark_room = if problem.is_some() { MARK_ADVANCE } else { 0.0 };
-    let span = egui::Rangef::new(span.min, (span.max - slot).max(span.min));
-    let shown = elide_at_words(ui, text, &font, (span.span() - mark_room).max(0.0));
+    let shown = elide_at_words(ui, text, &font, (span.span() - mark_room - slot).max(0.0));
     let elided = shown != text;
-    let galley = ui.painter().layout_no_wrap(shown, font, color);
+    let slot = if elided { 0.0 } else { slot };
+    let galley = ui
+        .painter()
+        .layout_job(reading_layout(&shown, font, color, slot, f32::INFINITY));
     let text_width = galley.size().x;
     let left = match align {
         Align::Left => span.min + mark_room,
