@@ -589,7 +589,7 @@ pub(crate) struct DigestSlot {
 /// stood at `source`.
 struct Digesting {
     dataset: DatasetId,
-    source: (crate::state::RunHistoryRevision, u64),
+    source: crate::state::RunHistoryRevision,
     stage: Stage,
 }
 
@@ -658,10 +658,7 @@ fn run_digest(
         return Some(digest);
     }
     let run = retained_run(state.model, dataset)?;
-    let source = (
-        simulation.retained.runs.revision(),
-        simulation.view.data_version,
-    );
+    let source = simulation.retained.runs.revision();
     let slot = &mut state.results.working_view_digesting;
     // A digest of another run, or of this one as it stood before, is let
     // go.

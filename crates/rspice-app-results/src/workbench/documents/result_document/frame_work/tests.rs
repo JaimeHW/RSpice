@@ -746,9 +746,11 @@ fn the_first_frame_counts_the_work_the_idle_frames_must_not_repeat() {
 }
 
 /// A memo that can serve stale data is worse than the cost it saved. Every
-/// surface must show the new truth after the dataset behind it changes.
+/// surface must show the new truth after the dataset behind it changes: a
+/// change to the retained runs moves their revision, and the view shows the
+/// changed data under a new display version.
 #[test]
-fn a_new_data_version_rebuilds_every_memo() {
+fn a_new_dataset_generation_rebuilds_every_memo() {
     for (name, viewer) in surfaces() {
         let mut state = state_for(viewer);
         let ctx = egui::Context::default();
@@ -757,6 +759,7 @@ fn a_new_data_version_rebuilds_every_memo() {
             show_surface(viewer, ui, state);
         });
 
+        let _: &mut Vec<_> = &mut state.model.simulation.retained.runs;
         state.model.simulation.view.data_version =
             state.model.simulation.view.data_version.wrapping_add(1);
         let baseline = WorkCounts::reset();
@@ -765,7 +768,7 @@ fn a_new_data_version_rebuilds_every_memo() {
         });
         assert!(
             baseline.since().total() > 0,
-            "{name} served its memo across a data-version bump without recomputing anything"
+            "{name} served its memo across a new dataset generation without recomputing anything"
         );
     }
 }

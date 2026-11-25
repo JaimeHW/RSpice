@@ -1619,13 +1619,10 @@ impl ResultsState {
             Option<crate::product::ContentDigest>,
         ),
     ) {
-        let source = (
-            simulation.retained.runs.revision(),
-            simulation.view.data_version,
-        );
+        let source = simulation.retained.runs.revision();
         self.session
             .signal_indices
-            .adopt(&source.0, analysis, index);
+            .adopt(&source, analysis, index);
         if let Some(verdict) = verdict {
             self.retained_evidence_validity
                 .insert(simulation, &source, analysis, verdict);

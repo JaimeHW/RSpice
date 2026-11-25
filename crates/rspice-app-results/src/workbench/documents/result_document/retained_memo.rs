@@ -6,10 +6,16 @@ use std::hash::Hash;
 
 use crate::state::{RunHistoryRevision, SimulationState};
 
-/// A memo belongs to exactly one retained history revision and display version.
-/// Holding the revision prevents a restored history from reusing its identity.
-/// Read-only consumers check this boundary themselves, without depending on
-/// frame preparation to clear answers computed from an earlier source.
+/// A memo belongs to exactly one retained history revision. Holding the
+/// revision prevents a restored history from reusing its identity, and every
+/// change to a retained run moves it. Read-only consumers check this boundary
+/// themselves, without depending on frame preparation to clear answers
+/// computed from an earlier source.
+///
+/// Every answer held here is a function of the retained runs alone, so the
+/// display version, which showing another run or analysis moves, is not part
+/// of the boundary: with it, each switch of the shown run validated the
+/// evidence of every retained run again, reading every column of each.
 #[derive(Debug, Clone)]
 pub(super) struct RetainedMemo<K, V> {
     inner: RefCell<Entries<K, V>>,
@@ -17,7 +23,7 @@ pub(super) struct RetainedMemo<K, V> {
 
 #[derive(Debug, Clone)]
 struct Entries<K, V> {
-    source: Option<(RunHistoryRevision, u64)>,
+    source: Option<RunHistoryRevision>,
     values: HashMap<K, V>,
 }
 
@@ -42,10 +48,7 @@ impl<K: Eq + Hash, V: Clone> RetainedMemo<K, V> {
         key: K,
         compute: impl FnOnce() -> V,
     ) -> V {
-        let source = (
-            simulation.retained.runs.revision(),
-            simulation.view.data_version,
-        );
+        let source = simulation.retained.runs.revision();
         let mut entries = self.inner.borrow_mut();
         if entries.source.as_ref() != Some(&source) {
             entries.source = Some(source);
@@ -64,10 +67,7 @@ impl<K: Eq + Hash, V: Clone> RetainedMemo<K, V> {
         compute: impl FnOnce() -> V,
         lasting: impl FnOnce(&V) -> bool,
     ) -> V {
-        let source = (
-            simulation.retained.runs.revision(),
-            simulation.view.data_version,
-        );
+        let source = simulation.retained.runs.revision();
         let mut entries = self.inner.borrow_mut();
         if entries.source.as_ref() != Some(&source) {
             entries.source = Some(source);
@@ -86,10 +86,7 @@ impl<K: Eq + Hash, V: Clone> RetainedMemo<K, V> {
     /// The answer held for `key`, while the retained data it was computed
     /// from stands; nothing is computed.
     pub(super) fn get(&self, simulation: &SimulationState, key: &K) -> Option<V> {
-        let source = (
-            simulation.retained.runs.revision(),
-            simulation.view.data_version,
-        );
+        let source = simulation.retained.runs.revision();
         let entries = self.inner.borrow();
         if entries.source.as_ref() != Some(&source) {
             return None;
@@ -102,14 +99,11 @@ impl<K: Eq + Hash, V: Clone> RetainedMemo<K, V> {
     pub(super) fn insert(
         &self,
         simulation: &SimulationState,
-        source: &(crate::state::RunHistoryRevision, u64),
+        source: &RunHistoryRevision,
         key: K,
         value: V,
     ) {
-        let now = (
-            simulation.retained.runs.revision(),
-            simulation.view.data_version,
-        );
+        let now = simulation.retained.runs.revision();
         if *source != now {
             return;
         }

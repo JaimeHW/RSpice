@@ -65,6 +65,44 @@ fn retained_memo_validity_tracks_corruption_and_repair_without_a_version_bump() 
     assert_eq!(state.model.simulation.view.data_version, version);
 }
 
+/// Showing another run or analysis moves the display version and changes no
+/// retained run, so nothing held is worked out again. Over two hundred runs,
+/// each switch of the shown run validated every run's evidence again.
+#[test]
+fn retained_memo_outlives_showing_another_run() {
+    let mut state = retained_state(AnalysisType::Transient, 100);
+    state.model.simulation.retained.runs[0].analyses.extend([
+        analysis(AnalysisType::Noise, 2, 100),
+        analysis(AnalysisType::Disto, 3, 100),
+    ]);
+    assert!(state.model.simulation.select_run(0));
+    read_all(&state);
+    let digest = retained_dataset_digest(
+        state.results_reads(),
+        &state.model.simulation.retained.runs[0],
+    );
+    let work = frame_work::WorkCounts::reset();
+    for analysis in [1, 2, 0] {
+        assert!(state.model.simulation.select_analysis(analysis));
+        state.model.simulation.view.data_version =
+            state.model.simulation.view.data_version.wrapping_add(1);
+        read_all(&state);
+        assert_eq!(
+            retained_dataset_digest(
+                state.results_reads(),
+                &state.model.simulation.retained.runs[0]
+            ),
+            digest
+        );
+    }
+    assert_eq!(
+        work.since().total(),
+        0,
+        "showing another analysis worked out again what the retained runs answered: {:?}",
+        work.since().nonzero()
+    );
+}
+
 #[test]
 fn retained_memo_absent_analysis_becomes_available_without_frame_preparation() {
     let mut state = retained_state(AnalysisType::Transient, 3);
