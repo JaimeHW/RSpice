@@ -230,11 +230,11 @@ fn the_cursor_commands_move_the_stepping_cursor_to_each_feature() {
     let painted = texts(&harness_frame(&ctx, &mut harness, Vec::new()));
     harness_frame(&ctx, &mut harness, Vec::new());
     assert!(
-        painted.iter().any(|text| text == "1 ms"),
+        painted.iter().any(|text| text == "1.000 ms"),
         "the Δ column reads one period: {painted:?}"
     );
     assert!(
-        painted.iter().any(|text| text == "1/\u{0394}x 1 kHz"),
+        painted.iter().any(|text| text == "1/\u{0394}x 1.000 kHz"),
         "and 1/Δx its frequency: {painted:?}"
     );
 
