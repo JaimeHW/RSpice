@@ -1,9 +1,11 @@
-//! A result signal reaches its place on the schematic in one action: a pin
-//! current selects its pin, and a signal read two levels down opens that
-//! occurrence.
+//! A result signal reaches its place on the schematic in one action, and a
+//! probe on the schematic reaches the plot: a pin current selects its pin, a
+//! signal read two levels down opens that occurrence, and a probed net is on
+//! the plan's working view.
 
 use super::inspector::{cross_probe, result_app_with_current_out_map, status_line};
 use crate::workbench::RSpiceApp;
+use rspice_app_design::schematic::view::gesture_commits::click_probe;
 use rspice_app_design::workbench::design::navigator::hierarchy_tree::open_occurrence;
 use rspice_app_design::workbench::design::navigator::tests::{add_master, placed};
 use rspice_app_results::workbench::commands::schematic_cross_probe::show_signal_on_schematic;
@@ -191,5 +193,57 @@ fn a_net_two_levels_down_opens_that_occurrence_and_selects_it() {
             .selection
             .wires
             .contains(&91)
+    );
+}
+
+/// A probe click on a net the last run holds puts its signal on the plan's
+/// working view, which every strip of the run draws from.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_schematic_probe_puts_its_signal_on_the_working_view() {
+    use super::working_view::{quick_frame, run_plan_with, show_newest, view_plots};
+    use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
+    use rspice_app_state::state::RetainedTrace;
+
+    let host = state_with_current_clean_drc();
+    let mut app = RSpiceApp::test_instance();
+    app.state.model = host.model;
+    app.state.runs = host.runs;
+    app.state.workbench.activate(Workspace::Results);
+    let time = vec![0.0, 0.5, 1.0];
+    let mut probed = RetainedTrace::new("V(probed)", time.clone(), vec![0.0, 0.7, 0.2], "#ffffff");
+    probed.visible = false;
+    run_plan_with(
+        &mut app.state,
+        vec![
+            RetainedTrace::new("V(in)", time.clone(), vec![1.0; 3], "#ffffff"),
+            probed,
+        ],
+    );
+    show_newest(&mut app.state);
+    quick_frame(&mut app.state);
+    assert!(
+        !view_plots(&app.state).contains(&("V(probed)".to_owned(), true)),
+        "the run does not plot the net before it is probed"
+    );
+
+    // The net PROBED, drawn away from everything else on the sheet.
+    let (a, b) = (Point::new(2000, 2000), Point::new(2040, 2000));
+    app.state.model.schematic.add_wire(vec![a, b]);
+    app.state
+        .model
+        .schematic
+        .add_net_label(a, "PROBED".to_owned());
+    app.state.sync_active_schematic_to_workspace();
+    app.state.workbench.activate(Workspace::Design);
+
+    click_probe(&mut app.state.canvas_frame(), Point::new(2020, 2000));
+    app.after_contribution();
+    quick_frame(&mut app.state);
+
+    assert!(
+        view_plots(&app.state).contains(&("V(probed)".to_owned(), true)),
+        "the probed net is on the view: {:?}",
+        view_plots(&app.state)
     );
 }

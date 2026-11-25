@@ -2060,7 +2060,7 @@ enum ProbeSubject {
     Part(u64),
 }
 
-fn handle_probe_click(
+pub(super) fn handle_probe_click(
     state: &mut CanvasParts<'_>,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,

@@ -38,7 +38,7 @@ fn run_plan(state: &mut AppState, out: [f64; 5]) {
 
 /// Run the session's plan once, its transient answering `waveforms`, and
 /// finish the run.
-fn run_plan_with(state: &mut AppState, waveforms: Vec<RetainedTrace>) {
+pub(super) fn run_plan_with(state: &mut AppState, waveforms: Vec<RetainedTrace>) {
     let mut controller = SimulationController::new();
     controller
         .preflight_run_set(state)
@@ -71,7 +71,7 @@ fn run_plan_with(state: &mut AppState, waveforms: Vec<RetainedTrace>) {
 
 /// The quick view's frame around nothing: the shown run's working view is
 /// made or followed, drawn, and kept.
-fn quick_frame(state: &mut AppState) {
+pub(super) fn quick_frame(state: &mut AppState) {
     let mut parts = state.results_parts();
     working_view::sync(&mut parts);
     working_view::capture(&mut parts);
@@ -82,7 +82,7 @@ fn quick_frame(state: &mut AppState) {
 
 /// Show the newest run, first in the history, as Results does when a run
 /// finishes.
-fn show_newest(state: &mut AppState) -> AnalysisPresentationKey {
+pub(super) fn show_newest(state: &mut AppState) -> AnalysisPresentationKey {
     assert!(state.model.simulation.select_run(0));
     let run = state.model.simulation.active_run().expect("the newest run");
     AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
@@ -428,7 +428,7 @@ fn an_older_run_is_shown_through_the_same_view_and_back_to_latest() {
 }
 
 /// The signals the plan's view plots, and whether each is drawn.
-fn view_plots(state: &AppState) -> Vec<(String, bool)> {
+pub(super) fn view_plots(state: &AppState) -> Vec<(String, bool)> {
     let view = plan_view(state);
     let mut plots: Vec<_> = state
         .model

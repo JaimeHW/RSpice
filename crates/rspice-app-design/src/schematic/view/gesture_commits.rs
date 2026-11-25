@@ -28,6 +28,13 @@ pub fn click_junction(frame: &mut CanvasFrame<'_>, at: Point) {
     interaction::handle_junction_click(&mut frame.parts(), at);
 }
 
+/// A click with the probe tool at `at`: the signal there goes on the plot,
+/// and an editable view keeps a probe marker for it.
+pub fn click_probe(frame: &mut CanvasFrame<'_>, at: Point) {
+    let symbols = schematic_symbol_context(&*frame.model);
+    interaction::handle_probe_click(&mut frame.parts(), at, &symbols);
+}
+
 /// Enter on an armed Move whose preview stands at its current delta.
 pub fn commit_move(frame: &mut CanvasFrame<'_>) {
     let symbols = schematic_symbol_context(&*frame.model);
