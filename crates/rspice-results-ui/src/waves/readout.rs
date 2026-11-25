@@ -14,7 +14,7 @@ use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_branches_into,
 };
 use rspice_ui_kit::plot::{CursorPair, SampleInterpolation, XScale};
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable};
+use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::AtomicUsize;
@@ -97,9 +97,13 @@ pub fn measurement_panel(
         window,
         signals: model.traces.iter().filter(|trace| trace.visible).count(),
     });
+    // A grid on the details pane's dense rows, as its other tables are: the
+    // reading's name on the left, its value right-aligned on its own column.
     let columns = [
         Column::name("Measurement", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
-        Column::name("Value", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
+        Column::name("Value", MEASUREMENT_COLUMN_LEAST_W)
+            .align(Align::Right)
+            .unsortable(),
     ];
     match shown {
         Shown::Measured(measured) => {
@@ -111,7 +115,6 @@ pub fn measurement_panel(
             let mut kept = None;
             crate::presentation::with_table_state(ui, "waves.measurements", |ui, state| {
                 let response = DataTable::new("results.measurements", &columns, measured.rows)
-                    .list()
                     .state(state)
                     .show(ui, |row| {
                         let row = measured.row(model, row, wording);
@@ -153,14 +156,15 @@ pub fn measurement_panel(
             kept
         }
         Shown::Measuring(signals) => {
-            let _ = DataTable::new("results.measurements", &columns[..1], 1)
-                .list()
-                .show(ui, |_| {
-                    vec![Cell::faint(format!(
+            let _ = DataTable::new("results.measurements", &columns, 1).show(ui, |_| {
+                vec![
+                    Cell::faint(format!(
                         "Measuring {signals} signal{}…",
                         if signals == 1 { "" } else { "s" }
-                    ))]
-                });
+                    )),
+                    Cell::empty(),
+                ]
+            });
             None
         }
         Shown::Nothing => None,
