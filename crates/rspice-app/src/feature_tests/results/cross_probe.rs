@@ -1,14 +1,16 @@
 //! A result signal reaches its place on the schematic in one action, and a
 //! probe on the schematic reaches the plot: a pin current selects its pin, a
-//! signal read two levels down opens that occurrence, and a probed net is on
-//! the plan's working view.
+//! noise contributor its part, a signal read two levels down opens that
+//! occurrence, and a probed net is on the plan's working view.
 
 use super::inspector::{cross_probe, result_app_with_current_out_map, status_line};
 use crate::workbench::RSpiceApp;
 use rspice_app_design::schematic::view::gesture_commits::click_probe;
 use rspice_app_design::workbench::design::navigator::hierarchy_tree::open_occurrence;
 use rspice_app_design::workbench::design::navigator::tests::{add_master, placed};
-use rspice_app_results::workbench::commands::schematic_cross_probe::show_signal_on_schematic;
+use rspice_app_results::workbench::commands::schematic_cross_probe::{
+    show_noise_contributor_on_schematic, show_signal_on_schematic,
+};
 use rspice_app_state::state::{
     CellViewRef, Component, ComponentType, InstancePath, Point, SchematicState, Wire,
 };
@@ -71,6 +73,32 @@ fn a_pin_current_selects_the_pin_of_its_part() {
         editor.net_highlight.is_wire_highlighted(91),
         "the conductor the drain meets is lit"
     );
+}
+
+/// A noise contributor's row shows the part that makes the noise as a
+/// current probe of it does: selected and centred, on Design.
+#[test]
+fn a_noise_contributor_selects_the_part_that_makes_the_noise() {
+    let mut app = result_app_with_current_out_map(false);
+    let place = Point::new(200, 0);
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(Component::new(7, ComponentType::Resistor, place).with_name_value("R1", "1k"));
+
+    show_noise_contributor_on_schematic(&mut app.state.results_parts(), "R1").expect("R1 is drawn");
+    app.after_contribution();
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(
+        status_line(&app).as_deref(),
+        Some("Selected R1 from the noise of R1.")
+    );
+    let editor = &app.state.model.schematic.session.editor;
+    assert!(editor.selection.has_component(7), "R1 is selected");
+    assert_eq!(editor.center_request, Some(place), "and centred");
 }
 
 /// A design two levels deep: the root places `XA` of `work/child`, which

@@ -10,8 +10,8 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 mod figure;
 mod table;
-pub use table::ContributorLine;
 pub(crate) use table::contributor_table;
+pub use table::{ContributorLine, ContributorResponse};
 
 /// Contributor evidence bound by the host to the displayed noise spectrum.
 pub enum ContributorEvidence<'a> {
@@ -28,14 +28,15 @@ pub enum ContributorEvidence<'a> {
 
 /// Show contributors for the host-selected analysis and its validated
 /// noise-figure evidence. The reader's `pinned` contributors lead the
-/// table; returns whether the reader changed them.
+/// table; returns whether the reader changed them and the device they asked
+/// to see on the schematic.
 pub fn right_panel(
     ui: &mut Ui,
     evidence: ContributorEvidence<'_>,
     quantity_policy: &QuantityPresentationPolicy,
     digits: usize,
     pinned: &mut Vec<PinnedContributor>,
-) -> bool {
+) -> ContributorResponse {
     let frequency = |hertz| crate::presentation::frequency_readout(quantity_policy, hertz, digits);
     let summary = match evidence {
         ContributorEvidence::Retained { summary, .. } => summary,
@@ -45,7 +46,7 @@ pub fn right_panel(
                 ui,
                 "No contributor data. Turn on contributor ranking in the noise analysis.",
             );
-            return false;
+            return ContributorResponse::default();
         }
     };
 
@@ -142,7 +143,7 @@ pub fn right_panel(
             ui,
             "No contributor data. Turn on contributor ranking in the noise analysis.",
         );
-        return false;
+        return ContributorResponse::default();
     }
     section_header(ui, "Contributors", Some("band-integrated"));
     let lines: Vec<ContributorLine<'_>> = summary

@@ -66,13 +66,15 @@ fn ranked_lines<'a>(
 /// Every value is a row: the integration band, each output's RMS figures and
 /// each contributor's share are facts with names, and they sit on the same
 /// label/value grid as the rest of the inspector rather than as sentences on
-/// its edge.
+/// its edge. Returns the contributor the reader asked to see on the
+/// schematic.
 pub fn summary(
     ui: &mut egui::Ui,
     response: &QpnoiseAnalysisResult,
     quantity_policy: &QuantityPresentationPolicy,
     digits: usize,
-) {
+) -> Option<String> {
+    let mut shown = None;
     section_header(ui, "Noise", None);
     let request = &response.metadata.request;
     if let Some(integration) = &request.integration {
@@ -157,14 +159,15 @@ pub fn summary(
                     .as_ref()
                     .map(|integral| integral.contributor_rms.as_slice()),
             );
-            contributor_table(
+            shown = shown.or(contributor_table(
                 ui,
                 &format!("qpnoise-contributors-{index}"),
                 &lines,
                 ("RMS", unit),
                 digits,
                 None,
-            );
+            )
+            .shown);
         }
         if request.contributor_ranking && spectrum.ranking.is_none() {
             panel_note(
@@ -173,6 +176,7 @@ pub fn summary(
             );
         }
     }
+    shown
 }
 
 #[cfg(test)]

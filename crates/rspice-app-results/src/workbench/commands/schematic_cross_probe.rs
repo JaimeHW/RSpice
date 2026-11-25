@@ -50,6 +50,19 @@ pub fn show_signal_on_schematic(state: &mut ResultsParts<'_>, signal: &str) -> R
     show_on_schematic(state, signal, signal)
 }
 
+/// Show the part a noise contributor names as a current probe of it shows
+/// it: selected, centred, and brought forward from wherever it is drawn.
+pub fn show_noise_contributor_on_schematic(
+    state: &mut ResultsParts<'_>,
+    device: &str,
+) -> Result<(), String> {
+    show_on_schematic(
+        state,
+        &format!("I({device})"),
+        &format!("the noise of {device}"),
+    )
+}
+
 /// Show what `signal` locates, saying it was selected `from` what the reader
 /// acted on.
 fn show_on_schematic(state: &mut ResultsParts<'_>, signal: &str, from: &str) -> Result<(), String> {

@@ -33,6 +33,16 @@ impl ContributorLine<'_> {
     }
 }
 
+/// What the reader asked of the contributor table this frame.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ContributorResponse {
+    /// The reader pinned or unpinned a contributor.
+    pub pins_changed: bool,
+    /// The device whose row the reader opened (a double-click, Enter, or
+    /// "Show on schematic" in its menu), to be shown on the schematic.
+    pub shown: Option<String>,
+}
+
 /// The order the table lists `lines` in before the reader sorts it: the
 /// pinned contributors first, first pinned first, then the rest in the
 /// run's order. Every line is listed once. Returns how many lead as pinned.
@@ -53,11 +63,11 @@ pub(super) fn listed_order(
     (order, leading)
 }
 
-/// Every contributor in a table whose every column sorts. A row's menu pins
-/// its contributor above the rest, whatever the sort, and copies the row;
-/// without `pinned` the table offers no pins. The figure column reads in
-/// `figure.1`, named in its head. Returns whether the reader changed the
-/// pins.
+/// Every contributor in a table whose every column sorts. Opening a row
+/// shows its device on the schematic, as its menu's first item does; the
+/// menu also pins its contributor above the rest, whatever the sort, and
+/// copies the row. Without `pinned` the table offers no pins. The figure
+/// column reads in `figure.1`, named in its head.
 pub(crate) fn contributor_table(
     ui: &mut Ui,
     salt: &str,
@@ -65,7 +75,7 @@ pub(crate) fn contributor_table(
     figure: (&str, &str),
     digits: usize,
     mut pinned: Option<&mut Vec<PinnedContributor>>,
-) -> bool {
+) -> ContributorResponse {
     let (order, leading) = listed_order(lines, pinned.as_deref().map_or(&[], Vec::as_slice));
     let groups = if leading > 0 {
         vec![Group::new("Pinned", 0), Group::new("Contributors", leading)]
@@ -136,10 +146,18 @@ pub(crate) fn contributor_table(
             .show(ui, |row| rows[row].clone())
     });
     let mut changed = false;
+    let mut shown = response
+        .activate
+        .and_then(|row| order.get(row))
+        .map(|&index| lines[index].device.to_owned());
     table_row_menu(ui, salt, response.context_menu, |ui, row| {
         let Some(line) = order.get(row).map(|&index| &lines[index]) else {
             return;
         };
+        if ui.button("Show on schematic").clicked() {
+            shown = Some(line.device.to_owned());
+            ui.close();
+        }
         if let Some(pins) = pinned.as_mut() {
             let at = pins.iter().position(|pin| line.is(pin));
             let label = if at.is_some() { "Unpin" } else { "Pin to top" };
@@ -168,7 +186,10 @@ pub(crate) fn contributor_table(
             ui.close();
         }
     });
-    changed
+    ContributorResponse {
+        pins_changed: changed,
+        shown,
+    }
 }
 
 /// The contributor table's columns: the rank and the two figures as wide as
@@ -253,5 +274,55 @@ mod tests {
         let (order, leading) = listed_order(&lines, &[]);
         assert_eq!(leading, 0);
         assert_eq!(order, (0..40).collect::<Vec<_>>());
+    }
+    /// A double-click on a contributor's row asks for its device on the
+    /// schematic, as a waveform's probe does.
+    #[test]
+    fn a_double_click_on_a_contributor_asks_for_its_device_on_the_schematic() {
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let lines = [(1, "R1"), (2, "M1")].map(|(rank, device)| ContributorLine {
+            rank,
+            device,
+            mechanism: "thermal",
+            figure: Some(1e-12),
+            figure_absent: None,
+            share_pct: Some(50.0),
+        });
+        let frame = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut response = ContributorResponse::default();
+            let (_, geometry) = rspice_ui_kit::probe::pass(&ctx, input, |ui| {
+                response = contributor_table(ui, "test", &lines, ("Power", "V2"), 4, None);
+            });
+            (response, geometry)
+        };
+        let (_, geometry) = frame(Vec::new());
+        let row = geometry
+            .one("table.line.1")
+            .expect("M1's row is shown")
+            .center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: row,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let (response, _) = frame(vec![
+            egui::Event::PointerMoved(row),
+            button(true),
+            button(false),
+            button(true),
+            button(false),
+        ]);
+        assert_eq!(response.shown.as_deref(), Some("M1"));
+        assert!(!response.pins_changed);
     }
 }

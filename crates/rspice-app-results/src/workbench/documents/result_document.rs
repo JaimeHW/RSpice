@@ -3508,8 +3508,12 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 .displayed_significant_digits()
                 .get(),
         );
-        rspice_results_ui::qpnoise::summary(ui, response, &quantity_policy, digits);
-        if view.viewer == ResultViewer::NoiseContrib {
+        let shown = rspice_results_ui::qpnoise::summary(ui, response, &quantity_policy, digits);
+        let contributors = view.viewer == ResultViewer::NoiseContrib;
+        if let Some(device) = shown {
+            noise_contrib::show_on_schematic(state, &device);
+        }
+        if contributors {
             waves::right_panel(ui, state);
             return;
         }

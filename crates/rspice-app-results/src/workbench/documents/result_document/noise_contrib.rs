@@ -48,7 +48,8 @@ fn keep_pinned(state: &mut ResultsParts<'_>, pinned: Vec<PinnedContributor>) {
     );
 }
 
-/// Bind the contributor inspector to the same qualified analysis as the noise spectrum.
+/// Bind the contributor inspector to the same qualified analysis as the
+/// noise spectrum. A contributor the reader opens is shown on the schematic.
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     bode::noise_spectrum_right_panel(ui, state);
     let index = bode::selected_noise_analysis_index(state.results_reads());
@@ -62,8 +63,21 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             .get(),
     );
     let mut pins = pinned(state.results_reads());
-    if view::right_panel(ui, evidence, &quantity_policy, digits, &mut pins) {
+    let response = view::right_panel(ui, evidence, &quantity_policy, digits, &mut pins);
+    if response.pins_changed {
         keep_pinned(state, pins);
+    }
+    if let Some(device) = response.shown {
+        show_on_schematic(state, &device);
+    }
+}
+
+/// Show the part a noise contributor names on the schematic, or say on the
+/// status line why it cannot be.
+pub(super) fn show_on_schematic(state: &mut ResultsParts<'_>, device: &str) {
+    use crate::workbench::commands::schematic_cross_probe::show_noise_contributor_on_schematic;
+    if let Err(reason) = show_noise_contributor_on_schematic(state, device) {
+        state.workbench.prompt(reason);
     }
 }
 
