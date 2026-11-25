@@ -130,15 +130,18 @@ pub fn evaluated_waveform(
     }
 }
 
-/// A complex locus the calculator reads off `waveforms` for `text`: its
-/// sweep, then its real and imaginary parts, as a Smith chart draws a
-/// response the reader typed. A real-valued result is a locus on the real
-/// axis; a scalar is not a locus at all.
+/// A complex locus: its sweep, then its real and imaginary parts.
+#[cfg(feature = "engine-evidence")]
+pub type ComplexLocus = (Vec<f64>, Vec<f64>, Vec<f64>);
+
+/// The complex locus the calculator reads off `waveforms` for `text`, as a
+/// Smith chart draws a response the reader typed. A real-valued result is a
+/// locus on the real axis; a scalar is not a locus at all.
 #[cfg(feature = "engine-evidence")]
 pub fn complex_locus<W: AsRef<RetainedWaveform>>(
     waveforms: &[W],
     text: &str,
-) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), String> {
+) -> Result<ComplexLocus, String> {
     let expression =
         super::spice_parser::try_parse(text).map_err(|error| format!("parse error: {error}"))?;
     let context = WaveformsContext::with_policy(waveforms, ComplexExpressionPolicy::Rectangular);
