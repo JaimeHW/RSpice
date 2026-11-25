@@ -1823,6 +1823,36 @@ fn publication_digest(
     ContentDigest::from_bytes(digest.finalize().into())
 }
 
+/// The page line a sheet's header carries: the source's revision, the page
+/// of the print and, only where the print is tiled, which tile this is.
+pub(super) fn header_page_line(plan: &HardcopyPlan, page: &PreviewPage) -> String {
+    let pages = plan.pagination().pages();
+    let mut line = format!(
+        "rev {} · page {} of {}",
+        plan.source().revision().get(),
+        page.number(),
+        pages.len()
+    );
+    let tiled = pages.iter().any(|other| {
+        other.section_ordinal() == page.section_ordinal() && other.coordinate() != page.coordinate()
+    });
+    if tiled {
+        line.push_str(" · tile ");
+        line.push_str(page.coordinate());
+    }
+    line
+}
+
+/// A digest as a printed page names it: its first twelve hexadecimal
+/// digits, as a commit is named. The whole digest stays in the file's
+/// metadata.
+#[must_use]
+pub fn short_digest(digest: impl std::fmt::Display) -> String {
+    let mut text = digest.to_string();
+    text.truncate(12);
+    text
+}
+
 pub(super) fn validate_lines(
     field: &'static str,
     lines: &[String],

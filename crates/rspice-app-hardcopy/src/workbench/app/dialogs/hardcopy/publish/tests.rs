@@ -21,11 +21,10 @@ fn file_contract_does_not_misrepresent_print_targets() {
 
 #[test]
 fn identity_bands_are_exactly_one_line_each() {
-    let (header, provenance) =
-        identity_lines("P", "7", "top / schematic", "source:key", "3", "0123");
+    let (header, provenance) = identity_lines("P", "7", "source:key", "3", "0123");
     assert!(!header.contains('\n'));
     assert!(!provenance.contains('\n'));
-    assert!(header.contains("top / schematic"));
+    assert_eq!(header, "P \u{00b7} revision 7");
     assert!(provenance.contains("source:key"));
 }
 

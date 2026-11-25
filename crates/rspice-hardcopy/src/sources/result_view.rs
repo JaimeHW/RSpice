@@ -29,6 +29,8 @@ pub use presentation::{QuickFftSettings, QuickHistogramSettings, ResultsQuickVie
 pub struct RetainedQuickViewSource<'a, W> {
     dataset_id: DatasetId,
     run_id: RunId,
+    /// The run's name as the sheet's bar shows it.
+    run_label: &'a str,
     analysis: &'a AnalysisResult<W>,
     is_visible: fn(&W) -> bool,
 }
@@ -71,6 +73,7 @@ impl<'a, W: AsRef<RetainedWaveform>> RetainedQuickViewSource<'a, W> {
         Ok(Self {
             dataset_id: run.dataset_id,
             run_id: run.run_id,
+            run_label: &run.label,
             analysis,
             is_visible,
         })
@@ -170,6 +173,7 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         active.dataset_id,
         active.run_id,
         active.analysis,
+        active.run_label,
     )?;
     let bounds = match &semantic_document {
         HardcopySemanticDocument::Plot(_) => SemanticBounds::try_new(
@@ -1145,6 +1149,7 @@ pub fn results_quick_view_identity<W: AsRef<RetainedWaveform>, A>(
         run.dataset_id,
         run.run_id,
         analysis,
+        &run.label,
     )
 }
 
@@ -1155,6 +1160,7 @@ fn quick_view_identity<W: AsRef<RetainedWaveform>>(
     dataset_id: DatasetId,
     run_id: RunId,
     analysis: &AnalysisResult<W>,
+    run_label: &str,
 ) -> Result<HardcopySourceIdentity, HardcopySourceError> {
     let mut identity_name = source_key.as_bytes().to_vec();
     identity_name.extend_from_slice(viewer.label().as_bytes());
@@ -1172,8 +1178,27 @@ fn quick_view_identity<W: AsRef<RetainedWaveform>>(
         HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_name))
             .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
         ObjectRevision::INITIAL,
-        format!("Results - {}", viewer.label()),
+        quick_view_title(viewer, run_label, analysis),
     )
+}
+
+/// What a printed sheet is called: the sheet, its run and its analysis,
+/// as the sheet's own bar names them, e.g. "Waves · Run 1 · Transient".
+fn quick_view_title<W>(
+    viewer: ResultViewer,
+    run_label: &str,
+    analysis: &AnalysisResult<W>,
+) -> String {
+    let analysis_label = if analysis.label.trim().is_empty() {
+        analysis.analysis_type.short_label()
+    } else {
+        analysis.label.trim()
+    };
+    [viewer.tab_label(), run_label.trim(), analysis_label]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 #[cfg(test)]

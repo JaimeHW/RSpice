@@ -50,8 +50,8 @@ pub(super) fn provenance_rows(
     let lines = if scene.metadata.provenance_lines.is_empty() {
         fallback = vec![format!(
             "source {} · plan {}",
-            plan.source().content_digest(),
-            plan.content_digest()
+            short_digest(plan.source().content_digest()),
+            short_digest(plan.content_digest())
         )];
         &fallback
     } else {

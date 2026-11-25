@@ -770,13 +770,7 @@ pub(super) fn write_svg_decorations(
             output,
             faces,
             SceneFont::Monospace,
-            &format!(
-                "rev {} · page {} / {} · {}",
-                plan.source().revision().get(),
-                page.number(),
-                plan.pagination().pages().len(),
-                page.coordinate()
-            ),
+            &header_page_line(plan, page),
             SvgLine {
                 x: page_right as f64,
                 anchor: TextAnchor::End,

@@ -869,13 +869,7 @@ pub(super) fn draw_pdf_decorations(
             surface,
             fonts,
             (right, baseline),
-            &format!(
-                "rev {} · page {} / {} · {}",
-                plan.source().revision().get(),
-                page.number(),
-                plan.pagination().pages().len(),
-                page.coordinate()
-            ),
+            &header_page_line(plan, page),
             TextAnchor::End,
             PdfTextStyle {
                 font: SceneFont::Monospace,

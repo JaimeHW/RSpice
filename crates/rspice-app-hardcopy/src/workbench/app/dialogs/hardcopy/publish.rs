@@ -747,10 +747,9 @@ fn metadata_for(
             .revision()
             .get()
             .to_string(),
-        resolved.authority().display_name(),
         resolved.source_key(),
         &resolved.authority().revision().get().to_string(),
-        &resolved.authority().content_digest().to_string(),
+        &rspice_hardcopy::render::short_digest(resolved.authority().content_digest()),
     );
     // Keep identity fields intact; the renderer wraps provenance to the
     // measured capacity of the physical band before producing any output.
@@ -759,16 +758,19 @@ fn metadata_for(
     Ok(metadata)
 }
 
+/// The header's project line and the footer's source line. The header's
+/// title already names the source, so the project line does not repeat it;
+/// the digest is the short form a page prints, the whole of it kept in the
+/// file's metadata.
 fn identity_lines(
     project: &str,
     project_revision: &str,
-    source_name: &str,
     source_key: &str,
     source_revision: &str,
     source_digest: &str,
 ) -> (String, String) {
     (
-        format!("{project} \u{00b7} revision {project_revision} \u{00b7} {source_name}"),
+        format!("{project} \u{00b7} revision {project_revision}"),
         format!(
             "Source {source_key} \u{00b7} revision {source_revision} \u{00b7} content {source_digest}"
         ),
