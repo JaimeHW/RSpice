@@ -1,6 +1,9 @@
 //! Retained DC mismatch charts and signed contributor readouts.
 
-use super::{CELL_INSET, PANEL_ROW_HEIGHT, column_rect, paint_cell};
+use super::{
+    CELL_INSET, column_rect, exact_copy, exact_row, kept_by_filter, listed_revision, paint_cell,
+    ranked_table,
+};
 use crate::{
     presentation::{panel_note, table_row_height, well_hint},
     strip::StripHeader,
@@ -9,11 +12,15 @@ use crate::{
 use egui::{Sense, Ui};
 use rspice_results::dc_mismatch::DcMismatchEvidence;
 use rspice_ui_kit::{
-    panels::{panel_body, section_header},
+    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::measurement_table,
+    widgets::{
+        measurement_table,
+        table::{Cell, RowKey, SortKey},
+    },
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::cmp::Ordering;
 
 const RANK_WIDTH: f32 = 44.0;
@@ -39,6 +46,8 @@ pub struct MismatchView<'a> {
     pub evidence: &'a DcMismatchEvidence,
     /// The reader's significant digits, which every figure reads at.
     pub significant_digits: usize,
+    /// How a copied row writes its values.
+    pub quantity_policy: QuantityPresentationPolicy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -50,6 +59,12 @@ pub enum ActiveMismatch<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MismatchPlan {
+    /// The contributors the sheet's filter keeps, in the engine's order,
+    /// which is their rank.
+    listed: Vec<usize>,
+    /// The listed contributors' identities, for the table's selection.
+    keys: Vec<RowKey>,
+    revision: u64,
     /// Running signed sum of the retained shares, in the engine's order.
     cumulative: Vec<f64>,
     /// Largest `|contribution|`, which is the absolute bar's full scale.
@@ -70,11 +85,48 @@ impl MismatchPlan {
         &self.offsets
     }
 
-    pub fn new(evidence: &DcMismatchEvidence) -> Self {
+    pub fn listed(&self) -> &[usize] {
+        &self.listed
+    }
+
+    /// The contributors `filter` keeps listed, by instance or parameter,
+    /// with the whole list's running share and scale, so neither moves as
+    /// the reader narrows the list.
+    pub fn new(evidence: &DcMismatchEvidence, filter: &str) -> Self {
         let cumulative = evidence.cumulative_shares();
+        let listed: Vec<usize> = evidence
+            .contributors
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| kept_by_filter(filter, &[&row.instance, &row.parameter]))
+            .map(|(rank, _)| rank)
+            .collect();
+        let keys: Vec<RowKey> = listed
+            .iter()
+            .map(|rank| {
+                let row = &evidence.contributors[*rank];
+                RowKey::Text(format!("{}\u{1f}{}", row.instance, row.parameter))
+            })
+            .collect();
+        let revision = listed_revision(
+            &keys,
+            listed.iter().map(|rank| {
+                let row = &evidence.contributors[*rank];
+                [
+                    row.sigma_parameter,
+                    row.sensitivity,
+                    row.contribution,
+                    row.share,
+                ]
+                .map(Some)
+            }),
+        );
         Self {
             // Counted in rows: the chart scales them by the density's row height.
-            offsets: RowOffsets::from_heights(std::iter::repeat_n(1.0, cumulative.len())),
+            offsets: RowOffsets::from_heights(std::iter::repeat_n(1.0, listed.len())),
+            listed,
+            keys,
+            revision,
             cumulative,
             max_contribution: evidence.max_contribution_magnitude(),
         }
@@ -139,7 +191,17 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
         evidence.retained_contributors(),
         evidence.evaluated_contributors,
     );
+    let listed = plan.listed();
+    let subtitle = if listed.len() == evidence.contributors.len() {
+        subtitle
+    } else {
+        format!("{subtitle} \u{b7} {} shown", listed.len())
+    };
     StripHeader::new("DCMATCH", &subtitle, &[]).show(ui);
+    if listed.is_empty() {
+        well_hint(ui, "No contributor matches the filter");
+        return;
+    }
 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -278,10 +340,9 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                 (viewport.max.y - row_height) / row_height,
             ));
             ui.allocate_space(egui::vec2(width, rows.leading * row_height));
-            for (rank, row) in evidence
-                .contributors
+            for (rank, row) in listed
                 .iter()
-                .enumerate()
+                .map(|rank| (*rank, &evidence.contributors[*rank]))
                 .skip(rows.first)
                 .take(rows.end - rows.first)
             {
@@ -316,7 +377,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                     );
                     ui.label(format!("Scope: {}", row.scope.tag()));
                     ui.label(format!(
-                        "Parameter sigma: {}",
+                        "Parameter \u{3c3}: {}",
                         exact_value(row.sigma_parameter, digits)
                     ));
                     ui.label(format!(
@@ -482,7 +543,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
             ui.allocate_space(egui::vec2(width, rows.trailing * row_height));
         });
 }
-pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
+pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>) {
     let view = match source {
         ActiveMismatch::Ready(view) => view,
         ActiveMismatch::Missing => {
@@ -545,9 +606,9 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
     let mut rows: Vec<(&str, &str)> = vec![
         ("Output", evidence.output.as_str()),
         ("Nominal", nominal.as_str()),
-        ("Sigma total", sigma_total.as_str()),
-        ("Sigma mismatch", sigma_mismatch.as_str()),
-        ("Sigma process", sigma_process.as_str()),
+        ("\u{3c3} total", sigma_total.as_str()),
+        ("\u{3c3} mismatch", sigma_mismatch.as_str()),
+        ("\u{3c3} process", sigma_process.as_str()),
         ("Quoted", quoted.as_str()),
     ];
     if let Some(remainder) = remainder.as_deref() {
@@ -564,76 +625,70 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
         return;
     }
 
-    let header_color = Tokens::get(ui.ctx()).color.text_faint;
-    // The table scrolls inside the rows' inset, so its first column starts
-    // where every label above it does rather than on the panel edge.
-    panel_body(ui, |ui| {
-        egui::ScrollArea::both()
-            .id_salt("rspice.results.dc-mismatch-ranked-table")
-            .auto_shrink([false, true])
-            .show_rows(
-                ui,
-                PANEL_ROW_HEIGHT,
-                evidence.contributors.len() + 1,
-                |ui, visible| {
-                    ui.set_min_width(560.0);
-                    egui::Grid::new("rspice.results.dc-mismatch-ranked-grid")
-                        .num_columns(8)
-                        .striped(true)
-                        .min_col_width(48.0)
-                        .spacing(egui::vec2(12.0, 6.0))
-                        .show(ui, |ui| {
-                            let cell = |text: String| {
-                                egui::RichText::new(text)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            };
-                            if visible.start == 0 {
-                                for heading in [
-                                    "Rank",
-                                    "Instance",
-                                    "Parameter",
-                                    "Scope",
-                                    "Sigma param",
-                                    "Sensitivity",
-                                    "Contribution",
-                                    "Share",
-                                ] {
-                                    ui.label(
-                                        egui::RichText::new(heading)
-                                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                            .color(header_color),
-                                    );
-                                }
-                                ui.end_row();
-                            }
-                            // Row 0 of the virtual list is the heading, so the
-                            // data rows start one behind it.
-                            let first = visible.start.saturating_sub(1);
-                            let last = visible
-                                .end
-                                .saturating_sub(1)
-                                .min(evidence.contributors.len());
-                            for (rank, row) in evidence.contributors[first..last]
-                                .iter()
-                                .enumerate()
-                                .map(|(offset, row)| (first + offset, row))
-                            {
-                                ui.label(cell((rank + 1).to_string()));
-                                ui.label(cell(row.instance.clone()));
-                                ui.label(cell(row.parameter.clone()));
-                                ui.label(cell(row.scope.tag().to_owned()));
-                                ui.label(cell(exact_value(row.sigma_parameter, digits)));
-                                ui.label(cell(exact_value(row.sensitivity, digits)));
-                                ui.label(cell(quantity(row.contribution, output_unit, digits)));
-                                // SHARE is a share: it printed as
-                                // "6.00000000000000000e-1".
-                                ui.label(cell(percent(row.share, digits)));
-                                ui.end_row();
-                            }
-                        });
-                },
-            );
-    });
+    let Some(plan) = plan else {
+        return;
+    };
+    if plan.listed.is_empty() {
+        panel_note(ui, "No contributor matches the filter.");
+        return;
+    }
+    let listed = |row: usize| {
+        let rank = plan.listed[row];
+        (rank, &evidence.contributors[rank])
+    };
+    let number = |text: String, value: f64| Cell::number(text).sort_by(SortKey::Number(value));
+    let name = |text: &str| Cell::text(text).sort_by(SortKey::Text(text.to_owned()));
+    let policy = &view.quantity_policy;
+    ranked_table::ranked_table(
+        ui,
+        &ranked_table::RankedTable {
+            salt: "mismatch-ranked",
+            columns: &[
+                ("#", false),
+                ("Instance", true),
+                ("Parameter", true),
+                ("Scope", true),
+                ("\u{3c3} param", false),
+                ("Sensitivity", false),
+                ("Contribution", false),
+                ("Share", false),
+            ],
+            keys: &plan.keys,
+            revision: plan.revision ^ digits as u64,
+        },
+        |row| {
+            let (rank, row) = listed(row);
+            vec![
+                number((rank + 1).to_string(), rank as f64),
+                name(&row.instance),
+                name(&row.parameter),
+                name(row.scope.tag()),
+                number(
+                    exact_value(row.sigma_parameter, digits),
+                    row.sigma_parameter,
+                ),
+                number(exact_value(row.sensitivity, digits), row.sensitivity),
+                number(
+                    quantity(row.contribution, output_unit, digits),
+                    row.contribution,
+                ),
+                number(percent(row.share, digits), row.share),
+            ]
+        },
+        |row| {
+            let (rank, row) = listed(row);
+            exact_row(&[
+                (rank + 1).to_string(),
+                row.instance.clone(),
+                row.parameter.clone(),
+                row.scope.tag().to_owned(),
+                exact_copy(row.sigma_parameter, "", policy),
+                exact_copy(row.sensitivity, "", policy),
+                exact_copy(row.contribution, output_unit, policy),
+                exact_copy(row.share * 100.0, "%", policy),
+            ])
+        },
+    );
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -701,7 +756,7 @@ mod tests {
         evidence.evaluated_contributors = 2;
         assert_eq!(evidence.validate(), Ok(()));
 
-        let plan = MismatchPlan::new(&evidence);
+        let plan = MismatchPlan::new(&evidence, "");
         // The running total passes one and comes back: the second variable
         // removes variance rather than adding it.
         let cumulative = plan.cumulative();

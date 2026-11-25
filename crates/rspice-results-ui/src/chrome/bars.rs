@@ -427,10 +427,15 @@ fn operating_point_filter_id() -> egui::Id {
     egui::Id::new("rspice.results.operating-point-filter")
 }
 
-/// The sheet's filter. Nothing beside it comes or goes as the reader types,
-/// and the inset is kept whether or not the mark is showing, so neither the
-/// field nor its text moves on the first keystroke.
 fn operating_point_filter(ui: &mut Ui, filter: &mut String) {
+    sheet_filter_field(ui, operating_point_filter_id(), filter);
+}
+
+/// A sheet's filter on its bar, the field `id` names. Nothing beside it
+/// comes or goes as the reader types, and the inset is kept whether or not
+/// the mark is showing, so neither the field nor its text moves on the
+/// first keystroke.
+pub(crate) fn sheet_filter_field(ui: &mut Ui, id: egui::Id, filter: &mut String) {
     // egui fades the body tone for a hint, which fell to 3.84:1 on the field
     // in the light interface; the palette's tertiary text holds 4.5:1.
     let faint = Tokens::get(ui.ctx()).color.text_faint;
@@ -445,7 +450,7 @@ fn operating_point_filter(ui: &mut Ui, filter: &mut String) {
         .max(0.0) as i8;
     let field = ui.add(
         egui::TextEdit::singleline(filter)
-            .id(operating_point_filter_id())
+            .id(id)
             .desired_width(150.0)
             .font(font)
             .margin(egui::Margin {

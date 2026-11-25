@@ -1,9 +1,10 @@
 //! Retained sensitivity-study charts, frequency selection and exact readouts.
 
 use super::{
-    CELL_INSET, PANEL_ROW_HEIGHT, PARAMETER_WIDTH, RANK_WIDTH, VALUE_WIDTH, chart_scale,
-    chart_value, column_rect, exact_sensitivity, exact_value, paint_cell, unavailable_reason,
-    value_width,
+    CELL_INSET, PARAMETER_WIDTH, RANK_WIDTH, VALUE_WIDTH, chart_scale, chart_value, column_rect,
+    exact_rank, exact_row, exact_sensitivity, exact_value, full_precision, kept_by_filter,
+    listed_count, listed_revision, paint_cell, rank_cell, ranked_table, sensitivity_cell,
+    unavailable_reason, value_width,
 };
 use crate::{
     presentation::{panel_note, table_row_height, well_hint},
@@ -15,10 +16,13 @@ use rspice_results::sensitivity::{
     SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow, SensitivityValue,
 };
 use rspice_ui_kit::{
-    panels::{panel_body, section_header},
+    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::measurement_table,
+    widgets::{
+        measurement_table,
+        table::{Cell, RowKey, SortKey},
+    },
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::cmp::Ordering;
@@ -49,7 +53,15 @@ pub struct StudyPlan {
     /// The point the ranking below was built at. A ranking of one frequency
     /// says nothing about another, so it is part of the key.
     index: usize,
+    /// The rows the sheet's filter keeps, ranked at the read point.
     order: Vec<usize>,
+    /// Each listed row's place in the whole ranking, the first 0.
+    ranks: Vec<usize>,
+    /// How many rows the whole ranking holds.
+    total: usize,
+    /// The listed rows' identities, for the table's selection.
+    keys: Vec<RowKey>,
+    revision: u64,
     /// The chart's row offsets, built once with the order they address.
     offsets: RowOffsets,
     /// Largest normalized magnitude at the read point, which is the bar scale.
@@ -68,9 +80,11 @@ pub struct StudyPlan {
 
 /// Width of the per-row frequency profile.
 const PROFILE_WIDTH: f32 = 132.0;
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SensitivitySheetState {
     pub frequency_index: usize,
+    /// The bar's filter: the rows whose parameter or instance holds it.
+    pub filter: String,
 }
 impl SensitivitySheetState {
     pub fn read_index(&self, evidence: &SensitivityStudyEvidence) -> usize {
@@ -78,17 +92,18 @@ impl SensitivitySheetState {
             .min(evidence.point_count().saturating_sub(1))
     }
 }
-pub fn domain_bar(
+/// The frequency a study over a band is read at, on the sheet's bar.
+pub(super) fn frequency_select(
     ui: &mut Ui,
     evidence: &SensitivityStudyEvidence,
     quantity_policy: &QuantityPresentationPolicy,
     state: &mut SensitivitySheetState,
-) -> bool {
+) {
     let SensitivityBasisEvidence::Ac { frequencies_hz, .. } = &evidence.basis else {
-        return false;
+        return;
     };
     if frequencies_hz.len() < 2 {
-        return false;
+        return;
     }
     let options: Vec<String> = frequencies_hz
         .iter()
@@ -105,7 +120,6 @@ pub fn domain_bar(
     ) {
         state.frequency_index = picked;
     }
-    true
 }
 impl StudyPlan {
     pub fn index(&self) -> usize {
@@ -120,13 +134,24 @@ impl StudyPlan {
         &self.order
     }
 
+    pub fn ranks(&self) -> &[usize] {
+        &self.ranks
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
+    }
+
     pub fn offsets(&self) -> &RowOffsets {
         &self.offsets
     }
 
-    pub fn new(evidence: &SensitivityStudyEvidence, index: usize) -> Self {
-        let order = ranked_rows(evidence, index);
-        let max_magnitude = order
+    /// The ranking at point `index`, the rows `filter` keeps listed. The
+    /// scales are the whole ranking's, so a bar keeps its length as the
+    /// reader narrows the list.
+    pub fn new(evidence: &SensitivityStudyEvidence, index: usize, filter: &str) -> Self {
+        let ranking = ranked_rows(evidence, index);
+        let max_magnitude = ranking
             .iter()
             .filter_map(|row| {
                 evidence.rows[*row]
@@ -147,11 +172,33 @@ impl StudyPlan {
             .flat_map(|row| &row.normalized)
             .filter_map(|value| value.value().map(f64::abs))
             .fold(0.0_f64, f64::max);
+        let (ranks, order): (Vec<usize>, Vec<usize>) = ranking
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, row)| kept_by_filter(filter, &[&evidence.rows[*row].parameter]))
+            .unzip();
+        let keys: Vec<RowKey> = order
+            .iter()
+            .map(|row| RowKey::Text(evidence.rows[*row].parameter.clone()))
+            .collect();
+        let revision = listed_revision(
+            &keys,
+            order.iter().map(|row| {
+                let row = &evidence.rows[*row];
+                [&row.normalized, &row.raw, &row.phase]
+                    .map(|column| column.get(index).copied().and_then(SensitivityValue::value))
+            }),
+        ) ^ index as u64;
         Self {
             index,
             // Counted in rows: the chart scales them by the density's row height.
             offsets: RowOffsets::from_heights(std::iter::repeat_n(1.0, order.len())),
+            total: evidence.rows.len(),
             order,
+            ranks,
+            keys,
+            revision,
             max_magnitude,
             sweep_max_magnitude,
             profile_x: profile_positions(&evidence.basis),
@@ -374,12 +421,16 @@ pub fn show(
     }
 
     let subtitle = format!(
-        "{} - {} - {} variables",
+        "{} \u{b7} {} \u{b7} {}",
         view.evidence.output,
         basis_label(view.evidence, &view.quantity_policy),
-        ranked.len()
+        listed_count(ranked.len(), plan.total(), "variables")
     );
     StripHeader::new("SENS", &subtitle, &[]).show(ui);
+    if ranked.is_empty() {
+        well_hint(ui, "No variable matches the filter");
+        return;
+    }
 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -484,8 +535,8 @@ pub fn show(
             ui.allocate_space(egui::vec2(width, rows.leading * row_height));
             for (rank, row) in ranked
                 .iter()
-                .map(|row| &view.evidence.rows[*row])
-                .enumerate()
+                .zip(plan.ranks())
+                .map(|(row, rank)| (*rank, &view.evidence.rows[*row]))
                 .skip(rows.first)
                 .take(rows.end - rows.first)
             {
@@ -694,77 +745,72 @@ pub fn right_panel(
         return;
     }
 
-    // The panel ranks the same thousands of variables the chart does, so it
-    // lays out only the rows its own viewport can show.
+    let Some(plan) = plan else {
+        return;
+    };
+    if ranked.is_empty() {
+        panel_note(ui, "No variable matches the filter.");
+        return;
+    }
     let has_phase = matches!(view.evidence.basis, SensitivityBasisEvidence::Ac { .. });
-    let columns = if has_phase { 5 } else { 4 };
-    let header_color = Tokens::get(ui.ctx()).color.text_faint;
-    // The table scrolls inside the rows' inset, so its first column starts
-    // where every label above it does rather than on the panel edge.
-    panel_body(ui, |ui| {
-        egui::ScrollArea::both()
-            .id_salt("rspice.results.sensitivity-study-ranked-table")
-            .auto_shrink([false, true])
-            .show_rows(ui, PANEL_ROW_HEIGHT, ranked.len() + 1, |ui, visible| {
-                ui.set_min_width(470.0);
-                egui::Grid::new("rspice.results.sensitivity-study-ranked-grid")
-                    .num_columns(columns)
-                    .striped(true)
-                    .min_col_width(48.0)
-                    .spacing(egui::vec2(12.0, 6.0))
-                    .show(ui, |ui| {
-                        let heading = |text: &str| {
-                            egui::RichText::new(text)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                .color(header_color)
-                        };
-                        if visible.start == 0 {
-                            ui.label(heading("Rank"));
-                            ui.label(heading("Variable"));
-                            ui.label(heading("Normalized"));
-                            ui.label(heading("Raw"));
-                            if has_phase {
-                                ui.label(heading("Phase"));
-                            }
-                            ui.end_row();
-                        }
-                        // Row 0 of the virtual list is the heading, so the data
-                        // rows start one behind it.
-                        let first = visible.start.saturating_sub(1);
-                        let last = visible.end.saturating_sub(1).min(ranked.len());
-                        for (rank, row) in ranked[first..last]
-                            .iter()
-                            .map(|row| &view.evidence.rows[*row])
-                            .enumerate()
-                            .map(|(offset, row)| (first + offset, row))
-                        {
-                            let normalized = column_at(&row.normalized, index);
-                            let cell = |text: String| {
-                                egui::RichText::new(text)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            };
-                            ui.label(cell(if normalized.value().is_some() {
-                                (rank + 1).to_string()
-                            } else {
-                                "—".to_owned()
-                            }));
-                            ui.label(cell(row.parameter.clone()));
-                            ui.label(cell(exact_sensitivity(normalized, significant_digits)));
-                            ui.label(cell(exact_sensitivity(
-                                column_at(&row.raw, index),
-                                significant_digits,
-                            )));
-                            if has_phase {
-                                ui.label(cell(exact_sensitivity(
-                                    column_at(&row.phase, index),
-                                    significant_digits,
-                                )));
-                            }
-                            ui.end_row();
-                        }
-                    });
-            });
-    });
+    let columns: &[(&str, bool)] = if has_phase {
+        &[
+            ("#", false),
+            ("Variable", true),
+            ("Normalized", false),
+            ("Raw", false),
+            ("Phase", false),
+        ]
+    } else {
+        &[
+            ("#", false),
+            ("Variable", true),
+            ("Normalized", false),
+            ("Raw", false),
+        ]
+    };
+    let listed = |row: usize| {
+        let data = &view.evidence.rows[plan.order[row]];
+        let at = |column: &[SensitivityValue<f64>]| column_at(column, index);
+        (
+            plan.ranks[row],
+            data,
+            [at(&data.normalized), at(&data.raw), at(&data.phase)],
+        )
+    };
+    let shown = if has_phase { 3 } else { 2 };
+    ranked_table::ranked_table(
+        ui,
+        &ranked_table::RankedTable {
+            salt: "study-ranked",
+            columns,
+            keys: &plan.keys,
+            revision: plan.revision ^ significant_digits as u64,
+        },
+        |row| {
+            let (rank, data, values) = listed(row);
+            let mut cells = vec![
+                rank_cell(rank, values[0]),
+                Cell::text(data.parameter.as_str()).sort_by(SortKey::Text(data.parameter.clone())),
+            ];
+            cells.extend(
+                values[..shown]
+                    .iter()
+                    .map(|value| sensitivity_cell(*value, significant_digits)),
+            );
+            cells
+        },
+        |row| {
+            let (rank, data, values) = listed(row);
+            let mut fields = vec![exact_rank(rank, values[0]), data.parameter.clone()];
+            fields.extend(
+                values[..shown]
+                    .iter()
+                    .map(|value| full_precision(*value, &view.quantity_policy)),
+            );
+            exact_row(&fields)
+        },
+    );
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -839,7 +885,7 @@ mod tests {
     #[test]
     fn the_frequency_profile_is_scaled_to_the_sweep_not_to_the_row() {
         let evidence = swept_evidence();
-        let plan = StudyPlan::new(&evidence, 0);
+        let plan = StudyPlan::new(&evidence, 0, "");
         assert_eq!(plan.sweep_max_magnitude, 9.0);
         assert!(plan.max_magnitude < plan.sweep_max_magnitude);
 
@@ -924,7 +970,7 @@ mod tests {
     #[test]
     fn the_exact_readings_carry_their_prefix_on_the_number() {
         let evidence = swept_evidence();
-        let plan = StudyPlan::new(&evidence, 0);
+        let plan = StudyPlan::new(&evidence, 0, "");
         let ctx = egui::Context::default();
         rspice_ui_kit::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -972,7 +1018,7 @@ mod tests {
     #[test]
     fn the_highest_magnitude_row_is_the_one_ranked_first_at_that_point() {
         let evidence = swept_evidence();
-        let plan = StudyPlan::new(&evidence, 0);
+        let plan = StudyPlan::new(&evidence, 0, "");
         let first = plan.order().first().copied().expect("a ranked row");
         assert_eq!(evidence.rows[first].parameter, "R1");
     }

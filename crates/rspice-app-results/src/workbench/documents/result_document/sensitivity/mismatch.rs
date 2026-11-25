@@ -32,6 +32,7 @@ pub(super) fn active_mismatch(state: ResultsReads<'_>) -> ActiveMismatch<'_> {
                 .displayed_significant_digits()
                 .get(),
         ),
+        quantity_policy: state.model.preferences.quantity_presentation_policy(),
     })
 }
 pub(super) fn serves_active_analysis(state: ResultsReads<'_>) -> bool {
@@ -54,6 +55,8 @@ pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
 pub(in crate::workbench::documents::result_document) struct MismatchPlan {
     source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
+    /// The filter the listed contributors were kept by.
+    filter: String,
     display: viewer::MismatchPlan,
 }
 fn mismatch_plan(state: &mut ResultsParts<'_>) -> Option<Arc<MismatchPlan>> {
@@ -64,9 +67,11 @@ fn mismatch_plan(state: &mut ResultsParts<'_>) -> Option<Arc<MismatchPlan>> {
     let run = state.model.simulation.active_run()?;
     let analysis_key =
         AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
+    let filter = state.results.session.study.filter.as_str();
     if let Some(plan) = state.results.plans.mismatch.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
+        && plan.filter == filter
     {
         return Some(Arc::clone(plan));
     }
@@ -77,7 +82,8 @@ fn mismatch_plan(state: &mut ResultsParts<'_>) -> Option<Arc<MismatchPlan>> {
     let built = Arc::new(MismatchPlan {
         source,
         analysis: analysis_key,
-        display: viewer::MismatchPlan::new(view.evidence),
+        filter: filter.to_owned(),
+        display: viewer::MismatchPlan::new(view.evidence, filter),
     });
     state.results.plans.mismatch = Some(Arc::clone(&built));
     Some(built)
@@ -90,8 +96,13 @@ pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         plan.as_deref().map(|plan| &plan.display),
     );
 }
-pub(super) fn right_panel(ui: &mut Ui, state: ResultsReads<'_>) {
-    viewer::right_panel(ui, active_mismatch(state));
+pub(super) fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
+    let plan = mismatch_plan(state);
+    viewer::right_panel(
+        ui,
+        active_mismatch(state.results_reads()),
+        plan.as_deref().map(|plan| &plan.display),
+    );
 }
 
 #[cfg(test)]

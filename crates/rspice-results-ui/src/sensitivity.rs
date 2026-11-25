@@ -11,14 +11,21 @@ use rspice_results::sensitivity::{
     SensitivityResultMode, SensitivityResultRow, SensitivityUnavailability, SensitivityValue,
 };
 use rspice_ui_kit::{
-    panels::{panel_body, section_header},
+    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::measurement_table,
+    widgets::{
+        measurement_table,
+        table::{Cell, RowKey, SortKey},
+    },
 };
+use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::cmp::Ordering;
 pub mod mismatch;
+mod ranked_table;
 pub mod study;
+#[cfg(test)]
+mod table_tests;
 
 const RANK_WIDTH: f32 = 44.0;
 const PARAMETER_WIDTH: f32 = 230.0;
@@ -26,8 +33,6 @@ const SENSITIVITY_WIDTH: f32 = 360.0;
 const VALUE_WIDTH: f32 = 118.0;
 const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + SENSITIVITY_WIDTH + VALUE_WIDTH;
 const CELL_INSET: f32 = 10.0;
-/// Height of one row of the panel's ranked table, spacing included.
-const PANEL_ROW_HEIGHT: f32 = 20.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SensitivityView<'a> {
@@ -35,6 +40,8 @@ pub struct SensitivityView<'a> {
     pub output: &'a str,
     pub result_mode: SensitivityResultMode,
     pub rows: &'a [SensitivityResultRow],
+    /// How a copied row writes its values.
+    pub quantity_policy: QuantityPresentationPolicy,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -46,7 +53,13 @@ pub enum ActiveSensitivity<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SensitivityPlan {
+    /// The rows the sheet's filter keeps, ranked.
     order: Vec<usize>,
+    /// Each listed row's place in the whole ranking, the first 0: a filter
+    /// narrows the list, never renumbers it.
+    ranks: Vec<usize>,
+    /// How many rows the whole ranking holds.
+    total: usize,
     /// The chart's row offsets, built once with the order they address.
     ///
     /// The rows are uniform, but the prefix sum over them is `O(parameters)`
@@ -54,6 +67,10 @@ pub struct SensitivityPlan {
     /// sheet whose whole point is that a real design ranks thousands of them.
     offsets: RowOffsets,
     max_magnitude: f64,
+    /// The listed rows' identities, so the table's selection follows its row
+    /// through a sort or a filter.
+    keys: Vec<RowKey>,
+    revision: u64,
 }
 
 impl SensitivityPlan {
@@ -65,25 +82,123 @@ impl SensitivityPlan {
         &self.order
     }
 
+    pub fn ranks(&self) -> &[usize] {
+        &self.ranks
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
+    }
+
     pub fn offsets(&self) -> &RowOffsets {
         &self.offsets
     }
 
-    /// The ranking of `rows`, its scale and its row offsets. The offsets
+    /// The ranking of `rows`, the ones `filter` keeps listed, the chart's
+    /// scale and its row offsets. The scale is the whole ranking's, so a
+    /// bar keeps its length as the reader narrows the list. The offsets
     /// count rows: the chart's row height follows the density preference,
     /// which the plan is built without, so the chart scales them to points.
-    pub fn new(rows: &[SensitivityResultRow]) -> Self {
-        let order = ranked_rows(rows);
-        let max_magnitude = order
+    pub fn new(rows: &[SensitivityResultRow], filter: &str) -> Self {
+        let ranking = ranked_rows(rows);
+        let max_magnitude = ranking
             .iter()
             .filter_map(|index| rows[*index].normalized.value().map(f64::abs))
             .fold(0.0_f64, f64::max);
+        let (ranks, order): (Vec<usize>, Vec<usize>) = ranking
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, index)| kept_by_filter(filter, &[&rows[*index].parameter]))
+            .unzip();
+        let keys: Vec<RowKey> = order
+            .iter()
+            .map(|index| RowKey::Text(rows[*index].parameter.clone()))
+            .collect();
+        let revision = listed_revision(
+            &keys,
+            order.iter().map(|index| {
+                let row = &rows[*index];
+                [row.normalized.value(), row.raw.value()]
+            }),
+        );
         Self {
             offsets: RowOffsets::from_heights(std::iter::repeat_n(1.0, order.len())),
+            total: rows.len(),
             order,
+            ranks,
             max_magnitude,
+            keys,
+            revision,
         }
     }
+}
+
+/// Whether a row named by `names` stays listed under a sheet's filter: one
+/// of its names holds the filter's words, ignoring case. An empty filter
+/// keeps every row.
+pub(crate) fn kept_by_filter(filter: &str, names: &[&str]) -> bool {
+    let filter = filter.trim();
+    if filter.is_empty() {
+        return true;
+    }
+    let filter = filter.to_lowercase();
+    names
+        .iter()
+        .any(|name| name.to_lowercase().contains(&filter))
+}
+
+/// How many rows a sheet lists, and of how many when its filter hides some.
+pub(crate) fn listed_count(listed: usize, total: usize, noun: &str) -> String {
+    if listed == total {
+        format!("{total} {noun}")
+    } else {
+        format!("{listed} of {total} {noun}")
+    }
+}
+
+/// What a ranked table's listed rows were built from, so the table sorts
+/// and filters them again only when it changes.
+pub(crate) fn listed_revision<const N: usize>(
+    keys: &[RowKey],
+    values: impl Iterator<Item = [Option<f64>; N]>,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    keys.hash(&mut hasher);
+    for values in values {
+        for value in values {
+            value.map(f64::to_bits).hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+/// The sheet's filter, on its bar: it narrows the chart and the table to
+/// the rows a parameter or instance name matches.
+pub fn filter_field(ui: &mut Ui, filter: &mut String) {
+    crate::chrome::bars::sheet_filter_field(
+        ui,
+        egui::Id::new("rspice.results.sensitivity.filter"),
+        filter,
+    );
+}
+
+/// The sensitivity sheet's bar: a frequency study's read point, then the
+/// filter. A frequency study names its evidence and quantity policy.
+pub fn domain_bar(
+    ui: &mut Ui,
+    study: Option<(
+        &rspice_results::sensitivity::SensitivityStudyEvidence,
+        &rspice_vocabulary::quantity::QuantityPresentationPolicy,
+    )>,
+    state: &mut study::SensitivitySheetState,
+) -> bool {
+    if let Some((evidence, quantity_policy)) = study {
+        study::frequency_select(ui, evidence, quantity_policy, state);
+    }
+    filter_field(ui, &mut state.filter);
+    true
 }
 fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<usize> {
     let mut ranked: Vec<usize> = (0..rows.len()).collect();
@@ -253,12 +368,16 @@ pub fn show(
     }
 
     let subtitle = format!(
-        "{} \u{b7} {} \u{b7} {} parameters",
+        "{} \u{b7} {} \u{b7} {}",
         view.output,
         exact_basis_label(view.result_mode),
-        ranked.len()
+        listed_count(ranked.len(), plan.total(), "parameters")
     );
     StripHeader::new("SENS", &subtitle, &[]).show(ui);
+    if ranked.is_empty() {
+        well_hint(ui, "No parameter matches the filter");
+        return;
+    }
 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -347,8 +466,8 @@ pub fn show(
             ui.allocate_space(egui::vec2(width, rows.leading * row_height));
             for (rank, row) in ranked
                 .iter()
-                .map(|index| &view.rows[*index])
-                .enumerate()
+                .zip(plan.ranks())
+                .map(|(index, rank)| (*rank, &view.rows[*index]))
                 .skip(rows.first)
                 .take(rows.end - rows.first)
             {
@@ -522,74 +641,95 @@ pub fn right_panel(
         panel_note(ui, "No sensitivities.");
         return;
     }
+    let Some(plan) = plan else {
+        return;
+    };
+    if ranked.is_empty() {
+        panel_note(ui, "No parameter matches the filter.");
+        return;
+    }
+    let listed = |row: usize| (plan.ranks[row], &view.rows[plan.order[row]]);
+    ranked_table::ranked_table(
+        ui,
+        &ranked_table::RankedTable {
+            salt: "ranked",
+            columns: &[
+                ("#", false),
+                ("Parameter", true),
+                ("Normalized", false),
+                ("Raw", false),
+            ],
+            keys: &plan.keys,
+            revision: plan.revision ^ significant_digits as u64,
+        },
+        |row| {
+            let (rank, row) = listed(row);
+            vec![
+                rank_cell(rank, row.normalized),
+                Cell::text(row.parameter.as_str()).sort_by(SortKey::Text(row.parameter.clone())),
+                sensitivity_cell(row.normalized, significant_digits),
+                sensitivity_cell(row.raw, significant_digits),
+            ]
+        },
+        |row| {
+            let (rank, row) = listed(row);
+            exact_row(&[
+                exact_rank(rank, row.normalized),
+                row.parameter.clone(),
+                full_precision(row.normalized, &view.quantity_policy),
+                full_precision(row.raw, &view.quantity_policy),
+            ])
+        },
+    );
+}
 
-    // The panel ranks the same thousands of parameters the chart does, so it
-    // lays out only the rows its own viewport can show.
-    let header_color = Tokens::get(ui.ctx()).color.text_faint;
-    // The table scrolls inside the rows' inset, so its first column starts
-    // where every label above it does rather than on the panel edge.
-    panel_body(ui, |ui| {
-        egui::ScrollArea::both()
-            .id_salt("rspice.results.sensitivity-ranked-table")
-            .auto_shrink([false, true])
-            .show_rows(ui, PANEL_ROW_HEIGHT, ranked.len() + 1, |ui, visible| {
-                ui.set_min_width(470.0);
-                egui::Grid::new("rspice.results.sensitivity-ranked-grid")
-                    .num_columns(4)
-                    .striped(true)
-                    .min_col_width(48.0)
-                    .spacing(egui::vec2(12.0, 6.0))
-                    .show(ui, |ui| {
-                        let heading = |text: &str| {
-                            egui::RichText::new(text)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                .color(header_color)
-                        };
-                        if visible.start == 0 {
-                            ui.label(heading("Rank"));
-                            ui.label(heading("Parameter"));
-                            ui.label(heading("Normalized"));
-                            ui.label(heading("Raw"));
-                            ui.end_row();
-                        }
-                        // Row 0 of the virtual list is the heading, so the data
-                        // rows start one behind it.
-                        let first = visible.start.saturating_sub(1);
-                        let last = visible.end.saturating_sub(1).min(ranked.len());
-                        for (rank, row) in ranked[first..last]
-                            .iter()
-                            .map(|index| &view.rows[*index])
-                            .enumerate()
-                            .map(|(offset, row)| (first + offset, row))
-                        {
-                            ui.label(
-                                egui::RichText::new(if row.normalized.value().is_some() {
-                                    (rank + 1).to_string()
-                                } else {
-                                    "—".to_owned()
-                                })
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                            );
-                            ui.label(
-                                egui::RichText::new(row.parameter.as_str())
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                            );
-                            ui.label(
-                                egui::RichText::new(exact_sensitivity(
-                                    row.normalized,
-                                    significant_digits,
-                                ))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                            );
-                            ui.label(
-                                egui::RichText::new(exact_sensitivity(row.raw, significant_digits))
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                            );
-                            ui.end_row();
-                        }
-                    });
-            });
-    });
+/// A row's place in the ranking, from 1, or a dash for a row that ranks
+/// nowhere since its sensitivity is unavailable.
+fn rank_cell(rank: usize, normalized: SensitivityValue<f64>) -> Cell {
+    if normalized.value().is_some() {
+        Cell::number((rank + 1).to_string()).sort_by(SortKey::Number(rank as f64))
+    } else {
+        Cell::absent().sort_by(SortKey::Number(f64::INFINITY))
+    }
+}
+
+/// A sensitivity in a ranked table at the reader's digits, sorting by its
+/// signed value; an unavailable one is a dash saying why on hover.
+fn sensitivity_cell(value: SensitivityValue<f64>, significant_digits: usize) -> Cell {
+    match value {
+        SensitivityValue::Available(value) => {
+            Cell::number(exact_value(value, significant_digits)).sort_by(SortKey::Number(value))
+        }
+        SensitivityValue::Unavailable { unavailable } => {
+            Cell::absent().hint(format!("Unavailable: {}", unavailable_reason(unavailable)))
+        }
+    }
+}
+
+/// A row's rank as a copied row states it: from 1, empty when unranked.
+fn exact_rank(rank: usize, normalized: SensitivityValue<f64>) -> String {
+    normalized
+        .value()
+        .map_or_else(String::new, |_| (rank + 1).to_string())
+}
+
+/// A sensitivity at the precision the run holds it, as Copied values
+/// writes it; an unavailable one is empty.
+fn full_precision(value: SensitivityValue<f64>, policy: &QuantityPresentationPolicy) -> String {
+    value
+        .value()
+        .map_or_else(String::new, |value| exact_copy(value, "", policy))
+}
+
+/// `value` in `unit` as Copied values writes it: every digit the double
+/// holds.
+fn exact_copy(value: f64, unit: &str, policy: &QuantityPresentationPolicy) -> String {
+    policy.copy_si_value(value, unit).trim_end().to_owned()
+}
+
+/// A copied row: its fields between tabs, as a spreadsheet pastes them.
+fn exact_row(fields: &[String]) -> String {
+    fields.join("\t")
 }
 
 #[cfg(test)]
@@ -641,7 +781,7 @@ mod tests {
                 normalized: 3.0.into(),
             },
         ];
-        let plan = SensitivityPlan::new(&rows);
+        let plan = SensitivityPlan::new(&rows, "");
         assert_eq!(plan.order(), &[2, 1, 0]);
         assert_eq!(plan.max_magnitude, 3.0);
         assert_eq!(chart_value(rows[0].normalized, 7), "Unavailable");

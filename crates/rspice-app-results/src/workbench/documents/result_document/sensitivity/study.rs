@@ -48,6 +48,8 @@ pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
 pub(in crate::workbench::documents::result_document) struct StudyPlan {
     source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
+    /// The filter the listed rows were kept by.
+    filter: String,
     display: viewer::StudyPlan,
 }
 fn study_plan(state: &mut ResultsParts<'_>) -> Option<Arc<StudyPlan>> {
@@ -62,10 +64,12 @@ fn study_plan(state: &mut ResultsParts<'_>) -> Option<Arc<StudyPlan>> {
         return None;
     };
     let index = state.results.session.study.read_index(view.evidence);
+    let filter = state.results.session.study.filter.as_str();
     if let Some(plan) = state.results.plans.study.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
         && plan.display.index() == index
+        && plan.filter == filter
     {
         return Some(Arc::clone(plan));
     }
@@ -73,29 +77,11 @@ fn study_plan(state: &mut ResultsParts<'_>) -> Option<Arc<StudyPlan>> {
     let built = Arc::new(StudyPlan {
         source,
         analysis: analysis_key,
-        display: viewer::StudyPlan::new(view.evidence, index),
+        filter: filter.to_owned(),
+        display: viewer::StudyPlan::new(view.evidence, index, filter),
     });
     state.results.plans.study = Some(Arc::clone(&built));
     Some(built)
-}
-pub(in crate::workbench::documents::result_document) fn domain_bar(
-    ui: &mut Ui,
-    context: &mut super::super::SheetContext<'_>,
-) -> bool {
-    let Some(analysis) = context.simulation.active_analysis() else {
-        return false;
-    };
-    let Some(AnalysisResultPayload::SensitivityStudy { evidence }) =
-        analysis.result_payload.as_ref()
-    else {
-        return false;
-    };
-    viewer::domain_bar(
-        ui,
-        evidence,
-        &context.policy,
-        &mut context.results.session.study,
-    )
 }
 pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let plan = study_plan(state);
@@ -228,15 +214,20 @@ mod tests {
                     .show(ctx, |ui| right_panel(ui, &mut state.results_parts()));
             },
         );
-        let drawn = output
-            .platform_output
-            .accesskit_update
-            .expect("the study panel publishes an accessibility tree")
-            .nodes
+        // The table paints only the rows its viewport shows; count the
+        // names it painted.
+        fn painted(shape: &egui::Shape, prefix: &str) -> usize {
+            match shape {
+                egui::Shape::Text(text) => usize::from(text.galley.job.text.starts_with(prefix)),
+                egui::Shape::Vec(inner) => inner.iter().map(|shape| painted(shape, prefix)).sum(),
+                _ => 0,
+            }
+        }
+        let drawn: usize = output
+            .shapes
             .iter()
-            // A Label-role node carries its text in `value`, not `label`.
-            .filter(|(_, node)| node.value().is_some_and(|text| text.starts_with("R0")))
-            .count();
+            .map(|clipped| painted(&clipped.shape, "R0"))
+            .sum();
         assert!(drawn > 0, "the panel listed no variables at all");
         assert!(
             drawn < 400,

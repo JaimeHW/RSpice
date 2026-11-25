@@ -12,7 +12,7 @@ use viewer::{ActiveSensitivity, SensitivityView};
 mod mismatch;
 mod study;
 pub(super) use mismatch::MismatchPlan;
-pub(super) use study::{StudyPlan, domain_bar};
+pub(super) use study::StudyPlan;
 
 fn active_sensitivity(state: ResultsReads<'_>) -> ActiveSensitivity<'_> {
     let Some(analysis) = state.model.simulation.active_analysis() else {
@@ -38,7 +38,27 @@ fn active_sensitivity(state: ResultsReads<'_>) -> ActiveSensitivity<'_> {
         output,
         result_mode: *result_mode,
         rows,
+        quantity_policy: state.model.preferences.quantity_presentation_policy(),
     })
+}
+
+/// The sheet's bar: a frequency study's read point, then the filter that
+/// narrows the chart and its table to the rows a name matches.
+pub(in crate::workbench::documents::result_document) fn domain_bar(
+    ui: &mut Ui,
+    context: &mut super::SheetContext<'_>,
+) -> bool {
+    let study = context.simulation.active_analysis().and_then(|analysis| {
+        match analysis.result_payload.as_ref() {
+            Some(AnalysisResultPayload::SensitivityStudy { evidence }) => Some(evidence.as_ref()),
+            _ => None,
+        }
+    });
+    viewer::domain_bar(
+        ui,
+        study.map(|evidence| (evidence, &context.policy)),
+        &mut context.results.session.study,
+    )
 }
 pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
     if study::serves_active_analysis(state) {
@@ -54,6 +74,8 @@ pub(super) fn active_payload_is_valid(state: ResultsReads<'_>) -> bool {
 pub(super) struct SensitivityPlan {
     source: (RunHistoryRevision, u64),
     analysis: AnalysisPresentationKey,
+    /// The filter the listed rows were kept by.
+    filter: String,
     display: viewer::SensitivityPlan,
 }
 fn sensitivity_plan(state: &mut ResultsParts<'_>) -> Option<Arc<SensitivityPlan>> {
@@ -64,9 +86,11 @@ fn sensitivity_plan(state: &mut ResultsParts<'_>) -> Option<Arc<SensitivityPlan>
     let run = state.model.simulation.active_run()?;
     let analysis_key =
         AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
+    let filter = state.results.session.study.filter.as_str();
     if let Some(plan) = state.results.plans.sensitivity.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
+        && plan.filter == filter
     {
         return Some(Arc::clone(plan));
     }
@@ -77,7 +101,8 @@ fn sensitivity_plan(state: &mut ResultsParts<'_>) -> Option<Arc<SensitivityPlan>
     let built = Arc::new(SensitivityPlan {
         source,
         analysis: analysis_key,
-        display: viewer::SensitivityPlan::new(view.rows),
+        filter: filter.to_owned(),
+        display: viewer::SensitivityPlan::new(view.rows, filter),
     });
     state.results.plans.sensitivity = Some(Arc::clone(&built));
     Some(built)
@@ -115,7 +140,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         return;
     }
     if mismatch::serves_active_analysis(state.results_reads()) {
-        mismatch::right_panel(ui, state.results_reads());
+        mismatch::right_panel(ui, state);
         return;
     }
     let plan = sensitivity_plan(state);
@@ -263,7 +288,7 @@ mod tests {
         };
         assert_eq!(
             first.display.order(),
-            viewer::SensitivityPlan::new(view.rows).order()
+            viewer::SensitivityPlan::new(view.rows, "").order()
         );
         assert_eq!(
             first.display.max_magnitude(),
@@ -340,17 +365,20 @@ mod tests {
                     .show(ctx, |ui| right_panel(ui, &mut state.results_parts()));
             },
         );
-        let drawn = output
-            .platform_output
-            .accesskit_update
-            .expect("the sensitivity panel publishes an accessibility tree")
-            .nodes
+        // The table paints only the rows its viewport shows; count the
+        // names it painted.
+        fn painted(shape: &egui::Shape, prefix: &str) -> usize {
+            match shape {
+                egui::Shape::Text(text) => usize::from(text.galley.job.text.starts_with(prefix)),
+                egui::Shape::Vec(inner) => inner.iter().map(|shape| painted(shape, prefix)).sum(),
+                _ => 0,
+            }
+        }
+        let drawn: usize = output
+            .shapes
             .iter()
-            .filter(|(_, node)| {
-                // A Label-role node carries its text in `value`, not `label`.
-                node.value().is_some_and(|text| text.starts_with("p0"))
-            })
-            .count();
+            .map(|clipped| painted(&clipped.shape, "p0"))
+            .sum();
         assert!(drawn > 0, "the panel listed no parameters at all");
         assert!(
             drawn < 400,
