@@ -140,16 +140,23 @@ pub(in crate::render) fn subset(face: &[u8], lettered: &Lettered) -> Option<Vec<
     // A short location table counts in words, so each outline starts on one.
     let align = if long { 4 } else { 2 };
     let mut cut_glyf = Vec::new();
-    let mut cut_loca = Vec::with_capacity(loca.len());
-    for glyph in 0..=count {
-        if long {
-            cut_loca.extend(u32::try_from(cut_glyf.len()).ok()?.to_be_bytes());
-        } else {
-            cut_loca.extend(u16::try_from(cut_glyf.len() / 2).ok()?.to_be_bytes());
-        }
-        if glyph < count && kept[glyph] {
+    // Each outline starts where the one before it ends; the last entry
+    // marks where the last one ends.
+    let mut starts = Vec::with_capacity(count + 1);
+    for (glyph, keep) in kept.iter().enumerate() {
+        starts.push(cut_glyf.len());
+        if *keep {
             cut_glyf.extend_from_slice(outline(glyph)?);
             cut_glyf.resize(cut_glyf.len().next_multiple_of(align), 0);
+        }
+    }
+    starts.push(cut_glyf.len());
+    let mut cut_loca = Vec::with_capacity(loca.len());
+    for start in starts {
+        if long {
+            cut_loca.extend(u32::try_from(start).ok()?.to_be_bytes());
+        } else {
+            cut_loca.extend(u16::try_from(start / 2).ok()?.to_be_bytes());
         }
     }
     let mut cut = tables
