@@ -266,7 +266,6 @@ pub fn show<'a>(
         status,
         icon_tone: icon_tone(status.state.category(), &t.color),
         offer: offer.as_ref(),
-        floating: status.blocks_visuals,
     };
     let mut actions = OperationalResponse {
         blocks_visuals: status.blocks_visuals,
@@ -275,7 +274,7 @@ pub fn show<'a>(
     let response = if status.blocks_visuals {
         card.show_centered(ui, &mut actions)
     } else {
-        card.show(ui, &mut actions)
+        card.show_banner(ui, &mut actions)
     };
     announce_status(ui, &response, status);
     actions
@@ -311,8 +310,13 @@ const OPERATIONAL_CARD_GUTTER: f32 = 16.0;
 const OPERATIONAL_CARD_PADDING: i8 = 14;
 const OPERATIONAL_CARD_ICON: f32 = 20.0;
 const OPERATIONAL_CARD_ICON_GAP: f32 = 10.0;
-/// What the banner form keeps clear of the bar above and the viewer below.
-const OPERATIONAL_BANNER_INSET: i8 = 8;
+/// The banner's own geometry: one line, inset at the sides as the dock's
+/// pages inset their text, with its glyph at the size of a toolbar icon and
+/// a gap between its parts.
+const OPERATIONAL_BANNER_PADDING_X: f32 = 10.0;
+const OPERATIONAL_BANNER_ICON: f32 = 14.0;
+const OPERATIONAL_BANNER_ICON_GAP: f32 = 7.0;
+const OPERATIONAL_BANNER_GAP: f32 = 10.0;
 
 /// The empty schematic sheet's hint, as `schematic::view::scene` paints it:
 /// a medium title in dim text over regular lines in faint text.
@@ -428,35 +432,137 @@ struct OperationalCard<'a> {
     status: &'a ResultOperationalStatus,
     icon_tone: egui::Color32,
     offer: Option<&'a FailureSiteControl<'a>>,
-    /// The card that owns the well — elevated and shadowed over the canvas —
-    /// rather than the banner attached above a still-usable viewer.
-    floating: bool,
 }
 
 impl OperationalCard<'_> {
-    /// Draw the card across the width its caller already fixed.
+    /// The banner over a viewer that is still read: one line of the design's
+    /// row height, flush across the well under the sheet's bar, as the
+    /// tracking banner stands. The glyph, the state's name, what happened and
+    /// what to do, then what the state offers at the right. A boxed card
+    /// inset on every side took four lines and a margin of the well for one
+    /// sentence; a sentence longer than the line now ends in an ellipsis and
+    /// is read whole on hover, so the strip never grows to hold it.
+    fn show_banner(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
+        let t = Tokens::get(ui.ctx());
+        let control = rspice_ui_kit::widgets::compact_height(&t.metrics);
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), t.metrics.row_h.max(control)),
+            egui::Sense::hover(),
+        );
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect.shrink2(egui::vec2(OPERATIONAL_BANNER_PADDING_X, 0.0)))
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        row.set_clip_rect(rect.intersect(ui.clip_rect()));
+        // A standard control in this row stands at the compact height, so
+        // the row stays one line whatever the state offers.
+        row.spacing_mut().interact_size.y = control;
+        row.spacing_mut().item_spacing.x = OPERATIONAL_BANNER_GAP;
+        // The actions are set first, from the right, so the copy knows the
+        // room they leave.
+        if self.status.dismissible {
+            actions.dismiss = rspice_ui_kit::widgets::Button::new("Dismiss")
+                .compact()
+                .show(&mut row)
+                .on_hover_text("Dismiss this recorded runtime notice")
+                .clicked();
+        }
+        if let Some(offer) = self.offer {
+            if let Some(note) = failure_site_note(offer) {
+                row.label(
+                    egui::RichText::new(note)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
+            }
+            actions.highlight = failure_site_button(&mut row, offer, true);
+        }
+        row.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = OPERATIONAL_BANNER_ICON_GAP;
+            let (glyph, _) = ui.allocate_exact_size(
+                egui::Vec2::splat(OPERATIONAL_BANNER_ICON),
+                egui::Sense::hover(),
+            );
+            operational_icon(self.status.state.category()).paint(
+                ui.painter(),
+                glyph,
+                self.icon_tone,
+            );
+            let galley = ui
+                .painter()
+                .layout_job(self.banner_copy(&t, ui.available_width().max(1.0)));
+            let (copy, hover) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+            let elided = galley.elided;
+            ui.painter().galley(copy.min, galley, t.color.text);
+            if elided {
+                hover.on_hover_text(self.sentence());
+            }
+        });
+        response
+    }
+
+    /// The banner's one line: the state's name in the ink a title takes,
+    /// then its detail, what happened and what to do, each quieter than the
+    /// last, cut with an ellipsis at `width`.
+    fn banner_copy(&self, t: &Tokens, width: f32) -> egui::text::LayoutJob {
+        let format = |weight, color| egui::TextFormat {
+            font_id: theme::sans(tokens::FS_1, weight),
+            color,
+            valign: egui::Align::Center,
+            ..Default::default()
+        };
+        let mut job = egui::text::LayoutJob::default();
+        job.append(
+            self.status.state.label(),
+            0.0,
+            format(FontWeight::SemiBold, t.color.text),
+        );
+        if let Some(detail) = self.status.detail.as_deref() {
+            job.append(
+                detail,
+                OPERATIONAL_BANNER_GAP,
+                format(FontWeight::Medium, t.color.text),
+            );
+        }
+        job.append(
+            self.status.state.message(),
+            OPERATIONAL_BANNER_GAP,
+            format(FontWeight::Regular, t.color.text_dim),
+        );
+        job.append(
+            self.status.state.recovery(),
+            OPERATIONAL_BANNER_GAP,
+            format(FontWeight::Regular, t.color.text_faint),
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+        job
+    }
+
+    /// Everything the banner says, as one sentence for its hover.
+    fn sentence(&self) -> String {
+        let status = self.status;
+        [Some(status.state.label()), status.detail.as_deref()]
+            .into_iter()
+            .flatten()
+            .chain([status.state.message(), status.state.recovery()])
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+
+    /// Draw the card across the width its caller already fixed: elevated
+    /// and shadowed over the well it has taken over.
     fn show(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
         let t = Tokens::get(ui.ctx());
         // Every card keeps the same strong border; the glyph alone carries
         // severity.
-        let border = t.color.border_strong;
-        let mut frame = egui::Frame::NONE
-            .fill(if self.floating {
-                t.color.bg_elevated
-            } else {
-                t.color.bg_panel
-            })
-            .stroke(egui::Stroke::new(1.0, border))
+        egui::Frame::NONE
+            .fill(t.color.bg_elevated)
+            .stroke(egui::Stroke::new(1.0, t.color.border_strong))
             .corner_radius(t.radius)
-            .inner_margin(egui::Margin::same(OPERATIONAL_CARD_PADDING));
-        if self.floating {
-            frame = frame.shadow(t.shadow());
-        } else {
-            // The banner is inset from the well it warns about, so it neither
-            // butts against the bar above it nor against the viewer below.
-            frame = frame.outer_margin(egui::Margin::same(OPERATIONAL_BANNER_INSET));
-        }
-        frame
+            .inner_margin(egui::Margin::same(OPERATIONAL_CARD_PADDING))
+            .shadow(t.shadow())
             .show(ui, |ui| {
                 // Both forms are laid out to a width their caller fixed, so
                 // the copy wraps inside the card rather than setting its
@@ -580,22 +686,33 @@ impl OperationalCard<'_> {
 /// paints its own focus ring, so nothing is given up by drawing it in the
 /// chrome every other control on this surface uses.
 fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> bool {
-    let clicked = rspice_ui_kit::widgets::Button::new(&failure_site_label(offer))
-        .show(ui)
-        .on_hover_text(failure_site_hint(offer))
-        .clicked();
-    if !offer.marked && offer.elided > 0 {
+    let clicked = failure_site_button(ui, offer, false);
+    if let Some(note) = failure_site_note(offer) {
         let t = Tokens::get(ui.ctx());
         ui.label(
-            egui::RichText::new(format!(
-                "{} more were measured but not named.",
-                offer.elided
-            ))
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_faint),
+            egui::RichText::new(note)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_faint),
         );
     }
     clicked
+}
+
+/// The marking control alone; a banner's line takes the compact form.
+fn failure_site_button(ui: &mut Ui, offer: &FailureSiteControl<'_>, compact: bool) -> bool {
+    let label = failure_site_label(offer);
+    let button = rspice_ui_kit::widgets::Button::new(&label);
+    if compact { button.compact() } else { button }
+        .show(ui)
+        .on_hover_text(failure_site_hint(offer))
+        .clicked()
+}
+
+/// How many objects the engine measured but did not name, while the marking
+/// is off.
+fn failure_site_note(offer: &FailureSiteControl<'_>) -> Option<String> {
+    (!offer.marked && offer.elided > 0)
+        .then(|| format!("{} more were measured but not named.", offer.elided))
 }
 
 #[cfg(test)]
