@@ -87,6 +87,7 @@ pub fn decode_fst(
                     }
                 }
                 fst_reader::FstHierarchyEntry::Var {
+                    tpe,
                     name,
                     length,
                     handle,
@@ -105,14 +106,23 @@ pub fn decode_fst(
                         );
                         return;
                     }
-                    if geometry.widths[handle] != length as usize {
+                    // A real's declared length is a writer's choice (8 bytes, or 64 bits); its
+                    // samples are the double the geometry marks it with.
+                    let real = tpe.is_real();
+                    if real && geometry.widths[handle] != 8 {
+                        hierarchy_error = Some(format!(
+                            "FST real variable '{name}' is not stored as a real number"
+                        ));
+                        return;
+                    }
+                    if !real && geometry.widths[handle] != length as usize {
                         hierarchy_error = Some(format!(
                             "FST hierarchy width {length} for '{name}' disagrees with geometry width {}",
                             geometry.widths[handle]
                         ));
                         return;
                     }
-                    if length == 0 || length > 53 {
+                    if !real && (length == 0 || length > 53) {
                         hierarchy_error = Some(format!(
                             "FST hierarchy signal '{name}' has unsupported width {length}"
                         ));
@@ -137,7 +147,7 @@ pub fn decode_fst(
                     }
                     by_handle.entry(handle).or_default().push(FstSignal {
                         name: full_name,
-                        width: Some(length as usize),
+                        width: (!real).then_some(length as usize),
                     });
                 }
                 _ => {}
@@ -191,12 +201,11 @@ pub fn decode_fst(
                 .get(&handle.get_index())
                 .ok_or_else(|| "FST returned an undeclared signal handle".to_owned())?;
             let (sample, raw) = match value {
-                fst_reader::FstSignalValue::String(bits) => (
-                    logic_bits_to_f64(bits, format).map_err(|error| error.to_string())?,
-                    FstRawValue::Logic(bits),
-                ),
+                fst_reader::FstSignalValue::String(bits) => {
+                    (logic_bits_to_f64(bits)?, FstRawValue::Logic(bits))
+                }
                 fst_reader::FstSignalValue::Real(value) if value.is_finite() => {
-                    (value, FstRawValue::Real(value))
+                    (Some(value), FstRawValue::Real(value))
                 }
                 fst_reader::FstSignalValue::Real(_) => {
                     return Err("FST contains a non-finite real value".to_owned());
@@ -226,30 +235,25 @@ pub fn decode_fst(
     })
 }
 
-fn logic_bits_to_f64(bits: &[u8], format: &str) -> Result<f64, FstReadError> {
+/// The unsigned integer a logic value's bits spell, a weak drive (`l`, `h`) at its level; `None`
+/// when a bit is unknown or high impedance (`x`, `z`, `u`, `w`, `-`) and they spell none.
+fn logic_bits_to_f64(bits: &[u8]) -> Result<Option<f64>, String> {
     if bits.is_empty() || bits.len() > 53 {
-        return Err(adapter_error(
-            format,
-            "digital vector is empty or wider than 53 exact bits",
+        return Err(format!(
+            "a logic value holds {} bits; an imported vector holds 1 to 53",
+            bits.len()
         ));
     }
     let mut value = 0_u64;
     for bit in bits {
-        value = value
-            .checked_mul(2)
-            .ok_or_else(|| adapter_error(format, "digital vector overflow"))?;
+        value <<= 1;
         match bit {
-            b'0' => {}
-            b'1' => value += 1,
-            _ => {
-                return Err(adapter_error(
-                    format,
-                    "digital vector contains X/Z/U/W/- state that cannot be losslessly mapped to an analog trace",
-                ));
-            }
+            b'0' | b'l' | b'L' => {}
+            b'1' | b'h' | b'H' => value += 1,
+            _ => return Ok(None),
         }
     }
-    Ok(value as f64)
+    Ok(Some(value as f64))
 }
 
 /// Whether `bytes` open as an FST file does: its header block (type 0, 329 bytes long, with
@@ -283,6 +287,16 @@ mod tests {
     use fst_writer::{
         FstFileType, FstInfo, FstScopeType, FstSignalType, FstVarDirection, FstVarType,
     };
+
+    fn limits() -> FstLimits {
+        FstLimits {
+            max_bytes: 1024 * 1024,
+            max_columns: 16,
+            max_rows: 16,
+            max_values: 64,
+            max_signal_name_bytes: 1024,
+        }
+    }
 
     fn fst_bytes(last_bit: &[u8]) -> Vec<u8> {
         // The clock alone is not unique: macOS reports whole microseconds, so
@@ -357,40 +371,95 @@ mod tests {
         assert_eq!(decoded.timescale_seconds, 1e-9);
         assert_eq!(
             events,
-            [(0, 0, 0.0, b"0".to_vec()), (1, 0, 1.0, b"1".to_vec())]
+            [
+                (0, 0, Some(0.0), b"0".to_vec()),
+                (1, 0, Some(1.0), b"1".to_vec())
+            ]
         );
     }
 
     #[test]
-    fn event_callback_failure_keeps_its_source_and_original_debug_diagnostic() {
+    fn an_unknown_or_floating_bit_streams_with_no_sample_and_keeps_its_code() {
+        for code in [b"x".as_slice(), b"z", b"u", b"-"] {
+            let mut events = Vec::new();
+            decode_fst(&fst_bytes(code), limits(), "fst", |event| {
+                let FstRawValue::Logic(bits) = event.raw else {
+                    panic!("logic signal must preserve its raw bits");
+                };
+                events.push((event.sample, bits.to_vec()));
+            })
+            .expect("an unknown bit imports");
+            assert_eq!(events, [(Some(0.0), b"0".to_vec()), (None, code.to_vec())]);
+        }
+        let mut weak = Vec::new();
+        decode_fst(&fst_bytes(b"h"), limits(), "fst", |event| {
+            weak.push(event.sample);
+        })
+        .unwrap();
+        assert_eq!(weak, [Some(0.0), Some(1.0)]);
+    }
+
+    #[test]
+    fn a_real_variable_streams_its_doubles_under_no_bit_width() {
+        let path = std::env::temp_dir().join(format!(
+            "rspice-formats-fst-real-{}.fst",
+            std::process::id()
+        ));
+        let info = FstInfo {
+            start_time: 0,
+            timescale_exponent: -12,
+            version: "RSpice formats test".to_owned(),
+            date: "2026-11-24".to_owned(),
+            file_type: FstFileType::Verilog,
+        };
+        let mut header = fst_writer::open_fst(&path, &info).expect("open FST fixture");
+        header.scope("top", "top", FstScopeType::Module).unwrap();
+        let level = header
+            .var(
+                "level",
+                FstSignalType::real(),
+                FstVarType::Real,
+                FstVarDirection::Implicit,
+                None,
+            )
+            .unwrap();
+        header.up_scope().unwrap();
+        let mut body = header.finish().unwrap();
+        for (tick, value) in [(0, 0.25_f64), (7, -1.5e-3)] {
+            body.time_change(tick).unwrap();
+            body.signal_change(level, &value.to_le_bytes()).unwrap();
+        }
+        body.finish().unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        let mut events = Vec::new();
+        let decoded = decode_fst(&bytes, limits(), "fst", |event| {
+            let FstRawValue::Real(value) = event.raw else {
+                panic!("a real variable streams doubles");
+            };
+            events.push((event.tick, event.sample, value));
+        })
+        .expect("a real variable imports");
+        assert_eq!(decoded.signals[0].name, "top.level");
+        assert_eq!(decoded.signals[0].width, None);
+        assert_eq!(events, [(0, Some(0.25), 0.25), (7, Some(-1.5e-3), -1.5e-3)]);
+    }
+
+    #[test]
+    fn an_event_refusal_keeps_its_source_and_says_it_in_plain_words() {
         use std::error::Error as _;
-        let bytes = fst_bytes(b"x");
-        let error = decode_fst(
-            &bytes,
-            FstLimits {
-                max_bytes: 1024 * 1024,
-                max_columns: 16,
-                max_rows: 16,
-                max_values: 64,
-                max_signal_name_bytes: 1024,
-            },
+        // Three hierarchy entries and two events: a budget of four admits the hierarchy and
+        // refuses nothing, so the refusal is built as the event callback returns it.
+        let error = super::read_error(
             "fst",
-            |_| {},
-        )
-        .unwrap_err();
-        let super::FstReadFailure::Events(source) = &error.reason else {
-            panic!("expected callback refusal: {error}");
-        };
-        let fst_reader::ReadSignalsError::CallbackError(detail) = source else {
-            panic!("expected the vector callback refusal: {error}");
-        };
-        assert_eq!(
-            detail,
-            "fst import: digital vector contains X/Z/U/W/- state that cannot be losslessly mapped to an analog trace"
+            super::FstReadFailure::Events(fst_reader::ReadSignalsError::CallbackError(
+                "FST contains a non-finite real value".to_owned(),
+            )),
         );
         assert_eq!(
             error.to_string(),
-            format!("fst import: could not read FST events: {source:?}")
+            "fst import: FST contains a non-finite real value"
         );
         assert!(
             error

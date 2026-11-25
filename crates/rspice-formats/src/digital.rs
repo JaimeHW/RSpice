@@ -65,6 +65,15 @@ impl std::fmt::Display for DigitalReadError {
             Self::InvalidData { format, detail } => {
                 write!(f, "{} import: {detail}", format.canonical_id())
             }
+            Self::Vcd {
+                format,
+                source: rspice_core::io::VcdError::ResourceLimit(limit),
+            } => write!(
+                f,
+                "{} import: {}",
+                format.canonical_id(),
+                plain_limit(limit)
+            ),
             Self::Vcd { format, source } => write!(f, "{} import: {source}", format.canonical_id()),
             Self::EventProjection { format, source } => {
                 write!(f, "{} import: {source}", format.canonical_id())
@@ -100,6 +109,27 @@ impl std::error::Error for DigitalReadError {
             Self::Fst(source) => Some(source),
             _ => None,
         }
+    }
+}
+
+/// A read limit the file reached, in the words of what the file holds rather than the limit's
+/// internal name.
+fn plain_limit(limit: &rspice_core::ResourceLimitError) -> String {
+    match limit.resource {
+        rspice_core::ResourceKind::ExternalDataBytes => format!(
+            "the file holds more than the {} bytes an import reads",
+            limit.limit
+        ),
+        rspice_core::ResourceKind::ExternalDataValues | rspice_core::ResourceKind::ResultValues => {
+            format!(
+                "the file holds more than the {} values an import keeps",
+                limit.limit
+            )
+        }
+        _ => format!(
+            "the file needs {} where an import allows {}",
+            limit.requested, limit.limit
+        ),
     }
 }
 
@@ -303,13 +333,7 @@ pub fn decode_vcd(
         policy.samples,
     )?;
     append_digital_aliases(format, &mut parsed.data, aliases, policy.samples)?;
-    if unknown_changes > 0 {
-        parsed.notes.push(format!(
-            "{unknown_changes} sampled values were unknown (x) or high impedance (z); each is \
-             plotted at the {UNKNOWN_LOGIC_LEVEL} level a solved run's digital projection uses. \
-             The retained event history keeps the four-state code the file recorded."
-        ));
-    }
+    parsed.notes.extend(unknown_values_note(unknown_changes));
     if expanded_vectors > 0 {
         parsed.notes.push(format!(
             "{} wider than {MAX_EXACT_VECTOR_BITS} bits, which no f64 sample holds exactly; each \
@@ -336,6 +360,20 @@ pub fn decode_vcd(
         parsed.event_dump = event_dump;
     }
     Ok(parsed)
+}
+
+/// What the review says of the values a dump records as unknown or high impedance, if any.
+fn unknown_values_note(count: usize) -> Option<String> {
+    let counted = match count {
+        0 => return None,
+        1 => "1 sampled value was".to_owned(),
+        _ => format!("{count} sampled values were"),
+    };
+    Some(format!(
+        "{counted} unknown (x) or high impedance (z); each is plotted at the \
+         {UNKNOWN_LOGIC_LEVEL} level a solved run's digital projection uses. The retained event \
+         history keeps the four-state code the file recorded."
+    ))
 }
 
 /// "1 vector variable is" / "3 vector variables are", so a note reads as a
@@ -384,6 +422,7 @@ pub fn decode_fst(
 ) -> Result<DecodedDigital, DigitalReadError> {
     let mut events = Vec::new();
     let mut recorded: Vec<Vec<rspice_core::io::VcdChange>> = Vec::new();
+    let mut unknown_changes = 0_usize;
     let decoded =
         crate::fst::decode_fst(bytes, fst_limits(policy), format.canonical_id(), |event| {
             if recorded.len() <= event.signal {
@@ -402,7 +441,10 @@ pub fn decode_fst(
             events.push(DigitalEvent {
                 tick: event.tick,
                 signal: event.signal,
-                value: event.sample,
+                value: event.sample.unwrap_or_else(|| {
+                    unknown_changes += 1;
+                    UNKNOWN_LOGIC_LEVEL
+                }),
             });
         })
         .map_err(DigitalReadError::Fst)?;
@@ -426,6 +468,7 @@ pub fn decode_fst(
         policy.samples,
     )?;
     append_digital_aliases(format, &mut parsed.data, decoded.aliases, policy.samples)?;
+    parsed.notes.extend(unknown_values_note(unknown_changes));
     if let Some(payload) = event_payload {
         if let AnalysisResultPayload::TransientEvents { digital_buses, .. } = &payload
             && !digital_buses.is_empty()
@@ -504,6 +547,29 @@ fn fst_event_histories(
     rspice_core::execution::vcd_event_histories(&document)
         .map(Some)
         .map_err(|source| DigitalReadError::EventProjection { format, source })
+}
+
+/// A tick's time: the decimal multiple of the timescale the dump states, as the double nearest
+/// it. Three ticks of 1 ns is 3e-9 s, where multiplying by 1e-9 (itself not exact) lands a step
+/// off it. A timescale that is no power of ten, which no dump writes, is multiplied.
+fn tick_seconds(tick: u64, timescale_seconds: f64) -> f64 {
+    const POWERS: [f64; 23] = [
+        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+        1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+    ];
+    let exponent = timescale_seconds.log10().round();
+    let decade = format!("1e{exponent}").parse::<f64>().unwrap_or(f64::NAN);
+    if !((decade - timescale_seconds).abs() <= timescale_seconds * 4.0 * f64::EPSILON) {
+        return tick as f64 * timescale_seconds;
+    }
+    // Both operands exact, so the one rounding is the quotient's or the product's.
+    match usize::try_from(exponent.abs() as i64) {
+        Ok(power) if power < POWERS.len() && exponent < 0.0 => tick as f64 / POWERS[power],
+        Ok(power) if power < POWERS.len() => tick as f64 * POWERS[power],
+        _ => format!("{tick}e{exponent}")
+            .parse()
+            .unwrap_or(tick as f64 * timescale_seconds),
+    }
 }
 
 fn digital_events_to_dataset(
@@ -603,7 +669,7 @@ fn digital_events_to_dataset(
                 ),
             ));
         }
-        let time = (tick as f64) * timescale_seconds;
+        let time = tick_seconds(tick, timescale_seconds);
         if !time.is_finite() {
             return Err(adapter_error(
                 format,
@@ -840,6 +906,131 @@ mod tests {
         assert!(
             note.contains("keeps the four-state code the file recorded"),
             "the level is the grid's decision, not a loss: {note}"
+        );
+    }
+
+    #[test]
+    fn tick_times_are_the_decimal_multiples_of_the_timescale() {
+        // Multiplying by the timescale lands a step off the decimal time.
+        assert_ne!(3.0 * 1e-9, 3e-9);
+        let vcd = b"$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#3\n1!\n#7\n0!\n#1000000007\n1!\n";
+        let parsed = decode_vcd(vcd, ResultImportFormat::Vcd, limits()).unwrap();
+        assert_eq!(
+            parsed.data.waveforms[0].x.in_memory().unwrap(),
+            &[0.0, 3e-9, 7e-9, 1.000000007]
+        );
+        for (tick, timescale, seconds) in [
+            (3, 100e-12, 3e-10),
+            (7, 10e-15, 7e-14),
+            (11, 1.0, 11.0),
+            (5, 1e-24, 5e-24),
+            (9, 10.0, 90.0),
+        ] {
+            assert_eq!(
+                tick_seconds(tick, timescale),
+                seconds,
+                "{tick} x {timescale}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_limit_the_dump_reaches_is_named_by_what_the_file_holds() {
+        let mut small = limits();
+        small.samples.max_values = 2;
+        let vcd = b"$timescale 1 ns $end\n$var wire 1 ! a $end\n$enddefinitions $end\n#0\n0!\n#1\n1!\n#2\n0!\n#3\n1!\n";
+        let error = decode_vcd(vcd, ResultImportFormat::Vcd, small)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !error.contains("external_data") && !error.contains("result_values"),
+            "{error}"
+        );
+        assert!(
+            error.starts_with("vcd import: the file holds more than the 2 values"),
+            "{error}"
+        );
+    }
+
+    #[cfg(all(feature = "fst", not(target_arch = "wasm32")))]
+    #[test]
+    fn fst_unknown_bits_import_at_the_projection_level_and_reals_as_themselves() {
+        use fst_writer::{
+            FstFileType, FstInfo, FstScopeType, FstSignalType, FstVarDirection, FstVarType,
+        };
+        let path = std::env::temp_dir().join(format!(
+            "rspice-formats-digital-fst-{}.fst",
+            std::process::id()
+        ));
+        let info = FstInfo {
+            start_time: 0,
+            timescale_exponent: -9,
+            version: "RSpice formats test".to_owned(),
+            date: "2026-11-24".to_owned(),
+            file_type: FstFileType::Verilog,
+        };
+        let mut header = fst_writer::open_fst(&path, &info).unwrap();
+        header.scope("top", "top", FstScopeType::Module).unwrap();
+        let bit = header
+            .var(
+                "en",
+                FstSignalType::bit_vec(1),
+                FstVarType::Wire,
+                FstVarDirection::Implicit,
+                None,
+            )
+            .unwrap();
+        let bus = header
+            .var(
+                "data",
+                FstSignalType::bit_vec(2),
+                FstVarType::Wire,
+                FstVarDirection::Implicit,
+                None,
+            )
+            .unwrap();
+        let level = header
+            .var(
+                "level",
+                FstSignalType::real(),
+                FstVarType::Real,
+                FstVarDirection::Implicit,
+                None,
+            )
+            .unwrap();
+        header.up_scope().unwrap();
+        let mut body = header.finish().unwrap();
+        for (tick, en, data, value) in [
+            (0, b"x", b"0z", 0.25_f64),
+            (3, b"1", b"10", 1.5),
+            (7, b"z", b"11", -0.5),
+        ] {
+            body.time_change(tick).unwrap();
+            body.signal_change(bit, en).unwrap();
+            body.signal_change(bus, data).unwrap();
+            body.signal_change(level, &value.to_le_bytes()).unwrap();
+        }
+        body.finish().unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        let parsed = decode_fst(&bytes, ResultImportFormat::Fst, limits()).unwrap();
+        let column = |index: usize| parsed.data.waveforms[index].y.in_memory().unwrap().to_vec();
+        assert_eq!(
+            parsed.data.waveforms[0].x.in_memory().unwrap(),
+            &[0.0, 3e-9, 7e-9]
+        );
+        assert_eq!(column(0), [0.5, 1.0, 0.5]);
+        assert_eq!(column(1), [0.5, 2.0, 3.0]);
+        assert_eq!(column(2), [0.25, 1.5, -0.5]);
+        assert!(
+            parsed
+                .notes
+                .iter()
+                .any(|note| note
+                    .starts_with("3 sampled values were unknown (x) or high impedance (z)")),
+            "{:?}",
+            parsed.notes
         );
     }
 

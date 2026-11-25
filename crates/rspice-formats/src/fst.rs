@@ -71,7 +71,13 @@ impl std::fmt::Display for FstReadFailure {
             #[cfg(feature = "fst")]
             Self::Hierarchy(source) => write!(f, "could not read FST hierarchy: {source}"),
             #[cfg(feature = "fst")]
-            Self::Events(source) => write!(f, "could not read FST events: {source:?}"),
+            Self::Events(fst_reader::ReadSignalsError::CallbackError(detail)) => {
+                f.write_str(detail)
+            }
+            #[cfg(feature = "fst")]
+            Self::Events(fst_reader::ReadSignalsError::ReadError(source)) => {
+                write!(f, "could not read FST events: {source}")
+            }
         }
     }
 }
@@ -153,7 +159,9 @@ pub enum FstRawValue<'a> {
 pub struct FstEvent<'a> {
     pub tick: u64,
     pub signal: usize,
-    pub sample: f64,
+    /// The value as one number: a real as it is, a logic vector as the unsigned integer its
+    /// bits spell, or `None` when a bit is unknown or high impedance and they spell none.
+    pub sample: Option<f64>,
     pub raw: FstRawValue<'a>,
 }
 
