@@ -241,13 +241,26 @@ pub struct OperationalResponse {
     pub highlight: bool,
 }
 
+/// Whether `status` leaves the viewer readable and says so beside it: a
+/// mark in the sheet's bar, or the pane's first row, rather than anything in
+/// the well.
+pub fn marks_beside_viewer(status: &ResultOperationalStatus) -> bool {
+    status.state != ResultOperationalState::Complete && !status.blocks_visuals
+}
+
+/// Present `status` in the well: the card or hint of a state that takes
+/// the well over, or, when nothing beside the viewer carries it
+/// (`marked_beside` false), the one-line banner over a readable viewer.
 /// Query failure-site display facts only when a card will be shown.
 pub fn show<'a>(
     ui: &mut Ui,
     status: &ResultOperationalStatus,
+    marked_beside: bool,
     failure_site: impl FnOnce() -> Option<FailureSiteControl<'a>>,
 ) -> OperationalResponse {
-    if status.state == ResultOperationalState::Complete {
+    if status.state == ResultOperationalState::Complete
+        || (marked_beside && marks_beside_viewer(status))
+    {
         return OperationalResponse::default();
     }
     // An empty well is not an alarm. It reads the way an empty schematic
@@ -278,6 +291,83 @@ pub fn show<'a>(
     };
     announce_status(ui, &response, status);
     actions
+}
+
+/// A state the viewer stays readable under, as a bar carries it: the
+/// category's glyph and, when `labelled`, the state's name, at the bar's
+/// control height, so the well beneath keeps every point of its height for
+/// the plot. Its hover reads the whole sentence; a press opens it, with
+/// whatever the state offers. Query failure-site display facts only when
+/// that opens.
+pub fn show_mark<'a>(
+    ui: &mut Ui,
+    status: &ResultOperationalStatus,
+    labelled: bool,
+    failure_site: impl FnOnce() -> Option<FailureSiteControl<'a>>,
+) -> OperationalResponse {
+    let t = Tokens::get(ui.ctx());
+    let category = status.state.category();
+    let tone = icon_tone(category, &t.color);
+    let name = labelled.then(|| {
+        ui.painter().layout_no_wrap(
+            status.state.label().to_owned(),
+            theme::sans(tokens::FS_1, FontWeight::Medium),
+            t.color.text,
+        )
+    });
+    let height = ui.spacing().interact_size.y;
+    let width = name.as_ref().map_or(height, |name| {
+        2.0 * OPERATIONAL_MARK_PADDING_X
+            + OPERATIONAL_BANNER_ICON
+            + OPERATIONAL_BANNER_ICON_GAP
+            + name.size().x
+    });
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
+    }
+    let glyph_x = if name.is_some() {
+        rect.left() + OPERATIONAL_MARK_PADDING_X + 0.5 * OPERATIONAL_BANNER_ICON
+    } else {
+        rect.center().x
+    };
+    let glyph = egui::Rect::from_center_size(
+        egui::pos2(glyph_x, rect.center().y),
+        egui::Vec2::splat(OPERATIONAL_BANNER_ICON),
+    );
+    operational_icon(category).paint(ui.painter(), glyph, tone);
+    if let Some(name) = name {
+        let origin = egui::pos2(
+            glyph.right() + OPERATIONAL_BANNER_ICON_GAP,
+            (rect.center().y - 0.5 * name.size().y).round(),
+        );
+        ui.painter().galley(origin, name, t.color.text);
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    let response = response.on_hover_text(sentence(status));
+    announce_status(ui, &response, status);
+    let mut actions = OperationalResponse::default();
+    egui::Popup::menu(&response).show(|ui| {
+        ui.set_max_width(OPERATIONAL_MARK_POPUP_WIDTH);
+        let offer = failure_site();
+        OperationalCard {
+            status,
+            icon_tone: tone,
+            offer: offer.as_ref(),
+        }
+        .contents(ui, &mut actions);
+    });
+    actions
+}
+
+/// Everything a state says, as one sentence for a hover.
+fn sentence(status: &ResultOperationalStatus) -> String {
+    [Some(status.state.label()), status.detail.as_deref()]
+        .into_iter()
+        .flatten()
+        .chain([status.state.message(), status.state.recovery()])
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// Name the state to assistive technology on whatever response shows it.
@@ -317,6 +407,10 @@ const OPERATIONAL_BANNER_PADDING_X: f32 = 10.0;
 const OPERATIONAL_BANNER_ICON: f32 = 14.0;
 const OPERATIONAL_BANNER_ICON_GAP: f32 = 7.0;
 const OPERATIONAL_BANNER_GAP: f32 = 10.0;
+/// The bar mark's inset either side of its glyph and name, as a compact
+/// button insets its label, and the width its popup wraps the state's copy at.
+const OPERATIONAL_MARK_PADDING_X: f32 = 6.0;
+const OPERATIONAL_MARK_POPUP_WIDTH: f32 = 340.0;
 
 /// The empty schematic sheet's hint, as `schematic::view::scene` paints it:
 /// a medium title in dim text over regular lines in faint text.
@@ -497,7 +591,7 @@ impl OperationalCard<'_> {
             let elided = galley.elided;
             ui.painter().galley(copy.min, galley, t.color.text);
             if elided {
-                hover.on_hover_text(self.sentence());
+                hover.on_hover_text(sentence(self.status));
             }
         });
         response
@@ -540,17 +634,6 @@ impl OperationalCard<'_> {
         job
     }
 
-    /// Everything the banner says, as one sentence for its hover.
-    fn sentence(&self) -> String {
-        let status = self.status;
-        [Some(status.state.label()), status.detail.as_deref()]
-            .into_iter()
-            .flatten()
-            .chain([status.state.message(), status.state.recovery()])
-            .collect::<Vec<_>>()
-            .join(" · ")
-    }
-
     /// Draw the card across the width its caller already fixed: elevated
     /// and shadowed over the well it has taken over.
     fn show(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
@@ -563,77 +646,77 @@ impl OperationalCard<'_> {
             .corner_radius(t.radius)
             .inner_margin(egui::Margin::same(OPERATIONAL_CARD_PADDING))
             .shadow(t.shadow())
-            .show(ui, |ui| {
-                // Both forms are laid out to a width their caller fixed, so
-                // the copy wraps inside the card rather than setting its
-                // width — a state's longest sentence is not a layout.
-                let width = ui.available_width();
-                ui.set_width(width);
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = OPERATIONAL_CARD_ICON_GAP;
-                    let (glyph, _) = ui.allocate_exact_size(
-                        egui::Vec2::splat(OPERATIONAL_CARD_ICON),
-                        egui::Sense::hover(),
+            .show(ui, |ui| self.contents(ui, actions))
+            .response
+    }
+
+    /// The card's glyph, copy and actions, laid out to a width its caller
+    /// fixed, so the copy wraps inside it rather than setting its width — a
+    /// state's longest sentence is not a layout. The card and a bar mark's
+    /// popup both say it this way.
+    fn contents(&self, ui: &mut Ui, actions: &mut OperationalResponse) {
+        let t = Tokens::get(ui.ctx());
+        let width = ui.available_width();
+        ui.set_width(width);
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = OPERATIONAL_CARD_ICON_GAP;
+            let (glyph, _) = ui.allocate_exact_size(
+                egui::Vec2::splat(OPERATIONAL_CARD_ICON),
+                egui::Sense::hover(),
+            );
+            operational_icon(self.status.state.category()).paint(
+                ui.painter(),
+                glyph,
+                self.icon_tone,
+            );
+            let copy = (width - OPERATIONAL_CARD_ICON - OPERATIONAL_CARD_ICON_GAP).max(1.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(copy, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(copy);
+                    ui.spacing_mut().item_spacing.y = 3.0;
+                    ui.label(
+                        egui::RichText::new(self.status.state.label())
+                            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+                            .color(t.color.text),
                     );
-                    operational_icon(self.status.state.category()).paint(
-                        ui.painter(),
-                        glyph,
-                        self.icon_tone,
+                    if let Some(detail) = self.status.detail.as_deref() {
+                        ui.label(
+                            egui::RichText::new(detail)
+                                .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                                .color(t.color.text),
+                        );
+                    }
+                    ui.label(
+                        egui::RichText::new(self.status.state.message())
+                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                            .color(t.color.text_dim),
                     );
-                    let copy = (width - OPERATIONAL_CARD_ICON - OPERATIONAL_CARD_ICON_GAP).max(1.0);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(copy, 0.0),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.set_width(copy);
-                            ui.spacing_mut().item_spacing.y = 3.0;
-                            ui.label(
-                                egui::RichText::new(self.status.state.label())
-                                    .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                                    .color(t.color.text),
-                            );
-                            if let Some(detail) = self.status.detail.as_deref() {
-                                ui.label(
-                                    egui::RichText::new(detail)
-                                        .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                                        .color(t.color.text),
-                                );
-                            }
-                            ui.label(
-                                egui::RichText::new(self.status.state.message())
-                                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                                    .color(t.color.text_dim),
-                            );
-                            ui.label(
-                                egui::RichText::new(self.status.state.recovery())
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.text_faint),
-                            );
-                        },
+                    ui.label(
+                        egui::RichText::new(self.status.state.recovery())
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_faint),
                     );
-                });
-                if self.offer.is_some() || self.status.dismissible {
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        if let Some(offer) = self.offer {
-                            actions.highlight = show_failure_site_control(ui, offer);
-                        }
-                        if self.status.dismissible {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    actions.dismiss =
-                                        rspice_ui_kit::widgets::Button::new("Dismiss")
-                                            .show(ui)
-                                            .on_hover_text("Dismiss this recorded runtime notice")
-                                            .clicked();
-                                },
-                            );
-                        }
+                },
+            );
+        });
+        if self.offer.is_some() || self.status.dismissible {
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if let Some(offer) = self.offer {
+                    actions.highlight = show_failure_site_control(ui, offer);
+                }
+                if self.status.dismissible {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        actions.dismiss = rspice_ui_kit::widgets::Button::new("Dismiss")
+                            .show(ui)
+                            .on_hover_text("Dismiss this recorded runtime notice")
+                            .clicked();
                     });
                 }
-            })
-            .response
+            });
+        }
     }
 
     /// Centre the card in the document well it has taken over.

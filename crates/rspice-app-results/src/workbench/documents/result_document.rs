@@ -2115,7 +2115,10 @@ pub fn show_compact_split(
         state.results.session.viewer = first;
     }
     let pane = ui.available_rect_before_wrap();
-    let lead_slots = chrome::bars::compact_pane_control_slots(sheets.len());
+    // The pane has no sheet bar, so its state takes the window place after
+    // its controls.
+    let marked = operational_state::status_beside_viewer(state).is_some();
+    let lead_slots = chrome::bars::compact_pane_control_slots(sheets.len()) + usize::from(marked);
     if sheets.is_empty() && state.model.simulation.retained.has_results() {
         let t = Tokens::get(ui.ctx());
         ui.painter().rect_filled(pane, 0.0, t.color.canvas_bg);
@@ -2699,8 +2702,14 @@ fn show_viewer_well(
         node.set_label(panel_label);
     });
 
+    // A state the viewer stays readable under is a mark in the sheet bar,
+    // or in the plot pane's first row, and costs the well nothing.
+    let marked_beside = match chrome {
+        ResultChrome::Full => result_stage_bar_visible(state.results_reads()),
+        ResultChrome::CompactSplit { .. } => true,
+    };
     let operational = operational_state::classify_viewer(state, viewer);
-    if operational_state::show_result_operational_status(ui, state, &operational) {
+    if operational_state::show_result_operational_status(ui, state, &operational, marked_beside) {
         return;
     }
 
@@ -2790,6 +2799,16 @@ fn show_compact_controls(
     let beside = state.workbench.results_split.axis == ResultsSplitAxis::Beside;
     let actions =
         chrome::bars::compact_pane_controls(ui, pane, state.results.session.viewer, sheets, beside);
+    let mark = chrome::bars::compact_pane_status_rect(pane, sheets.len());
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(mark)
+            .id_salt("plot-pane-status"),
+        |ui| {
+            ui.spacing_mut().interact_size.y = mark.height();
+            operational_state::show_status_mark(ui, state, false);
+        },
+    );
     if let Some(viewer) = actions.viewer {
         state.results.session.viewer = viewer;
     }

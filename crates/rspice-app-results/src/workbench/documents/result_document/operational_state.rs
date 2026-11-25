@@ -706,29 +706,66 @@ pub(super) fn show_result_operational_status(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     status: &ResultOperationalStatus,
+    marked_beside: bool,
 ) -> bool {
-    if status.state == ResultOperationalState::Failed
-        && !status.blocks_visuals
-        && op_sheet_states_the_failure(state.results_reads(), state.results.session.viewer)
-    {
+    if states_its_own_failure(state.results_reads(), status) {
         return false;
     }
     let mut offered = None;
-    let operational::OperationalResponse {
-        blocks_visuals,
-        dismiss,
-        highlight,
-    } = operational::show(ui, status, || {
+    let response = operational::show(ui, status, marked_beside, || {
         offered = offered_failure_sites(state);
         offered.as_ref().map(OfferedFailureSites::control)
     });
-    if dismiss {
+    apply_operational_response(state, &response, offered.as_ref());
+    response.blocks_visuals
+}
+
+/// The state the quick view's sheet stays readable under, when it is one a
+/// mark beside the viewer carries.
+pub(super) fn status_beside_viewer(
+    state: &mut ResultsParts<'_>,
+) -> Option<ResultOperationalStatus> {
+    let viewer = state.results.session.viewer;
+    let status = classify_viewer(state, viewer);
+    (operational::marks_beside_viewer(&status)
+        && !states_its_own_failure(state.results_reads(), &status))
+    .then_some(status)
+}
+
+/// Draw the quick view's state as a mark where `ui` stands — the sheet
+/// bar's right end, `labelled`, or the plot pane's window place, as a glyph
+/// — and carry out what its popup asked.
+pub(super) fn show_status_mark(ui: &mut Ui, state: &mut ResultsParts<'_>, labelled: bool) {
+    let Some(status) = status_beside_viewer(state) else {
+        return;
+    };
+    let mut offered = None;
+    let response = operational::show_mark(ui, &status, labelled, || {
+        offered = offered_failure_sites(state);
+        offered.as_ref().map(OfferedFailureSites::control)
+    });
+    apply_operational_response(state, &response, offered.as_ref());
+}
+
+/// A failed solve on its own operating-point sheet: the sheet says so on
+/// its first row, so neither a banner nor a mark repeats it.
+fn states_its_own_failure(state: ResultsReads<'_>, status: &ResultOperationalStatus) -> bool {
+    status.state == ResultOperationalState::Failed
+        && !status.blocks_visuals
+        && op_sheet_states_the_failure(state, state.results.session.viewer)
+}
+
+fn apply_operational_response(
+    state: &mut ResultsParts<'_>,
+    response: &operational::OperationalResponse,
+    offered: Option<&OfferedFailureSites>,
+) {
+    if response.dismiss {
         state.results.dismiss_runtime_condition();
     }
-    if highlight {
-        toggle_failure_site_marking(state, offered.as_ref());
+    if response.highlight {
+        toggle_failure_site_marking(state, offered);
     }
-    blocks_visuals
 }
 
 /// Whether `viewer` is the operating-point sheet of the solve that failed.
