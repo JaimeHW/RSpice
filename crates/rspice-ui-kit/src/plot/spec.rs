@@ -594,26 +594,7 @@ impl PlotMapper {
 /// and, under them, the X row's caption.
 pub const PLOT_GUTTER: f32 = 64.0;
 
-/// The share of its span a fit leaves free on each side: enough that no
-/// curve runs along the frame, little enough that the curves fill the plot,
-/// as ViVA's and EZwave's fits leave them.
-pub const FIT_HEADROOM: f64 = 0.04;
-
-/// A linear fit of the values spanning `min..max`, padded by
-/// [`FIT_HEADROOM`] each side.
-///
-/// A span that cannot survive its own padding is flat as far as any axis
-/// can draw it: exactly constant, or constant to within a few ulps. Both
-/// widen by one either side, because a range finer than the tick ladder can
-/// subdivide leaves the plot with no labels at all.
-#[must_use]
-pub fn padded_fit((min, max): (f64, f64)) -> (f64, f64) {
-    let pad = (max - min) * FIT_HEADROOM;
-    if pad <= 0.0 {
-        return (min - 1.0, max + 1.0);
-    }
-    (min - pad, max + pad)
-}
+pub use super::scale::{FIT_HEADROOM, padded_fit};
 
 /// Custom drawing under the traces (histogram bars, eye acquisitions).
 /// Receives a painter clipped to the plot area and the data→screen mapper.

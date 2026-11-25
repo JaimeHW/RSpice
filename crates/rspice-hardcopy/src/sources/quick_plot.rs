@@ -163,9 +163,13 @@ pub fn quick_plot_from_scaled_series(
                     .filter(|(_, of)| **of == strip)
                     .flat_map(|(points, _)| points.iter().map(|(_, point)| point.1)),
             )?;
+            // Unpinned, a strip fits its values with the sheet's headroom,
+            // so no curve runs along the frame and both ends of the axis
+            // are ruled and named, as on the sheet.
+            let fitted = rspice_results::plot_axis::padded_fit(data);
             let (y_minimum, y_maximum) = match overlay {
-                Some(overlay) if units.len() == 1 => overlay.framed_y(y_scale, data),
-                _ => data,
+                Some(overlay) if units.len() == 1 => overlay.framed_y(y_scale, fitted),
+                _ => fitted,
             };
             let (y_minimum, y_maximum) = nondegenerate_range(y_minimum, y_maximum);
             Ok(PlotFrame {

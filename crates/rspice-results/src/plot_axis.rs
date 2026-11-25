@@ -54,6 +54,28 @@ pub struct TickSeries {
     pub step: f64,
 }
 
+/// The share of its span a fit leaves free on each side: enough that no
+/// curve runs along the frame, little enough that the curves fill the plot,
+/// as ViVA's and EZwave's fits leave them. A sheet and its printed page fit
+/// alike.
+pub const FIT_HEADROOM: f64 = 0.04;
+
+/// A linear fit of the values spanning `min..max`, padded by
+/// [`FIT_HEADROOM`] each side.
+///
+/// A span that cannot survive its own padding is flat as far as any axis
+/// can draw it: exactly constant, or constant to within a few ulps. Both
+/// widen by one either side, because a range finer than the tick ladder can
+/// subdivide leaves the plot with no labels at all.
+#[must_use]
+pub fn padded_fit((min, max): (f64, f64)) -> (f64, f64) {
+    let pad = (max - min) * FIT_HEADROOM;
+    if pad <= 0.0 {
+        return (min - 1.0, max + 1.0);
+    }
+    (min - pad, max + pad)
+}
+
 /// However tall the pane, an axis past this many gridlines is a hatch, not a
 /// scale — and every one of them costs a line and a label layout per frame.
 pub const MAX_AXIS_TICKS: usize = 40;

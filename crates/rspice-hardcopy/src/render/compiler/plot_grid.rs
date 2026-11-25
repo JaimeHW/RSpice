@@ -9,6 +9,11 @@
 
 use super::*;
 
+/// How far a value label's baseline stands below its tick.
+const VALUE_DROP_UM: u64 = 700;
+/// How far a value label's capitals rise above its tick.
+const VALUE_ASCENT_UM: u64 = 950;
+
 impl SemanticSceneCompiler<'_> {
     /// Rule the plot's grid.
     ///
@@ -74,6 +79,16 @@ impl SemanticSceneCompiler<'_> {
                 });
             }
         }
+        let strips = plot
+            .frames
+            .iter()
+            .map(|frame| {
+                Ok((
+                    self.semantic_point(frame.minimum)?,
+                    self.semantic_point(frame.maximum)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, HardcopyRenderError>>()?;
         for tick in &plot.axis_ticks {
             let (from, to) = (
                 self.semantic_point(tick.start)?,
@@ -112,7 +127,25 @@ impl SemanticSceneCompiler<'_> {
                     } else {
                         to
                     };
-                    (self.offset_scene_point(foot, -1_000, 700)?, TextAnchor::End)
+                    // A value at either end of its strip stands inside it,
+                    // as the sheet's axis painter nudges it, rather than
+                    // half over the frame.
+                    let y = foot.y.micrometres();
+                    let strip = strips.iter().find(|(top, bottom)| {
+                        (top.y.micrometres()..=bottom.y.micrometres()).contains(&y)
+                    });
+                    let nudge = strip.map_or(0, |(top, bottom)| {
+                        let (top, bottom) = (top.y.micrometres(), bottom.y.micrometres());
+                        let inside = y.clamp(
+                            top.saturating_add(VALUE_ASCENT_UM),
+                            bottom.saturating_sub(VALUE_DROP_UM).max(top),
+                        );
+                        i64::try_from(inside).unwrap_or(0) - i64::try_from(y).unwrap_or(0)
+                    });
+                    (
+                        self.offset_scene_point(foot, -1_000, VALUE_DROP_UM as i64 + nudge)?,
+                        TextAnchor::End,
+                    )
                 }
             };
             let color = SemanticColor::Secondary;
