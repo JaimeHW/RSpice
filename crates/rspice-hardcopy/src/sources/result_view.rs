@@ -201,10 +201,10 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
 /// them. A plot of no frames, a plane, keeps its whole square box.
 fn drawn_bounds(plot: &SemanticPlot) -> Result<SemanticBounds, HardcopySourceError> {
     if plot.frames.is_empty() {
-        return Ok(SemanticBounds::try_new(
+        return SemanticBounds::try_new(
             SemanticPoint::new(0, 0),
             SemanticPoint::new(PLOT_WIDTH_UM, PLOT_HEIGHT_UM),
-        )?);
+        );
     }
     let frames = plot.frames.iter();
     let captions = plot.captions.iter().map(|caption| caption.position.y_um);
@@ -227,10 +227,10 @@ fn drawn_bounds(plot: &SemanticPlot) -> Result<SemanticBounds, HardcopySourceErr
         .max()
         .unwrap_or(PLOT_WIDTH_UM)
         .min(PLOT_WIDTH_UM);
-    Ok(SemanticBounds::try_new(
+    SemanticBounds::try_new(
         SemanticPoint::new(0, top),
         SemanticPoint::new(right, bottom),
-    )?)
+    )
 }
 
 fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(
