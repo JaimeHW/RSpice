@@ -48,6 +48,9 @@ rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = f
 [target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
 wasm-bindgen = "0.2"

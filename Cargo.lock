@@ -5661,6 +5661,7 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "web-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
