@@ -242,24 +242,7 @@ impl WorkbenchIcon {
                 line(&[(14.0, 18.5), (23.0, 18.5)]);
             }
             Self::Brand => {
-                painter.rect_filled(rect, side * 21.0 / 96.0, color);
-                let ink = Tokens::get(painter.ctx()).color.accent_ink;
-                let terminal_stroke = Stroke::new((2.0 * scale).max(1.2), ink);
-                line_colored(painter, &[p(6.05, 9.55), p(8.41, 9.55)], terminal_stroke);
-                line_colored(painter, &[p(6.05, 14.45), p(8.41, 14.45)], terminal_stroke);
-                line_colored(painter, &[p(15.76, 12.0), p(17.95, 12.0)], terminal_stroke);
-                for center in [p(5.0, 9.55), p(5.0, 14.45), p(19.0, 12.0)] {
-                    painter.circle_stroke(
-                        center,
-                        1.05 * scale,
-                        Stroke::new((1.0 * scale).max(0.8), ink),
-                    );
-                }
-                painter.add(Shape::convex_polygon(
-                    vec![p(8.06, 7.21), p(8.06, 16.79), p(15.94, 12.0)],
-                    ink,
-                    Stroke::new((1.4 * scale).max(1.0), ink),
-                ));
+                paint_brand_mark(painter, Rect::from_min_size(origin, Vec2::splat(side)))
             }
             Self::Project => {
                 line(&[(4.0, 10.0), (12.0, 4.0), (20.0, 10.0)]);
@@ -842,10 +825,6 @@ const STAR_POINTS: [(f32, f32); 10] = [
     (3.2, 9.2),
     (10.2, 9.2),
 ];
-
-fn line_colored(painter: &egui::Painter, points: &[Pos2], stroke: Stroke) {
-    painter.add(Shape::line(points.to_vec(), stroke));
-}
 
 pub fn icon_button(
     ui: &mut Ui,
@@ -3104,6 +3083,38 @@ const ACTION_ROW_HEIGHT: f32 = 51.0;
 /// the control never sees the click. This claims the label's own slot with a
 /// hover sense, which the hit test passes over, and paints the galley into it.
 /// Text the slot elides stays one hover away, as a truncated label's does.
+/// The RSpice mark as `assets/brand/logo.svg` draws it (the DIP package:
+/// steel leads, an ink body with its pin-1 notch and dot, on the signal
+/// yellow tile), in the largest square centred in `rect`. It keeps its own
+/// colours under every theme: it is the logo, not an icon tinted to the
+/// chrome.
+pub fn paint_brand_mark(painter: &egui::Painter, rect: Rect) {
+    let square =
+        Rect::from_center_size(rect.center(), Vec2::splat(rect.width().min(rect.height())));
+    let scale = square.width() / 96.0;
+    let gold = Color32::from_rgb(0xF2, 0xB8, 0x24);
+    let steel = Color32::from_rgb(0x86, 0x8E, 0x94);
+    let ink = Color32::from_rgb(0x17, 0x18, 0x1A);
+    let silkscreen = Color32::from_rgb(0xE6, 0xE9, 0xEB);
+    painter.rect_filled(square, 21.0 * scale, gold);
+
+    // The mark stands at `translate(2.88 2.88) scale(0.94)` on the tile.
+    let mark = 0.94 * scale;
+    let point = |x: f32, y: f32| square.min + Vec2::splat(2.88 * scale) + Vec2::new(x, y) * mark;
+    let span = |x: f32, y: f32, width: f32, height: f32| {
+        Rect::from_min_max(point(x, y), point(x + width, y + height))
+    };
+    for y in [28.0, 44.0, 60.0] {
+        for x in [13.0, 66.0] {
+            painter.rect_filled(span(x, y, 17.0, 8.0), 1.5 * mark, steel);
+        }
+    }
+    painter.rect_filled(span(28.0, 20.0, 40.0, 56.0), 4.0 * mark, ink);
+    // The pin-1 notch is the tile showing through the body's top edge.
+    painter.circle_filled(point(48.0, 20.0), 6.0 * mark, gold);
+    painter.circle_filled(point(35.0, 29.0), 3.2 * mark, silkscreen);
+}
+
 pub fn painted_label(
     ui: &mut Ui,
     text: impl Into<egui::WidgetText>,

@@ -95,7 +95,7 @@ pub enum Icon {
     Close,
     /// Read-only: a padlock.
     Lock,
-    /// Application brand mark (the RSpice forward waveform).
+    /// Application brand mark (the RSpice package: a DIP outline).
     Brand,
 }
 
@@ -312,7 +312,23 @@ impl Icon {
                 Arc([12.0, 8.0], 3.5, 180.0, 180.0),
                 Line(&[[15.5, 8.0], [15.5, 11.0]]),
             ],
-            Icon::Brand => &[Line(&[[7.0, 8.0], [17.0, 12.0], [7.0, 16.0]])],
+            Icon::Brand => &[
+                Line(&[
+                    [10.5, 5.0],
+                    [7.0, 5.0],
+                    [7.0, 19.0],
+                    [17.0, 19.0],
+                    [17.0, 5.0],
+                    [13.5, 5.0],
+                ]),
+                Arc([12.0, 5.0], 1.5, 0.0, 180.0),
+                Line(&[[3.5, 8.0], [7.0, 8.0]]),
+                Line(&[[3.5, 12.0], [7.0, 12.0]]),
+                Line(&[[3.5, 16.0], [7.0, 16.0]]),
+                Line(&[[17.0, 8.0], [20.5, 8.0]]),
+                Line(&[[17.0, 12.0], [20.5, 12.0]]),
+                Line(&[[17.0, 16.0], [20.5, 16.0]]),
+            ],
         }
     }
 

@@ -647,7 +647,7 @@ fn launcher_header(
             ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 let (mark, _) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
-                paint_brand_logo(ui.painter(), mark);
+                rspice_ui_kit::panels::paint_brand_mark(ui.painter(), mark);
                 let wordmark = ui.label(
                     egui::RichText::new("RSpice")
                         .font(theme::sans(20.0, FontWeight::SemiBold))
@@ -679,42 +679,6 @@ fn launcher_header(
             });
         });
     close.unwrap_or(header.response)
-}
-
-/// Paint the checked-in `assets/brand/logo.svg` geometry directly so the
-/// native, browser, and mobile renderers share the same mark without an SVG
-/// decoder or texture-lifetime dependency.
-fn paint_brand_logo(painter: &egui::Painter, rect: Rect) {
-    let square =
-        Rect::from_center_size(rect.center(), Vec2::splat(rect.width().min(rect.height())));
-    let scale = square.width() / 96.0;
-    let ink = Color32::from_rgb(23, 24, 26);
-    let gold = Color32::from_rgb(242, 184, 36);
-    painter.rect_filled(square, 21.0 * scale, gold);
-
-    let point = |x: f32, y: f32| {
-        egui::pos2(
-            square.left() + (14.4 + 0.7 * x) * scale,
-            square.top() + (14.4 + 0.7 * y) * scale,
-        )
-    };
-    let heavy = Stroke::new((8.0 * 0.7 * scale).max(1.0), ink);
-    for (from, to) in [
-        (point(14.0, 34.0), point(27.5, 34.0)),
-        (point(14.0, 62.0), point(27.5, 62.0)),
-        (point(69.5, 48.0), point(82.0, 48.0)),
-    ] {
-        painter.line_segment([from, to], heavy);
-    }
-    let terminal = Stroke::new((4.0 * 0.7 * scale).max(1.0), ink);
-    for center in [point(8.0, 34.0), point(8.0, 62.0), point(88.0, 48.0)] {
-        painter.circle_stroke(center, 6.0 * 0.7 * scale, terminal);
-    }
-    painter.add(egui::Shape::convex_polygon(
-        vec![point(25.5, 20.61), point(25.5, 75.39), point(70.5, 48.0)],
-        ink,
-        heavy,
-    ));
 }
 
 /// Safe mode changes how this launch behaves on every page, so the header
