@@ -239,18 +239,17 @@ fn plane_plot(
     })
 }
 
+/// A plane's ticks, the captions that name its axes and the lines that
+/// rule it.
+struct PlaneAxes {
+    ticks: Vec<SemanticAxisTick>,
+    captions: Vec<SemanticPlotCaption>,
+    guides: Vec<SemanticPlotGuide>,
+}
+
 /// The plane's own axes: Re along the bottom, Im up the left, ruled on the
 /// one scale both share, and the two lines through the origin.
-fn plane_axes(
-    plane: &Plane,
-) -> Result<
-    (
-        Vec<SemanticAxisTick>,
-        Vec<SemanticPlotCaption>,
-        Vec<SemanticPlotGuide>,
-    ),
-    HardcopySourceError,
-> {
+fn plane_axes(plane: &Plane) -> Result<PlaneAxes, HardcopySourceError> {
     let (ticks, mut captions) = plot_axes(AxisScale::Linear, AxisScale::Linear, &plane.frame())?;
     captions.push(SemanticPlotCaption {
         text: "Re".to_owned(),
@@ -269,7 +268,11 @@ fn plane_axes(
         plane.guide(&[(plane.x.0, 0.0), (plane.x.1, 0.0)], false)?,
         plane.guide(&[(0.0, plane.y.0), (0.0, plane.y.1)], false)?,
     ];
-    Ok((ticks, captions, guides))
+    Ok(PlaneAxes {
+        ticks,
+        captions,
+        guides,
+    })
 }
 
 /// The complex loci a polar or Smith sheet draws from one analysis: each
@@ -435,7 +438,7 @@ pub(super) fn quick_polar_plot<W: AsRef<RetainedWaveform>>(
         .map(|(re, im)| re.hypot(*im))
         .filter(|magnitude| magnitude.is_finite())
         .fold(0.0_f64, f64::max);
-    if loci.is_empty() || !(reach > 0.0) {
+    if loci.is_empty() || reach <= 0.0 {
         return Err(HardcopySourceError::InvalidVisualizationSource(
             "the polar chart has no complex quantity to draw".to_owned(),
         ));
@@ -636,7 +639,11 @@ pub(super) fn quick_nyquist_plot<W: AsRef<RetainedWaveform>>(
         overlay.window_y().unwrap_or(y),
     );
     let plane = Plane::new(x, y);
-    let (ticks, mut captions, mut guides) = plane_axes(&plane)?;
+    let PlaneAxes {
+        ticks,
+        mut captions,
+        mut guides,
+    } = plane_axes(&plane)?;
     guides.push(plane.guide(&circle((0.0, 0.0), 1.0, 256), false)?);
     guides.extend(plane.spot((-1.0, 0.0)));
     captions.extend(plane.label(
