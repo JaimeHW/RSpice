@@ -185,13 +185,13 @@ impl Metrics {
             Density::Compact => Metrics {
                 ctl_h: 28.0,
                 row_h: 28.0,
-                grid_row_h: 24.0,
+                grid_row_h: 20.0,
                 bar_pad: 6.0,
             },
             Density::Relaxed => Metrics {
                 ctl_h: 32.0,
                 row_h: 33.0,
-                grid_row_h: 28.0,
+                grid_row_h: 24.0,
                 bar_pad: 9.0,
             },
         }

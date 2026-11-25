@@ -66,9 +66,9 @@ use state::{Line, Step, TYPE_AHEAD_PAUSE, TreeStep, arrange, step, tree_step, ty
 /// Height of a table's head and of each band row over it at the compact
 /// density under a fine pointer, for a page that lines its own bands up with
 /// a table's; [`LineHeights`] is what a table takes under the live metrics.
-pub const TABLE_HEAD_H: f32 = 24.0;
+pub const TABLE_HEAD_H: f32 = 20.0;
 /// Height of one table row at the compact density under a fine pointer.
-pub const TABLE_ROW_H: f32 = 24.0;
+pub const TABLE_ROW_H: f32 = 20.0;
 /// The fewest whole rows a table in a panel body that does not scroll shows
 /// when it must scroll itself: the least that reads as a list to scroll
 /// rather than a row cut short.
