@@ -482,6 +482,40 @@ fn swap_menu(ui: &mut Ui, caption: egui::Rect, table: &SweepTable, x: usize) -> 
         .and_then(|shown| shown.inner)
 }
 
+/// Each row of a swept number as the netlist spells it, `2k`, `500`,
+/// `1Meg`, with its scale suffix held in a slot as wide as the column's
+/// widest, so right-aligned in mono the digits of every row end in one
+/// column: `500 `, ` 2k`. A unit that takes no prefix, `125°C`, has no slot.
+fn slotted_spellings(axis: &rspice_results::sweep_table::SweptAxis) -> Vec<String> {
+    let unit = axis.unit.as_str();
+    let spelled: Vec<String> = (0..axis.values.len())
+        .map(|row| axis.spelled(row))
+        .collect();
+    if !(unit.is_empty() || rspice_results::number_format::unit_takes_prefix(unit)) {
+        return spelled;
+    }
+    let split: Vec<(&str, &str)> = spelled
+        .iter()
+        .map(|text| {
+            let body = text.strip_suffix(unit).unwrap_or(text);
+            let digits = body.trim_end_matches(|c: char| c.is_alphabetic());
+            (digits, &body[digits.len()..])
+        })
+        .collect();
+    let slot = split
+        .iter()
+        .map(|(_, prefix)| prefix.chars().count())
+        .max()
+        .unwrap_or(0);
+    split
+        .iter()
+        .map(|(digits, prefix)| {
+            let blank = slot - prefix.chars().count();
+            format!("{digits}{prefix}{}{unit}", " ".repeat(blank))
+        })
+        .collect()
+}
+
 /// The points' table: a column per swept quantity, as the netlist states
 /// it, then a column per measured value, and the drawn signal's value when
 /// a signal is drawn.
@@ -492,10 +526,26 @@ fn points_table(ui: &mut Ui, view: &SweepView<'_>, output: Option<usize>, height
     let listed: Vec<usize> = (0..table.outputs.len())
         .filter(|&index| table.outputs[index].kind != OutputKind::Signal)
         .collect();
+    // A swept number stands right-aligned as every value does, its digits
+    // ending in one column whatever prefix each row's spelling takes; a
+    // swept name, a process corner, reads from the left.
+    let swept: Vec<Option<Vec<String>>> = table
+        .axes
+        .iter()
+        .map(|axis| axis.is_numeric().then(|| slotted_spellings(axis)))
+        .collect();
     let mut columns: Vec<Column> = table
         .axes
         .iter()
-        .map(|axis| Column::name(axis.name.clone(), 56.0))
+        .zip(&swept)
+        .map(|(axis, slotted)| {
+            let column = Column::name(axis.name.clone(), 56.0);
+            if slotted.is_some() {
+                column.align(Align::Right)
+            } else {
+                column
+            }
+        })
         .collect();
     // A head names the quantity; its cells carry the value and its unit.
     let value_head = |index: usize| table.outputs[index].name.clone();
@@ -533,11 +583,16 @@ fn points_table(ui: &mut Ui, view: &SweepView<'_>, output: Option<usize>, height
                 let mut cells: Vec<Cell> = table
                     .axes
                     .iter()
-                    .map(|axis| {
-                        let cell = Cell::text(axis.spelled(row));
-                        match axis.number(row) {
-                            Some(value) => cell.sort_by(SortKey::Number(value)),
-                            None => cell,
+                    .zip(&swept)
+                    .map(|(axis, slotted)| {
+                        match (
+                            slotted.as_ref().and_then(|cells| cells.get(row)),
+                            axis.number(row),
+                        ) {
+                            (Some(spelled), Some(value)) => {
+                                Cell::number(spelled.clone()).sort_by(SortKey::Number(value))
+                            }
+                            _ => Cell::text(axis.spelled(row)),
                         }
                     })
                     .collect();

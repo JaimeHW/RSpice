@@ -73,3 +73,39 @@ fn a_signal_column_names_where_it_was_read() {
     assert_eq!(output_head(&table, 0, Some(5e-3)), "V(out) at 5 ms");
     assert_eq!(output_head(&table, 1, Some(5e-3)), "gain");
 }
+
+/// A swept number right-aligns in its column with its scale suffix in a
+/// slot as wide as the widest, so in mono the digits of `500`, `2k` and
+/// `1Meg` end in one column; a resistor's ohms follow the slot, and a unit
+/// that takes no prefix, a temperature, has none.
+#[test]
+fn a_swept_numbers_digits_end_in_one_column() {
+    let axis = |unit: &str, values: &[f64]| SweptAxis {
+        name: "r".into(),
+        unit: unit.into(),
+        values: values
+            .iter()
+            .map(|value| SweptValue::Number(*value))
+            .collect(),
+    };
+    // What follows the last digit: right-aligned in mono, rows whose
+    // digits are followed by one width end their digits in one column.
+    let after_digits = |cell: &String| {
+        cell.chars()
+            .rev()
+            .take_while(|c| !c.is_ascii_digit())
+            .count()
+    };
+    let r = slotted_spellings(&axis("", &[500.0, 2e3, 1e6]));
+    assert_eq!(r, ["500   ", "2k  ", "1Meg"]);
+    assert!(r.iter().all(|cell| after_digits(cell) == 3), "{r:?}");
+    assert_eq!(
+        slotted_spellings(&axis("Ω", &[500.0, 2e3])),
+        ["500 Ω", "2kΩ"]
+    );
+    let temperatures = axis("°C", &[-40.0, 125.0]);
+    assert_eq!(
+        slotted_spellings(&temperatures),
+        [temperatures.spelled(0), temperatures.spelled(1)]
+    );
+}
