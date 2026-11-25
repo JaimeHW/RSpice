@@ -368,7 +368,7 @@ const VIEW_MENU: &[MenuEntry] = &[
     command_as(ShellCommand::ToggleNavigator, "Navigator").access('N'),
     command_as(ShellCommand::ToggleInspector, "Inspector").access('E'),
     command_as(ShellCommand::ToggleConsole, "Console").access('C'),
-    results(ResultsCommand::ShowPlot).access('L'),
+    results(ResultsCommand::ShowPlot).access('H'),
     command_as(ShellCommand::OpenProblems, "Problems").access('P'),
     Separator,
     MenuEntry::submenu("Project", PROJECT_PAGES_MENU).access('J'),
