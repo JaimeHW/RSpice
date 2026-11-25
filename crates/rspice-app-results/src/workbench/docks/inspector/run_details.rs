@@ -22,7 +22,7 @@ mod executed_deck;
 use egui::{Context, Ui};
 
 use super::super::super::design_system::{
-    FACT_MARK_ROOM, Fact, fact_label_width, fact_rows_on, panel_body, property_row_height,
+    FACT_MARK_ROOM, Fact, fact_label_width, fact_rows_on, panel_bleed, panel_body,
     property_row_wrapped, section_block_gap, section_header, section_header_action,
     subsection_header,
 };
@@ -89,9 +89,6 @@ impl RunDetailsDialogState {
 /// At most this many significant digits for the times a convergence record
 /// names.
 const TIME_DIGITS: usize = 6;
-
-/// How tall a forced-point list grows before it scrolls.
-const FORCED_LIST_HEIGHT: f32 = 160.0;
 
 /// Open Run details… on the retained run `run_id`. A run that is no longer
 /// retained opens nothing.
@@ -227,6 +224,15 @@ fn facts(ui: &mut Ui, lines: &[Line], label_width: f32) -> Option<usize> {
     fact_rows_on(ui, &facts, label_width)
 }
 
+/// A rule across the dialog's body at `y`, from one edge to the other, over
+/// whatever was painted there.
+fn hairline(ui: &Ui, y: f32) {
+    let edges = panel_bleed(ui, ui.max_rect()).x_range();
+    let border = rspice_ui_kit::tokens::Tokens::get(ui.ctx()).color.border;
+    ui.painter()
+        .hline(edges, y + 0.5, egui::Stroke::new(1.0, border));
+}
+
 /// Draw Run details… while it is open, and return the routes the reader
 /// took. Closing it, or taking any route, clears `run_details` once the frame
 /// is done.
@@ -308,17 +314,9 @@ pub fn show(
                     .chain(&identifiers)
                     .chain(convergence.iter().flat_map(|(_, lines)| lines.all()))
             };
-            let forced_labels: Vec<String> = convergence
-                .iter()
-                .filter_map(|(_, lines)| lines.widest_forced_label())
-                .collect();
             let marked = lines().any(|line| line.problem.is_some());
-            let label_width = fact_label_width(
-                ui,
-                lines()
-                    .map(|line| line.label.as_str())
-                    .chain(forced_labels.iter().map(String::as_str)),
-            ) + if marked { FACT_MARK_ROOM } else { 0.0 };
+            let label_width = fact_label_width(ui, lines().map(|line| line.label.as_str()))
+                + if marked { FACT_MARK_ROOM } else { 0.0 };
             if dialog.dataset_digest().is_none() {
                 // The thread computing it cannot wake the frame, so the
                 // dialog looks again shortly.
@@ -327,8 +325,11 @@ pub fn show(
             }
             panel_body(ui, |ui| {
                 let _ = facts(ui, &summary, label_width);
-                section_header(ui, "Analyses", None);
+                // The table's heads title the analyses, on a hairline under
+                // the summary.
+                let top = ui.cursor().top();
                 inventory_route = inventory_table(ui, manifest, run, dialog.rows_are_analyses);
+                hairline(ui, top);
                 section_header(ui, "Inputs", None);
                 match facts(ui, &inputs.lines, label_width) {
                     Some(line) if Some(line) == inputs.plan => open_plan = true,
@@ -643,7 +644,8 @@ enum InventoryLine {
 /// with the mark of a failure and why, when it has one.
 struct AnalysisWords {
     name: String,
-    kept: String,
+    /// What it kept; `None` when it kept nothing.
+    kept: Option<String>,
     state: String,
     problem: Option<Problem>,
     why: Option<String>,
@@ -662,7 +664,7 @@ fn analysis_words(
     if !rows_are_analyses {
         return AnalysisWords {
             name: task.to_owned(),
-            kept: String::new(),
+            kept: None,
             state: "Not verified".to_owned(),
             problem: Some(Problem::Failure),
             why: Some(
@@ -684,7 +686,7 @@ fn analysis_words(
         };
         return AnalysisWords {
             name: task.to_owned(),
-            kept: "Nothing".to_owned(),
+            kept: None,
             state: state.to_owned(),
             problem: None,
             why: None,
@@ -720,14 +722,14 @@ fn analysis_words(
         _ => (kind.to_owned(), None),
     };
     let kept = match (analysis.waveforms.len(), &analysis.dc_op) {
-        (0, Some(op)) => format!(
+        (0, Some(op)) => Some(format!(
             "{} node voltages, {} currents",
             op.node_voltages.len(),
             op.branch_currents.len()
-        ),
-        (0, None) => "Nothing".to_owned(),
-        (1, _) => "1 signal".to_owned(),
-        (signals, _) => format!("{signals} signals"),
+        )),
+        (0, None) => None,
+        (1, _) => Some("1 signal".to_owned()),
+        (signals, _) => Some(format!("{signals} signals")),
     };
     let (state, problem, why) = if analysis.is_live_partial() {
         ("Running".to_owned(), None, None)
@@ -763,9 +765,10 @@ fn analysis_words(
 /// its tasks and leads nowhere.
 ///
 /// The table rules its own edges, from the dialog's one side to the other:
-/// it stands on its section's head, the next head stands on its last rule,
-/// and it is as tall as its rows, for the dialog's body is what scrolls.
-/// Each column is as wide as its words, and the names take what is left.
+/// its heads title it, on a hairline under the run's summary; the next head
+/// stands on its last rule; and it is as tall as its rows, for the dialog's
+/// body is what scrolls. Each column is as wide as its words, and the names
+/// take what is left.
 fn inventory_table(
     ui: &mut Ui,
     manifest: &rspice_results::manifest::ManifestViewModel,
@@ -823,7 +826,7 @@ fn inventory_table(
                 } else {
                     name.twist(open.contains(&index))
                 },
-                Cell::text(&words.kept),
+                words.kept.as_ref().map_or_else(Cell::absent, Cell::text),
                 match &words.why {
                     Some(why) => state.hint(why),
                     None => state,
@@ -993,15 +996,6 @@ impl<'a> ConvergenceLines<'a> {
         self.phases().flat_map(|phase| &phase.counters)
     }
 
-    /// The widest forced point's label, for the label column.
-    fn widest_forced_label(&self) -> Option<String> {
-        self.phases()
-            .map(|phase| phase.forced.len())
-            .max()
-            .filter(|&count| count > 0)
-            .map(forced_label)
-    }
-
     fn show(&self, ui: &mut Ui, analysis: &str, label_width: f32, digits: usize) {
         section_header(ui, &format!("Convergence \u{b7} {analysis}"), None);
         self.transient
@@ -1018,48 +1012,45 @@ impl<'a> ConvergenceLines<'a> {
     }
 }
 
-/// A forced point's label: its place among the phase's forced points.
-fn forced_label(position: usize) -> String {
-    format!("Forced point {position}")
-}
-
 impl PhaseLines<'_> {
-    /// `salt` tells this phase's forced-point list from every other one in
+    /// `salt` tells this phase's forced points from every other phase's in
     /// the dialog.
     fn show(&self, ui: &mut Ui, label_width: f32, digits: usize, salt: &str) {
         let _ = facts(ui, &self.counters, label_width);
-        // A long run can force thousands, so the list scrolls rather than
-        // the dialog.
-        if !self.forced.is_empty() {
-            egui::ScrollArea::vertical()
-                .id_salt(("run-details-forced", salt))
-                .max_height(FORCED_LIST_HEIGHT)
-                .auto_shrink([false, true])
-                .show_rows(
-                    ui,
-                    property_row_height(ui),
-                    self.forced.len(),
-                    |ui, range| {
-                        let lines: Vec<Line> = range
-                            .map(|position| {
-                                Line::new(
-                                    forced_label(position + 1),
-                                    fmt_si_significant(
-                                        self.forced[position],
-                                        "s",
-                                        digits.min(TIME_DIGITS),
-                                    ),
-                                )
-                            })
-                            .collect();
-                        let _ = facts(ui, &lines, label_width);
-                    },
-                );
-        }
         for (label, words) in &self.diagnostic {
             property_row_wrapped(ui, label, words);
         }
+        if !self.forced.is_empty() {
+            let top = ui.cursor().top();
+            forced_points(ui, self.forced, digits, salt);
+            hairline(ui, top);
+        }
     }
+}
+
+/// Each point the phase forced, at the time it was forced, one row each.
+/// The table is as tall as its rows and lays out only those in view: a long
+/// run can force thousands, and the dialog's body is the one thing that
+/// scrolls.
+fn forced_points(ui: &mut Ui, times: &[f64], digits: usize, salt: &str) {
+    let heads = ["Forced point", "Time"];
+    let last = Cell::number(times.len().to_string());
+    // The times take what the numbers leave, set from the left, so they
+    // read on from the point they belong to.
+    let columns = [
+        Column::number(
+            heads[0],
+            fitted_width(ui, heads[0], [&last]) + TABLE_EDGE_INSET - CELL_PAD,
+        ),
+        Column::name(heads[1], fitted_width(ui, heads[1], [])),
+    ];
+    let id = format!("rspice.results.run-details.forced.{salt}");
+    let _ = DataTable::new(&id, &columns, times.len()).show(ui, |row| {
+        vec![
+            Cell::number((row + 1).to_string()),
+            Cell::number(fmt_si_significant(times[row], "s", digits.min(TIME_DIGITS))),
+        ]
+    });
 }
 
 fn convergence_lines(

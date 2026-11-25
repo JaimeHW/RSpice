@@ -380,7 +380,7 @@ impl RunDetailsFrames {
     }
 
     /// One frame over `events`: what the dialog returned, and where the
-    /// inventory's rows and their twists were drawn, top first.
+    /// inventory's rows were drawn, top first.
     fn frame(
         &mut self,
         app: &mut RSpiceApp,
@@ -388,7 +388,6 @@ impl RunDetailsFrames {
     ) -> (
         rspice_app_results::workbench::docks::inspector::run_details::RunDetailsRoutes,
         Vec<egui::Rect>,
-        Vec<Option<egui::Rect>>,
     ) {
         use rspice_app_results::workbench::docks::inspector::run_details;
         self.time += 1.0;
@@ -417,17 +416,14 @@ impl RunDetailsFrames {
                 .find(|(probed, _)| *probed == key)
                 .map(|(_, rect)| *rect)
         };
-        let lines: Vec<egui::Rect> = (0..)
+        let lines = (0..)
             .map_while(|row| probe(format!("table.line.{row}")))
             .collect();
-        let twists = (0..lines.len())
-            .map(|row| probe(format!("table.twist.{row}")))
-            .collect();
-        (routes.expect("the frame ran"), lines, twists)
+        (routes.expect("the frame ran"), lines)
     }
 
-    /// A double-click on the middle of `line`.
-    fn double_click(line: egui::Rect) -> Vec<egui::Event> {
+    /// A click on the middle of `line`.
+    fn click(line: egui::Rect) -> Vec<egui::Event> {
         let at = line.center();
         let button = |pressed| egui::Event::PointerButton {
             pos: at,
@@ -435,13 +431,18 @@ impl RunDetailsFrames {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        vec![
-            egui::Event::PointerMoved(at),
-            button(true),
-            button(false),
-            button(true),
-            button(false),
-        ]
+        vec![egui::Event::PointerMoved(at), button(true), button(false)]
+    }
+
+    /// A press of `key`.
+    fn key(key: egui::Key) -> Vec<egui::Event> {
+        vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
     }
 }
 
@@ -467,10 +468,10 @@ fn finished_run_of_out() -> RSpiceApp {
     app
 }
 
-/// Run details' Analyses table leads where its rows name, in one action: a
-/// double-click on an analysis shows it on Results, and one on a signal the
-/// analysis kept, listed once the analysis is opened, selects its conductor
-/// on the schematic.
+/// Run details' Analyses table leads where its rows name, from the keyboard:
+/// Enter on an analysis shows it on Results, and Enter on a signal the
+/// analysis kept, listed once the Right arrow opens the analysis, selects its
+/// conductor on the schematic. A click puts the keys on the table.
 #[test]
 fn run_details_inventory_rows_reach_their_places() {
     use rspice_app_results::workbench::docks::inspector::run_details::follow_inventory_route;
@@ -480,9 +481,10 @@ fn run_details_inventory_rows_reach_their_places() {
     let run_id = app.state.model.simulation.active_run().expect("the run").id;
 
     let mut dialog = RunDetailsFrames::open(&mut app);
-    let (_, lines, _) = dialog.frame(&mut app, Vec::new());
+    let (_, lines) = dialog.frame(&mut app, Vec::new());
     let analysis = *lines.first().expect("the analysis is listed");
-    let (routes, ..) = dialog.frame(&mut app, RunDetailsFrames::double_click(analysis));
+    dialog.frame(&mut app, RunDetailsFrames::click(analysis));
+    let (routes, ..) = dialog.frame(&mut app, RunDetailsFrames::key(egui::Key::Enter));
     assert_eq!(routes.show_analysis, Some((run_id, 0)));
     follow_inventory_route(&mut app.state.results_parts(), &routes);
     app.after_contribution();
@@ -493,25 +495,15 @@ fn run_details_inventory_rows_reach_their_places() {
         "taking a route closes Run details"
     );
 
-    // Open the analysis to its signals by its twist.
+    // Open the analysis to its signals and step down to the one it kept.
     let mut dialog = RunDetailsFrames::open(&mut app);
-    let (_, _, twists) = dialog.frame(&mut app, Vec::new());
-    let at = twists[0]
-        .expect("the analysis opens to its signals")
-        .center();
-    let button = |pressed| egui::Event::PointerButton {
-        pos: at,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    dialog.frame(
-        &mut app,
-        vec![egui::Event::PointerMoved(at), button(true), button(false)],
-    );
-    let (_, lines, _) = dialog.frame(&mut app, Vec::new());
-    let signal = *lines.get(1).expect("V(out) is listed under its analysis");
-    let (routes, ..) = dialog.frame(&mut app, RunDetailsFrames::double_click(signal));
+    let (_, lines) = dialog.frame(&mut app, Vec::new());
+    let analysis = *lines.first().expect("the analysis is listed");
+    dialog.frame(&mut app, RunDetailsFrames::click(analysis));
+    dialog.frame(&mut app, RunDetailsFrames::key(egui::Key::ArrowRight));
+    let (_, lines) = dialog.frame(&mut app, RunDetailsFrames::key(egui::Key::ArrowDown));
+    assert_eq!(lines.len(), 2, "V(out) is listed under its analysis");
+    let (routes, ..) = dialog.frame(&mut app, RunDetailsFrames::key(egui::Key::Enter));
     assert_eq!(routes.show_signal.as_deref(), Some("V(out)"));
     follow_inventory_route(&mut app.state.results_parts(), &routes);
     app.after_contribution();
