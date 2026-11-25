@@ -170,6 +170,40 @@ fn violations_only_shows_the_violated_checks() {
     assert!(rows.iter().all(|(_, _, status)| *status == "Fail"));
 }
 
+/// The view arrives on its worst check, so the detail beside it is never
+/// empty; a check the reader chose stays chosen when the view is drawn again
+/// and when the filter orders the rows again.
+#[test]
+fn the_checks_view_arrives_on_its_first_check_and_keeps_the_readers() {
+    let mut harness = checked_run();
+    let chosen = |harness: &FeatureHarness<SimulateFeature>| {
+        let checks = harness.model.simulation.verification_checks();
+        selected_check(&harness.model, &harness.state.verification).map(|row| {
+            let cells = row_cells(checks, row, false);
+            (cells[0].text.clone(), cells[1].text.clone())
+        })
+    };
+    let named = |target: &str, check: &str| Some((target.to_owned(), check.to_owned()));
+    assert_eq!(
+        chosen(&harness),
+        None,
+        "nothing is chosen before the view is drawn"
+    );
+    draw(&mut harness);
+    assert_eq!(chosen(&harness), named("M3", "VDS max"));
+
+    let session = &mut harness.state.verification;
+    session
+        .checks_table
+        .select(1, session.checks_rows.keys.get(1).cloned());
+    draw(&mut harness);
+    assert_eq!(chosen(&harness), named("M1", "VDS max"));
+    harness.state.verification.checks_violations_only = true;
+    draw(&mut harness);
+    draw(&mut harness);
+    assert_eq!(chosen(&harness), named("M1", "VDS max"));
+}
+
 /// The shown order is built once per revision of the run's checks and filter:
 /// a frame that changed neither orders nothing.
 #[test]

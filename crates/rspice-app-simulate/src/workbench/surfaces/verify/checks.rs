@@ -39,7 +39,7 @@ pub(super) fn checks_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let checks = cx.model.simulation.verification_checks();
     let revision = cx.model.simulation.verification_revision();
     let session = &mut cx.state.verification;
-    order_rows(
+    let mut ordered = order_rows(
         &mut session.checks_rows,
         checks,
         revision,
@@ -56,7 +56,7 @@ pub(super) fn checks_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     .show(ui);
     if output.action == Some(0) {
         session.checks_violations_only = !session.checks_violations_only;
-        order_rows(
+        ordered |= order_rows(
             &mut session.checks_rows,
             checks,
             revision,
@@ -82,6 +82,12 @@ pub(super) fn checks_view(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     if session.checks_rows.rows.is_empty() {
         let _ = empty_line(ui, "No check was violated.", None);
         return;
+    }
+    // The view arrives on its worst check, so the detail beside it is never
+    // empty; a check the reader chose is kept.
+    if ordered && session.checks_table.selection.is_none() {
+        let first = session.checks_rows.keys.first().cloned();
+        session.checks_table.select(0, first);
     }
 
     let several_points = checks.points.len() > 1;
@@ -170,15 +176,15 @@ pub(crate) fn select_soa_check(
 }
 
 /// Build the shown order again when the checks or the filter changed since
-/// it was built; otherwise leave it as it is.
+/// it was built; otherwise leave it as it is. Whether it was built again.
 pub(crate) fn order_rows(
     order: &mut CheckRowOrder,
     checks: &Checks,
     revision: u64,
     violations_only: bool,
-) {
+) -> bool {
     if order.basis == Some((revision, violations_only)) {
-        return;
+        return false;
     }
     let mut rows = (0..checks.rows.len())
         .filter(|index| !violations_only || checks.rows[*index].status.is_violation())
@@ -211,6 +217,7 @@ pub(crate) fn order_rows(
         rows,
         keys,
     };
+    true
 }
 
 /// What a check is, in words that name the same check after the run's checks
