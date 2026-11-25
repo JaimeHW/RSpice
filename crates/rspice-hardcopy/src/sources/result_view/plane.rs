@@ -259,10 +259,13 @@ struct PlaneAxes {
 /// one scale both share, and the two lines through the origin.
 fn plane_axes(plane: &Plane) -> Result<PlaneAxes, HardcopySourceError> {
     let (ticks, mut captions) = plot_axes(AxisScale::Linear, AxisScale::Linear, &plane.frame())?;
+    // A word and a signed value a millimetre apart read as one ("Re−3"),
+    // so the caption stands as far off the frame as a value's sign is wide
+    // again.
     captions.push(SemanticPlotCaption {
         text: "Re".to_owned(),
         position: SemanticPoint::new(
-            PLOT_INSET_UM - 1_000,
+            PLOT_INSET_UM - 2_500,
             PLOT_HEIGHT_UM - PLOT_INSET_UM + 2_600,
         ),
         anchor: SemanticCaptionAnchor::End,
