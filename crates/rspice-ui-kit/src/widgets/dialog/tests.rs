@@ -845,7 +845,10 @@ fn a_clicked_table_in_a_dialog_takes_the_arrows_and_enter() {
     };
     let _ = frame(Vec::new(), &mut state);
     let (_, _, geometry) = frame(Vec::new(), &mut state);
-    let row = geometry.one("table.line.1").expect("the row is laid out").center();
+    let row = geometry
+        .one("table.line.1")
+        .expect("the row is laid out")
+        .center();
     let press = |pressed| egui::Event::PointerButton {
         pos: row,
         button: egui::PointerButton::Primary,
@@ -864,5 +867,9 @@ fn a_clicked_table_in_a_dialog_takes_the_arrows_and_enter() {
     assert_eq!(state.selected_row(), Some(2), "Down moves the selection");
     let (table, choice, _) = frame(vec![key_event(Key::Enter, Modifiers::NONE)], &mut state);
     assert_eq!(table.activate, Some(2), "Enter opens the selected row");
-    assert_eq!(choice, DialogChoice::None, "Enter is the table's, not the Close's");
+    assert_eq!(
+        choice,
+        DialogChoice::None,
+        "Enter is the table's, not the Close's"
+    );
 }
