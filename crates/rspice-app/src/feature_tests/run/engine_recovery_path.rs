@@ -16,6 +16,7 @@ use egui::accesskit::Role;
 use crate::feature_tests::replay::{Control, PRIMARY, Replay, only};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
+use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
 /// The deck the script types into the open deck.
 const DECK: &str = "* Engine recovery analytic check\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n";
@@ -70,33 +71,54 @@ fn press_run_deck(replay: &mut Replay) {
 }
 
 /// `author_deck` and the native half of `run`: the editor takes the typed
-/// deck, one press of Run checks and runs it, the finished run opens in
-/// Results, a press of the Task log tab shows its DONE row there, and the
-/// palette opens the History page on its Create checkpoint.
+/// deck, one press of Run checks and runs it, the finished run shows on the
+/// dock's Plot tab under the editor, a press of the Task log tab shows its
+/// DONE row there, and the palette opens the History page on its Create
+/// checkpoint.
 #[test]
 fn the_engine_recovery_script_authors_and_runs_its_deck() {
     let mut replay = Replay::new();
     author_deck(&mut replay);
 
     press_run_deck(&mut replay);
-    // The run opens in Results the frame after it completes, so the DONE row
-    // on the editor's page can last a single frame, which a browser polling
-    // the tree misses. The script reads it on Results, whose own dock layout
-    // starts closed, through a press of the Task log tab.
+    // The run ends where Run was pressed: the Netlist stays in front, and the
+    // dock opens on the run's Plot page under the editor. Results opens only
+    // when the reader asks for it. The script reads the DONE row through a
+    // press of the Task log tab, which opens the dock on that page wherever
+    // the reader stands.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while replay.app.state.workbench.workspace != Workspace::Results {
+    while !replay
+        .app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .any(|run| run.lifecycle.is_terminal())
+    {
         assert!(
             std::time::Instant::now() < deadline,
-            "the finished run never opened in Results"
+            "the run never finished"
         );
         replay.frames(Vec::new());
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    replay.frames(Vec::new());
+    assert_eq!(
+        replay.app.state.workbench.workspace,
+        Workspace::Netlist,
+        "the finished run leaves the reader on the Netlist"
+    );
+    assert!(
+        replay.app.state.workbench.dock_shows(ConsolePage::Plot),
+        "the finished run shows on the dock's Plot tab"
+    );
     let task_log = replay
         .frames(Vec::new())
         .into_iter()
         .find(|control| control.label.starts_with("Task log"))
-        .expect("Results keeps the bottom dock's Task log tab");
+        .expect("the bottom dock keeps its Task log tab");
     replay.click(&task_log.label, task_log.role);
     assert!(
         replay.frames(Vec::new()).iter().any(|control| {
@@ -104,7 +126,7 @@ fn the_engine_recovery_script_authors_and_runs_its_deck() {
                 .iter()
                 .any(|text| text.starts_with("DONE · Run 1 "))
         }),
-        "a press of the Task log tab on Results shows the run's DONE row"
+        "a press of the Task log tab shows the run's DONE row"
     );
 
     let recovery = replay.choose_command("History");

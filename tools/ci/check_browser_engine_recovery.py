@@ -153,11 +153,10 @@ def run(browser, fault, cancel_startup=False):
     # One press checks the deck and runs it again.
     browser.click(run_deck_label(browser), "button")
 
-    # A finished run is a DONE row in the Task log. The run opens in Results
-    # the frame after it completes, and Results keeps its own dock layout,
-    # closed until opened, so the row may show for a single frame on this
-    # page. Press the tab until the row shows: a press opens the dock on its
-    # page wherever the reader stands and changes nothing on an open one.
+    # A finished run is a DONE row in the Task log. The run ends on the
+    # Netlist, which opens the dock on the run's Plot page, so the Task log is
+    # a tab away. Press the tab until the row shows: a press opens the dock on
+    # its page wherever the reader stands and changes nothing on an open one.
     def completed():
         shown = controls(browser.snapshot())
         if any(text.startswith("DONE · Run 2 ")
