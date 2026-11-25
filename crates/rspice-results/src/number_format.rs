@@ -993,6 +993,11 @@ mod tests {
         assert_eq!(tick_with_unit("500µ", "s"), "500 µs");
         assert_eq!(tick_with_unit("−1.5", "A"), "−1.5 A");
         assert_eq!(tick_with_unit("4k", ""), "4 k");
+        // A plane angle stands against its number; a temperature keeps
+        // its space.
+        assert_eq!(tick_with_unit("0", "\u{b0}"), "0\u{b0}");
+        assert_eq!(tick_with_unit("\u{2212}45", "\u{b0}"), "\u{2212}45\u{b0}");
+        assert_eq!(tick_with_unit("27", "\u{b0}C"), "27 \u{b0}C");
         assert_eq!(tick_with_unit("2m", "V"), si_tick_label(2e-3, "V", 2));
         assert_eq!(tick_with_unit("500µ", "s"), si_tick_label(5e-4, "s", 2));
         // A phase axis's top tick names its degree against the number.
