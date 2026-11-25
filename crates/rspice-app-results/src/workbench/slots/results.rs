@@ -302,6 +302,10 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         }
     }
 
+    fn smith_sheet(&self) -> Option<&rspice_results_ui::smith_chart::SmithSheetState> {
+        Some(&self.results.session.smith)
+    }
+
     fn histogram_settings(&self) -> &rspice_results_ui::histogram::HistogramState {
         &self.analysis.histogram_state
     }

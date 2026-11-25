@@ -185,8 +185,8 @@ pub(super) fn default_print_mapping(
                 "orange · solid",
                 "navy · solid",
             ];
-            let mut series = 0;
-            for trace in &plot.traces {
+            for (trace, slot) in plot.traces.iter().zip(plot.trace_slots()) {
+                let slot = usize::from(slot);
                 // A companion branch closes the series before it: the same
                 // ink, thin and dashed, as the sheet draws it.
                 let (redundancy, screen_style) = if trace.companion {
@@ -199,12 +199,11 @@ pub(super) fn default_print_mapping(
                         "series color · thin dashed",
                     )
                 } else {
-                    series += 1;
                     (
                         PrintRedundancy::SolidLine {
                             width: Length::from_micrometres(300),
                         },
-                        SCREEN_STYLES[(series - 1) % SCREEN_STYLES.len()],
+                        SCREEN_STYLES[slot % SCREEN_STYLES.len()],
                     )
                 };
                 entries.push(mapping_entry(
@@ -212,7 +211,7 @@ pub(super) fn default_print_mapping(
                     format!("trace:{}", trace.trace_id),
                     trace.label.clone(),
                     screen_style,
-                    trace_print_ink(series.max(1) - 1),
+                    trace_print_ink(slot),
                     redundancy,
                     true,
                 )?);

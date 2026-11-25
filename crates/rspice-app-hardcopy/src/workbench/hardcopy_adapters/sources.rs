@@ -152,7 +152,20 @@ fn capture_results_quick_view_presentation(
             mode: histogram.mode,
         },
     )?
-    .with_bode_signal(bode_signal)
+    .with_bode_signal(bode_signal)?
+    .with_smith(
+        reads
+            .results
+            .smith_sheet()
+            .map(|sheet| QuickSmithSettings {
+                grid: sheet.grid,
+                reading: sheet.reading,
+                reference_ohm: sheet.reference_ohm,
+                responses: sheet.responses.clone(),
+                toggled: sheet.toggled.iter().cloned().collect(),
+            })
+            .unwrap_or_default(),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

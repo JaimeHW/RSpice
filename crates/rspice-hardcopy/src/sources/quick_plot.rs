@@ -253,6 +253,7 @@ pub fn quick_plot_from_scaled_series(
                     })
                     .collect(),
                 companion: false,
+                palette_slot: None,
             })
         })
         .collect::<Result<Vec<_>, HardcopySourceError>>()?;

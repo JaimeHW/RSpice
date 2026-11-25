@@ -186,6 +186,12 @@ pub trait ResultsPort {
     fn bode_measured_signal(&self, _analysis: AnalysisPresentationKey) -> Option<String> {
         None
     }
+    /// The Smith sheet as the reader set it: its grid, its reading and Z₀,
+    /// the responses it lists and the network terms switched from how it
+    /// opens them. `None` where the host keeps no Smith sheet.
+    fn smith_sheet(&self) -> Option<&rspice_results_ui::smith_chart::SmithSheetState> {
+        None
+    }
     /// How the histogram viewer is set up.
     fn histogram_settings(&self) -> &HistogramState;
     /// What the transient viewers hold now.

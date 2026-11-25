@@ -51,7 +51,7 @@ pub use reports::{ReportHardcopySource, resolve_report_source};
 pub use result_documents::{resolve_results_quick_view_stack, results_stack_identity};
 pub use result_summary::semantic_result_summary;
 pub use result_view::{
-    QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation,
+    QuickFftSettings, QuickHistogramSettings, QuickSmithSettings, ResultsQuickViewPresentation,
     RetainedQuickViewSource, resolve_results_quick_view_parts, results_quick_view_identity,
 };
 pub use retained_results::{HardcopyRun, HardcopyWaveform, restore_hardcopy_runs};

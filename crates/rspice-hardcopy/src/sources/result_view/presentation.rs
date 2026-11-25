@@ -8,6 +8,7 @@ use rspice_results::fft::{
     window::{KaiserBeta, WindowFunction},
 };
 use rspice_results::histogram::HistogramDisplayMode;
+use rspice_results::smith::{DEFAULT_REFERENCE_OHM, ResponseReading, SmithGrid};
 use serde::{Deserialize, Serialize};
 
 /// FFT controls read at capture time, without viewer caches or runtime state.
@@ -22,6 +23,45 @@ pub struct QuickFftSettings {
     pub time_window_end: f64,
     pub sample_count_auto: bool,
     pub sample_count: usize,
+}
+
+/// The Smith sheet as the reader set it: the grid it rules, how a response
+/// lands on it and against what Z₀, the responses it lists, in order, and the
+/// network terms the reader switched from how the chart opens them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuickSmithSettings {
+    pub grid: SmithGrid,
+    pub reading: ResponseReading,
+    pub reference_ohm: f64,
+    pub responses: Vec<String>,
+    pub toggled: Vec<String>,
+}
+
+impl Default for QuickSmithSettings {
+    fn default() -> Self {
+        Self {
+            grid: SmithGrid::default(),
+            reading: ResponseReading::default(),
+            reference_ohm: DEFAULT_REFERENCE_OHM,
+            responses: Vec::new(),
+            toggled: Vec::new(),
+        }
+    }
+}
+
+impl QuickSmithSettings {
+    fn validate(&self) -> Result<(), HardcopySourceError> {
+        if !(self.reference_ohm.is_finite() && self.reference_ohm > 0.0) {
+            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                "Smith reference impedance is not a positive, finite number of ohms".to_owned(),
+            ));
+        }
+        for text in self.responses.iter().chain(&self.toggled) {
+            validate_optional_label("Smith trace", Some(text), DISPLAY_NAME_LIMIT)?;
+        }
+        Ok(())
+    }
 }
 
 /// Histogram controls in source coordinates.
@@ -89,6 +129,9 @@ pub struct ResultsQuickViewPresentation {
     /// The response the Bode card measures, as the reader chose it.
     #[serde(default)]
     pub(super) bode_signal: Option<String>,
+    /// The Smith sheet's grid, reading and Z₀, as the reader set them.
+    #[serde(default)]
+    pub(super) smith: QuickSmithSettings,
     pub(super) fft_input_fidelity: InputFidelity,
     pub(super) fft_time_window_auto: bool,
     pub(super) fft_time_window_start: f64,
@@ -145,6 +188,7 @@ impl ResultsQuickViewPresentation {
                 _ => None,
             },
             bode_signal: None,
+            smith: QuickSmithSettings::default(),
             fft_input_fidelity: fft.input_fidelity,
             fft_time_window_auto: fft.time_window_auto,
             fft_time_window_start: fft.time_window_start,
@@ -194,6 +238,7 @@ impl ResultsQuickViewPresentation {
             self.bode_signal.as_deref(),
             DISPLAY_NAME_LIMIT,
         )?;
+        self.smith.validate()?;
         for (field, value) in [
             ("FFT time-window start", self.fft_time_window_start),
             ("FFT time-window end", self.fft_time_window_end),
@@ -246,6 +291,13 @@ impl ResultsQuickViewPresentation {
     pub fn with_bode_signal(mut self, signal: Option<String>) -> Result<Self, HardcopySourceError> {
         validate_optional_label("Bode response", signal.as_deref(), DISPLAY_NAME_LIMIT)?;
         self.bode_signal = signal;
+        Ok(self)
+    }
+
+    /// Print the Smith chart as the sheet reads it.
+    pub fn with_smith(mut self, smith: QuickSmithSettings) -> Result<Self, HardcopySourceError> {
+        smith.validate()?;
+        self.smith = smith;
         Ok(self)
     }
 

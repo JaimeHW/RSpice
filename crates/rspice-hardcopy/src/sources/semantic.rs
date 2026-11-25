@@ -244,6 +244,11 @@ pub struct SemanticPlotTrace {
     /// that trace's colour: a Nyquist locus's negative frequencies.
     #[serde(default)]
     pub companion: bool,
+    /// The place in the sheet's trace colours the sheet gives this trace,
+    /// where that is not its place among the plot's series: a Smith chart
+    /// counts the network terms it lists but does not draw.
+    #[serde(default)]
+    pub palette_slot: Option<u16>,
 }
 
 /// One retained horizontal-axis cursor, represented by its exact source X
@@ -368,6 +373,26 @@ pub struct SemanticPlot {
     pub guides: Vec<SemanticPlotGuide>,
 }
 
+impl SemanticPlot {
+    /// The place in the sheet's trace colours each trace takes, in order:
+    /// its own `palette_slot`, else its place among the plot's series. A
+    /// companion takes the place of the series it closes.
+    #[must_use]
+    pub fn trace_slots(&self) -> Vec<u16> {
+        let (mut series, mut last) = (0_u16, 0_u16);
+        self.traces
+            .iter()
+            .map(|trace| {
+                if !trace.companion {
+                    last = trace.palette_slot.unwrap_or(series);
+                    series = series.saturating_add(1);
+                }
+                last
+            })
+            .collect()
+    }
+}
+
 /// A ruling a figure is read against that is not a straight gridline: a
 /// Smith chart's circles and arcs, a polar chart's rings, the unit circle a
 /// Nyquist plot's phase margin is read on, the point its criterion turns on.
@@ -379,6 +404,10 @@ pub struct SemanticPlotGuide {
     /// The boundary the plane is read against, drawn as firmly as the frame;
     /// otherwise a gridline.
     pub major: bool,
+    /// A gridline of the second family over the first, drawn in its own
+    /// ink: the admittance grid of a Smith chart ruled for both.
+    #[serde(default)]
+    pub second: bool,
 }
 
 const fn linear_axis() -> AxisScale {

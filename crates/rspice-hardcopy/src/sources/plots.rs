@@ -58,6 +58,7 @@ pub fn resolve_plot_source(
                 .map(|(x, y)| (x.to_bits(), y.to_bits()))
                 .collect(),
             companion: false,
+            palette_slot: None,
         });
     }
     let semantic = SemanticPlot {

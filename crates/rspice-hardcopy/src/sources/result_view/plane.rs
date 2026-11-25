@@ -10,6 +10,7 @@ use rspice_results::number_format::fmt_si_significant;
 use rspice_results::nyquist::{
     LOOP_GAIN_LOCUS_LABEL, NyquistData, NyquistMargin, loop_gain_traces,
 };
+use rspice_results::smith::{ResponseReading, SmithGrid};
 
 /// The plot area every plane fills, in micrometres.
 const AREA: (i64, i64) = (
@@ -102,6 +103,7 @@ impl Plane {
         Ok(SemanticPlotGuide {
             paths: self.paths(points)?,
             major,
+            second: false,
         })
     }
 
@@ -120,6 +122,7 @@ impl Plane {
         Some(SemanticPlotGuide {
             paths: vec![ring],
             major: true,
+            second: false,
         })
     }
 
@@ -194,6 +197,9 @@ struct Locus {
     label: String,
     points: Vec<(f64, f64)>,
     companion: bool,
+    /// Its place in the sheet's trace colours, where the sheet counts it
+    /// among loci it does not draw.
+    palette_slot: Option<u16>,
 }
 
 /// The plane's page: its loci over its rulings.
@@ -219,6 +225,7 @@ fn plane_plot(
                     .map(|(re, im)| (re.to_bits(), im.to_bits()))
                     .collect(),
                 companion: locus.companion,
+                palette_slot: locus.palette_slot,
             })
         })
         .collect::<Result<Vec<_>, HardcopySourceError>>()?;
@@ -301,6 +308,7 @@ fn polar_loci<W: AsRef<RetainedWaveform>>(active: &RetainedQuickViewSource<'_, W
                     .zip(complex.imag.samples(..))
                     .collect(),
                 companion: false,
+                palette_slot: None,
             })
         })
         .collect()
@@ -364,41 +372,217 @@ fn is_polar_quantity(
     }
 }
 
-/// The Smith page: the unit circle, the constant-resistance circles and
-/// constant-reactance arcs the sheet rules, labelled as it labels them, and
-/// each coefficient drawn as the sheet's Γ reading draws it.
-pub(super) fn quick_smith_plot<W: AsRef<RetainedWaveform>>(
+/// The loci a Smith sheet draws, and the reference impedances they are read
+/// against.
+struct SmithLoci {
+    loci: Vec<Locus>,
+    references: Vec<f64>,
+    /// Whether the loci are responses read through the sheet's reading,
+    /// rather than a network's own coefficients.
+    responses: bool,
+}
+
+/// What the Smith sheet draws from one analysis. A network draws its terms
+/// as the chart opens them, its reflection terms on and its transmission
+/// terms off, each switched as the reader switched it; each keeps the colour
+/// of its place among all the terms the sheet lists. Any other analysis
+/// draws the responses the reader listed, in order, each read through the
+/// sheet's Γ, Z or Y reading against its Z₀.
+fn smith_loci<W: AsRef<RetainedWaveform>>(
     active: &RetainedQuickViewSource<'_, W>,
-) -> Result<SemanticPlot, HardcopySourceError> {
-    let loci = polar_loci(active);
-    if loci.is_empty() {
-        return Err(HardcopySourceError::InvalidVisualizationSource(
-            "the Smith chart has no complex coefficient to draw".to_owned(),
-        ));
+    sheet: &QuickSmithSettings,
+) -> SmithLoci {
+    let analysis = active.analysis;
+    let mut loci = Vec::new();
+    let mut references = Vec::new();
+    if let Some(impedances) = network_impedances(analysis) {
+        let mut waveforms = analysis
+            .waveforms
+            .iter()
+            .map(AsRef::as_ref)
+            .collect::<Vec<&RetainedWaveform>>();
+        waveforms.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut listed = 0_u16;
+        for waveform in waveforms {
+            let Some(identity) = rspice_results::network_matrix::trace_identity(&waveform.name)
+            else {
+                continue;
+            };
+            let ports = if identity.physical_ports {
+                impedances.len()
+            } else {
+                impedances.len() / 2
+            };
+            let Some(complex) = waveform.complex.as_ref() else {
+                continue;
+            };
+            if identity.output_port > ports
+                || identity.input_port > ports
+                || complex.real.is_empty()
+                || complex.real.len() != complex.imag.len()
+                || complex.real.len() != waveform.x.len()
+            {
+                continue;
+            }
+            // The chart names a coefficient, S11, not the magnitude column
+            // |S11| it is retained beside.
+            let name =
+                if rspice_results::network_matrix::trace_identity(&complex.source_name).is_some() {
+                    &complex.source_name
+                } else {
+                    &waveform.name
+                };
+            let slot = listed;
+            listed = listed.saturating_add(1);
+            let reflection = identity.output_port == identity.input_port;
+            if reflection == sheet.toggled.iter().any(|toggled| toggled == name) {
+                continue;
+            }
+            if reflection && identity.physical_ports {
+                references.extend(
+                    identity
+                        .output_port
+                        .checked_sub(1)
+                        .and_then(|port| impedances.get(port)),
+                );
+            }
+            loci.push(Locus {
+                identity: format!(
+                    "{}:{}:{}:{}:complex",
+                    active.dataset_id, active.run_id, analysis.id, waveform.name
+                ),
+                label: name.clone(),
+                points: complex
+                    .real
+                    .samples(..)
+                    .zip(complex.imag.samples(..))
+                    .collect(),
+                companion: false,
+                palette_slot: Some(slot),
+            });
+        }
+        return SmithLoci {
+            loci,
+            references,
+            responses: false,
+        };
     }
-    let plane = Plane::new((-SMITH_REACH, SMITH_REACH), (-SMITH_REACH, SMITH_REACH));
-    let mut guides = vec![
-        plane.guide(&circle((0.0, 0.0), 1.0, 256), true)?,
-        plane.guide(&[(-1.0, 0.0), (1.0, 0.0)], false)?,
-    ];
-    let mut captions = Vec::new();
+    for text in &sheet.responses {
+        let retained = analysis
+            .waveforms
+            .iter()
+            .map(AsRef::as_ref)
+            .find(|waveform| {
+                waveform.name == *text && is_polar_quantity(analysis.analysis_type, None, waveform)
+            });
+        let parts = match retained.and_then(|waveform| waveform.complex.as_ref()) {
+            Some(complex) => complex
+                .real
+                .samples(..)
+                .zip(complex.imag.samples(..))
+                .collect::<Vec<_>>(),
+            None => {
+                match rspice_results::calculator::retained::complex_locus(&analysis.waveforms, text)
+                {
+                    Ok((_, real, imaginary)) => real.into_iter().zip(imaginary).collect(),
+                    Err(_) => continue,
+                }
+            }
+        };
+        // A response at the chart's singular point has no reflection, and
+        // the locus breaks there.
+        let points = parts
+            .into_iter()
+            .map(|sample| {
+                let gamma = sheet.reading.reflection_of(sample, sheet.reference_ohm);
+                if gamma.0.is_finite() && gamma.1.is_finite() {
+                    gamma
+                } else {
+                    (0.0, f64::NAN)
+                }
+            })
+            .collect();
+        references.push(sheet.reference_ohm);
+        loci.push(Locus {
+            identity: format!(
+                "{}:{}:{}:{text}:response",
+                active.dataset_id, active.run_id, analysis.id
+            ),
+            label: text.clone(),
+            points,
+            companion: false,
+            palette_slot: None,
+        });
+    }
+    SmithLoci {
+        loci,
+        references,
+        responses: true,
+    }
+}
+
+/// What the sheet's header says the chart is read against, and, for
+/// responses, how they were read onto it.
+fn smith_subtitle(drawn: &SmithLoci, reading: ResponseReading) -> String {
+    let mut references = drawn.references.clone();
+    references.sort_by(f64::total_cmp);
+    references.dedup_by(|left, right| left.to_bits() == right.to_bits());
+    let mut subtitle = match references.as_slice() {
+        [reference] => format!("Z\u{2080} = {reference} \u{3a9}"),
+        [] => "Coefficient loci".to_owned(),
+        _ => "Per-port retained Z\u{2080}".to_owned(),
+    };
+    if drawn.responses {
+        subtitle.push_str(" \u{b7} responses read as ");
+        subtitle.push_str(ResponseReading::OPTIONS[reading.index()]);
+    }
+    subtitle
+}
+
+/// One family of the Smith chart's rulings: constant resistance and
+/// reactance, or, reflected through the centre, constant conductance and
+/// susceptance. A family drawn second, over the first, takes its own ink,
+/// labels the real axis below it and leaves the rim to the first.
+fn smith_family(
+    plane: &Plane,
+    admittance: bool,
+    second: bool,
+    guides: &mut Vec<SemanticPlotGuide>,
+    captions: &mut Vec<SemanticPlotCaption>,
+) -> Result<(), HardcopySourceError> {
+    let flip = if admittance { -1.0 } else { 1.0 };
+    let mut rule = |points: &[(f64, f64)]| -> Result<(), HardcopySourceError> {
+        let mut guide = plane.guide(points, false)?;
+        guide.second = second;
+        guides.push(guide);
+        Ok(())
+    };
     for value in SMITH_GRID {
-        guides.push(plane.guide(
-            &circle((value / (value + 1.0), 0.0), 1.0 / (value + 1.0), 256),
-            false,
-        )?);
+        rule(&circle(
+            (flip * value / (value + 1.0), 0.0),
+            1.0 / (value + 1.0),
+            256,
+        ))?;
         captions.extend(plane.label(
-            ((value - 1.0) / (value + 1.0), 0.0),
-            (-400, -700),
+            (flip * (value - 1.0) / (value + 1.0), 0.0),
+            if second { (-400, 2_600) } else { (-400, -700) },
             grid_value(value),
             SemanticCaptionAnchor::End,
         ));
         for sign in [1.0, -1.0] {
             let x = sign * value;
-            guides.push(plane.guide(&arc_in_unit_disc((1.0, 1.0 / x), 1.0 / value), false)?);
+            rule(&arc_in_unit_disc((flip, flip / x), 1.0 / value))?;
+            if second {
+                // Its arcs meet the rim where the first family's
+                // opposite-signed arcs do, which label it already.
+                continue;
+            }
             // Γ = (jx − 1)/(jx + 1): where the arc meets the rim.
             let denominator = 1.0 + x * x;
-            let rim = ((x * x - 1.0) / denominator, 2.0 * x / denominator);
+            let rim = (
+                flip * (x * x - 1.0) / denominator,
+                flip * 2.0 * x / denominator,
+            );
             let outward = (rim.0 * 2_200.0, -rim.1 * 2_200.0);
             captions.extend(plane.label(
                 rim,
@@ -416,10 +600,43 @@ pub(super) fn quick_smith_plot<W: AsRef<RetainedWaveform>>(
             ));
         }
     }
+    Ok(())
+}
+
+/// The Smith page as the sheet stands: the unit circle and the grid it
+/// rules, impedance, admittance or both, labelled as it labels them; the
+/// loci it draws, a response read through its reading; and, where its
+/// header states them, the Z₀ the chart is read against and the reading.
+pub(super) fn quick_smith_plot<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
+    sheet: &QuickSmithSettings,
+) -> Result<SemanticPlot, HardcopySourceError> {
+    let drawn = smith_loci(active, sheet);
+    if drawn.loci.is_empty() {
+        return Err(HardcopySourceError::InvalidVisualizationSource(
+            "the Smith chart has no complex coefficient to draw".to_owned(),
+        ));
+    }
+    let plane = Plane::new((-SMITH_REACH, SMITH_REACH), (-SMITH_REACH, SMITH_REACH));
+    let mut guides = vec![
+        plane.guide(&circle((0.0, 0.0), 1.0, 256), true)?,
+        plane.guide(&[(-1.0, 0.0), (1.0, 0.0)], false)?,
+    ];
+    let mut captions = vec![SemanticPlotCaption::new(
+        smith_subtitle(&drawn, sheet.reading),
+        SemanticPoint::new(PLOT_INSET_UM + 2_000, PLOT_INSET_UM + 4_000),
+    )];
+    let both = sheet.grid == SmithGrid::ImpedanceAdmittance;
+    if sheet.grid.draws_admittance() {
+        smith_family(&plane, true, both, &mut guides, &mut captions)?;
+    }
+    if sheet.grid.draws_impedance() {
+        smith_family(&plane, false, false, &mut guides, &mut captions)?;
+    }
     plane_plot(
         ResultViewer::Smith,
         &plane,
-        &loci,
+        &drawn.loci,
         Vec::new(),
         captions,
         guides,
@@ -524,12 +741,14 @@ fn nyquist_loci<W: AsRef<RetainedWaveform>>(
             label: label.to_owned(),
             points: points.clone(),
             companion: false,
+            palette_slot: None,
         });
         loci.push(Locus {
             identity: identity(mirror),
             label: mirror.to_owned(),
             points: points.iter().map(|(re, im)| (*re, -im)).collect(),
             companion: true,
+            palette_slot: None,
         });
     };
     if let Some((real, imaginary)) = loop_gain_traces(analysis.analysis_type, &analysis.waveforms) {

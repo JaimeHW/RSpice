@@ -22,7 +22,9 @@ use uuid::Uuid;
 mod plane;
 mod presentation;
 use plane::{quick_nyquist_plot, quick_polar_plot, quick_smith_plot};
-pub use presentation::{QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation};
+pub use presentation::{
+    QuickFftSettings, QuickHistogramSettings, QuickSmithSettings, ResultsQuickViewPresentation,
+};
 
 /// A successful retained analysis borrowed from its terminal owning run.
 /// This input grants no publication or execution authority.
@@ -126,7 +128,9 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
             active,
             &presentation.overlay.for_analysis(active.analysis.id),
         )?),
-        ResultViewer::Smith => HardcopySemanticDocument::Plot(quick_smith_plot(active)?),
+        ResultViewer::Smith => {
+            HardcopySemanticDocument::Plot(quick_smith_plot(active, &presentation.smith)?)
+        }
         // The polar sheet's evidence is the same retained complex locus; the
         // printed figure states it on the coefficient plane, ringed at the
         // magnitudes its axis rules, where a page has no reader to rotate the
@@ -995,6 +999,7 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
                 .map(|(x, y)| (x.to_bits(), y.to_bits()))
                 .collect(),
             companion: false,
+            palette_slot: None,
         }],
         cursors: Vec::new(),
         markers: Vec::new(),
