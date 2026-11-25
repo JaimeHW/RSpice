@@ -202,7 +202,7 @@ fn binary_rows(
     // QSPICE states the count once the run ends; a file it is still writing states none.
     let points = if stated_points > 0 {
         stated_points
-    } else if source.len() % qspice_row == 0 {
+    } else if source.len().is_multiple_of(qspice_row) {
         source.len() / qspice_row
     } else {
         0

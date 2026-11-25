@@ -84,9 +84,12 @@ enum Token {
     Close,
 }
 
-/// The file's tokens, each with the line it is on, section by section.
-fn block_sections(text: &str) -> Result<Vec<(String, Vec<(usize, Token)>)>, String> {
-    let mut sections: Vec<(String, Vec<(usize, Token)>)> = Vec::new();
+/// A section's name and its tokens, each with the line it is on.
+type Section = (String, Vec<(usize, Token)>);
+
+/// The file's tokens, section by section.
+fn block_sections(text: &str) -> Result<Vec<Section>, String> {
+    let mut sections: Vec<Section> = Vec::new();
     for (index, raw_line) in text.lines().enumerate() {
         let line_number = index + 1;
         let line = raw_line.trim();

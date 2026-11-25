@@ -2261,12 +2261,12 @@ mod tests {
     #[test]
     fn structured_formats_reject_malformed_sources_and_signatures_defeat_spoofed_extensions() {
         for (name, bytes, id) in [
-            ("samples.npy", b"\x93NUMPY\x01\x00".as_slice(), "numpy-npy"),
-            ("table.parquet", b"PAR1payloadPAR1".as_slice(), "parquet"),
+            ("samples.npy", b"\x93NUMPY\x01\x00".as_slice(), "NumPy .npy"),
+            ("table.parquet", b"PAR1payloadPAR1".as_slice(), "Parquet"),
             (
                 "capture.vcd",
                 b"$timescale 1ns $end\n$scope module top $end\n".as_slice(),
-                "vcd",
+                "VCD",
             ),
         ] {
             let error = parse_result_dataset(name, bytes).expect_err("malformed source rejects");
@@ -2275,8 +2275,8 @@ mod tests {
 
         let error = parse_result_dataset("spoofed.csv", b"PAR1payloadPAR1")
             .expect_err("extension/signature mismatch must reject");
-        assert!(error.contains("csv-rfc4180"), "{error}");
-        assert!(error.contains("parquet"), "{error}");
+        assert!(error.contains("CSV"), "{error}");
+        assert!(error.contains("Parquet"), "{error}");
         assert!(error.contains("ambiguous"), "{error}");
     }
 

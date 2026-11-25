@@ -553,7 +553,9 @@ fn tick_seconds(tick: u64, timescale_seconds: f64) -> f64 {
     ];
     let exponent = timescale_seconds.log10().round();
     let decade = format!("1e{exponent}").parse::<f64>().unwrap_or(f64::NAN);
-    if !((decade - timescale_seconds).abs() <= timescale_seconds * 4.0 * f64::EPSILON) {
+    // Written so a NaN reads as not a decade.
+    let is_decade = (decade - timescale_seconds).abs() <= timescale_seconds * 4.0 * f64::EPSILON;
+    if !is_decade {
         return tick as f64 * timescale_seconds;
     }
     // Both operands exact, so the one rounding is the quotient's or the product's.

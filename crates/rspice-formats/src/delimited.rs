@@ -101,7 +101,7 @@ enum CoordinateDirection {
 /// Text".
 pub fn decode_source_text(bytes: &[u8]) -> Result<std::borrow::Cow<'_, str>, String> {
     fn utf16(units: &[u8], word: fn([u8; 2]) -> u16) -> Result<String, String> {
-        if units.len() % 2 != 0 {
+        if !units.len().is_multiple_of(2) {
             return Err("the UTF-16 text ends in half a character".to_owned());
         }
         char::decode_utf16(units.chunks_exact(2).map(|pair| word([pair[0], pair[1]])))
