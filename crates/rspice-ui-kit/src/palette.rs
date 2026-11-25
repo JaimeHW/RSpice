@@ -496,6 +496,16 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
 
 const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_DARK.wire, 0x44, 0x8c, 0x60) as usize];
 const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.wire, 0x4e, 0x34, 0x00) as usize];
+// The print draws a trace in its light-ground colour (`TRACE_PRINT_INKS` in
+// rspice-hardcopy), so a printed sheet is the colour the sheet is.
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[0], 30, 105, 190) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[1], 190, 30, 80) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[2], 0, 128, 60) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[3], 110, 70, 190) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[4], 0, 122, 128) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[5], 160, 50, 150) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[6], 195, 80, 0) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[7], 10, 60, 150) as usize];
 
 /// sRGB relative luminance (WCAG 2.x).
 fn relative_luminance(color: Color32) -> f64 {

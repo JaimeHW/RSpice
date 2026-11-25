@@ -10,29 +10,26 @@ use rspice_design_model::design_management::{
 pub(crate) const WIRE_PRINT_INK: [u8; 3] = [0x4E, 0x34, 0x00];
 pub(crate) const SYMBOL_PRINT_INK: [u8; 3] = [0x2C, 0x31, 0x35];
 
-/// The line the `index`th trace prints in black: eight a reader tells apart
-/// at a glance, so a page of eight traces never draws two alike.
-fn series_redundancy(index: usize) -> PrintRedundancy {
-    let um = Length::from_micrometres;
-    let dashed = |dash, gap| PrintRedundancy::DashedLine {
-        width: um(300),
-        dash: um(dash),
-        gap: um(gap),
-    };
-    let dotted = |spacing| PrintRedundancy::DottedLeader {
-        width: um(300),
-        spacing: um(spacing),
-    };
-    match index % 8 {
-        0 => PrintRedundancy::SolidLine { width: um(300) },
-        1 => dashed(2_000, 1_000),
-        2 => dotted(1_250),
-        3 => dashed(5_000, 1_200),
-        4 => dashed(700, 700),
-        5 => dotted(2_600),
-        6 => dashed(1_200, 2_600),
-        _ => PrintRedundancy::SolidLine { width: um(700) },
-    }
+/// The sheet's eight trace colours as it draws them on a light ground, in
+/// the order it gives them out: a printed trace is the colour it is on the
+/// sheet, solid, as ADS and ViVA print. The kit's light palette pins the
+/// same eight. A page printed in grey or black draws each series in its
+/// own line instead.
+pub(crate) const TRACE_PRINT_INKS: [[u8; 3]; 8] = [
+    [30, 105, 190],
+    [190, 30, 80],
+    [0, 128, 60],
+    [110, 70, 190],
+    [0, 122, 128],
+    [160, 50, 150],
+    [195, 80, 0],
+    [10, 60, 150],
+];
+
+/// The ink the `index`th series of a sheet prints in.
+pub(crate) fn trace_print_ink(index: usize) -> PrintColor {
+    let [red, green, blue] = TRACE_PRINT_INKS[index % TRACE_PRINT_INKS.len()];
+    PrintColor::Rgb { red, green, blue }
 }
 
 pub(super) fn default_print_mapping(
@@ -179,14 +176,14 @@ pub(super) fn default_print_mapping(
         }
         HardcopySemanticDocument::Plot(plot) => {
             const SCREEN_STYLES: [&str; 8] = [
-                "cyan · solid",
-                "amber · solid",
+                "blue · solid",
+                "crimson · solid",
                 "green · solid",
                 "violet · solid",
-                "yellow · solid",
-                "blue · solid",
+                "teal · solid",
+                "magenta · solid",
                 "orange · solid",
-                "gray · solid",
+                "navy · solid",
             ];
             let mut series = 0;
             for trace in &plot.traces {
@@ -204,7 +201,9 @@ pub(super) fn default_print_mapping(
                 } else {
                     series += 1;
                     (
-                        series_redundancy(series - 1),
+                        PrintRedundancy::SolidLine {
+                            width: Length::from_micrometres(300),
+                        },
                         SCREEN_STYLES[(series - 1) % SCREEN_STYLES.len()],
                     )
                 };
@@ -213,7 +212,7 @@ pub(super) fn default_print_mapping(
                     format!("trace:{}", trace.trace_id),
                     trace.label.clone(),
                     screen_style,
-                    PrintColor::Black,
+                    trace_print_ink(series.max(1) - 1),
                     redundancy,
                     true,
                 )?);

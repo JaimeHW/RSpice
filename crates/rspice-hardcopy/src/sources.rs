@@ -36,7 +36,7 @@ use geometry::{
     form_layer_mapping, layer_mapping, mapping_entry, symbol_bounds,
 };
 use mapping::default_print_mapping;
-pub(crate) use mapping::{SYMBOL_PRINT_INK, WIRE_PRINT_INK};
+pub(crate) use mapping::{SYMBOL_PRINT_INK, TRACE_PRINT_INKS, WIRE_PRINT_INK};
 pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
 pub use prepared::{PreparedRetainedHardcopyResolution, RetainedHardcopySourceInput};
 pub(crate) use quick_plot::print_read;

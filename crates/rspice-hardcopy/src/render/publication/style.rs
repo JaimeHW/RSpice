@@ -195,18 +195,6 @@ pub(in crate::render) fn series_line(index: u16) -> (StrokePattern, Option<(f64,
 }
 
 pub(super) fn base_semantic_color(color: SemanticColor) -> Rgb8 {
-    const TRACES: [Rgb8; 10] = [
-        Rgb8::new(0, 113, 188),
-        Rgb8::new(213, 94, 0),
-        Rgb8::new(0, 158, 115),
-        Rgb8::new(204, 121, 167),
-        Rgb8::new(230, 159, 0),
-        Rgb8::new(86, 180, 233),
-        Rgb8::new(111, 78, 161),
-        Rgb8::new(0, 0, 0),
-        Rgb8::new(56, 131, 74),
-        Rgb8::new(180, 65, 65),
-    ];
     match color {
         SemanticColor::Foreground => Rgb8::new(25, 32, 38),
         SemanticColor::Secondary => Rgb8::new(91, 102, 112),
@@ -214,7 +202,11 @@ pub(super) fn base_semantic_color(color: SemanticColor) -> Rgb8 {
         SemanticColor::Accent => Rgb8::new(196, 139, 0),
         SemanticColor::Warning => Rgb8::new(190, 67, 54),
         SemanticColor::Success => Rgb8::new(0, 125, 82),
-        SemanticColor::Trace(index) => TRACES[usize::from(index) % TRACES.len()],
+        SemanticColor::Trace(index) => {
+            let inks = crate::sources::TRACE_PRINT_INKS;
+            let [red, green, blue] = inks[usize::from(index) % inks.len()];
+            Rgb8::new(red, green, blue)
+        }
         SemanticColor::Exact(value) => value,
     }
 }
