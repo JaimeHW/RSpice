@@ -2260,6 +2260,8 @@ pub fn report_lifecycle_error(
         | ProjectLifecycleError::LibraryFiles(_) => {
             model.report_failure(context, error.to_string());
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        ProjectLifecycleError::FileGone(_) => model.report_failure(context, error.to_string()),
         _ => workbench.prompt(format!("{context}: {error}")),
     }
 }

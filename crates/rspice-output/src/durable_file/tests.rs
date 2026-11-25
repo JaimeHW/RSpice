@@ -66,6 +66,27 @@ fn compare_exchange_rejects_external_change_without_touching_target() {
     std::fs::remove_dir_all(root).expect("remove fixture");
 }
 
+/// A publication expecting a file in place, in a folder gone with it, makes no folder.
+#[test]
+fn compare_exchange_expecting_a_file_makes_no_folder_for_it() {
+    let root = unique_temp_dir("cas-folder-gone");
+    let folder = root.join("moved");
+    let accepted: [u8; 32] = Sha256::digest(b"accepted").into();
+
+    let result = compare_exchange_bytes(
+        &folder.join("state.json"),
+        ExpectedContent::Digest(accepted),
+        b"local successor",
+    );
+
+    assert!(matches!(
+        result,
+        Err(CompareExchangeError::Conflict { actual: None, .. })
+    ));
+    assert!(!folder.exists(), "the folder is not made again");
+    std::fs::remove_dir_all(root).expect("remove fixture");
+}
+
 #[test]
 fn compare_exchange_publishes_exact_successor_and_releases_predecessor_evidence() {
     let root = unique_temp_dir("cas-success");

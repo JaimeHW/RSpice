@@ -1031,6 +1031,7 @@ pub fn save_native(
         let state = &mut state.lifecycle_parts();
         require_open_project(state.platform)?;
         require_destination_writable(state.model, state.platform, path, authority)?;
+        require_file_in_place(path, authority)?;
         let destination = NativeSaveDestination::new(
             &persistence::NativeStorage,
             path,
@@ -1283,6 +1284,7 @@ pub fn begin_results_save(
         AfterResultsKept::SaveCopy { .. } => DestinationAuthority::UserSelected,
     };
     require_destination_writable(state.model, state.platform, path, authority)?;
+    require_file_in_place(path, authority)?;
     let results = state
         .platform
         .project_lifecycle
@@ -2546,6 +2548,26 @@ fn require_destination_writable(
         }
     }
     require_project_writable(model)
+}
+
+/// A save to the open project's own file finds the file where this window holds it. One
+/// renamed, moved or deleted outside RSpice is refused before anything is written: not the
+/// file at its old name, not the results beside it, not a folder made again for it. The work
+/// stays in the session, for Save As to keep.
+#[cfg(not(target_arch = "wasm32"))]
+fn require_file_in_place(
+    path: &Path,
+    authority: DestinationAuthority,
+) -> Result<(), ProjectLifecycleError> {
+    if authority != DestinationAuthority::Canonical {
+        return Ok(());
+    }
+    match std::fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(ProjectLifecycleError::FileGone(path.to_path_buf()))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// How the model's part of a cell-view revert left the view.

@@ -51,6 +51,8 @@ mod readers_words;
 mod recovery_comparison;
 mod recovery_frames;
 #[cfg(not(target_arch = "wasm32"))]
+mod renamed_outside;
+#[cfg(not(target_arch = "wasm32"))]
 mod results_save;
 mod revision_history;
 mod steps;

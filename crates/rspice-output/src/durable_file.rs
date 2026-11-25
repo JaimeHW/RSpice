@@ -719,7 +719,18 @@ fn compare_exchange_impl(
     write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
     owner_only: bool,
 ) -> Result<[u8; 32], CompareExchangeError> {
-    std::fs::create_dir_all(parent_directory(path))?;
+    match expected {
+        // A file expected in place is in a folder that exists. A folder gone was moved or
+        // deleted with the file, and is not made again for a file it would not hold.
+        ExpectedContent::Digest(_) if !parent_directory(path).is_dir() => {
+            return Err(CompareExchangeError::Conflict {
+                expected,
+                actual: None,
+            });
+        }
+        ExpectedContent::Digest(_) => {}
+        ExpectedContent::Missing => std::fs::create_dir_all(parent_directory(path))?,
+    }
     let destination = resolved_destination(path);
     let path = destination.as_path();
     let parent = parent_directory(path);

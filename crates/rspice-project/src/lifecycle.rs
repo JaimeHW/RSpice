@@ -55,6 +55,14 @@ pub enum ProjectLifecycleError {
         "a project copy cannot replace the open project's own file; choose a different destination"
     )]
     CopyDestinationIsCanonical,
+    /// The open project's file is gone from where this window opened or last saved it: it was
+    /// renamed, moved or deleted outside RSpice. A save writes nothing there.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[error(
+        "the project file {} is no longer there: it was renamed, moved or deleted outside RSpice. Nothing was saved; Save As keeps this work, or open the project from where it is now",
+        .0.display()
+    )]
+    FileGone(std::path::PathBuf),
     #[error(
         "the browser is still reconnecting this project to its saved copy; wait for it to finish before saving"
     )]
