@@ -2046,10 +2046,24 @@ struct Words<'a> {
 /// prefix glyph's advance when the reading's unit takes a prefix and the
 /// reading prints none (`1.144 V`), else none.
 pub fn prefix_slot_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
-    if !rspice_results::number_format::leaves_prefix_slot_blank(text) {
+    if !leaves_prefix_slot_blank(text) {
         return 0.0;
     }
     ui.fonts_mut(|fonts| fonts.glyph_width(font, 'm'))
+}
+
+/// The number formatter's rule for a blank prefix slot. The formatter comes
+/// with the `plot` feature, and with the kit's own tests as a dev-dependency;
+/// a kit built without it has no formatter to have set the reading, so it
+/// keeps no slot.
+#[cfg(any(feature = "plot", test))]
+fn leaves_prefix_slot_blank(text: &str) -> bool {
+    rspice_results::number_format::leaves_prefix_slot_blank(text)
+}
+
+#[cfg(not(any(feature = "plot", test)))]
+fn leaves_prefix_slot_blank(_text: &str) -> bool {
+    false
 }
 
 /// [`prefix_slot_width`] for a cell that asked for a slot
