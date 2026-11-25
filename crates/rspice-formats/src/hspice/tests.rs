@@ -187,6 +187,45 @@ fn a_binary_2001_ac_file_reads_voltages_and_currents_as_complex_and_decibels_as_
 }
 
 #[test]
+fn rows_a_single_precision_time_cannot_tell_apart_keep_the_first_and_say_so() {
+    let head = header("9601", &[1, 1], &["TIME", "v(out"], None);
+    // Two steps 10 ps apart at 300 us round to the same single-precision time.
+    let rows = [
+        0.0,
+        0.0, //
+        3.000_001_9e-4,
+        4.66, //
+        3.000_002e-4,
+        4.71, //
+        3.000_003_4e-4,
+        5.38, //
+        1.0e30,
+    ];
+    let decoded = decode_hspice(&binary(&head, &narrow(&rows), false, false)).unwrap();
+    let table = &decoded.tables[0];
+    assert_eq!(table.dataset.coordinate.len(), 3);
+    assert_eq!(
+        signal(table, "v(out)").real,
+        [0.0, f64::from(4.66_f32), f64::from(5.38_f32)]
+    );
+    assert_eq!(
+        decoded.notes,
+        [
+            "1 row repeats the time of the row before: the file writes the time to fewer digits \
+          than the simulator stepped, so it is left out. HSPICE writes it in full in binary \
+          output under .option post_version=2001."
+        ]
+    );
+
+    // A double-precision file states every time it stepped, so a repeat there is the file's.
+    let head = header("2001", &[1, 1], &["TIME", "v(out"], None);
+    let rows = [0.0, 0.0, 1.0e-9, 1.0, 1.0e-9, 2.0, 1.0e30];
+    let decoded = decode_hspice(&binary(&head, &narrow(&rows), true, false)).unwrap();
+    assert_eq!(decoded.tables[0].dataset.coordinate, [0.0, 1.0e-9, 1.0e-9]);
+    assert!(decoded.notes.is_empty());
+}
+
+#[test]
 fn a_binary_2013_file_reads_a_double_scale_beside_single_columns() {
     let head = header("2013", &[1, 1, 1], &["TIME", "v(in", "v(out"], None);
     let time = 1.000_000_000_1e-9;

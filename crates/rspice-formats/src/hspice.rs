@@ -46,6 +46,8 @@ pub struct DecodedHspice {
     /// The title line of the netlist, as the file states it.
     pub title: String,
     pub tables: Vec<DecodedHspiceTable>,
+    /// What the reader should know of how the file was read.
+    pub notes: Vec<String>,
 }
 
 /// A measurement table, read: one column per measurement, one row per sweep point or alter.
@@ -132,24 +134,47 @@ impl Header {
 
 /// Read an HSPICE waveform file, binary or ASCII.
 pub fn decode_hspice(bytes: &[u8]) -> Result<DecodedHspice, HspiceReadError> {
-    let (header, values) = match binary_byte_order(bytes) {
+    let (header, values, rounded_scale) = match binary_byte_order(bytes) {
         Some(order) => {
             let (header, data) = binary_records(bytes, order)?;
             let header = parse_header(&header)?;
             let values = binary_values(&data, order, &header)?;
-            (header, values)
+            let rounded = header.layout == Layout::Single;
+            (header, values, rounded)
         }
+        // Five or six significant digits.
         None => {
             let (header, data) = ascii_parts(bytes)?;
             let header = parse_header(&header)?;
             let values = ascii_values(&data, header.layout)?;
-            (header, values)
+            (header, values, true)
         }
     };
-    let tables = split_tables(&header, values)?;
+    let (tables, repeated) = split_tables(&header, values, rounded_scale)?;
+    let notes = (repeated > 0)
+        .then(|| {
+            let scale = match header.domain {
+                WaveformDomain::Transient => "time",
+                WaveformDomain::Ac => "frequency",
+                WaveformDomain::DcSweep => "sweep value",
+            };
+            let (rows, repeat, each) = if repeated == 1 {
+                ("row", "repeats", "it is")
+            } else {
+                ("rows", "repeat", "each is")
+            };
+            format!(
+                "{repeated} {rows} {repeat} the {scale} of the row before: the file writes the \
+                 {scale} to fewer digits than the simulator stepped, so {each} left out. HSPICE \
+                 writes it in full in binary output under .option post_version=2001."
+            )
+        })
+        .into_iter()
+        .collect();
     Ok(DecodedHspice {
         title: header.title,
         tables,
+        notes,
     })
 }
 
@@ -466,12 +491,17 @@ fn row_parts(header: &Header) -> usize {
         .sum()
 }
 
+/// The tables of a file and the rows left out of them. Where the file writes its scale rounded,
+/// two rows the simulator stepped apart can state the same scale value; the later of them is
+/// left out, since a coordinate cannot hold one value twice.
 fn split_tables(
     header: &Header,
     values: Vec<f64>,
-) -> Result<Vec<DecodedHspiceTable>, HspiceReadError> {
+    rounded_scale: bool,
+) -> Result<(Vec<DecodedHspiceTable>, usize), HspiceReadError> {
     let mut stream = values.into_iter();
     let mut tables = Vec::new();
+    let mut repeated = 0;
     loop {
         let sweep = match &header.sweep {
             Some(name) => match stream.next() {
@@ -495,6 +525,13 @@ fn split_tables(
             let scale = stream.next().ok_or_else(ends_inside_table)?;
             if scale >= TABLE_END {
                 break;
+            }
+            if rounded_scale && coordinate.last() == Some(&scale) {
+                for _ in 0..row_parts(header) {
+                    stream.next().ok_or_else(ends_inside_table)?;
+                }
+                repeated += 1;
+                continue;
             }
             coordinate.push(scale);
             for signal in &mut signals {
@@ -530,7 +567,7 @@ fn split_tables(
             break;
         }
     }
-    Ok(tables)
+    Ok((tables, repeated))
 }
 
 /// A voltage column is type 1 and a current 8 (a branch) or 15 (a terminal).

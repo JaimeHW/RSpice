@@ -351,6 +351,7 @@ pub(super) fn parse_hspice(
     let decoded = rspice_formats::hspice::decode_hspice(bytes)
         .map_err(|error| adapter_error(format, error))?;
     let swept = decoded.tables.len() > 1 || decoded.tables[0].sweep.is_some();
+    let notes = decoded.notes;
     let plots = decoded
         .tables
         .into_iter()
@@ -371,7 +372,9 @@ pub(super) fn parse_hspice(
             }),
         })
         .collect();
-    assemble_plots(format, plots)
+    let mut parsed = assemble_plots(format, plots)?;
+    parsed.notes.extend(notes);
+    Ok(parsed)
 }
 
 /// A measurement table, one value per measurement and row: a scalar result over its rows, as
