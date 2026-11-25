@@ -883,3 +883,152 @@ fn a_rolled_back_create_leaves_no_mark() {
         [(dataset, false), ("Review A".to_owned(), false)]
     );
 }
+
+/// An RC low-pass whose resistor runs 1 % per kelvin from 1 kΩ at 27 °C,
+/// over five temperatures: its corner sits at 1 kHz at 27 °C and moves with
+/// R(T) = 1k·(1 + 0.01·(T − 27)).
+const TEMPERATURE_DECK: &str = "* rc low-pass over temperature\nV1 in 0 AC 1\n\
+R1 in out 1k TC1=0.01\nC1 out 0 159.155n\n.step temp list -40 0 27 85 125\n\
+.ac dec 10 10 100k\n.end\n";
+
+/// The curves a frame's legend lists, by the name each chip toggles.
+#[cfg(not(target_arch = "wasm32"))]
+fn legend_curves(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+) -> std::collections::BTreeSet<String> {
+    nodes
+        .iter()
+        .filter_map(|(_, node)| {
+            node.label()?
+                .strip_prefix("Toggle ")?
+                .strip_suffix(" visibility")
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+/// The traces a frame's plots draw, as each plot's own label counts them.
+#[cfg(not(target_arch = "wasm32"))]
+fn drawn_traces(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> usize {
+    nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::GraphicsDocument)
+        .filter_map(|(_, node)| {
+            let (head, _) = node.label()?.split_once(" visible trace")?;
+            head.rsplit(' ').next()?.parse::<usize>().ok()
+        })
+        .sum()
+}
+
+/// A Bode document made from a five-temperature AC run draws the five
+/// curves the Bode sheet draws, under the same member labels, as ViVA's
+/// Plot Across Corners draws every corner: the document reads the run's
+/// family through the sheet's own projection. Each member's curve is the
+/// netlist's own low-pass at that temperature.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_bode_document_of_a_temperature_run_draws_every_member() {
+    use rspice_app_runs::simulation::controller::test_execution::run_manual_batch;
+    let mut run = run_manual_batch(TEMPERATURE_DECK);
+    // Only the output's magnitude is shown, so the legend lists each of
+    // its members as a chip of its own.
+    for analysis in &mut run.analyses {
+        for trace in &mut analysis.waveforms {
+            trace.visible = trace.data.name == "|V(OUT)|";
+        }
+    }
+    let temperatures = [-40.0, 0.0, 27.0, 85.0, 125.0];
+    assert_eq!(run.analyses.len(), temperatures.len());
+    for (analysis, temperature) in run.analyses.iter().zip(temperatures) {
+        let resistance = 1e3 * (1.0 + 0.01 * (temperature - 27.0));
+        let magnitude = analysis
+            .waveforms
+            .iter()
+            .map(|waveform| -> &rspice_results::waveform::RetainedWaveform { waveform.as_ref() })
+            .find(|waveform| waveform.name == "|V(OUT)|")
+            .expect("each member keeps its output's magnitude");
+        for sample in 0..magnitude.y.len() {
+            let frequency = magnitude.x.sample(sample).expect("a frequency");
+            let gain = magnitude.y.sample(sample).expect("a gain");
+            let pole = std::f64::consts::TAU * frequency * resistance * 159.155e-9;
+            let expected = 1.0 / (1.0 + pole * pole).sqrt();
+            assert!(
+                (gain - expected).abs() < 1e-6,
+                "{temperature} °C at {frequency} Hz: {gain} against {expected}"
+            );
+        }
+    }
+    let dataset_id = run.dataset_id;
+
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    app.state.workbench.activate(Workspace::Results);
+    app.state.results.results.session.viewer =
+        rspice_app_results::workbench::documents::result_document::ResultViewer::Bode;
+    let mut window = ResultsWindow {
+        ctx,
+        app,
+        frame: eframe::Frame::_new_kittest(),
+        time: 0.0,
+        dataset_id,
+    };
+    let output_curves = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]| {
+        legend_curves(nodes)
+            .into_iter()
+            .filter(|name| name.starts_with("|V(OUT)|"))
+            .collect::<Vec<_>>()
+    };
+    let nodes = window.frames(Vec::new());
+    assert_eq!(
+        drawn_traces(&nodes),
+        temperatures.len(),
+        "the Bode sheet draws every temperature"
+    );
+    // The legend lists as many members as its row holds and folds the rest
+    // into a count; each chip it lists names one member.
+    let sheet = output_curves(&nodes);
+    let members: Vec<String> = ["−40", "0", "27", "85", "125"]
+        .iter()
+        .map(|temperature| format!("|V(OUT)| · temp={temperature}°C"))
+        .collect();
+    assert!(
+        !sheet.is_empty() && sheet.iter().all(|chip| members.contains(chip)),
+        "the Bode sheet labels each curve by its member: {sheet:?}"
+    );
+
+    window.app.state.results.create_result_document = CreateResultDocumentDialogState {
+        open: true,
+        name: "Bode over temperature".to_owned(),
+        name_touched: true,
+        dataset_id: Some(dataset_id),
+        family_id: ResultDocumentFamily::FrequencyAndStability.id().to_owned(),
+        viewer_id: "viewer-bode".to_owned(),
+        layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
+        validation_error: None,
+    };
+    commit(&mut window.app.state.results_parts()).expect("the document commits");
+    let nodes = window.frames(Vec::new());
+    assert!(
+        drawn(
+            &nodes,
+            egui::accesskit::Role::Button,
+            "Add a pane to this result document"
+        ),
+        "the stage draws the created document"
+    );
+    assert_eq!(
+        drawn_traces(&nodes),
+        temperatures.len(),
+        "the document draws every temperature"
+    );
+    assert_eq!(
+        output_curves(&nodes),
+        sheet,
+        "the document draws the members the sheet drew"
+    );
+}
