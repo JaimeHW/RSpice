@@ -6,11 +6,13 @@
 //! writing each workspace through its owner.
 //!
 //! Here too, the source map a design dialog asks for, which opens the code
-//! feature's netlist page.
+//! feature's netlist page, and the other way round, a result signal the
+//! results workspace asks Design to show in another occurrence.
 
 use crate::workbench::AppState;
 use rspice_app_code::workbench::app::dialogs::library::new_veriloga_device::open_new_veriloga_device_form_in;
 use rspice_app_design::schematic::view::{DesignSurfaceRequest, PlotProbedTrace, ProbePlot};
+use rspice_app_results::workbench::commands::schematic_cross_probe::ShowSignalOnSchematic;
 use rspice_app_state::state::VerificationPage;
 use rspice_app_state::workbench::workspace::Workspace;
 
@@ -93,6 +95,76 @@ pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: Plot
         (true, true) => format!("{display} is already in the plot."),
         (true, false) => format!("{display} removed from the plot."),
     });
+}
+
+/// Show a result signal read in another occurrence than the tab in front:
+/// land the canvas on the occurrence the design draws for its scope, through
+/// the descent the hierarchy's occurrence rows take, and show the signal
+/// there as every Results surface shows one.
+pub(in crate::workbench) fn show_signal_in_its_occurrence(
+    state: &mut AppState,
+    request: ShowSignalOnSchematic,
+) {
+    use rspice_app_design::workbench::design::navigator::hierarchy_tree::open_occurrence;
+    use rspice_app_state::state::InstancePath;
+
+    let ShowSignalOnSchematic {
+        signal,
+        scope,
+        from,
+    } = request;
+    let drawn = if scope.is_root() {
+        // The root is the first step of the breadcrumb the tab descended by.
+        state.navigation().focus_workspace_breadcrumb(0);
+        InstancePath::root()
+    } else {
+        let drawn = state
+            .model
+            .workspace
+            .design_projection(
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
+            )
+            .ok()
+            .and_then(|projection| {
+                projection
+                    .plan()
+                    .engine_occurrence(&scope)
+                    .map(|occurrence| occurrence.instance_path().clone())
+            });
+        let Some(drawn) = drawn else {
+            state.prompt(format!(
+                "{from} is read inside {scope}, which this design does not draw."
+            ));
+            return;
+        };
+        open_occurrence(
+            &mut state.design,
+            &mut state.model,
+            &mut state.workbench,
+            &state.runs,
+            &drawn,
+        );
+        drawn
+    };
+    if !state
+        .model
+        .workspace
+        .content
+        .occurrence_path()
+        .same_engine_scope(&scope)
+    {
+        state.prompt(format!(
+            "{drawn} could not be opened, so {from} cannot be shown there."
+        ));
+        return;
+    }
+    state.workbench.activate(Workspace::Design);
+    match state.model.select_signal_on_drawing(&signal) {
+        Ok(place) => state.prompt(place.message(&from)),
+        Err(error) => state.prompt(error.message(&from)),
+    }
 }
 
 /// Answer what the design surface raised, as the shell does once the

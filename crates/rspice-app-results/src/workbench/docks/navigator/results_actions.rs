@@ -14,9 +14,8 @@ use crate::workbench::documents::result_document::{
 pub use crate::workbench::documents::result_document::{
     set_result_quantities_ticked, set_result_quantity_ticked,
 };
-use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::{Execute, held_back};
-use crate::workbench::framework::requests::{ExportResultQuantities, PromptAfterCommands};
+use crate::workbench::framework::requests::ExportResultQuantities;
 use crate::workbench::results::commands::ResultsCommand;
 use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, ResultViewer, SourceWaveformPresentationKey,
@@ -24,10 +23,10 @@ use rspice_results::result_presentation::{
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use super::super::super::commands::result_navigation::{open_run_log, producing_run};
+use super::super::super::commands::schematic_cross_probe::{self, schematic_refusal};
 use super::results::{RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT, ResultArtifact};
 use super::results_rows::VisibleKeys;
 use rspice_app_workbench::workbench::docks::navigator::row_context_menu;
-use rspice_schematic_editor::view::cross_probe;
 
 /// A tick on a row, or a tick drawn across a range of rows with Shift.
 pub(super) fn update_result_browser_multi_selection(
@@ -706,36 +705,11 @@ fn open_signal_table(
     }
 }
 
-/// Why `signal` has nothing one can show on the schematic: it is computed
-/// from other signals rather than carried by one net or part.
-fn schematic_refusal(signal: &str) -> Option<String> {
-    (!cross_probe::locates_on_schematic(signal))
-        .then(|| cross_probe::LocateSignalError::NotANet.message(signal))
-}
-
-/// Show what carries `signal` on the schematic: the conductor of a net's
-/// voltage, or the part a current flows through, selected and centred.
+/// Show what carries `signal` on the schematic, or say on the status line
+/// why nothing does.
 fn show_signal_on_schematic(state: &mut ResultsParts<'_>, signal: &str) {
-    if cross_probe::probed_device(signal).is_some() {
-        match state.model.locate_signal_device(signal) {
-            Ok((component, position, name)) => {
-                state.show_component_on_schematic(component, position);
-                state.workbench.outbox.push(PromptAfterCommands(format!(
-                    "Selected {name} from {signal}."
-                )));
-            }
-            Err(error) => state.workbench.prompt(error.message(signal)),
-        }
-        return;
-    }
-    match state.model.select_signal_conductor(signal) {
-        Ok(net) => {
-            execute(state, ids::DESIGN_WORKSPACE);
-            state.workbench.outbox.push(PromptAfterCommands(format!(
-                "Selected conductor {net} from {signal}."
-            )));
-        }
-        Err(error) => state.workbench.prompt(error.message(signal)),
+    if let Err(reason) = schematic_cross_probe::show_signal_on_schematic(state, signal) {
+        state.workbench.prompt(reason);
     }
 }
 

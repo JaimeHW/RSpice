@@ -35,7 +35,7 @@ use crate::workbench::commands::vocabulary::ShellCommand;
 use crate::workbench::commands::{
     active_schematic_editor, answer_project_request, answer_surface_request,
     carry_out_code_hand_off, file_action, open_connectivity_source_map, plot_probed_trace,
-    run_project_file_action, source_editor_redirect,
+    run_project_file_action, show_signal_in_its_occurrence, source_editor_redirect,
 };
 use crate::workbench::diagnostic_routes::open_in_verify;
 use crate::workbench::features;
@@ -55,6 +55,7 @@ use rspice_app_hardcopy::workbench::hardcopy;
 use rspice_app_models::workbench::models::ModelsFeature;
 use rspice_app_project::workbench::project::ProjectFeature;
 use rspice_app_project::workbench::project::commands::ProjectRequest;
+use rspice_app_results::workbench::commands::schematic_cross_probe::ShowSignalOnSchematic;
 use rspice_app_results::workbench::results::ResultsFeature;
 use rspice_app_simulate::workbench::simulate::SimulateFeature;
 use rspice_app_state::state::command_catalog::CommandKey;
@@ -361,6 +362,13 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, probed: PlotProbedTrace| plot_probed_trace(&mut app.state, probed),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, shown: ShowSignalOnSchematic| {
+                show_signal_in_its_occurrence(&mut app.state, shown)
+            },
         );
         requests::drain(
             self,

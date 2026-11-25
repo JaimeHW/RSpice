@@ -38,6 +38,7 @@ mod veriloga_interface;
 mod veriloga_parameters;
 
 pub use assembly_variants::BASE_DESIGN;
+pub use cross_probe::SignalPlace;
 pub use definition_index::DefinitionRow;
 pub use generated_instance::{GeneratedInstanceLocation, GeneratedNetLocation};
 pub use in_place_layout::InPlaceLayout;

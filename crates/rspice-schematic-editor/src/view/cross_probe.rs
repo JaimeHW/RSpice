@@ -106,6 +106,50 @@ pub fn probed_device(signal: &str) -> Option<&str> {
     (!device.is_empty()).then_some(device)
 }
 
+/// The pin a device current is read at, as the trace spells it: `d` of
+/// `I(M1:d)`, `a` of `Ix(U1:a)`, `b` of `Ib(Q1)`. `None` for a part's own
+/// current, `I(R1)`, and for anything that is not a device current.
+pub fn probed_pin(signal: &str) -> Option<&str> {
+    probed_device(signal)?;
+    let signal = signal.trim();
+    let (head, tail) = signal.split_once('(')?;
+    let inner = tail.strip_suffix(')')?.trim();
+    if let Some((_, pin)) = inner.split_once(':') {
+        let pin = pin.trim();
+        return (!pin.is_empty()).then_some(pin);
+    }
+    // `Ix(...)` is a subcircuit pin's current, whose pin follows a colon.
+    let letter = &head[1..];
+    (!letter.is_empty() && !letter.eq_ignore_ascii_case("x")).then_some(letter)
+}
+
+/// The terminal of `terminals` (each pin's name and where it is drawn) a
+/// trace's pin names: by its name, any case, or by its place in the part's
+/// terminal order counted from 1, as `I(R1:1)` names a resistor's first.
+pub fn drawn_pin<'a>(terminals: &'a [(String, Point)], pin: &str) -> Option<&'a (String, Point)> {
+    terminals
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(pin))
+        .or_else(|| {
+            let place = pin.parse::<usize>().ok()?;
+            terminals.get(place.checked_sub(1)?)
+        })
+}
+
+/// The scope a signal is read in, as the engine spells it: `x1.x2` of
+/// `V(x1.x2.n1)` and of `I(x1.x2.m1:d)`, the root for an unscoped one.
+/// `None` for a signal that names nothing the schematic draws.
+pub fn signal_scope(signal: &str) -> Option<InstancePath> {
+    let address = probed_net(signal)
+        .map(|(net, _)| net)
+        .or_else(|| probed_device(signal))?;
+    Some(
+        ProbeTarget::parse(address)
+            .map(|target| target.scope)
+            .unwrap_or_else(|_| InstancePath::root()),
+    )
+}
+
 /// Whether a result signal names one thing the schematic draws: a net's
 /// voltage or digital lane, or a device's current.
 pub fn locates_on_schematic(signal: &str) -> bool {
@@ -189,6 +233,31 @@ pub fn select_signal_conductor(
         .copied()
         .min_by_key(|point| (point.y, point.x));
     Ok(net)
+}
+
+/// Select the part a current flows through, on the sheet in view, and
+/// centre on it. Read at one of its pins, the pin is what the reader is
+/// shown: the canvas centres on that pin and lights the conductor it meets,
+/// whose net name is returned. A pin nothing meets lights nothing.
+pub fn select_signal_part(
+    view: &CrossProbeView<'_>,
+    editor: &mut EditorSession,
+    part: &Component,
+    pin: Option<Point>,
+) -> Option<String> {
+    editor.selection.clear();
+    editor.selection.select_component(part.id);
+    editor.net_highlight.clear();
+    editor.center_request = Some(pin.unwrap_or(part.pos));
+    let pin = pin?;
+    let (net, points) = view
+        .net_to_points?
+        .iter()
+        .find(|(_, points)| points.contains(&pin))?;
+    editor
+        .net_highlight
+        .highlight_wires(wires_touching(view, points).into_iter().collect());
+    Some(net.clone())
 }
 
 /// Resolve one signal to the conductor geometry the open sheet draws for it.
@@ -536,6 +605,74 @@ mod tests {
             locate_signal_device(&stale, "I(R1)").map(|part| part.id),
             Err(LocateSignalError::NoCurrentMap)
         );
+    }
+
+    /// A current read at one pin names that pin: after a colon, as `I(M1:d)`
+    /// and `Ix(U1:a)` spell it, or as the letter after the `I` of `Ib(Q1)`.
+    /// A pin is matched to the drawn terminal by name, any case, or by its
+    /// place in the part's terminal order.
+    #[test]
+    fn a_pin_current_names_its_pin() {
+        assert_eq!(probed_pin("I(M1:d)"), Some("d"));
+        assert_eq!(probed_pin("I(x1.m1:d)"), Some("d"));
+        assert_eq!(probed_pin("Ix(U1:a)"), Some("a"));
+        assert_eq!(probed_pin("Ib(Q1)"), Some("b"));
+        assert_eq!(probed_pin("I(R1)"), None);
+        assert_eq!(probed_pin("Ix(U1)"), None);
+        assert_eq!(probed_pin("V(out)"), None);
+        assert_eq!(probed_pin("I(M1:d)-I(M2:d)"), None);
+
+        let terminals = [
+            ("D".to_owned(), Point::new(20, -40)),
+            ("G".to_owned(), Point::new(-20, 0)),
+        ];
+        assert_eq!(drawn_pin(&terminals, "d"), Some(&terminals[0]));
+        assert_eq!(drawn_pin(&terminals, "2"), Some(&terminals[1]));
+        assert_eq!(drawn_pin(&terminals, "0"), None);
+        assert_eq!(drawn_pin(&terminals, "s"), None);
+    }
+
+    /// A signal is read in the scope its address spells, nets and currents
+    /// alike; an unscoped one at the root.
+    #[test]
+    fn a_signal_is_read_in_the_scope_its_address_spells() {
+        let scope = |path: &str| Some(InstancePath::parse(path).expect("a path"));
+        assert_eq!(signal_scope("V(x1.x2.n1)"), scope("x1.x2"));
+        assert_eq!(signal_scope("I(x1.m1:d)"), scope("x1"));
+        assert_eq!(signal_scope("V(out)"), Some(InstancePath::root()));
+        assert_eq!(signal_scope("I(R1)"), Some(InstancePath::root()));
+        assert_eq!(signal_scope("V(a)-V(b)"), None);
+    }
+
+    /// A current read at a pin selects its part, centres on the pin and
+    /// lights the conductor the pin meets; the part's own current centres on
+    /// the part and lights nothing.
+    #[test]
+    fn a_pin_current_selects_its_part_and_lights_the_pins_conductor() {
+        use rspice_design::schematic::component::Component;
+        use rspice_design::schematic::component_type::ComponentType;
+
+        let (document, points, mut editor) = fixture();
+        let part = Component::new(7, ComponentType::Resistor, Point::new(60, 0));
+        let root = InstancePath::root();
+        let view = CrossProbeView {
+            document: &document,
+            sheet_catalog: None,
+            occurrence: &root,
+            net_to_points: Some(&points),
+        };
+
+        let net = select_signal_part(&view, &mut editor, &part, Some(Point::new(40, 0)));
+
+        assert_eq!(net.as_deref(), Some("OUT"));
+        assert!(editor.selection.has_component(7));
+        assert!(editor.selection.wires.is_empty(), "the part, not the wire");
+        assert!(editor.net_highlight.is_wire_highlighted(1));
+        assert_eq!(editor.center_request, Some(Point::new(40, 0)));
+
+        assert_eq!(select_signal_part(&view, &mut editor, &part, None), None);
+        assert!(!editor.net_highlight.is_wire_highlighted(1));
+        assert_eq!(editor.center_request, Some(Point::new(60, 0)));
     }
 
     #[test]

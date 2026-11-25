@@ -88,6 +88,7 @@ pub mod workbench {
     }
     pub mod commands {
         pub mod result_navigation;
+        pub mod schematic_cross_probe;
     }
     pub mod docks {
         pub(crate) use inspector::run_details::{RunDetailsDialogState, show as show_run_details};

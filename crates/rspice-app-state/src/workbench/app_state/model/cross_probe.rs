@@ -12,6 +12,29 @@ use rspice_simulation::netlist_gen::SheetNetGeometry;
 use super::Model;
 use crate::state::{Point, SheetId};
 
+/// What a result signal was shown as on the drawing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignalPlace {
+    /// A net's conductor, spelled as the design spells it.
+    Conductor(String),
+    /// The part a current flows through, by the name the drawing gives it.
+    Part(String),
+    /// The pin of a part a current is read at, by the names the drawing and
+    /// the part's symbol give them.
+    Pin { part: String, pin: String },
+}
+
+impl SignalPlace {
+    /// What the status line says once `signal` is shown.
+    pub fn message(&self, signal: &str) -> String {
+        match self {
+            Self::Conductor(net) => format!("Selected conductor {net} from {signal}."),
+            Self::Part(part) => format!("Selected {part} from {signal}."),
+            Self::Pin { part, pin } => format!("Selected pin {pin} of {part} from {signal}."),
+        }
+    }
+}
+
 impl Model {
     /// Select a result signal only through the map belonging to the active
     /// drawing: on the sheet in view where it draws the net, else on the
@@ -96,6 +119,80 @@ impl Model {
                 .map(|geometry| &geometry.net_to_points),
         };
         cross_probe::select_signal_conductor(&view, editor, signal)
+    }
+
+    /// Show a result signal where the drawing in front carries it: a net's
+    /// conductor, the part a current flows through, or, for a current read at
+    /// one pin, that pin of its part. The sheet that draws it comes forward.
+    /// Read only through a map current for the drawing at this occurrence;
+    /// a signal read in another occurrence says which.
+    pub fn select_signal_on_drawing(
+        &mut self,
+        signal: &str,
+    ) -> Result<SignalPlace, LocateSignalError> {
+        if cross_probe::probed_device(signal).is_none() {
+            return self
+                .select_signal_conductor(signal)
+                .map(SignalPlace::Conductor);
+        }
+        let (component, _, name) = self.locate_signal_device(signal)?;
+        if let Some(sheet) = self
+            .multi_sheet_catalog()
+            .and_then(|catalog| catalog.sheet_for_object(component))
+            && self.active_sheet_id() != Some(sheet)
+            && self.activate_sheet(sheet, |_| {}).is_err()
+        {
+            return Err(LocateSignalError::UnknownDevice(name));
+        }
+        let symbols = self.schematic_symbol_context();
+        let Some(part) = self
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|part| part.id == component)
+            .cloned()
+        else {
+            return Err(LocateSignalError::UnknownDevice(name));
+        };
+        let terminals = symbols.named_terminal_points(&part);
+        let pin = cross_probe::probed_pin(signal)
+            .and_then(|pin| cross_probe::drawn_pin(&terminals, pin))
+            .cloned();
+        let occurrence = self.workspace.content.occurrence_path();
+        let sheet = self.active_sheet_id();
+        let topology = self.schematic.topology_version();
+        let key = self.workspace.content.active_schematic_reference().key();
+        let (document, editor) = self.schematic.document_and_editor();
+        let view = cross_probe::CrossProbeView {
+            document,
+            sheet_catalog: self.workspace.content.design_management.sheet_catalog(&key),
+            occurrence: &occurrence,
+            net_to_points: self
+                .simulation
+                .source
+                .cross_probe
+                .on_sheet_at(
+                    &self.workspace.content.active_view,
+                    &occurrence,
+                    topology,
+                    sheet,
+                )
+                .map(|geometry| &geometry.net_to_points),
+        };
+        cross_probe::select_signal_part(&view, editor, &part, pin.as_ref().map(|(_, at)| *at));
+        Ok(match pin {
+            Some((pin, _)) => SignalPlace::Pin { part: name, pin },
+            None => SignalPlace::Part(name),
+        })
+    }
+
+    /// The scope `signal` is read in when it is not the occurrence the tab
+    /// in front is editing, as the engine spells it. `None` when the signal
+    /// is read here, or names nothing the schematic draws.
+    pub fn signal_read_elsewhere(&self, signal: &str) -> Option<crate::state::InstancePath> {
+        let scope = cross_probe::signal_scope(signal)?;
+        (!scope.same_engine_scope(&self.workspace.content.occurrence_path())).then_some(scope)
     }
 
     /// The drawn part a current trace is read through, on the open drawing

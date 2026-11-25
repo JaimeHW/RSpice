@@ -14,15 +14,11 @@ use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::analysis_evidence_failure;
 use crate::workbench::documents::result_document::manifest::active_manifest;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
-use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::feature::Execute;
-use crate::workbench::framework::requests::PromptAfterCommands;
 use rspice_results_ui::session::PaneAxis;
 
 use super::super::super::design_system::{
     WorkbenchIcon, property_row, property_row_input_action, property_row_problem,
 };
-use super::super::super::state::Workspace;
 use super::{result_authority, run_details};
 use rspice_results::number_format::fmt_column_reading;
 use rspice_schematic_editor::view::cross_probe::probed_device;
@@ -301,15 +297,10 @@ fn selected_result_trace(
             if let Some(reason) = unavailable {
                 response = response.on_hover_text(reason);
             }
-            if response.clicked() {
-                match cross_probe_trace_to_design(state, &signal) {
-                    Ok(name) => state.workbench.outbox.push(PromptAfterCommands(if device {
-                        format!("Selected {name} from {signal}.")
-                    } else {
-                        format!("Selected conductor {name} from {signal}.")
-                    })),
-                    Err(message) => state.prompt(message),
-                }
+            if response.clicked()
+                && let Err(message) = cross_probe_trace_to_design(state, &signal)
+            {
+                state.prompt(message);
             }
         }
     });
@@ -742,6 +733,18 @@ fn schematic_cross_probe_unavailability(
                 .to_owned(),
         );
     }
+    // A trace read in another occurrence takes the canvas there, when the
+    // run drew it: its scope is spelled by written instance names, `xamp`
+    // for a cell drawn `amp`, and named to the reader as the run drew it.
+    if let Some(scope) = model.signal_read_elsewhere(signal) {
+        let drawn = receipt
+            .hierarchy_map()
+            .iter()
+            .filter_map(|row| crate::state::InstancePath::parse(row.occurrence()).ok())
+            .collect::<Vec<_>>();
+        return (!scope.is_root() && scope.resolve_drawn(&drawn).is_none())
+            .then(|| format!("{signal} is read inside {scope}, which this run did not draw."));
+    }
     let Some(net) = net else {
         // A current names its part; the part's own rules say whether this
         // drawing, at this occurrence, has it.
@@ -750,25 +753,9 @@ fn schematic_cross_probe_unavailability(
             .err()
             .map(|error| error.message(signal));
     };
-    let here = model.workspace.content.occurrence_path(); // only that occurrence answers for a trace
-    // A trace is scoped by written instance names, `xamp` for a cell drawn
-    // `amp`, so its scope is compared with the drawn occurrence by those names
-    // and named to the reader as the occurrence the run drew.
-    let leaf = match crate::state::ProbeTarget::parse(net) {
-        Ok(probe) if !probe.scope.same_engine_scope(&here) => {
-            let deeper = probe.scope.engine_scope_starts_with(&here);
-            let verb = if deeper { "Descend" } else { "Ascend" };
-            let drawn = receipt
-                .hierarchy_map()
-                .iter()
-                .filter_map(|row| crate::state::InstancePath::parse(row.occurrence()).ok())
-                .collect::<Vec<_>>();
-            let scope = probe.scope.resolve_drawn(&drawn).unwrap_or(&probe.scope);
-            return Some(format!("{verb} to {scope} to cross-probe it."));
-        }
-        Ok(probe) => probe.leaf,
-        Err(_) => net.to_owned(),
-    };
+    let leaf = crate::state::ProbeTarget::parse(net)
+        .map(|probe| probe.leaf)
+        .unwrap_or_else(|_| net.to_owned());
     (!model.drawing_draws_net(&leaf))
         .then(|| format!("No sheet of this drawing has a conductor named {leaf}."))
 }
@@ -776,12 +763,12 @@ fn schematic_cross_probe_unavailability(
 /// Resolve against the current schematic map before navigation. A stale or
 /// derived signal therefore leaves the engineer in Results with an exact
 /// explanation. On success, the Design surface opens once the inspector
-/// returns; a remembered split remains active and projects Design + the same
-/// canonical Results document.
+/// returns, at the occurrence that reads the trace; a remembered split
+/// remains active and projects Design + the same canonical Results document.
 pub fn cross_probe_trace_to_design(
     state: &mut ResultsParts<'_>,
     signal: &str,
-) -> Result<String, String> {
+) -> Result<(), String> {
     let selected = state
         .results
         .valid_selected_trace(&state.model.simulation)
@@ -789,22 +776,7 @@ pub fn cross_probe_trace_to_design(
     if let Some(reason) = schematic_cross_probe_unavailability(state.model, selected, signal) {
         return Err(reason);
     }
-    if probed_device(signal).is_some() {
-        let (component, position, name) = state
-            .model
-            .locate_signal_device(signal)
-            .map_err(|error| error.message(signal))?;
-        state.show_component_on_schematic(component, position);
-        return Ok(name);
-    }
-    let net = state
-        .model
-        .select_signal_conductor(signal)
-        .map_err(|error| error.message(signal))?;
-    if state.workbench.workspace != Workspace::Design {
-        state.workbench.outbox.push(Execute(ids::DESIGN_WORKSPACE));
-    }
-    Ok(net)
+    crate::workbench::commands::schematic_cross_probe::show_signal_on_schematic(state, signal)
 }
 
 #[cfg(test)]

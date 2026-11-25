@@ -323,10 +323,19 @@ fn install_block_map(
 /// Cross-probe `signal` as the inspector's button does, then answer what the
 /// gesture raised, as the shell does once the inspector returns: Design
 /// opens there.
-pub(crate) fn cross_probe(app: &mut RSpiceApp, signal: &str) -> Result<String, String> {
+pub(crate) fn cross_probe(app: &mut RSpiceApp, signal: &str) -> Result<(), String> {
     let outcome = cross_probe_trace_to_design(&mut app.state.results_parts(), signal);
     app.after_contribution();
     outcome
+}
+
+/// What the status line says now.
+pub(crate) fn status_line(app: &RSpiceApp) -> Option<String> {
+    app.state
+        .workbench
+        .prompt
+        .as_ref()
+        .map(|line| line.text.clone())
 }
 
 /// A finished 1 ms transient on the Waves sheet, the way James had it open:
@@ -431,9 +440,13 @@ pub(crate) fn run_inspector(
 fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
     let mut app = result_app_with_current_out_map(false);
 
-    assert_eq!(cross_probe(&mut app, "V(out)"), Ok("OUT".to_owned()));
+    assert_eq!(cross_probe(&mut app, "V(out)"), Ok(()));
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(
+        status_line(&app).as_deref(),
+        Some("Selected conductor OUT from V(out).")
+    );
     assert!(!app.state.workbench.split_with_results);
     assert!(
         app.state
@@ -460,7 +473,7 @@ fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
 fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
     let mut app = result_app_with_current_out_map(true);
 
-    assert_eq!(cross_probe(&mut app, "V(out)"), Ok("OUT".to_owned()));
+    assert_eq!(cross_probe(&mut app, "V(out)"), Ok(()));
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(
@@ -499,9 +512,12 @@ fn cross_probing_a_device_current_selects_its_part() {
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
 
-    let part = cross_probe(&mut app, "I(R1)").expect("R1 is drawn");
+    cross_probe(&mut app, "I(R1)").expect("R1 is drawn");
 
-    assert_eq!(part, "R1");
+    assert_eq!(
+        status_line(&app).as_deref(),
+        Some("Selected R1 from I(R1).")
+    );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     let editor = &app.state.model.schematic.session.editor;
     assert!(editor.selection.has_component(7), "R1 is selected");
@@ -532,53 +548,18 @@ fn stale_cross_probe_map_fails_without_leaving_results() {
     );
 }
 
+/// A trace read inside an instance the run did not draw has nowhere to go:
+/// the inspector says so and the reader stays on Results.
 #[test]
-fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
+fn a_trace_read_inside_an_undrawn_instance_says_so_and_stays() {
     let mut app = result_app_with_current_out_map(false);
-    let view = app.state.model.workspace.content.active_view.clone();
-    let view_type = app
-        .state
-        .model
-        .workspace
-        .content
-        .active_view_type()
-        .expect("the result app has its testbench open");
-    app.state
-        .model
-        .workspace
-        .open_as_root(view.clone(), view_type);
 
-    let error = cross_probe(&mut app, "V(x1.out)")
-        .expect_err("a trace read inside X1 has no conductor on the root sheet");
-    assert_eq!(error, "Descend to /x1 to cross-probe it.");
-    assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert!(
-        app.state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .wires
-            .is_empty()
+    let error = cross_probe(&mut app, "V(x1.out)").expect_err("X1 is not drawn");
+
+    assert_eq!(
+        error,
+        "V(x1.out) is read inside /x1, which this run did not draw."
     );
-
-    // One level down, the root-scoped trace is the one out of scope — even
-    // though the open sheet happens to carry a conductor of that name.
-    let parent = rspice_app_state::state::CellViewRef::new(&view.library, "tb", &view.view);
-    app.state
-        .model
-        .workspace
-        .open_as_root(parent.clone(), view_type);
-    app.state
-        .model
-        .workspace
-        .descend_into("X1".to_owned(), view.clone(), view_type);
-    install_block_map(&mut app, parent, view);
-
-    let error = cross_probe(&mut app, "V(out)")
-        .expect_err("a root-scoped trace does not name a conductor inside X1");
-    assert_eq!(error, "Ascend to / to cross-probe it.");
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert!(
         app.state
@@ -617,9 +598,12 @@ fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
         .descend_into("amp".to_owned(), view.clone(), view_type);
     install_block_map(&mut app, parent, view);
 
-    let net = cross_probe(&mut app, "V(xamp.out)").expect("the written scope is this occurrence");
+    cross_probe(&mut app, "V(xamp.out)").expect("the written scope is this occurrence");
 
-    assert!(net.eq_ignore_ascii_case("out"), "{net}");
+    assert_eq!(
+        status_line(&app).as_deref(),
+        Some("Selected conductor OUT from V(xamp.out).")
+    );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
 }
 
