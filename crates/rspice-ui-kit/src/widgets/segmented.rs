@@ -159,7 +159,9 @@ pub fn segmented(
         // A divider parts two unchosen options. Beside the chosen one its
         // fill is the edge, so a divider there read as a gap on one side of
         // the choice and not the other.
-        if index > 0 && chosen != index && chosen + 1 != index {
+        // A choice past the options is none chosen, as a caller with nothing
+        // to select passes it; its successor is no option either.
+        if index > 0 && chosen != index && chosen.checked_add(1) != Some(index) {
             ui.painter().vline(
                 ui.painter().round_to_pixel_center(cell.left()),
                 egui::Rangef::new(cell.top() + 1.0, cell.bottom() - 1.0),
@@ -203,4 +205,27 @@ pub fn segmented(
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::{SegmentedWidth, segmented};
+
+    /// A group with no option chosen is drawn, not refused: the run chip
+    /// passes `usize::MAX` for a plan with no analysis, and the divider rule
+    /// beside the choice overflowed on it and took the app down.
+    #[test]
+    fn a_group_with_no_option_chosen_draws_with_none_chosen() {
+        let ctx = egui::Context::default();
+        let mut selected = usize::MAX;
+        let mut changed = true;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            changed = segmented(
+                ui,
+                "segmented.none-chosen",
+                &["Operating point", "Transient", "AC"],
+                &mut selected,
+                SegmentedWidth::Equal,
+            );
+        });
+        assert!(!changed, "drawing alone chooses nothing");
+        assert_eq!(selected, usize::MAX, "and leaves none chosen");
+    }
+}
