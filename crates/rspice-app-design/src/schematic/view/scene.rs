@@ -1051,6 +1051,14 @@ fn voltage_badges(
                 }),
         )
         .collect::<std::collections::HashSet<_>>();
+    // The wires on the active sheet by their first point: a wire belongs to
+    // the net at its first point, as the netlist assigns it.
+    let mut wires_from: HashMap<Point, Vec<u64>> = HashMap::new();
+    for wire in document.wires.iter().filter(|wire| visible(wire.id)) {
+        if let Some(first) = wire.points.first() {
+            wires_from.entry(*first).or_default().push(wire.id);
+        }
+    }
     // The first net label on the active sheet that spells each name.
     let mut labels = HashMap::new();
     for label in document.net_labels.iter().filter(|label| visible(label.id)) {
@@ -1098,8 +1106,20 @@ fn voltage_badges(
         };
         let value = badge_quantity(voltage.value, &voltage.unit);
         let highlighted = editor_net_is_highlighted(state, net_name);
+        let mut wires: Vec<u64> = points
+            .iter()
+            .filter_map(|point| wires_from.get(point))
+            .flatten()
+            .copied()
+            .collect();
+        wires.sort_unstable();
+        wires.dedup();
         badges.push(OperatingPointCanvasAnnotation {
-            subject: BadgeSubject::Net { anchor, label },
+            subject: BadgeSubject::Net {
+                anchor,
+                label,
+                wires,
+            },
             lines: vec![if label.is_some() {
                 value
             } else {
@@ -1532,7 +1552,8 @@ pub mod tests {
             annotations[0].subject,
             BadgeSubject::Net {
                 anchor: Point::new(20, 10),
-                label: None
+                label: None,
+                wires: Vec::new(),
             }
         );
         assert!(
@@ -1564,7 +1585,8 @@ pub mod tests {
             annotations[0].subject,
             BadgeSubject::Net {
                 anchor: Point::new(20, 10),
-                label: Some(9)
+                label: Some(9),
+                wires: Vec::new(),
             }
         );
         assert_eq!(annotations[0].lines, vec!["1.25 V".to_owned()]);

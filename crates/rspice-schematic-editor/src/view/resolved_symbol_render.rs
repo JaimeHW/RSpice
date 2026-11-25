@@ -537,20 +537,6 @@ fn draw_symbol_labels(
     }
 }
 
-/// Where a cell instance's name stands, in world units, and how it hangs off
-/// that point: for whatever must keep clear of it.
-pub(crate) fn instance_name_anchor(
-    component: &Component,
-    symbol: &ResolvedCellSymbol,
-) -> (Pos2, Align2, bool) {
-    let placed = label_layout::symbol_name_placement(component, symbol.document());
-    (
-        super::drawing::layout_pos(placed.anchor),
-        super::drawing::text_align(placed.horizontal, placed.vertical),
-        placed.upward,
-    )
-}
-
 /// How an instance's name or value hangs off its anchor once the instance
 /// is rotated or mirrored (D1 section 7), from the shared layout
 /// (`label_layout::symbol_label_placement`) the printed page reads too.
