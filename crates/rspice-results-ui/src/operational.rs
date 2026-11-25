@@ -1,6 +1,7 @@
 //! Operational status presentation over host-classified retained evidence.
 
 use egui::{Ui, WidgetInfo, WidgetType};
+use rspice_ui_kit::widgets::notice::{self, DISMISS_SIDE};
 use rspice_ui_kit::{
     panels::WorkbenchIcon,
     theme::{self, FontWeight},
@@ -196,12 +197,13 @@ pub struct ResultOperationalStatus {
     pub wording: Option<StatusWording>,
 }
 
-/// What a status says under its name and detail: what happened, when that
-/// is not the detail alone, then what the reader can do.
+/// What a status says under its name: why, then what the reader can do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StatusLines {
-    pub message: Option<&'static str>,
-    pub recovery: &'static str,
+pub struct StatusLines<'a> {
+    /// The reason: the detail the host gave, else what the state means.
+    pub reason: Option<&'a str>,
+    /// One sentence of what to do, when there is something to do.
+    pub guidance: Option<&'static str>,
 }
 
 /// A status's words and tone where they are not its state's own: a run that
@@ -247,16 +249,15 @@ impl ResultOperationalStatus {
     /// is the detail, then what to do. An action that failed over a sheet
     /// (an export, a copy, a file picker) is never the result's state; the
     /// toast and the log report it.
-    pub fn lines(&self) -> StatusLines {
-        let message = match &self.wording {
-            Some(wording) => Some(wording.message),
-            // The reason is the detail: it is not said twice.
-            None if self.state == ResultOperationalState::Failed && self.detail.is_some() => None,
-            None => Some(self.state.message()),
-        };
+    pub fn lines(&self) -> StatusLines<'_> {
+        let meaning = self
+            .wording
+            .as_ref()
+            .map_or(self.state.message(), |wording| wording.message);
         StatusLines {
-            message,
-            recovery: self.state.recovery(),
+            reason: Some(self.detail.as_deref().unwrap_or(meaning)),
+            guidance: (self.state != ResultOperationalState::Complete)
+                .then(|| self.state.recovery()),
         }
     }
 }
@@ -358,6 +359,9 @@ pub fn show<'a>(
         status,
         icon_tone: icon_tone(status.category(), &t.color),
         offers: &offers,
+        // Closing a card in the well dismisses what holds it there, so only
+        // a notice the reader may dismiss has the ×.
+        closes: status.dismissible,
     };
     let mut actions = OperationalResponse {
         blocks_visuals: true,
@@ -407,16 +411,24 @@ pub fn show_mark<'a>(
     let response = response.on_hover_text(sentence(status));
     announce_status(ui, &response, status);
     let mut actions = OperationalResponse::default();
-    egui::Popup::menu(&response).show(|ui| {
-        ui.set_max_width(OPERATIONAL_MARK_POPUP_WIDTH);
-        let offers = offers();
-        OperationalCard {
-            status,
-            icon_tone: tone,
-            offers: &offers,
-        }
-        .contents(ui, &mut actions);
-    });
+    // The card opens on a press and closes on its ×, on Esc, or on a click
+    // outside it; a click on its copy leaves it open to be read.
+    egui::Popup::menu(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .frame(card_frame(&t))
+        .show(|ui| {
+            let offers = offers();
+            let card = OperationalCard {
+                status,
+                icon_tone: tone,
+                offers: &offers,
+                closes: true,
+            };
+            let width = card.copy_width(ui);
+            if card.contents(ui, width, &mut actions) || actions.run_again || actions.highlight {
+                ui.close();
+            }
+        });
     actions
 }
 
@@ -449,16 +461,11 @@ fn mark_width_of(name: &egui::Galley) -> f32 {
 /// Everything a state says, as one sentence for a hover.
 pub fn sentence(status: &ResultOperationalStatus) -> String {
     let lines = status.lines();
-    [
-        Some(status.label()),
-        status.detail.as_deref(),
-        lines.message,
-    ]
-    .into_iter()
-    .flatten()
-    .chain([lines.recovery])
-    .collect::<Vec<_>>()
-    .join(" · ")
+    [Some(status.label()), lines.reason, lines.guidance]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// Paint the glyph that stands for `status` in `rect`, in its category's
@@ -473,10 +480,9 @@ pub fn paint_status_glyph(ui: &Ui, rect: egui::Rect, status: &ResultOperationalS
 /// the words the screen shows: the role says it is a status.
 fn announce_status(ui: &Ui, response: &egui::Response, status: &ResultOperationalStatus) {
     let lines = status.lines();
-    let accessible = [status.detail.as_deref(), lines.message]
+    let accessible = [lines.reason, lines.guidance]
         .into_iter()
         .flatten()
-        .chain([lines.recovery])
         .collect::<Vec<_>>()
         .join(" ");
     let accessible = format!("{}: {accessible}", status.label());
@@ -491,22 +497,27 @@ fn announce_status(ui: &Ui, response: &egui::Response, status: &ResultOperationa
     });
 }
 
-/// The card's own geometry, as `.viewer-operational-state` defines it: a
-/// bounded column centred in the stage, never a strip as long as whichever
-/// sentence the state happens to carry.
-const OPERATIONAL_CARD_MAX_WIDTH: f32 = 560.0;
+/// The card's geometry: as wide as its copy, between the two widths, inside
+/// one padding all round, with its rows set at one gap and no spacer rows.
+/// A card in the well keeps a gutter from the well's edges.
+const OPERATIONAL_CARD_MIN_WIDTH: f32 = 240.0;
+const OPERATIONAL_CARD_MAX_WIDTH: f32 = 360.0;
+const OPERATIONAL_CARD_PADDING: f32 = 8.0;
+const OPERATIONAL_CARD_ROW_GAP: f32 = 4.0;
 const OPERATIONAL_CARD_GUTTER: f32 = 16.0;
-const OPERATIONAL_CARD_PADDING: i8 = 14;
-const OPERATIONAL_CARD_ICON: f32 = 20.0;
-const OPERATIONAL_CARD_ICON_GAP: f32 = 10.0;
+/// A compact kit button's label inset either side, for measuring the row
+/// of what the card offers before it is laid out.
+const OPERATIONAL_CARD_ACTION_INSET: f32 = 10.0;
 /// The mark's glyph, at the size of a toolbar icon, and the gap before the
 /// state's name; its inset either side of the two, as a compact button
-/// insets its label; and the width its popup wraps the state's copy at.
+/// insets its label. The card's first row sets its glyph the same way.
 const OPERATIONAL_MARK_ICON: f32 = 14.0;
 const OPERATIONAL_MARK_ICON_GAP: f32 = 7.0;
 pub const OPERATIONAL_MARK_PADDING_X: f32 = 6.0;
-const OPERATIONAL_MARK_POPUP_WIDTH: f32 = 340.0;
 
+/// The empty hint's bounded column: a long sentence breaks into centred
+/// lines instead of running under the well's edges.
+const EMPTY_HINT_MAX_WIDTH: f32 = 560.0;
 /// The empty schematic sheet's hint, as `schematic::view::scene` paints it:
 /// a medium title in dim text over regular lines in faint text.
 const EMPTY_HINT_TITLE_SIZE: f32 = 15.0;
@@ -525,8 +536,7 @@ const EMPTY_HINT_LINE_PITCH: f32 = 20.0;
 fn show_empty_hint(ui: &Ui, status: &ResultOperationalStatus) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let well = ui.available_rect_before_wrap();
-    let wrap =
-        (well.width() - 2.0 * OPERATIONAL_CARD_GUTTER).clamp(1.0, OPERATIONAL_CARD_MAX_WIDTH);
+    let wrap = (well.width() - 2.0 * OPERATIONAL_CARD_GUTTER).clamp(1.0, EMPTY_HINT_MAX_WIDTH);
     let painter = ui.painter();
     let set = |copy: &str, font: egui::FontId, color: egui::Color32| {
         let mut job = egui::text::LayoutJob::simple(copy.to_owned(), font, color, wrap);
@@ -542,10 +552,9 @@ fn show_empty_hint(ui: &Ui, status: &ResultOperationalStatus) -> egui::Response 
     let line = theme::sans(EMPTY_HINT_LINE_SIZE, FontWeight::Regular);
     let lines = status.lines();
     rows.extend(
-        [status.detail.as_deref(), lines.message]
+        [lines.reason, lines.guidance]
             .into_iter()
             .flatten()
-            .chain([lines.recovery])
             .map(|copy| set(copy, line.clone(), t.color.text_faint)),
     );
 
@@ -615,106 +624,164 @@ fn icon_tone(
     }
 }
 
-/// One operational card: the category glyph, then the state's label, detail,
-/// message and recovery, then whatever this state lets the reader act on.
+/// The card's frame: elevated and shadowed, with the strong border every
+/// card keeps; the glyph alone carries severity.
+fn card_frame(t: &Tokens) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(t.color.bg_elevated)
+        .stroke(egui::Stroke::new(1.0, t.color.border_strong))
+        .corner_radius(t.radius)
+        .inner_margin(egui::Margin::same(OPERATIONAL_CARD_PADDING as i8))
+        .shadow(t.shadow())
+}
+
+fn card_title_font() -> egui::FontId {
+    theme::sans(tokens::FS_1, FontWeight::SemiBold)
+}
+
+fn card_reason_font() -> egui::FontId {
+    theme::sans(tokens::FS_1, FontWeight::Regular)
+}
+
+fn card_guidance_font() -> egui::FontId {
+    theme::sans(tokens::FS_0, FontWeight::Regular)
+}
+
+/// One operational card, compact: the state's glyph and name with a × at
+/// the far right; the reason; one sentence of what to do; and, only when
+/// the state offers something, its actions right-aligned on a last row.
 struct OperationalCard<'a> {
     status: &'a ResultOperationalStatus,
     icon_tone: egui::Color32,
     offers: &'a CardOffers<'a>,
+    /// Whether the card has a ×: a popup always does, a card in the well
+    /// only over a notice the reader may dismiss.
+    closes: bool,
 }
 
 impl OperationalCard<'_> {
-    /// Draw the card across the width its caller already fixed: elevated
-    /// and shadowed over the well it has taken over.
-    fn show(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
-        let t = Tokens::get(ui.ctx());
-        // Every card keeps the same strong border; the glyph alone carries
-        // severity.
-        egui::Frame::NONE
-            .fill(t.color.bg_elevated)
-            .stroke(egui::Stroke::new(1.0, t.color.border_strong))
-            .corner_radius(t.radius)
-            .inner_margin(egui::Margin::same(OPERATIONAL_CARD_PADDING))
-            .shadow(t.shadow())
-            .show(ui, |ui| self.contents(ui, actions))
-            .response
+    /// What the state offers, as the card shows it: Run again only where
+    /// running again makes the result whole.
+    fn run_again(&self) -> Option<&RunAgainControl> {
+        self.offers
+            .run_again
+            .as_ref()
+            .filter(|_| self.status.state.offers_run_again())
     }
 
-    /// The card's glyph, copy and actions, laid out to a width its caller
-    /// fixed, so the copy wraps inside it rather than setting its width — a
-    /// state's longest sentence is not a layout. The card and a bar mark's
-    /// popup both say it this way.
-    fn contents(&self, ui: &mut Ui, actions: &mut OperationalResponse) {
+    /// The width the card's copy takes inside its padding: its widest row
+    /// unbroken, held between the card's two widths, so the card is as wide
+    /// as it needs and a long reason wraps rather than setting the width.
+    fn copy_width(&self, ui: &Ui) -> f32 {
+        let painter = ui.painter();
+        let measure = |copy: &str, font: egui::FontId| {
+            painter
+                .layout_no_wrap(copy.to_owned(), font, egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        };
+        let close = if self.closes {
+            OPERATIONAL_MARK_ICON_GAP + DISMISS_SIDE
+        } else {
+            0.0
+        };
+        let title = OPERATIONAL_MARK_ICON
+            + OPERATIONAL_MARK_ICON_GAP
+            + measure(self.status.label(), card_title_font())
+            + close;
+        let lines = self.status.lines();
+        let reason = lines
+            .reason
+            .map_or(0.0, |reason| measure(reason, card_reason_font()));
+        let guidance = lines
+            .guidance
+            .map_or(0.0, |guidance| measure(guidance, card_guidance_font()));
+        let actions = self
+            .run_again()
+            .map(|_| "Run again".to_owned())
+            .into_iter()
+            .chain(self.offers.failure_site.as_ref().map(failure_site_label))
+            .map(|label| {
+                measure(&label, theme::sans(tokens::FS_1, FontWeight::Medium))
+                    + 2.0 * OPERATIONAL_CARD_ACTION_INSET
+                    + OPERATIONAL_MARK_ICON_GAP
+            })
+            .sum::<f32>();
+        let inset = 2.0 * OPERATIONAL_CARD_PADDING;
+        title.max(reason).max(guidance).max(actions).clamp(
+            OPERATIONAL_CARD_MIN_WIDTH - inset,
+            OPERATIONAL_CARD_MAX_WIDTH - inset,
+        )
+    }
+
+    /// The card's rows across `width` points of copy. Whether its × was
+    /// pressed.
+    fn contents(&self, ui: &mut Ui, width: f32, actions: &mut OperationalResponse) -> bool {
         let t = Tokens::get(ui.ctx());
-        let width = ui.available_width();
         ui.set_width(width);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = OPERATIONAL_CARD_ICON_GAP;
+        ui.spacing_mut().item_spacing =
+            egui::vec2(OPERATIONAL_MARK_ICON_GAP, OPERATIONAL_CARD_ROW_GAP);
+        let mut closed = false;
+        ui.horizontal(|ui| {
+            ui.set_min_height(DISMISS_SIDE);
             let (glyph, _) = ui.allocate_exact_size(
-                egui::Vec2::splat(OPERATIONAL_CARD_ICON),
+                egui::Vec2::splat(OPERATIONAL_MARK_ICON),
                 egui::Sense::hover(),
             );
             operational_icon(self.status.category()).paint(ui.painter(), glyph, self.icon_tone);
-            let copy = (width - OPERATIONAL_CARD_ICON - OPERATIONAL_CARD_ICON_GAP).max(1.0);
-            ui.allocate_ui_with_layout(
-                egui::vec2(copy, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.set_width(copy);
-                    ui.spacing_mut().item_spacing.y = 3.0;
-                    ui.label(
-                        egui::RichText::new(self.status.label())
-                            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                            .color(t.color.text),
-                    );
-                    if let Some(detail) = self.status.detail.as_deref() {
-                        ui.label(
-                            egui::RichText::new(detail)
-                                .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                                .color(t.color.text),
-                        );
-                    }
-                    let lines = self.status.lines();
-                    if let Some(message) = lines.message {
-                        ui.label(
-                            egui::RichText::new(message)
-                                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        );
-                    }
-                    ui.label(
-                        egui::RichText::new(lines.recovery)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_faint),
-                    );
-                },
+            ui.label(
+                egui::RichText::new(self.status.label())
+                    .font(card_title_font())
+                    .color(t.color.text),
             );
+            if self.closes {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (rect, _) = ui
+                        .allocate_exact_size(egui::Vec2::splat(DISMISS_SIDE), egui::Sense::hover());
+                    closed = notice::dismiss_button(
+                        ui,
+                        rect,
+                        ui.id().with("operational-card-close"),
+                        &format!("Close {}", self.status.label()),
+                    )
+                    .clicked();
+                });
+            }
         });
-        let run_again = self
-            .offers
-            .run_again
-            .as_ref()
-            .filter(|_| self.status.state.offers_run_again());
+        let lines = self.status.lines();
+        if let Some(reason) = lines.reason {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(reason)
+                        .font(card_reason_font())
+                        .color(t.color.text),
+                )
+                .wrap(),
+            );
+        }
+        if let Some(guidance) = lines.guidance {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(guidance)
+                        .font(card_guidance_font())
+                        .color(t.color.text_dim),
+                )
+                .wrap(),
+            );
+        }
+        let run_again = self.run_again();
         let failure_site = self.offers.failure_site.as_ref();
-        if failure_site.is_some() || run_again.is_some() || self.status.dismissible {
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
+        if run_again.is_some() || failure_site.is_some() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(control) = run_again {
                     actions.run_again = run_again_button(ui, control);
                 }
                 if let Some(offer) = failure_site {
-                    actions.highlight = show_failure_site_control(ui, offer);
-                }
-                if self.status.dismissible {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        actions.dismiss = rspice_ui_kit::widgets::Button::new("Dismiss")
-                            .show(ui)
-                            .on_hover_text("Dismiss this recorded runtime notice")
-                            .clicked();
-                    });
+                    actions.highlight = failure_site_button(ui, offer);
                 }
             });
         }
+        closed
     }
 
     /// Centre the card in the document well it has taken over.
@@ -722,14 +789,16 @@ impl OperationalCard<'_> {
     /// The card is placed by the height it drew at last, at its final width,
     /// so it lands on the well's own centre. A card whose height is new asks
     /// egui to lay the pass out again, so the frame shows it centred and the
-    /// card is drawn, and announced to assistive technology, once. What this
-    /// replaces was a guessed 172 pt height halved against the well's left
-    /// edge, which put the card somewhere different for every state and in the
-    /// middle for none of them.
+    /// card is drawn, and announced to assistive technology, once.
     fn show_centered(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
+        let t = Tokens::get(ui.ctx());
         let well = ui.available_rect_before_wrap();
-        let width =
-            (well.width() - 2.0 * OPERATIONAL_CARD_GUTTER).clamp(1.0, OPERATIONAL_CARD_MAX_WIDTH);
+        let inset = 2.0 * OPERATIONAL_CARD_PADDING;
+        let copy = self
+            .copy_width(ui)
+            .min(well.width() - 2.0 * OPERATIONAL_CARD_GUTTER - inset)
+            .max(1.0);
+        let width = copy + inset;
 
         let height_id = ui.id().with("result-operational-state-height");
         let last_height = ui.ctx().data(|data| data.get_temp::<f32>(height_id));
@@ -744,7 +813,10 @@ impl OperationalCard<'_> {
                 ))
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
-        let response = self.show(&mut card, actions);
+        let shown = card_frame(&t).show(&mut card, |ui| self.contents(ui, copy, actions));
+        if shown.inner {
+            actions.dismiss = true;
+        }
         let drawn_height = card.min_rect().height();
         if last_height.is_none_or(|height| (height - drawn_height).abs() > 0.5) {
             ui.ctx()
@@ -752,31 +824,8 @@ impl OperationalCard<'_> {
             ui.ctx()
                 .request_discard("the operational card changed height");
         }
-        response
+        shown.response
     }
-}
-
-/// The control that marks what the failure named, or takes the marking back.
-///
-/// It says how many objects it will mark before it is pressed, because "mark
-/// the offending nodes" is a different proposition at four nodes than at
-/// thirty — and it says how many the engine measured but did not name, so the
-/// marking is not read as the complete set.
-///
-/// The workbench's own Button: it already marks its response disabled and
-/// paints its own focus ring, so nothing is given up by drawing it in the
-/// chrome every other control on this surface uses.
-fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> bool {
-    let clicked = failure_site_button(ui, offer);
-    if let Some(note) = failure_site_note(offer) {
-        let t = Tokens::get(ui.ctx());
-        ui.label(
-            egui::RichText::new(note)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_faint),
-        );
-    }
-    clicked
 }
 
 /// Run again: the card's one primary action, which runs the plan as Run
@@ -784,6 +833,7 @@ fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> boo
 fn run_again_button(ui: &mut Ui, control: &RunAgainControl) -> bool {
     let response = rspice_ui_kit::widgets::Button::new("Run again")
         .accent()
+        .compact()
         .enabled(control.unavailable.is_none())
         .show(ui);
     match control.unavailable {
@@ -793,19 +843,18 @@ fn run_again_button(ui: &mut Ui, control: &RunAgainControl) -> bool {
     .clicked()
 }
 
-/// The marking control alone.
+/// The control that marks what the failure named, or takes the marking back.
+///
+/// It says how many objects it will mark before it is pressed, because "mark
+/// the offending nodes" is a different proposition at four nodes than at
+/// thirty; its hover says how many the engine measured but did not name, so
+/// the marking is not read as the complete set.
 fn failure_site_button(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> bool {
     rspice_ui_kit::widgets::Button::new(&failure_site_label(offer))
+        .compact()
         .show(ui)
         .on_hover_text(failure_site_hint(offer))
         .clicked()
-}
-
-/// How many objects the engine measured but did not name, while the marking
-/// is off.
-fn failure_site_note(offer: &FailureSiteControl<'_>) -> Option<String> {
-    (!offer.marked && offer.elided > 0)
-        .then(|| format!("{} more were measured but not named.", offer.elided))
 }
 
 #[cfg(test)]
