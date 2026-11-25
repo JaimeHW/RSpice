@@ -114,6 +114,21 @@ fn a_printed_plot_carries_the_figures_its_card_shows() {
         let mut app = app_showing(viewer);
         app.state.results.results.session.viewer = viewer;
         draw_sheet_and_tessellate(&mut app, viewer);
+        // A spectrum is prepared by a job its sheet starts when it opens, and
+        // its card reads it on the frame after the job is done.
+        let preparing = app
+            .simulation_controller
+            .transient_post
+            .fft_task
+            .as_ref()
+            .map(|task| task.job.clone());
+        if let Some(job) = preparing {
+            assert!(
+                job.wait(std::time::Duration::from_secs(60)),
+                "the spectrum was never prepared"
+            );
+            draw_sheet_and_tessellate(&mut app, viewer);
+        }
         let figures = app.state.results_reads().sheet_print().figures;
         assert!(!figures.is_empty(), "the {viewer:?} card shows no figures");
         let resolved = printed(&app.state);
