@@ -2115,7 +2115,12 @@ mod tests {
             .iter()
             .find(|trace| trace.data.name == "|S21|")
             .expect("S21");
-        assert_eq!(s21.data.y.read_whole().unwrap().as_ref(), &[0.8, 0.75]);
+        // The magnitude is read back from the parts, so it matches the file's to rounding.
+        let magnitudes = s21.data.y.read_whole().unwrap();
+        assert_eq!(magnitudes.len(), 2);
+        for (read, stated) in magnitudes.iter().zip([0.8, 0.75]) {
+            assert!((read - stated).abs() < 1e-12, "{read} against {stated}");
+        }
         let parts = s21.data.complex.as_ref().expect("S21 keeps its parts");
         let angle = (-12.0_f64).to_radians();
         assert!((parts.real.sample(0).unwrap() - 0.8 * angle.cos()).abs() < 1e-12);
