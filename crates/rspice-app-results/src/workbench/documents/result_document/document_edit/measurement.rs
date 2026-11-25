@@ -38,7 +38,7 @@ pub fn open_measurement(state: &mut ResultsParts<'_>) {
 /// is in front. Over the dock under a drawing, a netlist or a plan there is
 /// none, and the run's working view keeps it, as over a quick view.
 fn measured_document(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
-    if state.workbench.plots_in_dock() {
+    if state.workbench.dock_reads_plotted_run() {
         None
     } else {
         active_document_id(state)

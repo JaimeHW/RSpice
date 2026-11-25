@@ -919,13 +919,22 @@ impl WorkbenchSession {
         self.route_plots_in_dock(self.current_route().surface_id())
     }
 
+    /// Whether the dock's pages read the run its Plot page draws: under the
+    /// drawing, the netlist or the plan, the command palette over them
+    /// included. Its Plot, Measurements and Cursors pages then read one
+    /// view, that run's working view, never a document open in Results; in
+    /// Results they read the document shown.
+    #[must_use]
+    pub fn dock_reads_plotted_run(&self) -> bool {
+        self.route_plots_in_dock(self.working_route().surface_id())
+    }
+
     /// Whether the dock's Plot page is in front of the page the reader
     /// works on, the command palette over it included: a page that plots in
     /// the dock, with the dock open on Plot.
     #[must_use]
     pub fn plot_page_in_front(&self) -> bool {
-        self.route_plots_in_dock(self.working_route().surface_id())
-            && self.dock_shows(ConsolePage::Plot)
+        self.dock_reads_plotted_run() && self.dock_shows(ConsolePage::Plot)
     }
 
     fn route_plots_in_dock(&self, surface: SurfaceId) -> bool {

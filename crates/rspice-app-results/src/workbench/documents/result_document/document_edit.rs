@@ -26,11 +26,18 @@ use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
 use super::{ResultViewer, ResultsParts, ResultsReads};
 
-/// The view Results shows: the saved document in front, else the working
-/// view the quick view draws the shown run through. What the reader keeps
-/// or undoes there is kept or undone in it.
+/// The view the reader is shown: in Results the saved document in front,
+/// else the working view the quick view draws the shown run through. Under
+/// a drawing, a netlist or a plan the dock's pages read the view its Plot
+/// page draws, the shown run's working view, never a document open in
+/// Results. What the reader keeps or undoes there is kept or undone in it.
 pub(crate) fn shown_view(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
-    match state.workbench.documents.active(Workspace::Results) {
+    let in_front = state
+        .workbench
+        .documents
+        .active(Workspace::Results)
+        .filter(|_| !state.workbench.dock_reads_plotted_run());
+    match in_front {
         Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => {
             super::working_view::view_of_run(state, *dataset_id)
         }
@@ -79,7 +86,7 @@ pub fn transact(
 fn reading_analysis(state: ResultsReads<'_>) -> Result<(&SimulationRun, &AnalysisResult), String> {
     // The dock under a drawing, a netlist or a plan reads the run its Plot
     // page draws, as a quick view does: Results' document is not in front.
-    let in_dock = state.workbench.plots_in_dock();
+    let in_dock = state.workbench.dock_reads_plotted_run();
     if state.workbench.workspace != Workspace::Results && !in_dock {
         return Err("Open a result in Results.".to_owned());
     }

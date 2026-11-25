@@ -619,6 +619,85 @@ fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
     show_document(&mut app, document_id);
 }
 
+/// Under a drawing the dock reads one view: the one its Plot page draws.
+/// With a saved document open in Results, a measurement added over Design's
+/// Plot page is kept with the shown run's working view and is listed on
+/// Design's Measurements page. That page read the saved document instead,
+/// and listed nothing.
+#[test]
+fn a_measurement_added_over_the_plot_page_is_on_the_measurements_page() {
+    use crate::feature_tests::replay::{Control, Replay};
+    use egui::accesskit::Role;
+    use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
+
+    let (app, document_id) = document_fixture("two-linked-panes");
+    assert_eq!(
+        app.state.workbench.documents.active(Workspace::Results),
+        Some(&WorkspaceDocumentId::VisualizationDocument(document_id)),
+        "the saved document is open in Results"
+    );
+    let mut replay = Replay::of(app);
+    replay.app.state.workbench.activate(Workspace::Design);
+    replay.app.state.workbench.show_plot_page();
+    replay.frames(Vec::new());
+
+    replay.choose_command("Add measurement");
+    replay.click("Expression", Role::TextInput);
+    replay.type_text("rms(V(out))");
+    replay.click("Add", Role::Button);
+    assert!(
+        replay.app.state.results.result_document_dialog.is_none(),
+        "Add keeps the measurement"
+    );
+    assert!(
+        retained(&replay.app, document_id).measurements().is_empty(),
+        "the saved document is not what the reader measured"
+    );
+
+    let tab = |controls: &[Control]| {
+        controls
+            .iter()
+            .find(|control| control.role == Role::Tab && control.label.starts_with("Measurements"))
+            .cloned()
+            .expect("the dock's Measurements tab")
+    };
+    let measurements = tab(&replay.frames(Vec::new()));
+    assert_eq!(
+        measurements.label, "Measurements, 1",
+        "its tab counts the measurement the Plot page took"
+    );
+    let press = |pressed| egui::Event::PointerButton {
+        pos: measurements.center,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    replay.frames(vec![
+        egui::Event::PointerMoved(measurements.center),
+        press(true),
+    ]);
+    let shown = replay.frames(vec![press(false)]);
+    assert!(
+        replay
+            .app
+            .state
+            .workbench
+            .dock_shows(ConsolePage::Measurements)
+    );
+    assert!(
+        shown
+            .iter()
+            .any(|control| control.label.contains("rms(V(out))")
+                || control.value.contains("rms(V(out))")),
+        "the Measurements page lists it: {:?}",
+        shown
+            .iter()
+            .filter(|control| !control.label.is_empty())
+            .map(|control| format!("{:?} {}", control.role, control.label))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// An expression that is still a trace, or names a signal the pane does not
 /// show, is refused under the field and keeps nothing.
 #[test]
