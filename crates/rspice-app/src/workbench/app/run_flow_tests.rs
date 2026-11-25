@@ -546,19 +546,12 @@ fn an_out_of_date_result_is_marked_on_the_plot_tab_and_the_runs_row() {
     );
     assert!(marks(&user).is_empty());
 
+    // The plan moves on as its page adds an analysis, one it can still run.
     user.app
         .state
         .model
-        .sim_setup
-        .stable_analysis_plan_mut()
-        .expect("a plan")
-        .insert(rspice_app_state::simulation::plan::AnalysisKind::Ac)
-        .expect("the plan takes an analysis");
-    user.app
-        .state
-        .model
-        .sim_setup
-        .refresh_legacy_analysis_projections();
+        .add_analysis_card_to_plan(".op")
+        .expect("the plan takes an operating point");
     user.settle();
 
     assert!(
@@ -606,6 +599,13 @@ fn an_out_of_date_result_is_marked_on_the_plot_tab_and_the_runs_row() {
         user.find("Out of date").is_some(),
         "a press opens what the state says"
     );
+
+    // Its Run again runs the plan, as Run plan does.
+    let before = user.app.state.model.simulation.retained.runs.len();
+    user.click("Run again");
+    user.wait_for("the run", |app| run_has_ended(app, before));
+    user.settle();
+    assert_eq!(active_run(&user), Some(newest_run(&user)));
 }
 
 /// Placing a cursor on the Plot page reads it there: the dock stays on the
