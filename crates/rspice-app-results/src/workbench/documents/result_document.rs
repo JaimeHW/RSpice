@@ -871,6 +871,29 @@ impl ResultsReads<'_> {
                 policy.with_significant_digits(document.significant_digits)
             })
     }
+
+    /// What the sheet shown prints beyond what its page reads for itself:
+    /// a table sheet's tables in its words, or the figures its card shows.
+    pub fn sheet_print(self) -> rspice_results_ui::table::SheetPrint {
+        match self.results.session.viewer {
+            ResultViewer::Table => table::printed(self),
+            ResultViewer::NetworkMatrix => network_matrix::printed(self),
+            _ => rspice_results_ui::table::SheetPrint::default(),
+        }
+    }
+}
+
+impl ResultsState {
+    /// Whether the table sheet shown holds a table its page can print,
+    /// without reading its words; `true` for every other sheet, whose page
+    /// reads its own evidence.
+    pub fn sheet_table_is_printable(&self, simulation: &crate::state::SimulationState) -> bool {
+        match self.session.viewer {
+            ResultViewer::Table => table::is_printable(self, simulation),
+            ResultViewer::NetworkMatrix => network_matrix::is_printable(self, simulation),
+            _ => true,
+        }
+    }
 }
 
 impl ResultsParts<'_> {

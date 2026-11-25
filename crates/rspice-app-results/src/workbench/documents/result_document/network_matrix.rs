@@ -348,6 +348,64 @@ pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     context.results.network_matrix.open_trace = open_trace;
 }
 
+/// The matrix the sheet shows, in its words, for a printed page; nothing
+/// while the sheet holds no matrix of the active analysis.
+pub(super) fn printed(state: ResultsReads<'_>) -> rspice_results_ui::table::SheetPrint {
+    use rspice_results_ui::table::SheetPrint;
+    let simulation = &state.model.simulation;
+    let (Some(analysis), Some(layout)) = (
+        shown_matrix(state.results, simulation),
+        state.results.network_matrix.layout.as_ref(),
+    ) else {
+        return SheetPrint::default();
+    };
+    view::printed_matrix(
+        analysis,
+        layout,
+        &state.results.network_matrix.controls,
+        state
+            .model
+            .preferences
+            .quantity_presentation_policy()
+            .angle_display,
+        usize::from(
+            state
+                .presentation_policy()
+                .displayed_significant_digits()
+                .get(),
+        ),
+    )
+    .map_or_else(SheetPrint::default, |(title, table)| {
+        SheetPrint::table(Some(analysis.id), title, table)
+    })
+}
+
+/// The active analysis, while the sheet holds its matrix as it was last
+/// shown.
+fn shown_matrix<'a>(
+    results: &super::ResultsState,
+    simulation: &'a crate::state::SimulationState,
+) -> Option<&'a AnalysisResult> {
+    let analysis = simulation.active_analysis()?;
+    let key = AnalysisPresentationKey::new(simulation.active_run()?.dataset_id, analysis);
+    let source = (
+        key,
+        simulation.retained.runs.revision(),
+        simulation.view.data_version,
+    );
+    (results.network_matrix.source.as_ref() == Some(&source)
+        && results.network_matrix.layout.is_some())
+    .then_some(analysis)
+}
+
+/// Whether the sheet holds a matrix to print, without reading its words.
+pub(super) fn is_printable(
+    results: &super::ResultsState,
+    simulation: &crate::state::SimulationState,
+) -> bool {
+    shown_matrix(results, simulation).is_some()
+}
+
 /// The exact matrix the sheet shows, as the clipboard takes it: the block and
 /// the frequency sample on screen, every coefficient's parts at full
 /// precision. `None` while the sheet holds no matrix of the active analysis
@@ -394,9 +452,6 @@ pub(crate) mod tests {
                 &matrix.exact_table(&analysis, 0, 1).unwrap(),
             );
             assert!(csv.contains("2.00000000000000000e6"));
-            let tables = rspice_results::network_matrix::report_tables(&analysis).unwrap();
-            assert_eq!(tables.len(), 1);
-            assert_eq!(tables[0].rows.len(), 2 * matrix.references().len().pow(2));
             assert_eq!(
                 channel_reference(0, matrix.references(), mixed),
                 if mixed { 100.0 } else { 50.0 }

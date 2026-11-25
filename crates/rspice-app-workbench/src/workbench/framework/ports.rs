@@ -186,6 +186,22 @@ pub trait ResultsPort {
     fn bode_measured_signal(&self, _analysis: AnalysisPresentationKey) -> Option<String> {
         None
     }
+    /// What the sheet shown prints beyond what its page reads for itself:
+    /// a table sheet's tables in its own words, and the figures the card
+    /// beside a plot shows. Empty where the host keeps no sheet.
+    fn sheet_print(
+        &self,
+        _model: &Model,
+        _workbench: &WorkbenchSession,
+    ) -> rspice_results_ui::table::SheetPrint {
+        rspice_results_ui::table::SheetPrint::default()
+    }
+    /// Whether the table sheet shown holds a table its page can print,
+    /// without reading its words; `true` for a sheet whose page reads its
+    /// own evidence.
+    fn sheet_table_is_printable(&self, _model: &Model) -> bool {
+        true
+    }
     /// The Smith sheet as the reader set it: its grid, its reading and Z₀,
     /// the responses it lists and the network terms switched from how it
     /// opens them. `None` where the host keeps no Smith sheet.

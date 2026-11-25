@@ -145,9 +145,9 @@ fn typed_pstb_table_summary_preserves_complete_modes_and_global_evidence() {
     let analysis: AnalysisResult = AnalysisResult::new(4, AnalysisType::Pstb, "PSTB", 0.0)
         .with_result_payload(payload.clone());
 
-    let summary = semantic_result_summary(ResultViewer::Table, &analysis).unwrap();
+    let summary = semantic_result_summary(ResultViewer::Floquet, &analysis).unwrap();
 
-    assert_eq!(summary.viewer, ResultViewer::Table);
+    assert_eq!(summary.viewer, ResultViewer::Floquet);
     assert_eq!(summary.payload, Some(payload));
     assert_eq!(summary.tables.len(), 2);
     assert!(summary.tables[0].title.contains("global metrics"));

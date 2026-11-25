@@ -301,6 +301,58 @@ fn copied_operating_point_row(
     format!("{}\t{}\t{value}\t{}", row.source, row.quantity, row.status)
 }
 
+/// The operating-point table's heads and how each sets its words.
+const OPERATING_POINT_HEADS: [(&str, Align); 5] = [
+    ("Source", Align::Left),
+    ("Quantity", Align::Left),
+    ("Exact value", Align::Right),
+    ("Unit", Align::Left),
+    ("Status", Align::Left),
+];
+
+/// The operating-point table as the sheet reads it, for a printed page:
+/// every row it lists, in its words. `None` where the analysis lists none.
+pub fn printed_operating_point(analysis: &AnalysisResult) -> Option<PrintedTable> {
+    let count = operating_point_row_count(analysis);
+    if count == 0 {
+        return None;
+    }
+    let heads = OPERATING_POINT_HEADS
+        .iter()
+        .map(|(head, _)| (*head).to_owned())
+        .collect();
+    let rows = (0..count)
+        .map(|row| {
+            operating_point_row_at(analysis, row).map_or_else(
+                || vec!["\u{2014}".to_owned(); 5],
+                |value| {
+                    vec![
+                        value.source,
+                        value.quantity,
+                        value.value,
+                        value.unit,
+                        value.status,
+                    ]
+                },
+            )
+        })
+        .collect();
+    Some((heads, rows))
+}
+
+/// An evidence artifact as the sheet reads it, for a printed page: each of
+/// its exact records numbered from one.
+pub fn printed_artifact(text: &str, lines: &[(usize, usize)]) -> PrintedTable {
+    (
+        vec!["Line".to_owned(), "Evidence".to_owned()],
+        lines
+            .iter()
+            .enumerate()
+            .map(|(row, (start, end))| vec![(row + 1).to_string(), text[*start..*end].to_owned()])
+            .collect(),
+    )
+}
+
 pub fn show_operating_point_table(
     ui: &mut Ui,
     analysis: &AnalysisResult,
@@ -329,13 +381,7 @@ pub fn show_operating_point_table(
         .collect();
     let columns = fitted_to(
         ui,
-        &[
-            ("Source", Align::Left, true),
-            ("Quantity", Align::Left, true),
-            ("Exact value", Align::Right, true),
-            ("Unit", Align::Left, true),
-            ("Status", Align::Left, true),
-        ],
+        &OPERATING_POINT_HEADS.map(|(head, align)| (head, align, true)),
         &rows,
     );
     let revision = egui::Id::new((
@@ -729,6 +775,154 @@ fn row_of_sample(rows: RowSelection, sample: usize) -> Option<usize> {
     Some(((offset + stride / 2) / stride).min(rows.len() - 1))
 }
 
+/// A value column's head: the conductor the design drew. The trace keeps the
+/// engine's own name as its identity and as the key it is exported under,
+/// exactly as the waveform legend does.
+fn value_head(
+    model: &StripModel,
+    trace: usize,
+    display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
+) -> String {
+    model.trace_heading(trace).map_or_else(
+        || "Signal".to_owned(),
+        |(name, _)| display_name(name).into_owned(),
+    )
+}
+
+/// The words of one sample's row: its index after the flags of the cursors
+/// standing on it, its X, and each column's value. A trace shorter than the
+/// grid has `None` there, rather than borrowing a neighbouring sample's
+/// value.
+fn sample_words(
+    model: &StripModel,
+    sample: usize,
+    columns: &[usize],
+    (significant_digits, quantity_policy): (usize, QuantityPresentationPolicy),
+    (at_a, at_b): (bool, bool),
+) -> (String, String, Vec<Option<String>>) {
+    let flag = match (at_a, at_b) {
+        (true, true) => "A/B  ",
+        (true, false) => "A  ",
+        (false, true) => "B  ",
+        (false, false) => "",
+    };
+    (
+        format!("{flag}{sample}"),
+        model.format_x_at(sample, significant_digits, quantity_policy),
+        columns
+            .iter()
+            .map(|&trace| model.format_sample(trace, sample, significant_digits, quantity_policy))
+            .collect(),
+    )
+}
+
+/// A table as a page prints it: its heads, then each row's cells in the
+/// words the sheet shows them in.
+pub type PrintedTable = (Vec<String>, Vec<Vec<String>>);
+
+/// What a sheet prints that its page cannot read for itself: a table
+/// sheet's tables in the sheet's own words, and the figures the card beside
+/// a plot shows, with the analysis they were read from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SheetPrint {
+    /// The run-local id of the analysis the words were read from; `None`
+    /// where they belong to no one analysis.
+    pub analysis: Option<u64>,
+    /// Each table's title, heads and rows.
+    pub tables: Vec<(String, PrintedTable)>,
+    /// Each figure's name and reading.
+    pub figures: Vec<(String, String)>,
+}
+
+impl SheetPrint {
+    /// The figures a card shows, read off `analysis`.
+    pub fn figures(analysis: Option<u64>, figures: Vec<(&'static str, String)>) -> Self {
+        Self {
+            analysis,
+            tables: Vec::new(),
+            figures: figures
+                .into_iter()
+                .map(|(name, reading)| (name.to_owned(), reading))
+                .collect(),
+        }
+    }
+
+    /// One table a sheet shows, read off `analysis`.
+    pub fn table(analysis: Option<u64>, title: String, table: PrintedTable) -> Self {
+        Self {
+            analysis,
+            tables: vec![(title, table)],
+            figures: Vec::new(),
+        }
+    }
+}
+
+/// Whether the sheet shows samples of `model` under `view`: a column to
+/// show and a retained sample to show it at.
+pub fn shows_samples(model: &StripModel, view: &TableView) -> bool {
+    !resolved_columns(model, &view.columns, &automatic_columns(model)).is_empty()
+        && model.sample_grid().is_some_and(|grid| !grid.is_empty())
+}
+
+/// The sample table as the sheet reads it, for a printed page: the line
+/// its footer states the rows in, as a title, its heads, then every row the
+/// controls select, not a sample fewer, each cell in the sheet's words and
+/// a dash where a trace is shorter than the grid. `None` where the sheet
+/// shows no samples.
+pub fn printed_samples(
+    source: SampleTable<'_>,
+    view: &TableView,
+    display_name: impl for<'a> Fn(&'a str) -> Cow<'a, str>,
+    mut on_scan: impl FnMut(),
+) -> Option<(String, PrintedTable)> {
+    let model = source.model;
+    let columns = resolved_columns(model, &view.columns, &automatic_columns(model));
+    if columns.is_empty() {
+        return None;
+    }
+    let rows = selected_rows(model, view, source.cursor_a, &mut on_scan);
+    if rows.is_empty() {
+        return None;
+    }
+    let grid = model.sample_grid().unwrap_or_default();
+    let ascending = model.grid_is_ascending();
+    let mut cursor_row =
+        |x: Option<f64>| x.and_then(|x| nearest_sample_index(&grid, x, ascending, &mut on_scan));
+    let (cursor_a_row, cursor_b_row) = (cursor_row(source.cursor_a), cursor_row(source.cursor_b));
+    let heads = ["Row".to_owned(), model.x_axis_heading()]
+        .into_iter()
+        .chain(
+            columns
+                .iter()
+                .map(|&trace| value_head(model, trace, &display_name)),
+        )
+        .collect();
+    let body = (0..rows.len())
+        .filter_map(|position| rows.sample_at(position))
+        .map(|sample| {
+            let (index, x, values) = sample_words(
+                model,
+                sample,
+                &columns,
+                (source.significant_digits, source.quantity_policy),
+                (cursor_a_row == Some(sample), cursor_b_row == Some(sample)),
+            );
+            [index, x]
+                .into_iter()
+                .chain(
+                    values
+                        .into_iter()
+                        .map(|value| value.unwrap_or_else(|| "\u{2014}".to_owned())),
+                )
+                .collect()
+        })
+        .collect();
+    Some((
+        status_line(rows.len(), rows.retained, view, source.cursor_a),
+        (heads, body),
+    ))
+}
+
 pub fn show_samples(
     ui: &mut Ui,
     source: SampleTable<'_>,
@@ -761,18 +955,10 @@ pub fn show_samples(
         .cursor_b
         .and_then(|x| nearest_sample_index(&grid, x, ascending, &mut on_scan));
 
-    // A column heading names the conductor the design drew; the trace keeps
-    // the engine's own name as its identity and as the key it is exported
-    // under, exactly as the waveform legend does.
     let x_heading = model.x_axis_heading();
     let value_heads: Vec<String> = columns
         .iter()
-        .map(|&trace| {
-            model.trace_heading(trace).map_or_else(
-                || "Signal".to_owned(),
-                |(name, _)| display_name(name).into_owned(),
-            )
-        })
+        .map(|&trace| value_head(model, trace, &display_name))
         .collect();
     let row_cells = |row_position: usize| -> Vec<Cell> {
         let Some(sample) = rows.sample_at(row_position) else {
@@ -780,29 +966,26 @@ pub fn show_samples(
         };
         let at_a = cursor_a_row == Some(sample);
         let at_b = cursor_b_row == Some(sample);
-        let flag = match (at_a, at_b) {
-            (true, true) => "A/B  ",
-            (true, false) => "A  ",
-            (false, true) => "B  ",
-            (false, false) => "",
-        };
+        let (index, x, values) = sample_words(
+            model,
+            sample,
+            &columns,
+            (significant_digits, quantity_policy),
+            (at_a, at_b),
+        );
         #[allow(clippy::cast_precision_loss)]
         let mut cells = vec![
-            Cell::number(format!("{flag}{sample}")).sort_by(SortKey::Number(sample as f64)),
+            Cell::number(index).sort_by(SortKey::Number(sample as f64)),
             {
-                let x =
-                    Cell::quantity(model.format_x_at(sample, significant_digits, quantity_policy));
+                let x = Cell::quantity(x);
                 match grid.get(sample) {
                     Some(&x_value) => x.sort_by(SortKey::Number(x_value)),
                     None => x,
                 }
             },
         ];
-        for &trace in &columns {
-            // A trace shorter than the grid says so rather than borrowing a
-            // neighbouring sample's value.
-            let cell = match model.format_sample(trace, sample, significant_digits, quantity_policy)
-            {
+        for (&trace, text) in columns.iter().zip(values) {
+            let cell = match text {
                 Some(text) => {
                     let cell = Cell::quantity(text);
                     match model.sample_value(trace, sample) {

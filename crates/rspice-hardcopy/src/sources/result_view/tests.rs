@@ -383,3 +383,37 @@ fn a_printed_polar_reads_its_angles_and_rings_as_the_sheet() {
         assert!(captions.contains(&ring), "{ring} in {captions:?}");
     }
 }
+
+/// A table sheet prints the tables it showed under the analysis's name,
+/// and never tables read off another analysis.
+#[test]
+fn a_table_sheet_prints_the_tables_it_showed() {
+    let run = completed(
+        AnalysisResult::new(2, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![
+            RetainedWaveform::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0]),
+        ]),
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 2, |_| true).unwrap();
+    let table = SemanticTable {
+        title: "2 rows".to_owned(),
+        columns: vec!["Row".to_owned(), "V(out)".to_owned()],
+        rows: vec![
+            vec!["0".to_owned(), "0.000 V".to_owned()],
+            vec!["1".to_owned(), "1.000 V".to_owned()],
+        ],
+    };
+    let shown = |analysis_id| QuickSheetReading {
+        analysis_id,
+        tables: vec![table.clone()],
+        figures: Vec::new(),
+    };
+    let summary = sheet_summary(ResultViewer::Table, source.analysis, &shown(Some(2))).unwrap();
+    assert_eq!(summary.title, "TRAN");
+    assert_eq!(summary.tables, std::slice::from_ref(&table));
+    for elsewhere in [shown(Some(3)), QuickSheetReading::default()] {
+        assert!(matches!(
+            sheet_summary(ResultViewer::Table, source.analysis, &elsewhere),
+            Err(HardcopySourceError::MissingViewerEvidence(_))
+        ));
+    }
+}

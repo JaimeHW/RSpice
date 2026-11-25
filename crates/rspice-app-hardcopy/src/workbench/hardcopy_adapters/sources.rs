@@ -165,7 +165,26 @@ fn capture_results_quick_view_presentation(
                 toggled: sheet.toggled.iter().cloned().collect(),
             })
             .unwrap_or_default(),
-    )
+    )?
+    .with_sheet_reading(captured_sheet_reading(reads))
+}
+
+/// The sheet's tables and card figures, in the words it shows them in.
+fn captured_sheet_reading(reads: SourceReads<'_>) -> QuickSheetReading {
+    let sheet = reads.results.sheet_print(reads.model, reads.workbench);
+    QuickSheetReading {
+        analysis_id: sheet.analysis,
+        tables: sheet
+            .tables
+            .into_iter()
+            .map(|(title, (columns, rows))| SemanticTable {
+                title,
+                columns,
+                rows,
+            })
+            .collect(),
+        figures: sheet.figures,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -856,8 +875,12 @@ pub fn quick_result_availability(
         // real traces, or a retained complex response.
         ResultViewer::Nyquist => analysis_supports_viewer(viewer, analysis, |_| {}),
         ResultViewer::Smith => smith_analysis_is_renderable(analysis, |_| {}),
-        ResultViewer::NetworkMatrix | ResultViewer::SParameters => {
+        ResultViewer::SParameters => analysis_supports_viewer(viewer, analysis, |_| {}),
+        // A table sheet prints the table it shows, so it offers Print only
+        // while it shows one.
+        ResultViewer::NetworkMatrix => {
             analysis_supports_viewer(viewer, analysis, |_| {})
+                && results.sheet_table_is_printable(model)
         }
         ResultViewer::Polar => visible_waveforms().any(|waveform| {
             waveform.complex.as_ref().is_some_and(|complex| {
@@ -909,18 +932,7 @@ pub fn quick_result_availability(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::PssFloquet { .. } | AnalysisResultPayload::Pstb { .. })
         ),
-        // Periodic payloads have an exact semantic table even when a
-        // zero-order map or a payload-only result retained no display curve.
-        ResultViewer::Table => {
-            has_waveform()
-                || matches!(
-                    analysis.result_payload.as_ref(),
-                    Some(
-                        AnalysisResultPayload::PssFloquet { .. }
-                            | AnalysisResultPayload::Pstb { .. }
-                    )
-                )
-        }
+        ResultViewer::Table => results.sheet_table_is_printable(model),
         ResultViewer::Events => matches!(
             analysis.result_payload.as_ref(),
             Some(AnalysisResultPayload::TransientEvents {

@@ -64,6 +64,44 @@ impl QuickSmithSettings {
     }
 }
 
+/// What the sheet showed that its page cannot read for itself, in the
+/// sheet's own words: a table sheet's tables, and the figures the card
+/// beside a plot shows, with the analysis they were read off.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuickSheetReading {
+    /// The run-local id of the analysis the words were read off; `None`
+    /// where they belong to no one analysis.
+    pub analysis_id: Option<u64>,
+    pub tables: Vec<SemanticTable>,
+    /// Each figure's name and reading.
+    pub figures: Vec<(String, String)>,
+}
+
+impl QuickSheetReading {
+    fn validate(&self) -> Result<(), HardcopySourceError> {
+        for table in &self.tables {
+            validate_label("printed table title", &table.title, DISPLAY_NAME_LIMIT)?;
+            if table.columns.is_empty()
+                || table
+                    .rows
+                    .iter()
+                    .any(|row| row.len() != table.columns.len())
+            {
+                return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
+                    "the rows of printed table \"{}\" do not match its heads",
+                    table.title
+                )));
+            }
+        }
+        for (name, reading) in &self.figures {
+            validate_label("printed figure name", name, DISPLAY_NAME_LIMIT)?;
+            validate_label("printed figure", reading, DISPLAY_NAME_LIMIT)?;
+        }
+        Ok(())
+    }
+}
+
 /// Histogram controls in source coordinates.
 #[derive(Debug, Clone)]
 pub struct QuickHistogramSettings {
@@ -132,6 +170,9 @@ pub struct ResultsQuickViewPresentation {
     /// The Smith sheet's grid, reading and Z₀, as the reader set them.
     #[serde(default)]
     pub(super) smith: QuickSmithSettings,
+    /// The sheet's tables and card figures, in its words.
+    #[serde(default)]
+    pub(super) sheet: QuickSheetReading,
     pub(super) fft_input_fidelity: InputFidelity,
     pub(super) fft_time_window_auto: bool,
     pub(super) fft_time_window_start: f64,
@@ -189,6 +230,7 @@ impl ResultsQuickViewPresentation {
             },
             bode_signal: None,
             smith: QuickSmithSettings::default(),
+            sheet: QuickSheetReading::default(),
             fft_input_fidelity: fft.input_fidelity,
             fft_time_window_auto: fft.time_window_auto,
             fft_time_window_start: fft.time_window_start,
@@ -239,6 +281,7 @@ impl ResultsQuickViewPresentation {
             DISPLAY_NAME_LIMIT,
         )?;
         self.smith.validate()?;
+        self.sheet.validate()?;
         for (field, value) in [
             ("FFT time-window start", self.fft_time_window_start),
             ("FFT time-window end", self.fft_time_window_end),
@@ -298,6 +341,17 @@ impl ResultsQuickViewPresentation {
     pub fn with_smith(mut self, smith: QuickSmithSettings) -> Result<Self, HardcopySourceError> {
         smith.validate()?;
         self.smith = smith;
+        Ok(self)
+    }
+
+    /// Print a table sheet's tables, and a plot's card figures, in the
+    /// words the sheet showed them in.
+    pub fn with_sheet_reading(
+        mut self,
+        sheet: QuickSheetReading,
+    ) -> Result<Self, HardcopySourceError> {
+        sheet.validate()?;
+        self.sheet = sheet;
         Ok(self)
     }
 

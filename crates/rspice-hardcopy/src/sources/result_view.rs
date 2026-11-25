@@ -23,7 +23,8 @@ mod plane;
 mod presentation;
 use plane::{quick_nyquist_plot, quick_polar_plot, quick_smith_plot};
 pub use presentation::{
-    QuickFftSettings, QuickHistogramSettings, QuickSmithSettings, ResultsQuickViewPresentation,
+    QuickFftSettings, QuickHistogramSettings, QuickSheetReading, QuickSmithSettings,
+    ResultsQuickViewPresentation,
 };
 
 /// A successful retained analysis borrowed from its terminal owning run.
@@ -140,11 +141,17 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
             active,
             &presentation.overlay.for_analysis(active.analysis.id),
         )?),
+        // A table sheet prints the tables it shows, in its own words.
+        ResultViewer::Table | ResultViewer::NetworkMatrix => {
+            HardcopySemanticDocument::ResultSummary(Box::new(sheet_summary(
+                viewer,
+                active.analysis,
+                &presentation.sheet,
+            )?))
+        }
         ResultViewer::Op
-        | ResultViewer::NetworkMatrix
         | ResultViewer::Contribution
         | ResultViewer::TransferFunction
-        | ResultViewer::Table
         | ResultViewer::Soa
         | ResultViewer::Optimization
         | ResultViewer::Sweep
@@ -207,6 +214,26 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         semantic_document,
         bounds,
     )
+}
+
+/// A table sheet's page: the tables it showed of `analysis`, in its words,
+/// under the analysis's name.
+fn sheet_summary<W: AsRef<RetainedWaveform>>(
+    viewer: ResultViewer,
+    analysis: &AnalysisResult<W>,
+    sheet: &QuickSheetReading,
+) -> Result<SemanticResultSummary, HardcopySourceError> {
+    if sheet.tables.is_empty() || sheet.analysis_id.is_some_and(|id| id != analysis.id) {
+        return Err(HardcopySourceError::MissingViewerEvidence(
+            "the sheet's table",
+        ));
+    }
+    Ok(SemanticResultSummary {
+        viewer,
+        title: analysis.label.clone(),
+        tables: sheet.tables.clone(),
+        payload: None,
+    })
 }
 
 /// What a plot draws, so that its strips take the page: from its left edge,

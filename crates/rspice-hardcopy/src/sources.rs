@@ -55,8 +55,9 @@ pub use result_documents::{resolve_results_quick_view_stack, results_stack_ident
 pub(crate) use result_summary::layout as result_summary_layout;
 pub use result_summary::semantic_result_summary;
 pub use result_view::{
-    QuickFftSettings, QuickHistogramSettings, QuickSmithSettings, ResultsQuickViewPresentation,
-    RetainedQuickViewSource, resolve_results_quick_view_parts, results_quick_view_identity,
+    QuickFftSettings, QuickHistogramSettings, QuickSheetReading, QuickSmithSettings,
+    ResultsQuickViewPresentation, RetainedQuickViewSource, resolve_results_quick_view_parts,
+    results_quick_view_identity,
 };
 pub use retained_results::{HardcopyRun, HardcopyWaveform, restore_hardcopy_runs};
 use rspice_design::schematic::component::Component;

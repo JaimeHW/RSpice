@@ -43,7 +43,7 @@ pub(super) const AC_FIXTURE_POINTS: usize = 8_192;
 /// Painted through `show_persistent_pane_viewer`, the same dispatch the
 /// workbench itself paints through, so no sheet can pass here by a route
 /// the product never takes.
-fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
+pub(super) fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {

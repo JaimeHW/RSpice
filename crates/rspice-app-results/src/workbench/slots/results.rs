@@ -303,6 +303,18 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         }
     }
 
+    fn sheet_print(
+        &self,
+        model: &crate::workbench::app_state::Model,
+        workbench: &crate::workbench::state::WorkbenchSession,
+    ) -> rspice_results_ui::table::SheetPrint {
+        self.reads(model, workbench).sheet_print()
+    }
+
+    fn sheet_table_is_printable(&self, model: &crate::workbench::app_state::Model) -> bool {
+        self.results.sheet_table_is_printable(&model.simulation)
+    }
+
     fn smith_sheet(&self) -> Option<&rspice_results_ui::smith_chart::SmithSheetState> {
         Some(&self.results.session.smith)
     }

@@ -319,7 +319,7 @@ pub fn semantic_result_summary<W: AsRef<RetainedWaveform>>(
         }
         // A printed page has no plane to pin a mode on: the Floquet sheet
         // prints the spectrum its table lists.
-        ResultViewer::Table | ResultViewer::Floquet => {
+        ResultViewer::Floquet => {
             let Some(payload) = analysis.result_payload.as_ref() else {
                 return Err(HardcopySourceError::MissingViewerEvidence(
                     "typed periodic result",
@@ -328,17 +328,6 @@ pub fn semantic_result_summary<W: AsRef<RetainedWaveform>>(
             tables.extend(periodic_result_tables(payload).ok_or(
                 HardcopySourceError::MissingViewerEvidence("typed periodic result"),
             )?);
-        }
-        ResultViewer::NetworkMatrix => {
-            let retained =
-                rspice_results::network_matrix::report_tables(analysis).map_err(|reason| {
-                    HardcopySourceError::InvalidVisualizationSource(reason.to_owned())
-                })?;
-            tables.extend(retained.into_iter().map(|table| SemanticTable {
-                title: table.title,
-                columns: table.columns,
-                rows: table.rows,
-            }));
         }
         ResultViewer::PoleZero => {
             let Some(AnalysisResultPayload::PoleZero {

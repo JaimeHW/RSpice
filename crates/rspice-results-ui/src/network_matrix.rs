@@ -762,6 +762,162 @@ fn heat_legend(ui: &mut Ui, floor: f64, palette: &rspice_ui_kit::palette::Palett
 
 /// Draw a validated, aligned matrix: the table, and under it the heat map's
 /// key and the passivity verdict at this frequency.
+/// A wave channel as a head of the matrix names it: its port and the
+/// reference impedance it is read against.
+fn channel_head(
+    matrix: &NetworkLayout,
+    index: usize,
+    mixed: bool,
+    significant_digits: usize,
+) -> String {
+    format!(
+        "{} · {}",
+        channel_label(index, matrix.references().len(), mixed),
+        fmt_column_reading(
+            channel_reference(index, matrix.references(), mixed),
+            "Ω",
+            significant_digits
+        )
+    )
+}
+
+/// What the corner of the matrix says its rows and columns hold, and the
+/// sentence its hover says it in.
+fn corner(transpose: bool) -> (&'static str, &'static str) {
+    if transpose {
+        (
+            "In \u{2193} / Out \u{2192}",
+            "Rows: incident waves · Columns: outgoing waves",
+        )
+    } else {
+        (
+            "Out \u{2193} / In \u{2192}",
+            "Rows: outgoing waves · Columns: incident waves",
+        )
+    }
+}
+
+/// Where the cell at `row`, `column` sits in the matrix, the transpose
+/// undone.
+fn position(transpose: bool, row: usize, column: usize) -> (usize, usize) {
+    if transpose {
+        (column, row)
+    } else {
+        (row, column)
+    }
+}
+
+/// The parts of the coefficient at `(out, input)` read in `form`, at
+/// `sample`: not a number where the form has no matrix there.
+fn parts(
+    (analysis, block, ports): (&AnalysisResult<RetainedTrace>, &MatrixBlock, usize),
+    (form, converted): (NetworkForm, Option<&[num_complex::Complex64]>),
+    sample: usize,
+    (out, input): (usize, usize),
+) -> (f64, f64) {
+    match (form, converted) {
+        (NetworkForm::S, _) => {
+            let Some(complex) = analysis.waveforms[block.cells()[out * ports + input]]
+                .complex
+                .as_ref()
+            else {
+                return (f64::NAN, f64::NAN);
+            };
+            (
+                coefficient(&complex.real, sample),
+                coefficient(&complex.imag, sample),
+            )
+        }
+        (_, Some(values)) => (
+            values[out * ports + input].re,
+            values[out * ports + input].im,
+        ),
+        (_, None) => (f64::NAN, f64::NAN),
+    }
+}
+
+/// A coefficient's cell as the sheet reads it, at the matrix's shared
+/// reading, or a dash where there is no value to read.
+fn cell_words(
+    reading: &MatrixReading<'_>,
+    (real, imaginary): (f64, f64),
+    unit: &str,
+    representation: usize,
+    angle_display: AngleDisplay,
+) -> String {
+    if real.is_finite() && imaginary.is_finite() {
+        reading.cell(real, imaginary, unit, representation, angle_display)
+    } else {
+        "\u{2014}".to_owned()
+    }
+}
+
+/// The matrix the sheet shows, as it reads it, for a printed page: its
+/// block and form at its frequency as a title, the corner and the channels
+/// as heads, and a row for each channel with every coefficient in the
+/// sheet's words. `None` while its samples have not arrived.
+pub fn printed_matrix(
+    analysis: &AnalysisResult<RetainedTrace>,
+    matrix: &NetworkLayout,
+    controls: &NetworkMatrixControls,
+    angle_display: AngleDisplay,
+    significant_digits: usize,
+) -> Option<(String, crate::table::PrintedTable)> {
+    let block = matrix
+        .blocks()
+        .get(controls.block.min(matrix.blocks().len().checked_sub(1)?))?;
+    let grid = held(&analysis.waveforms[*block.cells().first()?].x)?;
+    let sample = controls.sample.min(grid.len().checked_sub(1)?);
+    let ports = matrix.references().len();
+    let mixed = block.is_mixed();
+    let form = controls.form;
+    let converted = form_matrix(analysis, matrix, block, form, sample);
+    let heads = std::iter::once(corner(controls.transpose).0.to_owned())
+        .chain((0..ports).map(|column| channel_head(matrix, column, mixed, significant_digits)))
+        .collect();
+    let coefficient = |row: usize, column: usize| {
+        let (out, input) = position(controls.transpose, row, column);
+        let (real, imaginary) = parts(
+            (analysis, block, ports),
+            (form, converted.as_deref()),
+            sample,
+            (out, input),
+        );
+        (form.unit(out, input), real, imaginary)
+    };
+    // The page reads the matrix at the sheet's one shared reading.
+    let reading = MatrixReading::of(
+        (0..ports)
+            .flat_map(|row| (0..ports).map(move |column| (row, column)))
+            .map(|(row, column)| coefficient(row, column)),
+        controls.representation,
+        significant_digits,
+    );
+    let rows = (0..ports)
+        .map(|row| {
+            std::iter::once(channel_head(matrix, row, mixed, significant_digits))
+                .chain((0..ports).map(|column| {
+                    let (unit, real, imaginary) = coefficient(row, column);
+                    cell_words(
+                        &reading,
+                        (real, imaginary),
+                        unit,
+                        controls.representation,
+                        angle_display,
+                    )
+                }))
+                .collect()
+        })
+        .collect();
+    let title = format!(
+        "{} · {} at {}",
+        block.label(),
+        form.label(),
+        fmt_column_reading(grid[sample], "Hz", significant_digits)
+    );
+    Some((title, (heads, rows)))
+}
+
 pub fn show(
     ui: &mut Ui,
     analysis: &AnalysisResult<RetainedTrace>,
@@ -779,30 +935,10 @@ pub fn show(
     controls.sample = controls.sample.min(grid.len() - 1);
     let ports = matrix.references().len();
     let mixed = block.is_mixed();
-    let channel = |index: usize| {
-        format!(
-            "{} · {}",
-            channel_label(index, ports, mixed),
-            fmt_column_reading(
-                channel_reference(index, matrix.references(), mixed),
-                "Ω",
-                significant_digits
-            )
-        )
-    };
+    let channel = |index: usize| channel_head(matrix, index, mixed, significant_digits);
     // The corner names what the rows and the columns hold, so no caption
     // line restates it above the table.
-    let (corner, axes) = if controls.transpose {
-        (
-            "In \u{2193} / Out \u{2192}",
-            "Rows: incident waves · Columns: outgoing waves",
-        )
-    } else {
-        (
-            "Out \u{2193} / In \u{2192}",
-            "Rows: outgoing waves · Columns: incident waves",
-        )
-    };
+    let (corner, axes) = corner(controls.transpose);
     let mut corner_hint = format!("{axes}\nEach wave channel names its reference impedance.");
     if mixed {
         corner_hint.push_str("\nAdjacent physical ports form (+, −) pairs. Differential and common power waves use (a+ − a−)/√2 and (a+ + a−)/√2.");
@@ -823,14 +959,7 @@ pub fn show(
     let form = controls.form;
     let converted = form_matrix(analysis, matrix, block, form, controls.sample);
     let held_coefficients = form == NetworkForm::S || converted.is_some();
-    // Where a cell sits in the matrix, the transpose undone.
-    let position = |row: usize, column: usize| {
-        if controls.transpose {
-            (column, row)
-        } else {
-            (row, column)
-        }
-    };
+    let position = |row: usize, column: usize| position(controls.transpose, row, column);
     let entry = |row: usize, column: usize| {
         let (out, input) = position(row, column);
         let waveform = &analysis.waveforms[block.cells()[out * ports + input]];
@@ -838,17 +967,12 @@ pub fn show(
             .complex
             .as_ref()
             .expect("resolved complex coefficient");
-        let (real, imaginary) = match (form, &converted) {
-            (NetworkForm::S, _) => (
-                coefficient(&complex.real, controls.sample),
-                coefficient(&complex.imag, controls.sample),
-            ),
-            (_, Some(values)) => (
-                values[out * ports + input].re,
-                values[out * ports + input].im,
-            ),
-            (_, None) => (f64::NAN, f64::NAN),
-        };
+        let (real, imaginary) = parts(
+            (analysis, block, ports),
+            (form, converted.as_deref()),
+            controls.sample,
+            (out, input),
+        );
         (waveform, complex, real, imaginary)
     };
     let name = |row: usize, column: usize| {
@@ -901,17 +1025,13 @@ pub fn show(
                     let (_, _, real, imaginary) = entry(row, column);
                     let (out, input) = position(row, column);
                     let unit = form.unit(out, input);
-                    let text = if real.is_finite() && imaginary.is_finite() {
-                        reading.cell(
-                            real,
-                            imaginary,
-                            unit,
-                            controls.representation,
-                            angle_display,
-                        )
-                    } else {
-                        "\u{2014}".to_owned()
-                    };
+                    let text = cell_words(
+                        &reading,
+                        (real, imaginary),
+                        unit,
+                        controls.representation,
+                        angle_display,
+                    );
                     let opens = if form == NetworkForm::S {
                         "\nDouble-click or press Enter to open this coefficient in Polar"
                     } else {
