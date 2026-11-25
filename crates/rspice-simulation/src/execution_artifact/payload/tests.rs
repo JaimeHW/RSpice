@@ -1502,3 +1502,75 @@ fn checkpoint_images_cross_the_worker_transfer_and_resolve_by_their_scheduled_ti
     );
     assert!(TransientCheckpointArtifact::new(vec![(4e-6, Arc::from(Vec::new()))]).is_err());
 }
+
+/// A stored column of `rows` rows that counts the samples read from it.
+struct CountedColumn {
+    rows: u64,
+    read: std::sync::atomic::AtomicU64,
+}
+
+impl rspice_results::waveform::ColumnSource for CountedColumn {
+    fn name(&self) -> &str {
+        "v(out)"
+    }
+
+    fn store(&self) -> String {
+        "run.rsr".to_owned()
+    }
+
+    fn rows(&self) -> u64 {
+        self.rows
+    }
+
+    fn read(&self, _first: u64, out: &mut [f64]) -> Result<(), String> {
+        self.read
+            .fetch_add(out.len() as u64, std::sync::atomic::Ordering::SeqCst);
+        out.fill(0.0);
+        Ok(())
+    }
+}
+
+/// A stored transient longer than the artifact may carry is refused by its
+/// length: none of its samples is read to find that out.
+#[test]
+fn a_stored_trajectory_past_the_payload_limit_is_refused_before_it_is_read() {
+    use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
+    let rows = PeriodicStateArtifact::MAX_NUMERIC_VALUES as u64;
+    let window = StoredWindow {
+        first: 0,
+        rows,
+        lead: WindowLead::None,
+    };
+    let column = |rows| {
+        Arc::new(CountedColumn {
+            rows,
+            read: std::sync::atomic::AtomicU64::new(0),
+        })
+    };
+    let (time_column, out_column) = (column(rows), column(rows));
+    let time = WaveformValues::stored(time_column.clone(), window).unwrap();
+    let out = WaveformValues::stored(out_column.clone(), window).unwrap();
+    let mut result = transient();
+    let SimulationResult::Transient {
+        time: result_time,
+        waveforms,
+        ..
+    } = &mut result
+    else {
+        unreachable!()
+    };
+    *result_time = time.clone();
+    waveforms.insert(
+        "V(out)".to_owned(),
+        SampledWaveform::new_time_domain("V(out)", time, out),
+    );
+    let refused = TransientTrajectoryArtifact::from_result(&result, &["out".to_owned()], false)
+        .expect_err("twice the limit is refused");
+    assert!(
+        refused.to_string().contains("numeric payload limit"),
+        "{refused}"
+    );
+    for column in [time_column, out_column] {
+        assert_eq!(column.read.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+}

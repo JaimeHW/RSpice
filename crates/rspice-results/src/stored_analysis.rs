@@ -15,7 +15,7 @@ pub use rspice_results_store::{Axis, RunMeta, Schema, Signal, SignalKind, StoreE
 
 use crate::analysis_result::AnalysisResult;
 use crate::store_reader::{Segment, SegmentColumn};
-use crate::waveform::{RetainedWaveform, StoredWindow, WaveformValues, WindowLead};
+use crate::waveform::{BLOCK_SAMPLES, RetainedWaveform, StoredWindow, WaveformValues, WindowLead};
 
 /// The most rows pushed into a segment at once.
 pub const ROWS_PER_PUSH: usize = 4096;
@@ -79,7 +79,9 @@ impl SegmentGroup {
     }
 
     /// Push every row of this group, at most [`ROWS_PER_PUSH`] at a time and no more than
-    /// [`VALUES_PER_PUSH`] values, reading each series once.
+    /// [`VALUES_PER_PUSH`] values, reading each series a block at a time: a stored series (one
+    /// whose segment states no digest, or a stored axis under series held in memory) is never
+    /// read whole.
     pub fn fill<W: AsRef<RetainedWaveform>>(
         &self,
         waveforms: &[W],
@@ -90,10 +92,9 @@ impl SegmentGroup {
             message,
         };
         let rows = self.rows();
-        let x = samples(&self.x).map_err(failed)?;
-        let mut columns: Vec<Cow<'_, [f64]>> = Vec::with_capacity(self.columns.len() + 1);
+        let mut columns: Vec<&WaveformValues> = Vec::with_capacity(self.columns.len() + 1);
         if !self.axis {
-            columns.push(Cow::Borrowed(&x[..]));
+            columns.push(&self.x);
         }
         for &(index, part) in &self.columns {
             let waveform = waveforms[index].as_ref();
@@ -110,22 +111,43 @@ impl SegmentGroup {
                     values.len()
                 )));
             }
-            columns.push(samples(values).map_err(failed)?);
+            columns.push(values);
         }
-        let block = (VALUES_PER_PUSH / columns.len().max(1)).clamp(1, ROWS_PER_PUSH);
-        let mut row_values = Vec::with_capacity(columns.len() * block.min(rows));
-        let mut row_x = Vec::with_capacity(block.min(rows));
-        let mut first = 0;
-        while first < rows {
-            let last = (first + block).min(rows);
-            row_x.clear();
-            row_values.clear();
-            for row in first..last {
-                row_x.push(if self.axis { x[row] } else { row as f64 });
-                row_values.extend(columns.iter().map(|column| column[row]));
+        let push_rows = (VALUES_PER_PUSH / columns.len().max(1)).clamp(1, ROWS_PER_PUSH);
+        // Each read takes a whole block of every column, as many rows as a push of them holds
+        // values, so a stored column is read a block at a time and not once per push.
+        let read_rows = (VALUES_PER_PUSH / columns.len().max(1)).clamp(push_rows, BLOCK_SAMPLES);
+        let mut row_values = Vec::with_capacity(columns.len() * push_rows.min(rows));
+        let mut row_x = Vec::with_capacity(push_rows.min(rows));
+        let mut read_first = 0;
+        while read_first < rows {
+            let read_last = (read_first + read_rows).min(rows);
+            let x = if self.axis {
+                Some(samples(&self.x, read_first..read_last).map_err(failed)?)
+            } else {
+                None
+            };
+            let read = columns
+                .iter()
+                .map(|values| samples(values, read_first..read_last))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(failed)?;
+            let mut first = 0;
+            while first < read_last - read_first {
+                let last = (first + push_rows).min(read_last - read_first);
+                row_x.clear();
+                row_values.clear();
+                for row in first..last {
+                    row_x.push(match &x {
+                        Some(x) => x[row],
+                        None => (read_first + row) as f64,
+                    });
+                    row_values.extend(read.iter().map(|column| column[row]));
+                }
+                push(&row_x, &row_values)?;
+                first = last;
             }
-            push(&row_x, &row_values)?;
-            first = last;
+            read_first = read_last;
         }
         Ok(())
     }
@@ -270,10 +292,7 @@ fn group<W: AsRef<RetainedWaveform>>(
     x: WaveformValues,
     columns: Vec<(usize, Part)>,
 ) -> Result<SegmentGroup, String> {
-    let axis = {
-        let x = samples(&x)?;
-        x.iter().all(|x| x.is_finite()) && x.windows(2).all(|pair| pair[0] < pair[1])
-    };
+    let axis = x.is_ascending_axis() || ascends_finite(&x)?;
     let mut signals = Vec::with_capacity(columns.len() + 1);
     if !axis {
         signals.push(Signal::new("x", "", SignalKind::Real));
@@ -361,11 +380,29 @@ fn same_axis(left: &WaveformValues, right: &WaveformValues) -> bool {
             .all(|(left, right)| left.to_bits() == right.to_bits())
 }
 
-/// The samples of `values`, read once.
-fn samples(values: &WaveformValues) -> Result<Cow<'_, [f64]>, String> {
+/// Samples `range` of `values`: borrowed from memory, or one block read from a stored window.
+fn samples(
+    values: &WaveformValues,
+    range: std::ops::Range<usize>,
+) -> Result<Cow<'_, [f64]>, String> {
     values
-        .read_range(0..values.len())
+        .read_range(range)
         .map_err(|failure| failure.to_string())
+}
+
+/// Whether every sample of `x` is finite and greater than the one before, passed over a block
+/// at a time.
+fn ascends_finite(x: &WaveformValues) -> Result<bool, String> {
+    let mut before = f64::NEG_INFINITY;
+    for block in x.blocks(..) {
+        for &sample in block.map_err(|failure| failure.to_string())?.iter() {
+            if !sample.is_finite() || sample <= before {
+                return Ok(false);
+            }
+            before = sample;
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -414,5 +451,84 @@ mod tests {
             .expect("every row is pushed");
         assert_eq!(next_row, ROWS, "every row, once");
         assert_eq!(pushes, 2, "a thousand and forty-eight rows, then the rest");
+    }
+
+    /// A stored column that records the longest read it is asked for, and states no digest, as
+    /// a segment its run left without `END` does.
+    struct Unnamed {
+        values: Vec<f64>,
+        longest: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::waveform::ColumnSource for Unnamed {
+        fn name(&self) -> &str {
+            "v(out)"
+        }
+
+        fn store(&self) -> String {
+            "run.rsr".to_owned()
+        }
+
+        fn rows(&self) -> u64 {
+            self.values.len() as u64
+        }
+
+        fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+            self.longest
+                .fetch_max(out.len(), std::sync::atomic::Ordering::SeqCst);
+            let first = first as usize;
+            out.copy_from_slice(&self.values[first..first + out.len()]);
+            Ok(())
+        }
+    }
+
+    fn unnamed(values: Vec<f64>) -> (Arc<Unnamed>, WaveformValues) {
+        let rows = values.len() as u64;
+        let column = Arc::new(Unnamed {
+            values,
+            longest: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let window = StoredWindow {
+            first: 0,
+            rows,
+            lead: WindowLead::None,
+        };
+        let values = WaveformValues::stored(column.clone(), window).expect("the window fits");
+        (column, values)
+    }
+
+    /// A stored series that must be kept again (its segment states no digest) is written into
+    /// its new segment a block at a time: neither its axis nor its values is read whole.
+    #[test]
+    fn a_stored_series_is_kept_again_a_block_at_a_time() {
+        const ROWS: usize = 3 * BLOCK_SAMPLES + 17;
+        let (x_column, x) = unnamed((0..ROWS).map(|row| row as f64 * 1e-9).collect());
+        let (y_column, y) = unnamed((0..ROWS).map(|row| (row % 97) as f64).collect());
+        let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
+            .with_waveforms(vec![RetainedWaveform::new("V(out)", x, y)]);
+        let plan = StoredAnalysis::plan(&analysis).expect("the analysis is grouped");
+        let [group] = plan.groups() else {
+            panic!("one x axis is one segment");
+        };
+        assert!(group.axis(), "a finite ascending axis is the segment's own");
+        let mut next_row = 0;
+        group
+            .fill(&analysis.waveforms, &mut |row_x: &[f64], values: &[f64]| {
+                for (&at, &value) in row_x.iter().zip(values) {
+                    assert_eq!(at, next_row as f64 * 1e-9);
+                    assert_eq!(value, (next_row % 97) as f64);
+                    next_row += 1;
+                }
+                Ok::<(), StoreError>(())
+            })
+            .expect("every row is pushed");
+        assert_eq!(next_row, ROWS, "every row, once");
+        for (what, column) in [("axis", &x_column), ("values", &y_column)] {
+            let longest = column.longest.load(std::sync::atomic::Ordering::SeqCst);
+            assert!(
+                longest <= BLOCK_SAMPLES,
+                "the {what} were read {longest} samples at once"
+            );
+        }
     }
 }

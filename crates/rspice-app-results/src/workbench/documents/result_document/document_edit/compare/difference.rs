@@ -69,8 +69,10 @@ impl Finished {
         {
             return band.clone();
         }
+        // A band whose result the reader service is still reading is asked
+        // for again on a later frame, not kept as none.
         let band = self
-            .read_band(state, signal, expr, (fill, edge))
+            .read_band(state, signal, expr, (fill, edge))?
             .map(Arc::new);
         bands.insert(text.to_owned(), (expr.cache_key, band.clone()));
         band
@@ -81,14 +83,20 @@ impl Finished {
     /// the baseline there, which is the result less the difference. A
     /// relative band is drawn for a real signal on the result's own axis
     /// only; anything else would draw a band the comparison did not judge.
+    ///
+    /// The difference is evaluated, so its samples are in memory; the
+    /// result's own samples are read off the frame by the reader service,
+    /// and `None` says they have not arrived yet.
     fn read_band(
         &self,
         state: ResultsReads<'_>,
         signal: &str,
         expr: &ResolvedExpr,
         (fill, edge): (egui::Color32, egui::Color32),
-    ) -> Option<ToleranceBand> {
-        let x = expr.x.read_range(0..expr.x.len()).ok()?;
+    ) -> Option<Option<ToleranceBand>> {
+        let Some(x) = expr.x.in_memory() else {
+            return Some(None);
+        };
         if self.relative_tolerance == 0.0 {
             let ends: Vec<f64> = [
                 x.iter().find(|x| x.is_finite()),
@@ -98,21 +106,30 @@ impl Finished {
             .flatten()
             .copied()
             .collect();
-            return Some(ToleranceBand {
+            return Some(Some(ToleranceBand {
                 half_width: vec![self.absolute_tolerance; ends.len()],
                 x: ends,
                 fill,
                 edge,
-            });
+            }));
         }
-        let run = retained_run(state, self.candidate_id)?;
-        let (_, analysis) = self.analysis.resolve(run)?;
-        let own = find_waveform(&analysis.waveforms, signal)?;
-        if own.complex.is_some() || own.y.len() != expr.y.len() || x.len() != expr.y.len() {
-            return None;
+        let Some(own) = retained_run(state, self.candidate_id)
+            .and_then(|run| self.analysis.resolve(run))
+            .and_then(|(_, analysis)| find_waveform(&analysis.waveforms, signal).cloned())
+        else {
+            return Some(None);
+        };
+        let Some(difference) = expr.y.in_memory() else {
+            return Some(None);
+        };
+        if own.complex.is_some() || own.y.len() != difference.len() || x.len() != difference.len() {
+            return Some(None);
         }
-        let own = own.y.read_range(0..own.y.len()).ok()?;
-        let difference = expr.y.read_range(0..expr.y.len()).ok()?;
+        let own = match own.y.fetch_whole() {
+            rspice_results::waveform::Fetched::Ready(own) => own,
+            rspice_results::waveform::Fetched::Pending => return None,
+            rspice_results::waveform::Fetched::Refused(_) => return Some(None),
+        };
         let half_width = own
             .iter()
             .zip(difference.iter())
@@ -120,12 +137,12 @@ impl Finished {
                 self.absolute_tolerance + self.relative_tolerance * (own - difference).abs()
             })
             .collect();
-        Some(ToleranceBand {
-            x: x.into_owned(),
+        Some(Some(ToleranceBand {
+            x: x.to_vec(),
             half_width,
             fill,
             edge,
-        })
+        }))
     }
 }
 

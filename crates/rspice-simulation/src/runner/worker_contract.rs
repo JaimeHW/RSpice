@@ -1118,6 +1118,10 @@ fn testbench_errors(
         .collect()
 }
 
+/// A result sent whole across the worker boundary. Only the browser's simulation worker sends
+/// one, and its columns are always in memory: the browser's engine bridge writes no results
+/// store, so the reads below borrow. A desktop test that converts a stored transient reads its
+/// windows whole here.
 impl TryFrom<SimulationResult> for WorkerSimulationResult {
     type Error = SimulationError;
 

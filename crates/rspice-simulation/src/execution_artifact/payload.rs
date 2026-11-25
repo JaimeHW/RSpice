@@ -143,6 +143,24 @@ impl TransientTrajectoryArtifact {
                 "transient artifact request contains no required waveforms".to_owned(),
             ));
         }
+        // The artifact carries every sample of its trajectory to the dependent analysis, so one
+        // past the numeric payload limit is refused by its length, before any sample is read.
+        let sampled = waveforms
+            .iter()
+            .filter(|(name, _)| {
+                required_waveforms.iter().any(|required| {
+                    normalize_waveform_name(required) == normalize_waveform_name(name)
+                })
+            })
+            .fold(time.len(), |total, (_, waveform)| {
+                total.saturating_add(waveform.y_values.len())
+            });
+        if sampled > PeriodicStateArtifact::MAX_NUMERIC_VALUES {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "Transient trajectory and convergence evidence exceed the numeric payload limit"
+                    .to_owned(),
+            ));
+        }
         let mut artifact_waveforms = BTreeMap::new();
         for (name, waveform) in waveforms {
             if !required_waveforms

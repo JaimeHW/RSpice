@@ -166,11 +166,13 @@ fn unique_waveform<'a, W: AsRef<RetainedWaveform>>(
     Ok(waveform)
 }
 
-/// A column's samples for this comparison alone. A stored window is read
-/// here and dropped with the borrow; the waveform never keeps it.
+/// A column's samples for this comparison alone: resampling and the lag
+/// search take every sample at once, so a stored window is read whole here,
+/// refused past the loaded-results budget, and dropped with the borrow; the
+/// waveform never keeps it.
 fn read_column<'v>(values: &'v WaveformValues, what: &str) -> Result<Cow<'v, [f64]>, String> {
     values
-        .read_range(0..values.len())
+        .read_whole()
         .map_err(|failure| format!("{what} could not be read: {failure}"))
 }
 
