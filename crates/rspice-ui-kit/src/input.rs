@@ -506,3 +506,36 @@ mod tests {
         }
     }
 }
+
+/// Whether the Menu key went down this pass, while the window has the
+/// keyboard. egui has no name for the Menu key, so the keyboard's own state
+/// is read, once a pass however many controls ask; a press wakes the frame
+/// as any other key does. A key held from the pass before was answered then.
+///
+/// A control that opens its menu on Shift+F10 opens it on this as well.
+#[cfg(windows)]
+pub fn menu_key_pressed(ctx: &Context) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_APPS};
+    let id = Id::new("rspice_ui_kit.menu-key");
+    let pass = ctx.cumulative_pass_nr();
+    let last = ctx.data(|data| data.get_temp::<(u64, bool, bool)>(id));
+    if let Some((seen, _, pressed)) = last
+        && seen == pass
+    {
+        return pressed;
+    }
+    // SAFETY: takes a virtual-key code and returns a value; nothing is borrowed.
+    let down =
+        unsafe { GetAsyncKeyState(i32::from(VK_APPS)) } < 0 && ctx.input(|input| input.focused);
+    let held = last.is_some_and(|(seen, down, _)| down && seen + 1 == pass);
+    let pressed = down && !held;
+    ctx.data_mut(|data| data.insert_temp(id, (pass, down, pressed)));
+    pressed
+}
+
+/// Whether the Menu key went down this pass: never, where the keyboard's
+/// state is not read.
+#[cfg(not(windows))]
+pub const fn menu_key_pressed(_ctx: &Context) -> bool {
+    false
+}

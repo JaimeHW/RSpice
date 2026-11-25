@@ -291,7 +291,7 @@ pub fn row_context_menu(response: &egui::Response) -> (egui::Popup<'_>, bool) {
         && (response
             .ctx
             .input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10))
-            || menu_key_pressed(&response.ctx));
+            || rspice_ui_kit::input::menu_key_pressed(&response.ctx));
     let popup_id = egui::Popup::default_response_id(response);
     let mut popup = egui::Popup::context_menu(response).id(popup_id);
     if keyboard_open {
@@ -301,35 +301,6 @@ pub fn row_context_menu(response: &egui::Response) -> (egui::Popup<'_>, bool) {
         popup = popup.anchor(response);
     }
     (popup, keyboard_open)
-}
-
-/// Whether the Menu key went down this pass. egui has no name for the Menu
-/// key, so the keyboard's own state is read, once a pass however many rows
-/// ask; a press wakes the frame as any other key does.
-#[cfg(windows)]
-fn menu_key_pressed(ctx: &egui::Context) -> bool {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_APPS};
-    let id = egui::Id::new("rspice.workbench.menu-key");
-    let pass = ctx.cumulative_pass_nr();
-    let last = ctx.data(|data| data.get_temp::<(u64, bool, bool)>(id));
-    if let Some((seen, _, pressed)) = last
-        && seen == pass
-    {
-        return pressed;
-    }
-    // SAFETY: takes a virtual-key code and returns a value; nothing is borrowed.
-    let down =
-        unsafe { GetAsyncKeyState(i32::from(VK_APPS)) } < 0 && ctx.input(|input| input.focused);
-    // Held down since the pass before: the press was already answered.
-    let held = last.is_some_and(|(seen, down, _)| down && seen + 1 == pass);
-    let pressed = down && !held;
-    ctx.data_mut(|data| data.insert_temp(id, (pass, down, pressed)));
-    pressed
-}
-
-#[cfg(not(windows))]
-const fn menu_key_pressed(_ctx: &egui::Context) -> bool {
-    false
 }
 
 pub fn nav_row_indented_styled(

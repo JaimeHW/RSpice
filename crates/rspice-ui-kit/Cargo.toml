@@ -29,6 +29,10 @@ sha2 = { workspace = true, optional = true }
 # A desktop letters what no embedded face has from the faces installed there.
 rspice-fonts = { workspace = true, features = ["bidi", "egui", "system"] }
 
+[target.'cfg(windows)'.dependencies]
+# The Menu key, which egui has no name for, is read from the keyboard.
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+
 [dev-dependencies]
 serde_json.workspace = true
 sha2.workspace = true

@@ -20,7 +20,7 @@
 //! group heads, a row filter, type-ahead, Ctrl+C, and a column's right edge
 //! that the reader drags to size it; one that asks for
 //! [`DataTable::multi_select`] lets the reader select several rows the way a
-//! file list does. Enter, F2, Delete and the menu key are reported for the
+//! file list does. Enter, F2, Delete, Shift+F10 and the Menu key are reported for the
 //! page to act on. Under a coarse pointer such a table puts a mark before
 //! each row that a tap toggles, since a finger has no Ctrl to hold, and a
 //! press held still on a row asks for its menu. Words a cell cuts short show
@@ -808,6 +808,8 @@ impl Keys {
     /// Read and take the keys a focused table answers; Shift with a step and
     /// Ctrl+A only when it selects several rows.
     fn read(ui: &Ui, multi: bool) -> Self {
+        // Read before the input is held: it asks the context's memory.
+        let menu_key = crate::input::menu_key_pressed(ui.ctx());
         ui.input_mut(|input| {
             let mut step = None;
             let mut extend = false;
@@ -841,7 +843,7 @@ impl Keys {
             let f2 = take(Key::F2);
             let delete = take(Key::Delete);
             let all = multi && input.consume_key(Modifiers::COMMAND, Key::A);
-            let menu = input.consume_key(Modifiers::SHIFT, Key::F10);
+            let menu = input.consume_key(Modifiers::SHIFT, Key::F10) || menu_key;
             let typed = input
                 .events
                 .iter()
