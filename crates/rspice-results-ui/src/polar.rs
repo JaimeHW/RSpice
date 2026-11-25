@@ -326,15 +326,7 @@ impl RadiusRule {
                 let ceiling = if normalize {
                     peak
                 } else {
-                    // A 1-2-5 step above the peak, so the five rings land on
-                    // numbers a reader can hold.
-                    let decade = 10.0_f64.powf(peak.log10().floor());
-                    let steps = [1.0, 2.0, 5.0, 10.0];
-                    steps
-                        .iter()
-                        .map(|step| step * decade)
-                        .find(|candidate| *candidate >= peak)
-                        .unwrap_or(peak)
+                    rspice_results::plot_axis::polar_ring_ceiling(peak)
                 };
                 Self {
                     mode,

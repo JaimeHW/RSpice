@@ -97,6 +97,21 @@ pub fn degree_lattice((min, max): (f64, f64), thinning: usize) -> (f64, f64, Vec
     (low, high, values)
 }
 
+/// The outer ring a polar chart rules a linear magnitude to: the first
+/// 1-2-5 number at or past `peak`, so its rings land on numbers a reader
+/// can hold. A peak that is not a positive number rules to 1.
+pub fn polar_ring_ceiling(peak: f64) -> f64 {
+    if !(peak.is_finite() && peak > 0.0) {
+        return 1.0;
+    }
+    let decade = 10.0_f64.powf(peak.log10().floor());
+    [1.0, 2.0, 5.0, 10.0]
+        .iter()
+        .map(|step| step * decade)
+        .find(|candidate| *candidate >= peak)
+        .unwrap_or(peak)
+}
+
 /// The next coarser spacing on the 1–2–5 ladder.
 fn coarser(step: f64) -> f64 {
     let magnitude = 10f64.powf(step.log10().floor());
@@ -747,5 +762,14 @@ mod tests {
         let t = XScale::Log10.normalize(x, 1.0, 1e9);
         let back = XScale::Log10.denormalize(t, 1.0, 1e9);
         assert!((back / x - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_polar_rim_is_the_first_one_two_five_number_past_the_peak() {
+        assert_eq!(polar_ring_ceiling(7.3), 10.0);
+        assert_eq!(polar_ring_ceiling(1.5), 2.0);
+        assert!((polar_ring_ceiling(0.04) - 0.05).abs() < 1e-15);
+        assert_eq!(polar_ring_ceiling(5.0), 5.0);
+        assert_eq!(polar_ring_ceiling(0.0), 1.0);
     }
 }

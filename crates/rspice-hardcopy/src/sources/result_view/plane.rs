@@ -644,6 +644,9 @@ pub(super) fn quick_smith_plot<W: AsRef<RetainedWaveform>>(
     )
 }
 
+/// The rings a polar chart is ruled in, as the sheet rules them.
+const POLAR_RINGS: u32 = 5;
+
 /// The polar page: each complex quantity on its plane, with rings at the
 /// magnitudes its axis rules and a spoke every 30°.
 pub(super) fn quick_polar_plot<W: AsRef<RetainedWaveform>>(
@@ -661,28 +664,21 @@ pub(super) fn quick_polar_plot<W: AsRef<RetainedWaveform>>(
             "the polar chart has no complex quantity to draw".to_owned(),
         ));
     }
-    // The outermost ring is the first the axis rules at or past the
-    // largest magnitude, so every locus sits inside its rim.
-    let step = rspice_results::plot_axis::linear_ticks(0.0, reach, 4).step;
-    let outer = if step > 0.0 {
-        (reach / step).ceil() * step
-    } else {
-        reach
-    };
+    // The outer ring is the sheet's: the first 1-2-5 number at or past
+    // the largest magnitude, divided into the sheet's five rings.
+    let outer = rspice_results::plot_axis::polar_ring_ceiling(reach);
     let plane = Plane::new((-outer * 1.05, outer * 1.05), (-outer * 1.05, outer * 1.05));
     let mut guides = Vec::new();
     let mut captions = Vec::new();
-    let ruled = rspice_results::plot_axis::linear_ticks_at(0.0, outer * (1.0 + 1.0e-9), step);
-    for (index, (radius, label)) in ruled.ticks.iter().enumerate() {
-        if *radius <= 0.0 {
-            continue;
-        }
-        let rim = index + 1 == ruled.ticks.len();
-        guides.push(plane.guide(&circle((0.0, 0.0), *radius, 256), rim)?);
+    for ring in 1..=POLAR_RINGS {
+        let radius = outer * f64::from(ring) / f64::from(POLAR_RINGS);
+        guides.push(plane.guide(&circle((0.0, 0.0), radius, 256), ring == POLAR_RINGS)?);
+        // Up the 90° spoke, inside each ring, as the sheet writes them:
+        // clear of the angles round the rim.
         captions.extend(plane.label(
-            (*radius, 0.0),
-            (300, -500),
-            label.clone(),
+            (0.0, radius),
+            (300, 2_600),
+            fmt_si_significant(radius, "", 3),
             SemanticCaptionAnchor::Start,
         ));
     }
@@ -696,7 +692,16 @@ pub(super) fn quick_polar_plot<W: AsRef<RetainedWaveform>>(
                 (cos * 1_800.0).round() as i64,
                 (-sin * 1_800.0).round() as i64 + 700,
             ),
-            format!("{degrees}\u{b0}"),
+            // Signed about 0°, as the sheet reads a phase: −150° rather
+            // than 210°.
+            format!(
+                "{}\u{b0}",
+                rspice_results::number_format::tick_label(f64::from(if degrees > 180 {
+                    degrees - 360
+                } else {
+                    degrees
+                }))
+            ),
             if cos < -0.1 {
                 SemanticCaptionAnchor::End
             } else {

@@ -350,3 +350,36 @@ fn a_printed_bode_draws_the_response_the_card_measures() {
         assert_eq!(keys, [format!("|{chosen}|"), format!("phase({chosen})")]);
     }
 }
+
+/// The polar page reads as the sheet: angles signed about 0°, and five
+/// rings to the sheet's 1-2-5 rim, each named up the 90° spoke.
+#[test]
+fn a_printed_polar_reads_its_angles_and_rings_as_the_sheet() {
+    let frequency = vec![1.0, 10.0, 100.0];
+    let run = completed(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC", 0.0).with_waveforms(vec![
+            RetainedWaveform::new("V(out)", frequency, vec![7.3, 5.0, 1.0])
+                .with_complex_components("V(out)", vec![7.3, 0.0, -1.0], vec![0.0, 5.0, 0.0]),
+        ]),
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 2, |_| true).unwrap();
+    let plot = quick_polar_plot(&source).unwrap();
+    let captions = plot
+        .captions
+        .iter()
+        .map(|caption| caption.text.as_str())
+        .collect::<Vec<_>>();
+    for label in [
+        "0\u{b0}",
+        "90\u{b0}",
+        "180\u{b0}",
+        "\u{2212}90\u{b0}",
+        "\u{2212}150\u{b0}",
+    ] {
+        assert!(captions.contains(&label), "{label} in {captions:?}");
+    }
+    assert!(!captions.contains(&"210\u{b0}"), "{captions:?}");
+    for ring in ["2", "4", "6", "8", "10"] {
+        assert!(captions.contains(&ring), "{ring} in {captions:?}");
+    }
+}
