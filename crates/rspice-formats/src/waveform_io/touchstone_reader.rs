@@ -962,7 +962,12 @@ mod tests {
     fn unsupported_port_counts_are_rejected_before_reference_data() {
         let source = "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 65\n[Reference] invalid\n";
         let error = super::read_touchstone_bytes("network.ts", source.as_bytes()).unwrap_err();
-        assert!(error.to_string().contains("supported range"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("a Touchstone import takes 1 to 64"),
+            "{error}"
+        );
     }
 
     #[test]
