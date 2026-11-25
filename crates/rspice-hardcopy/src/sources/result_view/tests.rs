@@ -249,7 +249,7 @@ fn a_printed_bode_gives_magnitude_and_phase_their_own_axes() {
         ]),
     );
     let source = RetainedQuickViewSource::try_new(&run, 2, |_| true).unwrap();
-    let plot = quick_bode_plot(&source, &RetainedQuickViewOverlay::default()).unwrap();
+    let plot = quick_bode_plot(&source, &RetainedQuickViewOverlay::default(), None).unwrap();
     let (captions, tops) = stated_axes(&plot);
     assert!(
         captions.iter().any(|caption| caption == "FREQ \u{b7} Hz"),
@@ -320,4 +320,25 @@ fn a_printed_spectrum_keeps_and_states_the_sheets_window() {
             && settings.contains(" samples \u{b7} RBW "),
         "{settings}"
     );
+}
+
+/// The Bode page prints the response the card measures: the one the reader
+/// chose, not the first the analysis retained.
+#[test]
+fn a_printed_bode_draws_the_response_the_card_measures() {
+    let frequency = vec![1.0, 10.0, 100.0, 1_000.0];
+    let run = completed(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC", 0.0).with_waveforms(vec![
+            RetainedWaveform::new("|V(in)|", frequency.clone(), vec![1.0; 4]),
+            RetainedWaveform::new("phase(V(in))", frequency.clone(), vec![0.0; 4]),
+            RetainedWaveform::new("|V(out)|", frequency.clone(), vec![10.0, 9.0, 1.0, 0.1]),
+            RetainedWaveform::new("phase(V(out))", frequency, vec![0.0, -10.0, -90.0, -170.0]),
+        ]),
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 2, |_| true).unwrap();
+    for (chosen, printed) in [("V(in)", "|V(in)| (dB)"), ("V(out)", "|V(out)| (dB)")] {
+        let plot =
+            quick_bode_plot(&source, &RetainedQuickViewOverlay::default(), Some(chosen)).unwrap();
+        assert_eq!(plot.traces[0].label, printed);
+    }
 }

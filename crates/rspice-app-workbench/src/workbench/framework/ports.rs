@@ -181,6 +181,11 @@ pub trait ResultsPort {
     fn cursors(&self) -> CursorPair;
     /// How the FFT viewer is set up.
     fn fft_settings(&self) -> &FftState;
+    /// The response the reader chose for the Bode card to measure on the
+    /// authored analysis of `analysis`; `None` where they chose none.
+    fn bode_measured_signal(&self, _analysis: AnalysisPresentationKey) -> Option<String> {
+        None
+    }
     /// How the histogram viewer is set up.
     fn histogram_settings(&self) -> &HistogramState;
     /// What the transient viewers hold now.

@@ -287,6 +287,21 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         &self.analysis.fft_state
     }
 
+    fn bode_measured_signal(
+        &self,
+        analysis: rspice_results::result_presentation::AnalysisPresentationKey,
+    ) -> Option<String> {
+        match self.results.session.sheet_settings.get(&(
+            analysis.authored(),
+            rspice_results::result_presentation::ResultViewer::Bode,
+        ))? {
+            crate::results::visualization_document::SheetSettingValue::Bode { measured_signal } => {
+                Some(measured_signal.clone())
+            }
+            _ => None,
+        }
+    }
+
     fn histogram_settings(&self) -> &rspice_results_ui::histogram::HistogramState {
         &self.analysis.histogram_state
     }

@@ -108,6 +108,7 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         ResultViewer::Bode => HardcopySemanticDocument::Plot(quick_bode_plot(
             active,
             &presentation.overlay.for_analysis(active.analysis.id),
+            presentation.bode_signal.as_deref(),
         )?),
         ResultViewer::Fft => HardcopySemanticDocument::Plot(quick_fft_plot(presentation, active)?),
         ResultViewer::HarmonicBalance => {
@@ -368,16 +369,30 @@ const fn waveform_abscissa_scale(analysis: AnalysisType) -> AxisScale {
 fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
     active: &RetainedQuickViewSource<'_, W>,
     overlay: &RetainedQuickViewOverlay,
+    measured: Option<&str>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
+    use rspice_results::bode::retained::{bode_responses, response_signal};
     // Which traces make the response, from their names alone: the page reads
-    // only the window it draws of them, never the whole sweep.
+    // only the window it draws of them, never the whole sweep. It is the
+    // response the card measures: the reader's choice while the analysis
+    // still has it, else the one the sheet shows by default.
     let analysis_type = active.analysis.analysis_type;
     let waveforms = &active.analysis.waveforms;
+    let measured = measured.filter(|signal| {
+        bode_responses(analysis_type, waveforms)
+            .iter()
+            .any(|candidate| candidate == signal)
+    });
     let Some(shape) = rspice_results::bode::retained::ac_bode_shape_for_analysis(
         analysis_type,
         waveforms,
         0,
-        active.is_visible,
+        |waveform: &W| match measured {
+            Some(signal) => {
+                response_signal(analysis_type, &waveform.as_ref().name).as_deref() == Some(signal)
+            }
+            None => (active.is_visible)(waveform),
+        },
     ) else {
         if active.analysis.analysis_type.is_raw_frequency_curve() {
             return quick_waveform_plot(active, ResultViewer::Bode, overlay);

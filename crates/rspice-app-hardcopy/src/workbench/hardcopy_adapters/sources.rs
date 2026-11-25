@@ -115,6 +115,17 @@ fn capture_results_quick_view_presentation(
         .map(|run| capture_quick_view_overlays(reads, run))
         .transpose()?
         .unwrap_or_default();
+    // The response the Bode card measures on the analysis the page prints.
+    let bode_signal = captured_results_run(reads).and_then(|run| {
+        let index = quick_result_analysis_index(reads.model, run, ResultViewer::Bode)?;
+        let analysis = run.analyses.get(index)?;
+        reads.results.bode_measured_signal(
+            rspice_results::result_presentation::AnalysisPresentationKey::new(
+                run.dataset_id,
+                analysis,
+            ),
+        )
+    });
     ResultsQuickViewPresentation::try_new(
         reads.results.result_viewer(),
         overlay,
@@ -140,7 +151,8 @@ fn capture_results_quick_view_presentation(
             custom_max: histogram.custom_max,
             mode: histogram.mode,
         },
-    )
+    )?
+    .with_bode_signal(bode_signal)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -86,6 +86,9 @@ pub struct ResultsQuickViewPresentation {
     /// window.
     #[serde(default)]
     fft_kaiser_beta: Option<f64>,
+    /// The response the Bode card measures, as the reader chose it.
+    #[serde(default)]
+    pub(super) bode_signal: Option<String>,
     pub(super) fft_input_fidelity: InputFidelity,
     pub(super) fft_time_window_auto: bool,
     pub(super) fft_time_window_start: f64,
@@ -141,6 +144,7 @@ impl ResultsQuickViewPresentation {
                 WindowFunction::Kaiser(beta) => Some(beta.get()),
                 _ => None,
             },
+            bode_signal: None,
             fft_input_fidelity: fft.input_fidelity,
             fft_time_window_auto: fft.time_window_auto,
             fft_time_window_start: fft.time_window_start,
@@ -183,6 +187,11 @@ impl ResultsQuickViewPresentation {
         validate_optional_label(
             "prepared FFT source",
             self.fft_selected_source.as_deref(),
+            DISPLAY_NAME_LIMIT,
+        )?;
+        validate_optional_label(
+            "Bode response",
+            self.bode_signal.as_deref(),
             DISPLAY_NAME_LIMIT,
         )?;
         for (field, value) in [
@@ -230,6 +239,14 @@ impl ResultsQuickViewPresentation {
 
     pub fn viewer(&self) -> ResultViewer {
         self.viewer
+    }
+
+    /// Print the response the Bode card measures: the one the reader chose,
+    /// where they chose one.
+    pub fn with_bode_signal(mut self, signal: Option<String>) -> Result<Self, HardcopySourceError> {
+        validate_optional_label("Bode response", signal.as_deref(), DISPLAY_NAME_LIMIT)?;
+        self.bode_signal = signal;
+        Ok(self)
     }
 
     pub(super) fn fft_normalization(&self) -> SpectrumNormalization {
