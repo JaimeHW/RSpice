@@ -7,7 +7,7 @@ mod strips;
 
 use super::*;
 pub use axis::plot_axes;
-use axis::{project, ruled_axis};
+use axis::{project, ruled_at, ruled_axis};
 pub(crate) use columns::print_read;
 pub use columns::{PRINT_COLUMNS_PER_INCH, print_columns};
 use overlay::resolved_overlay_geometry;
@@ -202,6 +202,16 @@ pub(crate) fn quick_plot_in(
     });
     let (x_minimum, x_maximum) = nondegenerate_range(x_minimum, x_maximum);
     let (plot_width, plot_height) = (area.plot_width, area.plot_height);
+    // A strip in degrees is ruled on the sheet's 45° lattice unless the
+    // reader pinned its window, as the sheet rules it.
+    let lattices = units
+        .iter()
+        .map(|unit| {
+            *unit == "\u{b0}"
+                && y_scale != AxisScale::Logarithmic
+                && !(units.len() == 1 && overlay.is_some_and(|overlay| overlay.pins_y()))
+        })
+        .collect::<Vec<_>>();
     let frames = (0..units.len())
         .map(|strip| {
             let data = available_range(
@@ -216,6 +226,10 @@ pub(crate) fn quick_plot_in(
             // are ruled and named, as on the sheet.
             let fitted = rspice_results::plot_axis::padded_fit(data);
             let (y_minimum, y_maximum) = match overlay {
+                _ if lattices[strip] => {
+                    let (low, high, _) = rspice_results::plot_axis::degree_lattice(fitted, 0);
+                    (low, high)
+                }
                 Some(overlay) if units.len() == 1 => overlay.framed_y(y_scale, fitted),
                 _ => fitted,
             };
@@ -246,7 +260,14 @@ pub(crate) fn quick_plot_in(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let (axis_ticks, captions) = strip_axes(area, &frames, &rects, &units, abscissa, y_scale)?;
+    let (axis_ticks, captions) = strip_axes(
+        area,
+        &frames,
+        &rects,
+        (&units, &lattices),
+        abscissa,
+        y_scale,
+    )?;
     let (cursors, markers) = overlay.map_or_else(
         || Ok((Vec::new(), Vec::new())),
         |overlay| {
@@ -350,7 +371,7 @@ fn strip_axes(
     area: PlotArea,
     frames: &[PlotFrame],
     rects: &[StripRect],
-    units: &[&str],
+    (units, lattices): (&[&str], &[bool]),
     abscissa: &QuickAbscissa,
     y_scale: AxisScale,
 ) -> Result<(Vec<SemanticAxisTick>, Vec<SemanticPlotCaption>), HardcopySourceError> {
@@ -387,9 +408,14 @@ fn strip_axes(
             SemanticPoint::new(PLOT_INSET_UM, area.bottom() - 1_500),
         ));
     }
-    for ((frame, rect), unit) in frames.iter().zip(rects).zip(units) {
-        let (mut horizontals, anchor) =
-            ruled_axis(SemanticAxisKind::Vertical, y_scale, frame, unit)?;
+    for (((frame, rect), unit), lattice) in frames.iter().zip(rects).zip(units).zip(lattices) {
+        let (mut horizontals, anchor) = if *lattice {
+            let (_, _, values) =
+                rspice_results::plot_axis::degree_lattice((frame.y_minimum, frame.y_maximum), 0);
+            (ruled_at(SemanticAxisKind::Vertical, frame, &values)?, None)
+        } else {
+            ruled_axis(SemanticAxisKind::Vertical, y_scale, frame, unit)?
+        };
         // The unit stands on the top value, where the sheet writes it.
         if let Some(top) = horizontals
             .iter_mut()

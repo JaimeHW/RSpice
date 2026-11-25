@@ -16,7 +16,7 @@ use rspice_ui_kit::plot::sample::{
     BranchSample, SweepShape, sample_at_with_shape, sample_branches_into,
 };
 use rspice_ui_kit::plot::{
-    self, Axis, CursorPair, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation, Trace, TraceLook, XScale,
+    self, Axis, CursorPair, PlotSpec, SampleInterpolation, Trace, TraceLook, XScale,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
@@ -933,8 +933,7 @@ pub fn show_plot<'a>(
         // An unzoomed degree pane keeps the 45° lattice a Bode phase
         // reading expects; arbitrary zoom depths fall back to plain linear
         // ticks, which stay legible where the lattice would crowd.
-        y0 = (y0 / 45.0).floor() * 45.0;
-        y1 = (y1 / 45.0).ceil() * 45.0;
+        (y0, y1, _) = rspice_results::plot_axis::degree_lattice((y0, y1), 0);
     }
     let y_axis_with = |density: usize| {
         let y_axis = if log_y {
@@ -948,13 +947,10 @@ pub fn show_plot<'a>(
             // values a phase reading is taken at.
             // A shorter pane halves the lattice again for each step of
             // density it gives up.
-            let steps = ((y1 - y0) / 45.0).round().max(0.0) as usize;
-            let stride = (steps + 1).div_ceil(MAX_AXIS_TICKS).max(1)
-                << DENSEST_Y_LADDER.saturating_sub(density);
-            let ticks: Vec<f64> = (0..=steps)
-                .step_by(stride)
-                .map(|index| 45.0f64.mul_add(index as f64, y0))
-                .collect();
+            let (_, _, ticks) = rspice_results::plot_axis::degree_lattice(
+                (y0, y1),
+                DENSEST_Y_LADDER.saturating_sub(density),
+            );
             Axis::with_ticks(y0, y1, "°", &ticks)
         } else {
             Axis::linear_with(y0, y1, pane.axis_unit(), density)

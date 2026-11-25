@@ -96,6 +96,36 @@ pub(super) fn ruled_axis(
             .map(|(value, label)| (value, label, true))
             .collect()
     };
+    Ok((mapped_rules(kind, frame, rules)?, anchor))
+}
+
+/// One axis of `frame` ruled at `values`, each named as the sheet names a
+/// tick it places itself.
+pub(super) fn ruled_at(
+    kind: SemanticAxisKind,
+    frame: &PlotFrame,
+    values: &[f64],
+) -> Result<Vec<SemanticAxisTick>, HardcopySourceError> {
+    mapped_rules(
+        kind,
+        frame,
+        values
+            .iter()
+            .map(|&value| (value, tick_label(value), true))
+            .collect(),
+    )
+}
+
+/// `rules` inside `frame`, mapped to the page.
+fn mapped_rules(
+    kind: SemanticAxisKind,
+    frame: &PlotFrame,
+    rules: Vec<(f64, String, bool)>,
+) -> Result<Vec<SemanticAxisTick>, HardcopySourceError> {
+    let (min, max) = match kind {
+        SemanticAxisKind::Horizontal => (frame.x_minimum, frame.x_maximum),
+        SemanticAxisKind::Vertical => (frame.y_minimum, frame.y_maximum),
+    };
     let mut ticks = Vec::new();
     for (value, label, major) in rules {
         if value < min || value > max {
@@ -124,7 +154,7 @@ pub(super) fn ruled_axis(
             major,
         });
     }
-    Ok((ticks, anchor))
+    Ok(ticks)
 }
 
 fn logarithmic_rules(min: f64, max: f64) -> Vec<(f64, String, bool)> {

@@ -162,6 +162,11 @@ impl RetainedQuickViewOverlay {
     }
 
     /// [`Self::framed_x`] for the ordinate.
+    /// Whether the reader pinned the ordinate's window.
+    pub(super) fn pins_y(&self) -> bool {
+        self.viewport.and_then(|viewport| viewport.y).is_some()
+    }
+
     pub(super) fn framed_y(&self, scale: AxisScale, data: (f64, f64)) -> (f64, f64) {
         pinned(scale, self.viewport.and_then(|viewport| viewport.y), data)
     }

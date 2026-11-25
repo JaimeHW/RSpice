@@ -80,6 +80,23 @@ pub fn padded_fit((min, max): (f64, f64)) -> (f64, f64) {
 /// scale — and every one of them costs a line and a label layout per frame.
 pub const MAX_AXIS_TICKS: usize = 40;
 
+/// The 45° lattice a phase in degrees is ruled on, as a Bode phase is
+/// read: `(min, max)` widened out to whole 45° steps, and the values
+/// ruled across it. Every step is ruled while they number at most
+/// [`MAX_AXIS_TICKS`]; past that the lattice thins by whole multiples of
+/// 45°, so what is left still falls on values a phase is read at, and
+/// it halves again for each step of `thinning` a short pane gives up.
+pub fn degree_lattice((min, max): (f64, f64), thinning: usize) -> (f64, f64, Vec<f64>) {
+    let (low, high) = ((min / 45.0).floor() * 45.0, (max / 45.0).ceil() * 45.0);
+    let steps = ((high - low) / 45.0).round().max(0.0) as usize;
+    let stride = (steps + 1).div_ceil(MAX_AXIS_TICKS).max(1) << thinning;
+    let values = (0..=steps)
+        .step_by(stride)
+        .map(|index| 45.0f64.mul_add(index as f64, low))
+        .collect();
+    (low, high, values)
+}
+
 /// The next coarser spacing on the 1–2–5 ladder.
 fn coarser(step: f64) -> f64 {
     let magnitude = 10f64.powf(step.log10().floor());
@@ -535,6 +552,20 @@ mod tests {
         assert_eq!(series.ticks[0].1, "0");
         assert!(series.ticks.iter().any(|tick| tick.1 == "4µ"));
         assert!(series.anchor.is_none());
+    }
+
+    #[test]
+    fn a_phase_is_ruled_on_whole_forty_five_degree_steps() {
+        assert_eq!(
+            degree_lattice((-170.0, -3.0), 0),
+            (-180.0, 0.0, vec![-180.0, -135.0, -90.0, -45.0, 0.0])
+        );
+        // A span past the tick budget thins by whole steps, and each step
+        // of thinning halves it again.
+        let (_, _, wide) = degree_lattice((0.0, 45.0 * 60.0), 0);
+        assert_eq!(wide[1] - wide[0], 90.0);
+        let (_, _, thinned) = degree_lattice((0.0, 45.0 * 60.0), 1);
+        assert_eq!(thinned[1] - thinned[0], 180.0);
     }
 
     #[test]
