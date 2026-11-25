@@ -234,7 +234,8 @@ fn svg_legend_labels_stay_inside_their_columns_on_a4_and_a3() {
         let mut swatch_left = None;
         let mut entries = Vec::new();
         let mut printed = Vec::new();
-        for node in legend.children().filter(|node| node.is_element()).skip(1) {
+        // The legend stands unboxed: its children are its entries.
+        for node in legend.children().filter(|node| node.is_element()) {
             match node.tag_name().name() {
                 "line" => swatch_left = Some(number(node, "x1")),
                 "rect" => swatch_left = Some(number(node, "x")),

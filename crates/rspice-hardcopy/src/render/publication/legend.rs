@@ -1,10 +1,11 @@
 //! The printed legend's layout, shared by the vector and raster writers.
 //!
-//! Entries fill the plan's [`LegendGrid`] column by column. A column takes the
-//! width its longest label needs, never less than the grid's narrowest
-//! column, and the columns share the printable width out when together they
-//! need more. A label still too long for its column keeps its end, the
-//! object's own name, behind an ellipsis.
+//! Entries fill the plan's [`LegendGrid`] column by column, packed from the
+//! left: a column takes the width its longest label needs and no more, as a
+//! plot's key does, and the columns share the printable width out only when
+//! together they need more. A label still too long for its column keeps its
+//! end, the object's own name, behind an ellipsis. The legend stands under
+//! the content unboxed.
 
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -12,12 +13,14 @@ use super::*;
 
 /// Legend labels are set in Plex Sans at this size.
 pub(super) const LEGEND_TEXT_UM: u64 = 2_600;
-/// A swatch starts this far inside its column.
-const SWATCH_INSET_UM: u64 = 2_000;
+/// A swatch starts at its column's left edge.
+const SWATCH_INSET_UM: u64 = 0;
+/// How long a swatch's line is.
+pub(super) const SWATCH_UM: u64 = 8_000;
 /// A label starts this far right of its swatch's start.
-const LABEL_OFFSET_UM: u64 = 15_000;
+const LABEL_OFFSET_UM: u64 = SWATCH_UM + 1_500;
 /// Clear space between a column's longest label and the next column.
-const COLUMN_GAP_UM: u64 = 2_000;
+const COLUMN_GAP_UM: u64 = 6_000;
 /// The first row's swatch line lies this far below the band's top.
 const FIRST_ROW_UM: u64 = 3_500;
 /// A label's baseline lies this far below its swatch line.
@@ -130,7 +133,7 @@ pub(super) fn legend_layout<'a>(
         .collect::<Result<Vec<_>, HardcopyRenderError>>()?;
     let ellipsis = measure(ELLIPSIS)?.iter().map(|(_, width)| width).sum();
     let chrome = SWATCH_INSET_UM + LABEL_OFFSET_UM + COLUMN_GAP_UM;
-    let mut natural = vec![LegendGrid::MIN_COLUMN_WIDTH.micrometres(); shown.div_ceil(rows)];
+    let mut natural = vec![0; shown.div_ceil(rows)];
     for (index, label) in labels.iter().enumerate() {
         let column = &mut natural[index / rows];
         *column = (*column).max(chrome.saturating_add(to_um(label.width())));

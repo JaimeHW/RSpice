@@ -820,15 +820,7 @@ pub(super) fn write_svg_decorations(
         output.push_str("</text>");
     }
     if let Some(legend) = legend_layout(plan, scene, page)? {
-        let legend_top = legend.top_um;
-        let box_height = geometry.legend_band().micrometres();
-        write!(
-            output,
-            "<g data-rspice-decoration=\"legend\"><rect x=\"{}\" y=\"{legend_top}\" width=\"{}\" height=\"{box_height}\" fill=\"#ffffff\" fill-opacity=\"0.92\" stroke=\"{secondary}\" stroke-width=\"150\"/>",
-            printable.x.micrometres(),
-            printable.width.micrometres(),
-        )
-        .expect("write to string");
+        output.push_str("<g data-rspice-decoration=\"legend\">");
         for slot in &legend.slots {
             let entry = slot.entry;
             let (x, y) = slot.swatch;
@@ -836,7 +828,7 @@ pub(super) fn write_svg_decorations(
             if entry.fill.is_some() {
                 write!(
                     output,
-                    "<rect x=\"{x}\" y=\"{}\" width=\"12000\" height=\"3000\"",
+                    "<rect x=\"{x}\" y=\"{}\" width=\"{SWATCH_UM}\" height=\"3000\"",
                     y.saturating_sub(2_000)
                 )
                 .expect("write to string");
@@ -847,7 +839,7 @@ pub(super) fn write_svg_decorations(
                 write!(
                     output,
                     "<line x1=\"{x}\" y1=\"{y}\" x2=\"{}\" y2=\"{y}\"",
-                    x + 12_000
+                    x + SWATCH_UM
                 )
                 .expect("write to string");
                 write_svg_stroke(output, stroke);

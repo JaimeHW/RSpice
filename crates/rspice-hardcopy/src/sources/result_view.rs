@@ -176,10 +176,7 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         active.run_label,
     )?;
     let bounds = match &semantic_document {
-        HardcopySemanticDocument::Plot(_) => SemanticBounds::try_new(
-            SemanticPoint::new(0, 0),
-            SemanticPoint::new(PLOT_WIDTH_UM, PLOT_HEIGHT_UM),
-        )?,
+        HardcopySemanticDocument::Plot(plot) => drawn_bounds(plot)?,
         _ => SemanticBounds::try_new(
             SemanticPoint::new(0, 0),
             SemanticPoint::new(REPORT_PAGE_WIDTH_UM, REPORT_PAGE_HEIGHT_UM),
@@ -193,6 +190,43 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         semantic_document,
         bounds,
     )
+}
+
+/// What a plot draws, so that its strips take the page: from its left edge,
+/// where its values stand, to just past its frames and every word beside
+/// them. A plot of no frames, a plane, keeps its whole square box.
+fn drawn_bounds(plot: &SemanticPlot) -> Result<SemanticBounds, HardcopySourceError> {
+    if plot.frames.is_empty() {
+        return Ok(SemanticBounds::try_new(
+            SemanticPoint::new(0, 0),
+            SemanticPoint::new(PLOT_WIDTH_UM, PLOT_HEIGHT_UM),
+        )?);
+    }
+    let frames = plot.frames.iter();
+    let captions = plot.captions.iter().map(|caption| caption.position.y_um);
+    let top = frames
+        .clone()
+        .map(|frame| frame.minimum.y_um - 4_000)
+        .chain(captions.clone().map(|y| y - 3_000))
+        .min()
+        .unwrap_or(0)
+        .max(0);
+    let bottom = frames
+        .clone()
+        .map(|frame| frame.maximum.y_um + 4_500)
+        .chain(captions.map(|y| y + 1_500))
+        .max()
+        .unwrap_or(PLOT_HEIGHT_UM)
+        .min(PLOT_HEIGHT_UM);
+    let right = frames
+        .map(|frame| frame.maximum.x_um + 3_000)
+        .max()
+        .unwrap_or(PLOT_WIDTH_UM)
+        .min(PLOT_WIDTH_UM);
+    Ok(SemanticBounds::try_new(
+        SemanticPoint::new(0, top),
+        SemanticPoint::new(right, bottom),
+    )?)
 }
 
 fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(

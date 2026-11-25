@@ -98,9 +98,11 @@ pub const SCHEMATIC_UNIT_UM: i64 = 250;
 /// Fixed top-left authored page origin in schematic world units.
 pub const SCHEMATIC_SHEET_ORIGIN_X_UNITS: i64 = -140;
 pub const SCHEMATIC_SHEET_ORIGIN_Y_UNITS: i64 = -40;
-/// Natural active-plot canvas (10 by 5.625 inches, 16:9).
+/// Natural active-plot canvas, 10 inches wide and as tall as lets its strips
+/// fill a landscape page's content once its header, legend and footer are
+/// set.
 pub const PLOT_WIDTH_UM: i64 = 254_000;
-pub const PLOT_HEIGHT_UM: i64 = 142_875;
+pub const PLOT_HEIGHT_UM: i64 = 176_200;
 /// Natural report page used to arrange the report's already-authored pages.
 pub const REPORT_PAGE_WIDTH_UM: i64 = 215_900;
 pub const REPORT_PAGE_HEIGHT_UM: i64 = 279_400;

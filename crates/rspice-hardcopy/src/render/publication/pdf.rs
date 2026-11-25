@@ -913,36 +913,6 @@ pub(super) fn draw_pdf_decorations(
         );
     }
     if let Some(legend) = legend_layout(plan, scene, page)? {
-        let legend_band = geometry.legend_band().micrometres();
-        let legend_top = legend.top_um;
-        let background = Rect::from_xywh(
-            um_to_points(printable.x.micrometres()),
-            um_to_points(legend_top),
-            um_to_points(printable.width.micrometres()),
-            um_to_points(legend_band),
-        );
-        if let Some(background) = background {
-            set_pdf_fill(
-                surface,
-                Rgb8::new(255, 255, 255),
-                NormalizedF32::new(0.92).expect("valid opacity"),
-            );
-            set_pdf_stroke(
-                surface,
-                ResolvedStroke {
-                    color: secondary,
-                    width_um: 150.0,
-                    pattern: StrokePattern::Solid,
-                    exact_dash_um: None,
-                    exact_dot_spacing_um: None,
-                },
-            );
-            let mut builder = PathBuilder::new();
-            builder.push_rect(background);
-            if let Some(path) = builder.finish() {
-                surface.draw_path(&path);
-            }
-        }
         for slot in &legend.slots {
             let entry = slot.entry;
             let (x_um, y_um) = slot.swatch;
@@ -953,7 +923,7 @@ pub(super) fn draw_pdf_decorations(
                 let Some(swatch) = Rect::from_xywh(
                     um_to_points(x_um),
                     um_to_points(swatch_y),
-                    um_to_points(12_000),
+                    um_to_points(SWATCH_UM),
                     um_to_points(3_000),
                 ) else {
                     continue;
@@ -971,7 +941,7 @@ pub(super) fn draw_pdf_decorations(
                         (
                             um_to_points(x_um),
                             um_to_points(swatch_y),
-                            um_to_points(12_000),
+                            um_to_points(SWATCH_UM),
                             um_to_points(3_000),
                         ),
                         entry.fill,
@@ -979,7 +949,7 @@ pub(super) fn draw_pdf_decorations(
                 }
             } else {
                 builder.move_to(um_to_points(x_um), um_to_points(y_um));
-                builder.line_to(um_to_points(x_um + 12_000), um_to_points(y_um));
+                builder.line_to(um_to_points(x_um + SWATCH_UM), um_to_points(y_um));
                 surface.set_fill(None);
                 set_pdf_stroke(surface, resolve_stroke(plan, transform, entry.stroke));
                 if let Some(path) = builder.finish() {
