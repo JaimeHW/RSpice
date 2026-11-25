@@ -54,16 +54,19 @@ pub enum NetQuantity {
     Voltage,
     /// `D(net)`: the digital event trace, drawn as a logic or bus lane.
     Digital,
+    /// `E(net)`: a real-valued event net's trace, drawn as a lane of values.
+    Real,
 }
 
 impl NetQuantity {
-    pub const ALL: [Self; 2] = [Self::Voltage, Self::Digital];
+    pub const ALL: [Self; 3] = [Self::Voltage, Self::Digital, Self::Real];
 
     /// The accessor letter that wraps a net into this quantity.
     pub const fn prefix(self) -> char {
         match self {
             Self::Voltage => 'V',
             Self::Digital => 'D',
+            Self::Real => 'E',
         }
     }
 
@@ -73,8 +76,8 @@ impl NetQuantity {
     }
 }
 
-/// The net a result signal is read on, and which of its quantities: `V(n)`
-/// and `D(n)` both locate the conductor `n`.
+/// The net a result signal is read on, and which of its quantities: `V(n)`,
+/// `D(n)` and `E(n)` all locate the conductor `n`.
 pub fn probed_net(signal: &str) -> Option<(&str, NetQuantity)> {
     NetQuantity::ALL.into_iter().find_map(|quantity| {
         wrapped_signal_name(signal, quantity.prefix()).map(|net| (net, quantity))
@@ -512,6 +515,7 @@ mod tests {
         assert_eq!(net, "OUT");
         assert!(editor.net_highlight.is_wire_highlighted(1));
         assert_eq!(probed_net("D(x1.q)"), Some(("x1.q", NetQuantity::Digital)));
+        assert_eq!(probed_net("E(gain)"), Some(("gain", NetQuantity::Real)));
         assert_eq!(probed_net(" v(out) "), Some(("out", NetQuantity::Voltage)));
         assert_eq!(probed_net("D(a)-D(b)"), None);
         assert_eq!(probed_net("I(r1)"), None);

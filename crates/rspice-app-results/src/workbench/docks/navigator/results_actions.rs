@@ -3,7 +3,7 @@
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::documents::result_document::browser_plot::{
-    result_quantity_ticked, set_result_signal_plotted,
+    EVENT_NET_ROW_PREFIX, result_quantity_ticked, set_result_signal_plotted,
 };
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultsParts, compare_availability, exact_result_artifact_text,
@@ -452,6 +452,15 @@ pub(super) fn result_artifact_context_menu(
             open_result_artifact(state, artifact, true);
             ui.close();
         }
+        // An event net's lane is drawn by its conductor, as a waveform's
+        // net is.
+        if let Some(net) = artifact
+            .identity
+            .canonical_name()
+            .strip_prefix(EVENT_NET_ROW_PREFIX)
+        {
+            show_on_schematic_item(ui, state, net);
+        }
         // Offered only while the session holds the run that produced it.
         if let Some(run) = producing_run(
             &state.model.simulation.retained.runs,
@@ -649,25 +658,15 @@ pub(super) fn result_signal_context_menu(
             state,
             &ResultBrowserSelectionKey::Waveform(key.clone()),
         );
-        let signal_name = key
+        match key
             .resolve(&state.model.simulation.retained.runs)
-            .map(|(.., waveform)| waveform.name.clone());
-        let refusal = match &signal_name {
-            None => Some("This signal is no longer in its run.".to_owned()),
-            Some(signal) => schematic_refusal(signal),
-        };
-        let cross_probe = ui.add_enabled(
-            refusal.is_none(),
-            egui::Button::new("Show on schematic"),
-        );
-        if let Some(refusal) = refusal {
-            cross_probe.clone().on_disabled_hover_text(refusal);
-        }
-        if cross_probe.clicked() {
-            if let Some(signal) = signal_name {
-                show_signal_on_schematic(state, &signal);
+            .map(|(.., waveform)| waveform.name.clone())
+        {
+            Some(signal) => show_on_schematic_item(ui, state, &signal),
+            None => {
+                ui.add_enabled(false, egui::Button::new("Show on schematic"))
+                    .on_disabled_hover_text("This signal is no longer in its run.");
             }
-            ui.close();
         }
         // Offered only while the session holds the run that produced it.
         if let Some(run) = producing_run(
@@ -724,18 +723,24 @@ pub(super) fn locate_on_schematic_menu(
     state: &mut ResultsParts<'_>,
     signal: &str,
 ) {
-    let signal = signal.to_owned();
-    response.context_menu(|ui| {
-        let refusal = schematic_refusal(&signal);
-        let show = ui.add_enabled(refusal.is_none(), egui::Button::new("Show on schematic"));
-        if let Some(refusal) = refusal {
-            show.clone().on_disabled_hover_text(refusal);
+    response.context_menu(|ui| show_on_schematic_item(ui, state, signal));
+}
+
+/// The menu row that shows `signal` on the schematic: disabled, saying why,
+/// when no one net or part carries it.
+fn show_on_schematic_item(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, signal: &str) {
+    let refusal = schematic_refusal(signal);
+    let show = ui.add_enabled(refusal.is_none(), egui::Button::new("Show on schematic"));
+    match refusal {
+        Some(refusal) => {
+            show.on_disabled_hover_text(refusal);
         }
-        if show.clicked() {
-            show_signal_on_schematic(state, &signal);
+        None if show.clicked() => {
+            show_signal_on_schematic(state, signal);
             ui.close();
         }
-    });
+        None => {}
+    }
 }
 
 /// Run the command `key` names once the data browser's contribution
