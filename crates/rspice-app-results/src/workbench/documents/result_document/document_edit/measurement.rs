@@ -827,7 +827,10 @@ mod tests {
         assert_eq!(evaluate(&analysis, "max(V(out))"), Ok(10.0));
         let work = before.since();
         assert_eq!(work.stored_reads, 0, "a stored column was read whole");
-        assert!(work.stored_views > 0, "the trace was not read a block at a time");
+        assert!(
+            work.stored_views > 0,
+            "the trace was not read a block at a time"
+        );
     }
 
     /// A digital net is measured from its event history, as `.MEASURE` reads

@@ -1620,9 +1620,7 @@ impl ResultsState {
         ),
     ) {
         let source = simulation.retained.runs.revision();
-        self.session
-            .signal_indices
-            .adopt(&source, analysis, index);
+        self.session.signal_indices.adopt(&source, analysis, index);
         if let Some(verdict) = verdict {
             self.retained_evidence_validity
                 .insert(simulation, &source, analysis, verdict);
