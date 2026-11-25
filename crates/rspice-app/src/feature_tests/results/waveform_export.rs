@@ -108,6 +108,8 @@ fn a_result_export_that_fails_is_toasted() {
         )]),
     );
     state.open_project_session();
+    state.model.simulation.retained.runs[0].lifecycle =
+        rspice_app_state::state::SimulationRunLifecycle::Completed;
     state.results.results.session.viewer =
         rspice_app_results::workbench::documents::result_document::ResultViewer::Waves;
     let io = MockExportWorkflowIo {
