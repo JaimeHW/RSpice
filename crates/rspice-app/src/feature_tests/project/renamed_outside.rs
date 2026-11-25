@@ -191,7 +191,11 @@ fn a_project_renamed_while_closed_opens_by_its_new_name_with_every_run_and_docum
     let moved = scratch.0.join("moved");
     std::fs::rename(&folder, &moved).unwrap();
     let state = opened(&moved.join("amp-final.rspiceproj"));
-    assert_eq!(runs_read(&state), runs, "every run reads from the moved folder");
+    assert_eq!(
+        runs_read(&state),
+        runs,
+        "every run reads from the moved folder"
+    );
     assert_eq!(documents(&state), documents_saved);
 }
 
