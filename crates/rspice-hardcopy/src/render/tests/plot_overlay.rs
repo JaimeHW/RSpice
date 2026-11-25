@@ -61,6 +61,7 @@ fn overlay_plot() -> SemanticPlot {
         }],
         annotations: Vec::new(),
         captions: Vec::new(),
+        frames: Vec::new(),
     }
 }
 

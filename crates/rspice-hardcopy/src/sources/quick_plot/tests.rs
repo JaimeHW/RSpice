@@ -1,5 +1,9 @@
 use super::*;
 
+fn time() -> QuickAbscissa {
+    QuickAbscissa::new("Time", "s", AxisScale::Linear)
+}
+
 /// A retained document marker reaches the page as itself.
 ///
 /// The two stores allocate independently and label distinctly, so a `D`
@@ -13,6 +17,7 @@ fn a_retained_document_marker_and_a_spec_limit_reach_the_page_as_themselves() {
     let series = vec![QuickResultSeries {
         identity: "trace-identity".to_owned(),
         label: "V(out)".to_owned(),
+        unit: "V".to_owned(),
         points: vec![(0.0, 0.0), (1.0, 4.0), (2.0, 8.0)],
     }];
     let overlay = RetainedQuickViewOverlay::try_new(
@@ -44,8 +49,15 @@ fn a_retained_document_marker_and_a_spec_limit_reach_the_page_as_themselves() {
     )
     .unwrap();
 
-    let plot = quick_plot_from_series(ResultViewer::Waves, "Results", 0, series, Some(&overlay))
-        .expect("plot resolves");
+    let plot = quick_plot_from_series(
+        ResultViewer::Waves,
+        "Results",
+        0,
+        series,
+        Some(&overlay),
+        &time(),
+    )
+    .expect("plot resolves");
 
     assert_eq!(
         plot.markers
@@ -93,9 +105,11 @@ fn a_retained_document_marker_and_a_spec_limit_reach_the_page_as_themselves() {
             vec![QuickResultSeries {
                 identity: "trace-identity".to_owned(),
                 label: "V(out)".to_owned(),
+                unit: "V".to_owned(),
                 points: vec![(0.0, 0.0), (2.0, 8.0)],
             }],
             Some(&decoded),
+            &time(),
         ),
         Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(_))
     ));

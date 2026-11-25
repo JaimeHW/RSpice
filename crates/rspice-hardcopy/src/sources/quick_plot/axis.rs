@@ -48,73 +48,83 @@ pub fn plot_axes(
 ) -> Result<(Vec<SemanticAxisTick>, Vec<SemanticPlotCaption>), HardcopySourceError> {
     let mut ticks = Vec::new();
     let mut captions = Vec::new();
-    for (kind, scale, min, max) in [
+    for (kind, scale, label, y) in [
         (
             SemanticAxisKind::Horizontal,
             x_scale,
-            frame.x_minimum,
-            frame.x_maximum,
+            "x",
+            PLOT_HEIGHT_UM - 1_500,
         ),
-        (
-            SemanticAxisKind::Vertical,
-            y_scale,
-            frame.y_minimum,
-            frame.y_maximum,
-        ),
+        (SemanticAxisKind::Vertical, y_scale, "y", 9_000),
     ] {
-        if !min.is_finite() || !max.is_finite() || min >= max || !(max - min).is_finite() {
-            return Err(HardcopySourceError::InvalidResultRange);
-        }
-        let rules = if scale == AxisScale::Logarithmic {
-            logarithmic_rules(min, max)
-        } else {
-            let axis = rspice_results::plot_axis::linear_ticks(min, max, 6);
-            if let Some(anchor) = rspice_results::plot_axis::anchor_label(&axis, "") {
-                let (label, y) = match kind {
-                    SemanticAxisKind::Horizontal => ("x", PLOT_HEIGHT_UM - 1_500),
-                    SemanticAxisKind::Vertical => ("y", 9_000),
-                };
-                captions.push(SemanticPlotCaption {
-                    text: format!("{label}: {anchor}"),
-                    position: SemanticPoint::new(PLOT_INSET_UM, y),
-                });
-            }
-            axis.ticks
-                .into_iter()
-                .map(|(value, label)| (value, label, true))
-                .collect()
-        };
-        for (value, label, major) in rules {
-            if value < min || value > max {
-                continue;
-            }
-            let (start, end) = match kind {
-                SemanticAxisKind::Horizontal => {
-                    ((value, frame.y_minimum), (value, frame.y_maximum))
-                }
-                SemanticAxisKind::Vertical => ((frame.x_minimum, value), (frame.x_maximum, value)),
-            };
-            let point = |(x, y)| {
-                map_plot_point(
-                    (x, y),
-                    frame.x_minimum,
-                    frame.y_minimum,
-                    frame.x_span,
-                    frame.y_span,
-                    frame.plot_width,
-                    frame.plot_height,
-                )
-            };
-            ticks.push(SemanticAxisTick {
-                axis: kind,
-                start: point(start)?,
-                end: point(end)?,
-                label,
-                major,
-            });
+        let (rules, anchor) = ruled_axis(kind, scale, frame, "")?;
+        ticks.extend(rules);
+        if let Some(anchor) = anchor {
+            captions.push(SemanticPlotCaption::new(
+                format!("{label}: {anchor}"),
+                SemanticPoint::new(PLOT_INSET_UM, y),
+            ));
         }
     }
     Ok((ticks, captions))
+}
+
+/// One axis of `frame`, ruled in source space and mapped to the page, and
+/// the anchor its ticks are offsets from when they are offsets, stated in
+/// `unit`.
+pub(super) fn ruled_axis(
+    kind: SemanticAxisKind,
+    scale: AxisScale,
+    frame: &PlotFrame,
+    unit: &str,
+) -> Result<(Vec<SemanticAxisTick>, Option<String>), HardcopySourceError> {
+    let (min, max) = match kind {
+        SemanticAxisKind::Horizontal => (frame.x_minimum, frame.x_maximum),
+        SemanticAxisKind::Vertical => (frame.y_minimum, frame.y_maximum),
+    };
+    if !min.is_finite() || !max.is_finite() || min >= max || !(max - min).is_finite() {
+        return Err(HardcopySourceError::InvalidResultRange);
+    }
+    let mut anchor = None;
+    let rules = if scale == AxisScale::Logarithmic {
+        logarithmic_rules(min, max)
+    } else {
+        let axis = rspice_results::plot_axis::linear_ticks(min, max, 6);
+        anchor = rspice_results::plot_axis::anchor_label(&axis, unit);
+        axis.ticks
+            .into_iter()
+            .map(|(value, label)| (value, label, true))
+            .collect()
+    };
+    let mut ticks = Vec::new();
+    for (value, label, major) in rules {
+        if value < min || value > max {
+            continue;
+        }
+        let (start, end) = match kind {
+            SemanticAxisKind::Horizontal => ((value, frame.y_minimum), (value, frame.y_maximum)),
+            SemanticAxisKind::Vertical => ((frame.x_minimum, value), (frame.x_maximum, value)),
+        };
+        let point = |(x, y)| {
+            map_plot_point(
+                (x, y),
+                frame.x_minimum,
+                frame.y_minimum,
+                frame.x_span,
+                frame.y_span,
+                frame.plot_width,
+                frame.plot_height,
+            )
+        };
+        ticks.push(SemanticAxisTick {
+            axis: kind,
+            start: point(start)?,
+            end: point(end)?,
+            label,
+            major,
+        });
+    }
+    Ok((ticks, anchor))
 }
 
 fn logarithmic_rules(min: f64, max: f64) -> Vec<(f64, String, bool)> {

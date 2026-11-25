@@ -64,7 +64,17 @@ impl SemanticSceneCompiler<'_> {
                     } else {
                         to
                     };
-                    (self.offset_scene_point(foot, 0, 2_600)?, TextAnchor::Middle)
+                    // A value at either end of the axis stands inside it, as
+                    // the sheet nudges it, clear of the abscissa's caption.
+                    let (left, x) = (frame.x.micrometres(), foot.x.micrometres());
+                    let anchor = if x <= left + 1 {
+                        TextAnchor::Start
+                    } else if x + 1 >= left + frame.width.micrometres() {
+                        TextAnchor::End
+                    } else {
+                        TextAnchor::Middle
+                    };
+                    (self.offset_scene_point(foot, 0, 2_600)?, anchor)
                 }
                 crate::sources::SemanticAxisKind::Vertical => {
                     let foot = if from.x.micrometres() < to.x.micrometres() {

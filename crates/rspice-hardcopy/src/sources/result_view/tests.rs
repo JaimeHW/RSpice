@@ -155,3 +155,108 @@ fn the_s_parameter_sheet_prints_its_coefficients_in_decibels() {
     let s11 = decibels(&plot.traces[0]);
     assert!((s11[0] - 20.0 * 0.5f64.log10()).abs() < 1e-12, "{s11:?}");
 }
+
+/// A completed run of one analysis.
+fn completed(analysis: AnalysisResult) -> SimulationRun {
+    let mut run: SimulationRun = SimulationRun::from_persisted_identity(
+        1,
+        "Run 1".to_owned(),
+        0.0,
+        RunId::new(),
+        DatasetId::new(),
+        None,
+        None,
+    );
+    run.analyses.push(analysis);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run
+}
+
+/// The words a printed plot states its axes in: the abscissa's caption, and
+/// for each strip, top to bottom, the value on its top tick.
+fn stated_axes(plot: &SemanticPlot) -> (Vec<String>, Vec<String>) {
+    let captions = plot
+        .captions
+        .iter()
+        .map(|caption| caption.text.clone())
+        .collect();
+    let tops = plot
+        .frames
+        .iter()
+        .map(|frame| {
+            plot.axis_ticks
+                .iter()
+                .filter(|tick| {
+                    tick.axis == SemanticAxisKind::Vertical
+                        && !tick.label.is_empty()
+                        && (frame.minimum.y_um..=frame.maximum.y_um).contains(&tick.start.y_um)
+                })
+                .min_by_key(|tick| tick.start.y_um)
+                .map(|tick| tick.label.clone())
+                .unwrap_or_default()
+        })
+        .collect();
+    (captions, tops)
+}
+
+/// A printed sheet says what it plots: the abscissa's quantity and unit in
+/// its row's gutter, and each strip's unit on its top value. A current and a
+/// voltage get a strip each, so a milliamp is not a flat line on a volt axis.
+#[test]
+fn a_printed_plot_states_its_axes_and_gives_each_unit_a_strip() {
+    let time = vec![0.0, 1.0e-3, 2.0e-3];
+    let run = completed(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient", 0.0).with_waveforms(vec![
+            RetainedWaveform::new("V(out)", time.clone(), vec![0.0, 1.0, 2.0]),
+            RetainedWaveform::new("I(R1)", time, vec![0.0, 1.0e-3, 2.0e-3]),
+        ]),
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 1, |_| true).unwrap();
+    let plot = quick_waveform_plot(
+        &source,
+        ResultViewer::Waves,
+        &RetainedQuickViewOverlay::default(),
+    )
+    .unwrap();
+    let (captions, tops) = stated_axes(&plot);
+    assert!(
+        captions.iter().any(|caption| caption == "TIME \u{b7} s"),
+        "{captions:?}"
+    );
+    assert_eq!(plot.frames.len(), 2, "a volt strip and an amp strip");
+    assert!(tops[0].ends_with('V'), "{tops:?}");
+    assert!(tops[1].ends_with("mA"), "{tops:?}");
+    let in_frame = |trace: &SemanticPlotTrace, frame: &SemanticPlotFrame| {
+        trace
+            .paths
+            .iter()
+            .flatten()
+            .all(|point| (frame.minimum.y_um..=frame.maximum.y_um).contains(&point.y_um))
+    };
+    assert!(in_frame(&plot.traces[0], &plot.frames[0]));
+    assert!(in_frame(&plot.traces[1], &plot.frames[1]));
+}
+
+/// The Bode page prints magnitude and phase each on its own axis, on a
+/// decade abscissa it names.
+#[test]
+fn a_printed_bode_gives_magnitude_and_phase_their_own_axes() {
+    let frequency = vec![1.0, 10.0, 100.0, 1_000.0];
+    let run = completed(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC", 0.0).with_waveforms(vec![
+            RetainedWaveform::new("|V(out)|", frequency.clone(), vec![10.0, 9.0, 1.0, 0.1]),
+            RetainedWaveform::new("phase(V(out))", frequency, vec![0.0, -10.0, -90.0, -170.0]),
+        ]),
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 2, |_| true).unwrap();
+    let plot = quick_bode_plot(&source, &RetainedQuickViewOverlay::default()).unwrap();
+    let (captions, tops) = stated_axes(&plot);
+    assert!(
+        captions.iter().any(|caption| caption == "FREQ \u{b7} Hz"),
+        "{captions:?}"
+    );
+    assert_eq!(plot.frames.len(), 2);
+    assert!(tops[0].ends_with("dB"), "{tops:?}");
+    assert!(tops[1].ends_with('°'), "{tops:?}");
+    assert_eq!(plot.x_scale, AxisScale::Logarithmic);
+}

@@ -195,6 +195,7 @@ fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(
     viewer: ResultViewer,
     overlay: &RetainedQuickViewOverlay,
 ) -> Result<SemanticPlot, HardcopySourceError> {
+    let abscissa = waveform_abscissa_scale(active.analysis.analysis_type);
     let series = active
         .analysis
         .waveforms
@@ -211,7 +212,8 @@ fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(
                 active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
             label: waveform.name.clone(),
-            points: waveform.x.samples(..).zip(waveform.y.samples(..)).collect(),
+            unit: printed_unit(waveform, active.analysis.analysis_type),
+            points: printed_points(&waveform.x, &waveform.y, abscissa, overlay),
         })
         .collect();
     quick_plot_from_scaled_series(
@@ -220,8 +222,79 @@ fn quick_waveform_plot<W: AsRef<RetainedWaveform>>(
         0,
         series,
         Some(overlay),
-        waveform_abscissa_scale(active.analysis.analysis_type),
+        &analysis_abscissa(active.analysis, abscissa),
         AxisScale::Linear,
+    )
+}
+
+/// What the analysis's abscissa measures, ruled on `scale`: its quantity,
+/// and the unit its coordinates are retained in.
+fn analysis_abscissa<W>(analysis: &AnalysisResult<W>, scale: AxisScale) -> QuickAbscissa {
+    let (quantity, unit, _, _) = analysis.analysis_type.axis_info();
+    QuickAbscissa::new(
+        quantity,
+        analysis.waveform_coordinate_unit().unwrap_or(unit),
+        scale,
+    )
+}
+
+/// The unit a retained series reads in, as the sheet names it: the unit the
+/// producer stated, else the unit its name's accessor reads (`I(R1)` is
+/// amperes, `phase(V(out))` degrees, however wrapped), else the analysis's
+/// own quantity.
+fn printed_unit(waveform: &RetainedWaveform, analysis: AnalysisType) -> String {
+    if let Some(unit) = &waveform.unit {
+        return unit.clone();
+    }
+    let accessor = |name: &str, accessor: &str| {
+        name.get(..accessor.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(accessor))
+    };
+    let mut name = waveform.name.trim_start();
+    if accessor(name, "phase(") {
+        return "°".to_owned();
+    }
+    for wrapper in ["re(", "im(", "mag(", "abs("] {
+        if accessor(name, wrapper) {
+            name = name[wrapper.len()..].trim_start();
+        }
+    }
+    let name = name.strip_prefix('|').unwrap_or(name);
+    if accessor(name, "i(") {
+        "A"
+    } else if accessor(name, "v(") {
+        "V"
+    } else if accessor(name, "p(") {
+        "W"
+    } else if analysis == AnalysisType::Pstb {
+        ""
+    } else if analysis.is_bode_response() {
+        "dB"
+    } else if matches!(
+        analysis,
+        AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise
+    ) {
+        "V^2/Hz"
+    } else {
+        "V"
+    }
+    .to_owned()
+}
+
+/// `y` over `x` as the page reads it for a sheet ruled on `scale`: over the
+/// reader's window at the page's columns, as the sheet reads what it draws.
+fn printed_points(
+    x: &rspice_results::waveform::WaveformValues,
+    y: &rspice_results::waveform::WaveformValues,
+    scale: AxisScale,
+    overlay: &RetainedQuickViewOverlay,
+) -> Vec<(f64, f64)> {
+    print_read(
+        x,
+        y,
+        scale,
+        overlay.window_x(),
+        print_columns(PLOT_WIDTH_UM - 2 * PLOT_INSET_UM),
     )
 }
 
@@ -250,15 +323,10 @@ fn quick_network_plot<W: AsRef<RetainedWaveform>>(
                     active.dataset_id, active.run_id, active.analysis.id, waveform.name
                 ),
                 label: format!("|{coefficient}| (dB)"),
-                points: waveform
-                    .x
-                    .samples(..)
-                    .zip(
-                        waveform
-                            .y
-                            .samples(..)
-                            .map(|magnitude| 20.0 * magnitude.log10()),
-                    )
+                unit: "dB".to_owned(),
+                points: printed_points(&waveform.x, &waveform.y, AxisScale::Logarithmic, overlay)
+                    .into_iter()
+                    .map(|(frequency, magnitude)| (frequency, 20.0 * magnitude.log10()))
                     .collect(),
             })
         })
@@ -274,7 +342,7 @@ fn quick_network_plot<W: AsRef<RetainedWaveform>>(
         0,
         series,
         Some(overlay),
-        AxisScale::Logarithmic,
+        &analysis_abscissa(active.analysis, AxisScale::Logarithmic),
         AxisScale::Linear,
     )
 }
@@ -301,9 +369,13 @@ fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
     active: &RetainedQuickViewSource<'_, W>,
     overlay: &RetainedQuickViewOverlay,
 ) -> Result<SemanticPlot, HardcopySourceError> {
-    let Some(summary) = rspice_results::bode::retained::ac_bode_summary_for_analysis(
-        active.analysis.analysis_type,
-        &active.analysis.waveforms,
+    // Which traces make the response, from their names alone: the page reads
+    // only the window it draws of them, never the whole sweep.
+    let analysis_type = active.analysis.analysis_type;
+    let waveforms = &active.analysis.waveforms;
+    let Some(shape) = rspice_results::bode::retained::ac_bode_shape_for_analysis(
+        analysis_type,
+        waveforms,
         0,
         active.is_visible,
     ) else {
@@ -314,43 +386,48 @@ fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
             "frequency response",
         ));
     };
+    let magnitude = waveforms[shape.mag_index].as_ref();
+    let signal = shape.signal;
+    // A stability analysis retains its loop gain in decibels; every other
+    // response retains a linear magnitude.
+    let decibels = analysis_type == AnalysisType::Stb;
     let mut series = vec![QuickResultSeries {
         identity: format!(
-            "{}:{}:{}:{}:magnitude-db",
-            active.dataset_id, active.run_id, active.analysis.id, summary.signal
+            "{}:{}:{}:{signal}:magnitude-db",
+            active.dataset_id, active.run_id, active.analysis.id
         ),
-        label: format!("|{}| (dB)", summary.signal),
-        points: summary
-            .frequency
-            .samples(..)
-            .zip(summary.gain_db.samples(..))
+        label: format!("|{signal}| (dB)"),
+        unit: "dB".to_owned(),
+        points: printed_points(&magnitude.x, &magnitude.y, AxisScale::Logarithmic, overlay)
+            .into_iter()
+            .map(|(frequency, gain)| (frequency, if decibels { gain } else { 20.0 * gain.log10() }))
             .collect(),
     }];
-    if let Some(phase) = summary.phase_deg {
+    if let Some(phase) = shape
+        .phase_index
+        .and_then(|index| waveforms.get(index))
+        .map(AsRef::as_ref)
+    {
         series.push(QuickResultSeries {
             identity: format!(
-                "{}:{}:{}:{}:phase-deg",
-                active.dataset_id, active.run_id, active.analysis.id, summary.signal
+                "{}:{}:{}:{signal}:phase-deg",
+                active.dataset_id, active.run_id, active.analysis.id
             ),
-            label: format!("phase({}) (°)", summary.signal),
-            points: summary
-                .frequency
-                .samples(..)
-                .zip(phase.samples(..))
-                .collect(),
+            label: format!("phase({signal}) (°)"),
+            unit: "°".to_owned(),
+            points: printed_points(&phase.x, &phase.y, AxisScale::Logarithmic, overlay),
         });
     }
     // Frequency is ruled in decades on the sheet, so the page rules it in
-    // decades too. The ordinate is left linear: the magnitude series is in
-    // decibels and the phase series in degrees, and one axis cannot honestly
-    // claim to be either while it carries both.
+    // decades too. Magnitude in decibels and phase in degrees each get their
+    // own strip and axis, as the sheet's two panes do.
     quick_plot_from_scaled_series(
         ResultViewer::Bode,
         "Results",
         0,
         series,
         Some(overlay),
-        AxisScale::Logarithmic,
+        &analysis_abscissa(active.analysis, AxisScale::Logarithmic),
         AxisScale::Linear,
     )
 }
@@ -431,19 +508,16 @@ fn quick_noise_spectrum_plot<W: AsRef<RetainedWaveform>>(
                 "{}:{}:{}:{}:noise-amplitude-density:{waveform_index}",
                 active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
-            label: format!(
-                "{} ({})",
-                waveform.name,
-                match waveform.unit.as_deref() {
-                    Some("A²/Hz" | "A^2/Hz") => "nA/√Hz",
-                    Some("s²/Hz" | "s^2/Hz") => "ns/√Hz",
-                    _ => "nV/√Hz",
-                }
-            ),
-            points: waveform
-                .x
-                .samples(..)
-                .zip(waveform.y.samples(..).map(|density| density.sqrt() * 1.0e9))
+            label: waveform.name.clone(),
+            unit: match waveform.unit.as_deref() {
+                Some("A²/Hz" | "A^2/Hz") => "nA/√Hz",
+                Some("s²/Hz" | "s^2/Hz") => "ns/√Hz",
+                _ => "nV/√Hz",
+            }
+            .to_owned(),
+            points: printed_points(&waveform.x, &waveform.y, AxisScale::Logarithmic, overlay)
+                .into_iter()
+                .map(|(frequency, density)| (frequency, density.sqrt() * 1.0e9))
                 .collect(),
         })
         .collect();
@@ -455,7 +529,7 @@ fn quick_noise_spectrum_plot<W: AsRef<RetainedWaveform>>(
         0,
         series,
         Some(overlay),
-        AxisScale::Logarithmic,
+        &analysis_abscissa(active.analysis, AxisScale::Logarithmic),
         AxisScale::Linear,
     )
 }
@@ -494,10 +568,23 @@ fn quick_harmonic_balance_plot<W: AsRef<RetainedWaveform>>(
                 || waveform.name.clone(),
                 |complex| complex.source_name.clone(),
             ),
-            points: waveform.x.samples(..).zip(waveform.y.samples(..)).collect(),
+            unit: printed_unit(waveform, active.analysis.analysis_type),
+            points: printed_points(
+                &waveform.x,
+                &waveform.y,
+                AxisScale::Linear,
+                &RetainedQuickViewOverlay::default(),
+            ),
         })
         .collect();
-    quick_plot_from_series(ResultViewer::HarmonicBalance, "Results", 0, series, None)
+    quick_plot_from_series(
+        ResultViewer::HarmonicBalance,
+        "Results",
+        0,
+        series,
+        None,
+        &analysis_abscissa(active.analysis, AxisScale::Linear),
+    )
 }
 
 fn quick_phase_noise_plot<W: AsRef<RetainedWaveform>>(
@@ -531,8 +618,14 @@ fn quick_phase_noise_plot<W: AsRef<RetainedWaveform>>(
                 "{}:{}:{}:{}:phase-noise",
                 active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
-            label: format!("{} - dBc/Hz", waveform.name),
-            points: waveform.x.samples(..).zip(waveform.y.samples(..)).collect(),
+            label: waveform.name.clone(),
+            unit: "dBc/Hz".to_owned(),
+            points: printed_points(
+                &waveform.x,
+                &waveform.y,
+                AxisScale::Logarithmic,
+                &RetainedQuickViewOverlay::default(),
+            ),
         })
         .collect();
     // Offset frequency in decades, phase noise in dBc/Hz: the two axes of
@@ -543,7 +636,7 @@ fn quick_phase_noise_plot<W: AsRef<RetainedWaveform>>(
         0,
         series,
         None,
-        AxisScale::Logarithmic,
+        &QuickAbscissa::new("Offset frequency", "Hz", AxisScale::Logarithmic),
         AxisScale::Decibels,
     )
 }
@@ -596,6 +689,7 @@ fn quick_fft_plot<W: AsRef<RetainedWaveform>>(
                 active.dataset_id, active.run_id, active.analysis.id, waveform.name, data.fft_size
             ),
             label: data.name.clone(),
+            unit: spectrum_level_unit(&waveform.name, presentation.fft_normalization()).to_owned(),
             points: data
                 .points
                 .iter()
@@ -603,9 +697,33 @@ fn quick_fft_plot<W: AsRef<RetainedWaveform>>(
                 .collect(),
         }],
         None,
-        AxisScale::Linear,
+        &QuickAbscissa::new("Frequency", "Hz", AxisScale::Linear),
         AxisScale::Decibels,
     )
+}
+
+/// The level unit a spectrum's decibels are referenced to, as the spectrum
+/// sheet names it: a voltage is in dBV, a current in dB re 1 A, and anything
+/// else in plain dB, at the peak or RMS the spectrum is normalised to.
+fn spectrum_level_unit(
+    source: &str,
+    normalization: rspice_results::fft::data::SpectrumNormalization,
+) -> &'static str {
+    use rspice_results::fft::data::SpectrumNormalization::{Peak, Rms};
+    let source = source.trim_start();
+    let reads = |accessor: &str| {
+        source
+            .get(..accessor.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(accessor))
+    };
+    match (reads("v("), reads("i("), normalization) {
+        (true, _, Peak) => "dBV pk",
+        (true, _, Rms) => "dBV rms",
+        (_, true, Peak) => "dB re 1 A pk",
+        (_, true, Rms) => "dB re 1 A rms",
+        (_, _, Peak) => "dB pk",
+        (_, _, Rms) => "dB rms",
+    }
 }
 
 fn quick_eye_plot<W: AsRef<RetainedWaveform>>(
@@ -641,6 +759,7 @@ fn quick_eye_plot<W: AsRef<RetainedWaveform>>(
                 bit_period.to_bits()
             ),
             label: format!("Eye trace {}", index + 1),
+            unit: printed_unit(waveform, active.analysis.analysis_type),
             points: trace
                 .time
                 .iter()
@@ -649,7 +768,14 @@ fn quick_eye_plot<W: AsRef<RetainedWaveform>>(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(ResultViewer::Eye, "Results", 0, series, None)
+    quick_plot_from_series(
+        ResultViewer::Eye,
+        "Results",
+        0,
+        series,
+        None,
+        &QuickAbscissa::new("Time", "s", AxisScale::Linear),
+    )
 }
 
 fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
@@ -730,8 +856,8 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
             plot_height: height,
         },
     )?;
-    captions.push(SemanticPlotCaption {
-        text: format!(
+    captions.push(SemanticPlotCaption::new(
+        format!(
             "{} [{}]; {} samples; {} below and {} above the bin range",
             display.mode.label(),
             display.mode.unit(),
@@ -739,7 +865,12 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
             histogram.underflow,
             histogram.overflow
         ),
-        position: SemanticPoint::new(PLOT_INSET_UM, 5_000),
+        SemanticPoint::new(PLOT_INSET_UM, 5_000),
+    ));
+    captions.push(SemanticPlotCaption {
+        text: QuickAbscissa::new(&variable.name, "", AxisScale::Linear).caption(),
+        position: SemanticPoint::new(PLOT_INSET_UM - 1_000, PLOT_INSET_UM + height + 2_600),
+        anchor: SemanticCaptionAnchor::End,
     });
     let mut paths = Vec::new();
     for outline in display.paths(&histogram, x0, x1) {
@@ -774,6 +905,10 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
         markers: Vec::new(),
         annotations: Vec::new(),
         captions,
+        frames: vec![SemanticPlotFrame {
+            minimum: SemanticPoint::new(PLOT_INSET_UM, PLOT_INSET_UM),
+            maximum: SemanticPoint::new(PLOT_INSET_UM + width, PLOT_INSET_UM + height),
+        }],
     })
 }
 
@@ -794,6 +929,7 @@ fn quick_complex_plot<W: AsRef<RetainedWaveform>>(
                 active.dataset_id, active.run_id, active.analysis.id, waveform.name
             ),
             label: waveform.name.clone(),
+            unit: String::new(),
             points: complex
                 .real
                 .samples(..)
@@ -801,7 +937,14 @@ fn quick_complex_plot<W: AsRef<RetainedWaveform>>(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(viewer, "Results", 0, series, None)
+    quick_plot_from_series(
+        viewer,
+        "Results",
+        0,
+        series,
+        None,
+        &QuickAbscissa::new("Re", "", AxisScale::Linear),
+    )
 }
 
 /// A source's two columns, each borrowed or read.

@@ -157,25 +157,13 @@ impl RetainedQuickViewOverlay {
     /// cannot place — a non-positive frequency on a log axis — leaves that
     /// axis showing the data, rather than pinning the page to a coordinate
     /// the axis has no position for.
-    pub(super) fn framed_bounds(
-        &self,
-        x_scale: AxisScale,
-        y_scale: AxisScale,
-        bounds: (f64, f64, f64, f64),
-    ) -> (f64, f64, f64, f64) {
-        let (x_minimum, x_maximum, y_minimum, y_maximum) = bounds;
-        let Some(viewport) = self.viewport else {
-            return bounds;
-        };
-        let pinned = |scale, range: Option<(f64, f64)>, fallback: (f64, f64)| {
-            range
-                .and_then(|(low, high)| Some((project(scale, low)?, project(scale, high)?)))
-                .filter(|(low, high)| low < high)
-                .unwrap_or(fallback)
-        };
-        let (x_minimum, x_maximum) = pinned(x_scale, viewport.x, (x_minimum, x_maximum));
-        let (y_minimum, y_maximum) = pinned(y_scale, viewport.y, (y_minimum, y_maximum));
-        (x_minimum, x_maximum, y_minimum, y_maximum)
+    pub(super) fn framed_x(&self, scale: AxisScale, data: (f64, f64)) -> (f64, f64) {
+        pinned(scale, self.viewport.and_then(|viewport| viewport.x), data)
+    }
+
+    /// [`Self::framed_x`] for the ordinate.
+    pub(super) fn framed_y(&self, scale: AxisScale, data: (f64, f64)) -> (f64, f64) {
+        pinned(scale, self.viewport.and_then(|viewport| viewport.y), data)
     }
 
     /// Capture only validated reading controls; source coordinates remain exact.
@@ -263,12 +251,26 @@ impl RetainedQuickViewOverlay {
             })
     }
 
+    /// The abscissa window the reader had pinned, in source units, if any.
+    pub(crate) fn window_x(&self) -> Option<(f64, f64)> {
+        self.viewport.and_then(|viewport| viewport.x)
+    }
+
     /// The Y a marker's tag sits at, resampled off its anchored trace exactly
     /// as the sheet resamples it every frame.
     pub(super) fn marker_y(&self, points: &[(f64, f64)], x: f64) -> f64 {
         let (xs, ys): (Vec<f64>, Vec<f64>) = points.iter().copied().unzip();
         sample_at_with(&xs, &ys, x, self.interpolation.sampler())
     }
+}
+
+/// `range`, pinned in source units, in the axis's projected space, or `data`
+/// when nothing was pinned or the pin has no position on the axis.
+fn pinned(scale: AxisScale, range: Option<(f64, f64)>, data: (f64, f64)) -> (f64, f64) {
+    range
+        .and_then(|(low, high)| Some((project(scale, low)?, project(scale, high)?)))
+        .filter(|(low, high)| low < high)
+        .unwrap_or(data)
 }
 
 /// Whether one printed series carries the retained trace a marker rides.
@@ -318,14 +320,24 @@ pub struct PlotFrame {
 /// are full-height lines: a spec constrains the axis position rather than one
 /// curve, which is exactly what the semantic cursor primitive expresses, so
 /// it travels there rather than being flattened into a point.
+///
+/// `frames` are the strips' frames, top to bottom, `strip_of` the strip each
+/// series is drawn in, and `place` moves a point mapped into the whole plot
+/// area into a strip. A full-height line runs from the bottom of the last
+/// strip to the top of the first, through every strip the abscissa rules.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn resolved_overlay_geometry(
     viewer: ResultViewer,
     overlay: &RetainedQuickViewOverlay,
     series: &[QuickResultSeries],
-    x_scale: AxisScale,
-    y_scale: AxisScale,
-    frame: &PlotFrame,
+    (x_scale, y_scale): (AxisScale, AxisScale),
+    frames: &[PlotFrame],
+    strip_of: &[usize],
+    place: impl Fn(usize, SemanticPoint) -> SemanticPoint,
 ) -> Result<(Vec<SemanticPlotCursor>, Vec<SemanticPlotMarker>), HardcopySourceError> {
+    let (Some(frame), Some(last)) = (frames.first(), frames.len().checked_sub(1)) else {
+        return Ok((Vec::new(), Vec::new()));
+    };
     let mut cursors = Vec::new();
     let mut markers = Vec::new();
     let mut vertical = |label: &str, source_x: f64| -> Result<(), HardcopySourceError> {
@@ -353,8 +365,8 @@ pub(super) fn resolved_overlay_geometry(
             cursor_id: stable_overlay_id(viewer, "cursor", label),
             label: label.to_owned(),
             source_x_bits: source_x.to_bits(),
-            start: point(frame.y_minimum)?,
-            end: point(frame.y_maximum)?,
+            start: place(last, point(frame.y_minimum)?),
+            end: place(0, point(frame.y_maximum)?),
         });
         Ok(())
     };
@@ -379,6 +391,8 @@ pub(super) fn resolved_overlay_geometry(
         else {
             continue;
         };
+        let strip = strip_of.get(index).copied().unwrap_or(0);
+        let frame = &frames[strip.min(last)];
         let source_y = overlay.marker_y(&source.points, marker.x);
         let (Some(x), Some(y)) = (project(x_scale, marker.x), project(y_scale, source_y)) else {
             continue;
@@ -393,15 +407,18 @@ pub(super) fn resolved_overlay_geometry(
             trace_id: Some(stable_quick_trace_id(viewer, index, &source.identity)),
             source_x_bits: Some(marker.x.to_bits()),
             source_y_bits: Some(source_y.to_bits()),
-            position: Some(map_plot_point(
-                (x, y),
-                frame.x_minimum,
-                frame.y_minimum,
-                frame.x_span,
-                frame.y_span,
-                frame.plot_width,
-                frame.plot_height,
-            )?),
+            position: Some(place(
+                strip,
+                map_plot_point(
+                    (x, y),
+                    frame.x_minimum,
+                    frame.y_minimum,
+                    frame.x_span,
+                    frame.y_span,
+                    frame.plot_width,
+                    frame.plot_height,
+                )?,
+            )),
         });
     }
     Ok((cursors, markers))
@@ -466,6 +483,7 @@ mod tests {
     #[test]
     fn a_bode_marker_finds_its_trace_through_the_decorated_label() {
         let series = vec![QuickResultSeries {
+            unit: "V".to_owned(),
             identity: "dataset:run:1:V(out):magnitude-db".to_owned(),
             label: "|V(out)| (dB)".to_owned(),
             points: vec![(1.0, 40.0), (6.0, -40.0)],
@@ -475,9 +493,10 @@ mod tests {
             ResultViewer::Bode,
             &anchored_marker("V(out)"),
             &series,
-            AxisScale::Linear,
-            AxisScale::Linear,
-            &frame(),
+            (AxisScale::Linear, AxisScale::Linear),
+            &[frame()],
+            &[0],
+            |_, point| point,
         )
         .expect("the marker maps inside the frame");
 
@@ -502,6 +521,7 @@ mod tests {
     #[test]
     fn a_marker_for_another_trace_is_still_dropped() {
         let series = vec![QuickResultSeries {
+            unit: "V".to_owned(),
             identity: "dataset:run:1:V(out):magnitude-db".to_owned(),
             label: "|V(out)| (dB)".to_owned(),
             points: vec![(1.0, 40.0), (6.0, -40.0)],
@@ -511,9 +531,10 @@ mod tests {
             ResultViewer::Bode,
             &anchored_marker("V(in)"),
             &series,
-            AxisScale::Linear,
-            AxisScale::Linear,
-            &frame(),
+            (AxisScale::Linear, AxisScale::Linear),
+            &[frame()],
+            &[0],
+            |_, point| point,
         )
         .expect("the overlay resolves");
 
@@ -524,6 +545,7 @@ mod tests {
     #[test]
     fn a_waveform_marker_still_rides_its_own_series() {
         let series = vec![QuickResultSeries {
+            unit: "V".to_owned(),
             identity: "dataset:run:1:V(out)".to_owned(),
             label: "V(out)".to_owned(),
             points: vec![(1.0, 40.0), (6.0, -40.0)],
@@ -533,9 +555,10 @@ mod tests {
             ResultViewer::Waves,
             &anchored_marker("V(out)"),
             &series,
-            AxisScale::Linear,
-            AxisScale::Linear,
-            &frame(),
+            (AxisScale::Linear, AxisScale::Linear),
+            &[frame()],
+            &[0],
+            |_, point| point,
         )
         .expect("the marker maps inside the frame");
 

@@ -78,6 +78,7 @@ pub fn resolve_plot_source(
         markers: Vec::new(),
         annotations: Vec::new(),
         captions: Vec::new(),
+        frames: Vec::new(),
     };
     let identity = HardcopySourceIdentity::try_new(
         source.source_key,

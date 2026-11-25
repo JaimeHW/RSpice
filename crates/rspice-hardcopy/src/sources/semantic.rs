@@ -282,6 +282,41 @@ pub struct SemanticPlotAnnotation {
 pub struct SemanticPlotCaption {
     pub text: String,
     pub position: SemanticPoint,
+    /// Which end of the text `position` is: its start, or its end for a
+    /// caption that stands against what follows it, as an abscissa's name
+    /// stands against its first value.
+    #[serde(default)]
+    pub anchor: SemanticCaptionAnchor,
+}
+
+impl SemanticPlotCaption {
+    /// A caption that starts at `position`.
+    #[must_use]
+    pub fn new(text: String, position: SemanticPoint) -> Self {
+        Self {
+            text,
+            position,
+            anchor: SemanticCaptionAnchor::Start,
+        }
+    }
+}
+
+/// Which end of a caption its position is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticCaptionAnchor {
+    #[default]
+    Start,
+    End,
+}
+
+/// One strip's axis box, in page coordinates: its top-left and bottom-right
+/// corners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticPlotFrame {
+    pub minimum: SemanticPoint,
+    pub maximum: SemanticPoint,
 }
 
 /// Exact active Cartesian pane. Source samples are mapped to integer physical
@@ -318,6 +353,10 @@ pub struct SemanticPlot {
     pub annotations: Vec<SemanticPlotAnnotation>,
     #[serde(default)]
     pub captions: Vec<SemanticPlotCaption>,
+    /// The strips' axis boxes, top to bottom. A plot that declares none is
+    /// framed by its page's one box.
+    #[serde(default)]
+    pub frames: Vec<SemanticPlotFrame>,
 }
 
 const fn linear_axis() -> AxisScale {

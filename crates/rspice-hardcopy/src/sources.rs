@@ -38,11 +38,13 @@ use mapping::default_print_mapping;
 pub(crate) use mapping::{SYMBOL_PRINT_INK, WIRE_PRINT_INK};
 pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
 pub use prepared::{PreparedRetainedHardcopyResolution, RetainedHardcopySourceInput};
+pub(crate) use quick_plot::print_read;
 pub use quick_plot::{
-    PlotFrame, QuickResultSeries, RetainedCursorInterpolation, RetainedQuickMarker,
-    RetainedQuickViewOverlay, RetainedQuickViewOverlays, RetainedQuickViewport,
-    nondegenerate_range, plot_axes, quick_plot_from_scaled_series, quick_plot_from_series,
-    stable_page_id, stable_quick_trace_id,
+    PRINT_COLUMNS_PER_INCH, PlotFrame, QuickAbscissa, QuickResultSeries,
+    RetainedCursorInterpolation, RetainedQuickMarker, RetainedQuickViewOverlay,
+    RetainedQuickViewOverlays, RetainedQuickViewport, nondegenerate_range, plot_axes,
+    print_columns, quick_plot_from_scaled_series, quick_plot_from_series, stable_page_id,
+    stable_quick_trace_id,
 };
 pub use reports::{ReportHardcopySource, resolve_report_source};
 pub use result_documents::{resolve_results_quick_view_stack, results_stack_identity};

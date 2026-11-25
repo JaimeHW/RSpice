@@ -1278,11 +1278,41 @@ impl<'a> SemanticSceneCompiler<'a> {
             Length::from_micrometres(self.extent.width().micrometres().saturating_sub(25_400)),
             Length::from_micrometres(self.extent.height().micrometres().saturating_sub(25_400)),
         )?;
-        self.primitives.push(ScenePrimitive::Rect {
-            rect: frame,
-            stroke: Some(frame_stroke),
-            fill: None,
-        });
+        // Each strip is boxed on its own; a plot that declares no strips is
+        // boxed by its page.
+        if plot.frames.is_empty() {
+            self.primitives.push(ScenePrimitive::Rect {
+                rect: frame,
+                stroke: Some(frame_stroke),
+                fill: None,
+            });
+        }
+        for strip in &plot.frames {
+            let (minimum, maximum) = (
+                self.semantic_point(strip.minimum)?,
+                self.semantic_point(strip.maximum)?,
+            );
+            self.primitives.push(ScenePrimitive::Rect {
+                rect: SceneRect::try_new(
+                    minimum.x,
+                    minimum.y,
+                    Length::from_micrometres(
+                        maximum
+                            .x
+                            .micrometres()
+                            .saturating_sub(minimum.x.micrometres()),
+                    ),
+                    Length::from_micrometres(
+                        maximum
+                            .y
+                            .micrometres()
+                            .saturating_sub(minimum.y.micrometres()),
+                    ),
+                )?,
+                stroke: Some(frame_stroke),
+                fill: None,
+            });
+        }
         self.plot_grid(plot, frame)?;
         for (index, trace) in plot.traces.iter().enumerate() {
             let stable_id = format!("trace:{}", trace.trace_id);
@@ -1415,12 +1445,17 @@ impl<'a> SemanticSceneCompiler<'a> {
             self.add_mapping_legend(PrintObjectKind::Marker, &stable_id, stroke)?;
         }
         for caption in &plot.captions {
-            self.add_text(
+            let anchor = match caption.anchor {
+                crate::sources::SemanticCaptionAnchor::Start => TextAnchor::Start,
+                crate::sources::SemanticCaptionAnchor::End => TextAnchor::End,
+            };
+            self.add_text_placed(
                 self.semantic_point(caption.position)?,
                 &caption.text,
                 SceneFont::Sans,
                 2_300,
                 SemanticColor::Secondary,
+                (anchor, SceneTextRotation::Upright),
             )?;
         }
         for annotation in &plot.annotations {
