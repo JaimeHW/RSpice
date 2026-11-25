@@ -196,19 +196,16 @@ fn complex_component(name: &str) -> Option<(String, bool)> {
             return Some((base.to_owned(), imag));
         }
     }
-    if let Some(base) = name
-        .strip_prefix("Re(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        return Some((base.to_owned(), false));
+    // `Re(H)`, `re(H)` or `RE(H)`: the spellings tools and people give a part.
+    let (part, rest) = (name.get(..3)?, name.get(3..)?);
+    let base = rest.strip_suffix(')')?;
+    if part.eq_ignore_ascii_case("re(") {
+        Some((base.to_owned(), false))
+    } else if part.eq_ignore_ascii_case("im(") {
+        Some((base.to_owned(), true))
+    } else {
+        None
     }
-    if let Some(base) = name
-        .strip_prefix("Im(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        return Some((base.to_owned(), true));
-    }
-    None
 }
 
 /// Decode paired numeric columns, retaining plain-column input order followed
@@ -388,7 +385,7 @@ mod tests {
         let signals = combine_real_imag_columns(vec![
             ("b__imag".into(), vec![-0.0, adjacent]),
             ("z".into(), vec![7.0]),
-            ("Im(a)".into(), vec![-2.0]),
+            ("im(a)".into(), vec![-2.0]),
             ("b__real".into(), vec![3.0, 4.0]),
             ("plain".into(), vec![8.0]),
             ("Re(a)".into(), vec![1.0]),

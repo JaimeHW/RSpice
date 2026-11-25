@@ -36,7 +36,8 @@ xlsx = ["dep:rust_xlsxwriter"]
 
 [dependencies]
 arrow-array = { version = "60", optional = true }
-arrow-ipc = { version = "60", optional = true }
+# LZ4 is the codec pandas and pyarrow give a Feather file by default.
+arrow-ipc = { version = "60", features = ["lz4"], optional = true }
 arrow-schema = { version = "60", optional = true }
 bytes = { version = "1", optional = true }
 csv.workspace = true
@@ -50,7 +51,14 @@ npyz = { version = "0.9", features = ["complex"] }
 py_literal = "0.4"
 # arrow-rs 59 is the first release whose parquet drops the `thrift` crate
 # (GHSA-2f9f-gq7v-9h6m); every parquet <= 58 pins the unpatched `thrift ^0.17`.
-parquet = { version = "60", default-features = false, features = ["arrow"], optional = true }
+# The codecs a Parquet file is read in: Snappy (the default of pandas, pyarrow and Spark), gzip
+# and LZ4, all pure Rust. Zstandard and Brotli are refused by name.
+parquet = { version = "60", default-features = false, features = [
+    "arrow",
+    "snap",
+    "lz4",
+    "flate2-rust_backend",
+], optional = true }
 rustyhdf5 = { version = "1.93", default-features = false, optional = true }
 rust_xlsxwriter = { version = "0.100", default-features = false, optional = true }
 rspice-vocabulary = { workspace = true, optional = true }

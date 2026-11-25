@@ -51,6 +51,8 @@ pub enum ColumnarReadFailure {
     },
     ParquetMetadata(parquet::errors::ParquetError),
     ParquetReader(parquet::errors::ParquetError),
+    /// The values are compressed with a codec this importer does not read.
+    Compression(&'static str),
     FieldCount {
         fields: usize,
         max_columns: usize,
@@ -89,13 +91,17 @@ pub enum ColumnarReadFailure {
 impl std::fmt::Display for ColumnarReadFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ArrowFraming { file, stream } => write!(
-                f,
-                "neither Arrow file nor stream framing is valid (file: {file}; stream: {stream})"
-            ),
+            Self::ArrowFraming { .. } => {
+                f.write_str("the file is neither an Arrow IPC file nor an Arrow stream")
+            }
             Self::ArrowBatch { context, source } => write!(f, "{context}: {source}"),
             Self::ParquetMetadata(source) => write!(f, "invalid Parquet metadata: {source}"),
             Self::ParquetReader(source) => write!(f, "could not create Parquet reader: {source}"),
+            Self::Compression(codec) => write!(
+                f,
+                "the values are compressed with {codec}, which this importer does not read; save \
+                 the table uncompressed or with Snappy, gzip or LZ4"
+            ),
             Self::FieldCount {
                 fields,
                 max_columns,
@@ -356,6 +362,12 @@ fn decode_parquet_table(
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     let builder = ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::copy_from_slice(bytes))
         .map_err(|error| adapter_error(format, ColumnarReadFailure::ParquetMetadata(error)))?;
+    if let Some(codec) = unread_parquet_codec(builder.metadata()) {
+        return Err(adapter_error(
+            format,
+            ColumnarReadFailure::Compression(codec),
+        ));
+    }
     let metadata = builder.schema().metadata().clone();
     let batch_size = 16_384.min(limits.max_rows.saturating_add(1).max(1));
     let reader = builder
@@ -371,6 +383,31 @@ fn decode_parquet_table(
     )
 }
 
+/// The first codec of a Parquet file's column chunks that this importer does not read, named as
+/// its documentation names it.
+fn unread_parquet_codec(
+    metadata: &parquet::file::metadata::ParquetMetaData,
+) -> Option<&'static str> {
+    use parquet::basic::Compression;
+    metadata
+        .row_groups()
+        .iter()
+        .flat_map(|group| group.columns())
+        .find_map(|column| match column.compression() {
+            Compression::ZSTD(_) => Some("Zstandard"),
+            Compression::BROTLI(_) => Some("Brotli"),
+            Compression::LZO => Some("LZO"),
+            _ => None,
+        })
+}
+
+/// An Arrow batch whose buffers are compressed with Zstandard, which this importer does not read.
+fn unread_arrow_codec(error: &arrow_schema::ArrowError) -> Option<&'static str> {
+    matches!(error, arrow_schema::ArrowError::InvalidArgumentError(message)
+        if message.contains("zstd"))
+    .then_some("Zstandard")
+}
+
 fn decode_arrow_batches(
     format: &str,
     batches: impl IntoIterator<Item = Result<arrow_array::RecordBatch, arrow_schema::ArrowError>>,
@@ -384,9 +421,12 @@ fn decode_arrow_batches(
         let batch = batch.map_err(|error| {
             adapter_error(
                 format,
-                ColumnarReadFailure::ArrowBatch {
-                    context: batch_error,
-                    source: error,
+                match unread_arrow_codec(&error) {
+                    Some(codec) => ColumnarReadFailure::Compression(codec),
+                    None => ColumnarReadFailure::ArrowBatch {
+                        context: batch_error,
+                        source: error,
+                    },
                 },
             )
         })?;
@@ -629,6 +669,143 @@ mod tests {
     use arrow_schema::{DataType, Field, Metadata, Schema};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use std::sync::Arc;
+
+    /// A two-column table of a transfer function over frequency, as pandas writes one: the real
+    /// and imaginary parts in their own `re(H)` and `im(H)` columns.
+    fn transfer_function() -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("frequency", DataType::Float64, false),
+            Field::new("re(H)", DataType::Float64, false),
+            Field::new("im(H)", DataType::Float64, false),
+        ]));
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Float64Array::from(vec![10.0, 100.0, 1000.0])),
+                Arc::new(Float64Array::from(vec![0.99, 0.5, 0.01])),
+                Arc::new(Float64Array::from(vec![-0.1, -0.5, -0.1])),
+            ],
+        )
+        .unwrap()
+    }
+
+    fn limits() -> ColumnarLimits {
+        ColumnarLimits {
+            max_columns: 8,
+            max_rows: 8,
+            max_values: 64,
+        }
+    }
+
+    #[test]
+    fn parquet_in_every_codec_pandas_offers_but_two_reads_and_those_two_are_named() {
+        use parquet::arrow::ArrowWriter;
+        use parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
+        use parquet::file::properties::WriterProperties;
+        let batch = transfer_function();
+        let write = |compression| {
+            let properties = WriterProperties::builder()
+                .set_compression(compression)
+                .build();
+            let mut bytes = Vec::new();
+            let mut writer =
+                ArrowWriter::try_new(&mut bytes, batch.schema(), Some(properties)).unwrap();
+            writer.write(&batch).unwrap();
+            writer.close().unwrap();
+            bytes
+        };
+        for compression in [
+            Compression::UNCOMPRESSED,
+            Compression::SNAPPY,
+            Compression::GZIP(GzipLevel::default()),
+            Compression::LZ4_RAW,
+        ] {
+            let decoded = super::decode_parquet(&write(compression), limits(), "parquet")
+                .unwrap_or_else(|error| panic!("{compression:?}: {error}"));
+            assert_eq!(decoded.coordinate, [10.0, 100.0, 1000.0]);
+            let [signal] = decoded.signals.as_slice() else {
+                panic!("re(H) and im(H) pair into one signal");
+            };
+            assert_eq!(signal.name, "H");
+            assert_eq!(signal.real, [0.99, 0.5, 0.01]);
+            assert_eq!(signal.imag.as_deref(), Some([-0.1, -0.5, -0.1].as_slice()));
+        }
+        // This build cannot write the two codecs it leaves out, so the file's own statement of
+        // its codec is changed to each of them.
+        let bytes = bytes::Bytes::from(write(Compression::UNCOMPRESSED));
+        let stated = ParquetRecordBatchReaderBuilder::try_new(bytes)
+            .unwrap()
+            .metadata()
+            .as_ref()
+            .clone();
+        assert_eq!(super::unread_parquet_codec(&stated), None);
+        for (compression, codec) in [
+            (Compression::ZSTD(ZstdLevel::default()), "Zstandard"),
+            (Compression::BROTLI(BrotliLevel::default()), "Brotli"),
+        ] {
+            let groups = stated
+                .row_groups()
+                .iter()
+                .map(|group| {
+                    let columns = group
+                        .columns()
+                        .iter()
+                        .map(|column| {
+                            column
+                                .clone()
+                                .into_builder()
+                                .set_compression(compression)
+                                .build()
+                                .unwrap()
+                        })
+                        .collect();
+                    group
+                        .clone()
+                        .into_builder()
+                        .set_column_metadata(columns)
+                        .build()
+                        .unwrap()
+                })
+                .collect();
+            let restated = stated.clone().into_builder().set_row_groups(groups).build();
+            assert_eq!(super::unread_parquet_codec(&restated), Some(codec));
+            assert_eq!(
+                ColumnarReadFailure::Compression(codec).to_string(),
+                format!(
+                    "the values are compressed with {codec}, which this importer does not read; \
+                     save the table uncompressed or with Snappy, gzip or LZ4"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn a_feather_file_in_its_default_lz4_reads_and_pairs_its_complex_columns() {
+        use arrow_ipc::writer::{FileWriter, IpcWriteOptions};
+        let batch = transfer_function();
+        let options = IpcWriteOptions::default()
+            .try_with_compression(Some(arrow_ipc::CompressionType::LZ4_FRAME))
+            .unwrap();
+        let mut bytes = Vec::new();
+        let mut writer =
+            FileWriter::try_new_with_options(&mut bytes, &batch.schema(), options).unwrap();
+        writer.write(&batch).unwrap();
+        writer.finish().unwrap();
+        drop(writer);
+        let decoded = super::decode_arrow_ipc(&bytes, limits(), "arrow").unwrap();
+        let [signal] = decoded.signals.as_slice() else {
+            panic!("re(H) and im(H) pair into one signal");
+        };
+        assert_eq!(signal.name, "H");
+        assert_eq!(signal.imag.as_deref(), Some([-0.1, -0.5, -0.1].as_slice()));
+        let error = super::decode_arrow_ipc(b"ARROW1 but nothing after", limits(), "arrow")
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "arrow import: the file is neither an Arrow IPC file nor an Arrow stream"
+        );
+    }
 
     #[test]
     fn nullable_numeric_columns_preserve_gaps_and_boolean_levels() {
@@ -973,14 +1150,12 @@ mod tests {
         };
         let error =
             super::decode_arrow_ipc(b"invalid", limits, "arrow_ipc").expect_err("invalid Arrow");
-        let ColumnarReadFailure::ArrowFraming { file, stream } = &error.reason else {
+        let ColumnarReadFailure::ArrowFraming { .. } = &error.reason else {
             panic!("expected both framing errors: {error}");
         };
         assert_eq!(
             error.to_string(),
-            format!(
-                "arrow_ipc import: neither Arrow file nor stream framing is valid (file: {file}; stream: {stream})"
-            )
+            "arrow_ipc import: the file is neither an Arrow IPC file nor an Arrow stream"
         );
         assert!(
             error

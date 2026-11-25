@@ -385,6 +385,7 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "flatbuffers",
+ "lz4_flex 0.14.2",
 ]
 
 [[package]]
@@ -3448,6 +3449,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lz4_flex"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f56455fff36934a9500d69062aec1c77037179b6f0669e4d5d6b72b84722d6a3"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4291,12 +4301,15 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "chrono",
+ "flate2",
  "half",
  "hashbrown 0.17.1",
+ "lz4_flex 0.14.2",
  "num-bigint 0.5.1",
  "num-integer",
  "num-traits",
  "seq-macro",
+ "snap",
  "twox-hash",
 ]
 
@@ -7461,6 +7474,12 @@ dependencies = [
  "borsh",
  "serde_core",
 ]
+
+[[package]]
+name = "snap"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "199905e6153d6405f9728fe44daace35f8f837bbf830bb6e85fbd5828709a886"
 
 [[package]]
 name = "socket2"
