@@ -2396,6 +2396,7 @@ fn result_quantity_row(
                 } else {
                     c.text_faint
                 },
+                value.is_some(),
             )
         }),
     );
@@ -2462,11 +2463,11 @@ fn paint_row_line(
     left: f32,
     name: &str,
     name_color: egui::Color32,
-    right: Option<(&str, egui::Color32)>,
+    right: Option<(&str, egui::Color32, bool)>,
 ) {
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let mut name_right = rect.right() - 8.0;
-    if let Some((text, color)) = right {
+    if let Some((text, color, reading)) = right {
         let galley = ui
             .painter()
             .layout_no_wrap(text.to_owned(), font.clone(), color);
@@ -2478,7 +2479,22 @@ fn paint_row_line(
         } else {
             super::super::super::design_system::elide_text(ui, text, &font, room)
         };
-        let galley = ui.painter().layout_no_wrap(shown, font.clone(), color);
+        // A reading keeps its unit's blank prefix slot, so the column's
+        // digits end at one x: `1.144  V` under `604.8 mV`.
+        let slot = if reading && shown == text {
+            rspice_ui_kit::widgets::table::prefix_slot_width(ui, &shown, &font)
+        } else {
+            0.0
+        };
+        let galley = ui
+            .painter()
+            .layout_job(rspice_ui_kit::widgets::table::reading_layout(
+                &shown,
+                font.clone(),
+                color,
+                slot,
+                f32::INFINITY,
+            ));
         let width = galley.size().x;
         ui.painter().galley(
             egui::pos2(name_right - width, rect.center().y - galley.size().y * 0.5),
@@ -2603,6 +2619,7 @@ fn result_artifact_row(
                 } else {
                     c.text_faint
                 },
+                value.is_some(),
             )
         }),
     );

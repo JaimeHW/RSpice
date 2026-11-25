@@ -386,14 +386,10 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
         // name's column gives way to it rather than the value wrapping, down
         // to the name's own width. Only a value wider still wraps; a name
         // squeezed to nothing would stand one letter to a line.
-        // A reading printed without a prefix keeps its prefix's slot blank,
-        // so the values' digits end at one x down the list: `1.144 V` under
-        // `604.8 mV`.
-        let slot = if rspice_results::number_format::leaves_prefix_slot_blank(value) {
-            ui.fonts_mut(|fonts| fonts.glyph_width(&value_font, 'm'))
-        } else {
-            0.0
-        };
+        // A reading printed without a prefix keeps its prefix's slot blank
+        // before its unit, so the values' digits end at one x down the list:
+        // `1.144  V` under `604.8 mV`.
+        let slot = rspice_ui_kit::widgets::table::prefix_slot_width(ui, value, &value_font);
         let natural = ui
             .painter()
             .layout_no_wrap(value.clone(), value_font.clone(), c.text)
@@ -415,9 +411,15 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
             if *highlight { c.text } else { c.text_dim },
             name_width,
         );
-        let value_galley =
-            ui.painter()
-                .layout(value.clone(), value_font, c.text, value_width - slot);
+        let value_galley = ui
+            .painter()
+            .layout_job(rspice_ui_kit::widgets::table::reading_layout(
+                value,
+                value_font,
+                c.text,
+                slot,
+                value_width,
+            ));
         let row_height = PANEL_ROW_H.max(name_galley.size().y.max(value_galley.size().y) + 8.0);
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
@@ -440,10 +442,7 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
         // The value is text the reader can select and copy, as a readout
         // is read off to be used elsewhere; the name beside it is painted.
         let value_at = egui::Rect::from_min_size(
-            egui::pos2(
-                value_rect.right() - slot - value_galley.size().x,
-                value_rect.top(),
-            ),
+            egui::pos2(value_rect.right() - value_galley.size().x, value_rect.top()),
             value_galley.size(),
         )
         .intersect(value_rect);

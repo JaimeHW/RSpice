@@ -1054,7 +1054,7 @@ pub fn right_panel(
         ),
     ];
     if let Some(reference) = trace.reference_impedance_ohm {
-        rows.push(("Z₀", format!("{reference} Ω"), false));
+        rows.push(("Z₀", fmt_column_reading(reference, "Ω", digits), false));
     }
     if let Some(value) = maximum_gamma {
         rows.push(("|Γ| max", fmt_column_reading(value, "", digits), true));

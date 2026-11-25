@@ -32,11 +32,11 @@ pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, digits: usize
     {
         rows.push((
             "Source temperature",
-            format!("{} K", figure.source_temperature_kelvin),
+            fmt_column_reading(figure.source_temperature_kelvin, "K", digits),
         ));
         rows.push((
             "Reference temperature",
-            format!("{} K", figure.reference_temperature_kelvin),
+            fmt_column_reading(figure.reference_temperature_kelvin, "K", digits),
         ));
     }
     measurement_table(
