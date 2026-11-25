@@ -430,7 +430,7 @@ const COORDINATE_DIGITS: usize = 6;
 /// `Meg`, where a lone `M` is milli; before a unit the letters are SI's.
 pub fn spice_coordinate(value: f64, unit: &str) -> String {
     let prefixed = unit.is_empty() || unit_takes_prefix(unit);
-    let (number, prefix) = significant_number(value, COORDINATE_DIGITS, prefixed);
+    let (number, prefix) = significant_number(value, COORDINATE_DIGITS, prefixed, Zeros::Trim);
     let prefix = if unit.is_empty() && prefix == "M" {
         "Meg"
     } else {
