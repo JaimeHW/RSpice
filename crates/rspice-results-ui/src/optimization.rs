@@ -28,6 +28,9 @@ pub struct OptimizationPlot<'a> {
     /// Each design variable's unit, by its name in the history: `F`, `Ω`,
     /// and none for a variable without one.
     pub variable_units: &'a BTreeMap<String, &'a str>,
+    /// Each goal's least and greatest measured value, in the history's
+    /// order.
+    pub goal_ranges: &'a [(f64, f64)],
     /// The table at the sheet's foot.
     pub table: OptimizationTable,
     /// The reader's displayed significant digits.
@@ -225,6 +228,7 @@ pub fn show(
         cost_range,
         variable_ranges,
         variable_units,
+        goal_ranges,
         table,
         significant_digits: digits,
     } = input;
@@ -275,26 +279,47 @@ pub fn show(
     );
     let plot_area = egui::Rect::from_min_max(area.min, egui::pos2(area.right(), table_area.top()));
 
-    // The cost and every design variable, one strip each over the shared
-    // iteration axis, so a step in a variable reads against the cost it
-    // bought.
+    // The cost, every design variable and every goal, one strip each over
+    // the shared iteration axis, so a step in a variable reads against the
+    // cost it bought and the measurement it moved.
     let variables = view
         .variables
         .iter()
         .map(|(name, waveform)| (*name, held(&waveform.y)))
         .collect::<Vec<_>>();
-    let histories = std::iter::once(("cost", &cost[..], cost_range, ""))
+    let goals = view
+        .goals
+        .iter()
+        .map(|(name, waveform)| {
+            (
+                *name,
+                held(&waveform.y),
+                waveform.unit.as_deref().unwrap_or(""),
+            )
+        })
+        .collect::<Vec<_>>();
+    let unfitted = || std::iter::repeat((0.0, 1.0));
+    let histories = std::iter::once(("cost", &cost[..], cost_range, "", Role::Cost))
         .chain(
             variables
                 .iter()
-                .zip(
-                    variable_ranges
-                        .iter()
-                        .copied()
-                        .chain(std::iter::repeat((0.0, 1.0))),
-                )
+                .zip(variable_ranges.iter().copied().chain(unfitted()))
                 .map(|((name, values), range)| {
-                    (*name, &values[..], range, unit_of(variable_units, name))
+                    (
+                        *name,
+                        &values[..],
+                        range,
+                        unit_of(variable_units, name),
+                        Role::Variable,
+                    )
+                }),
+        )
+        .chain(
+            goals
+                .iter()
+                .zip(goal_ranges.iter().copied().chain(unfitted()))
+                .map(|((name, values, unit), range)| {
+                    (*name, &values[..], range, *unit, Role::Goal)
                 }),
         )
         .collect::<Vec<_>>();
@@ -314,9 +339,10 @@ pub fn show(
     let strips = histories
         .iter()
         .enumerate()
-        .map(|(index, &(name, values, range, unit))| HistoryStrip {
+        .map(|(index, &(name, values, range, unit, role))| HistoryStrip {
             name,
             unit,
+            role,
             iterations: view.iterations,
             values,
             x: (x0, x1),
@@ -360,16 +386,14 @@ pub fn show(
                 .max_rect(rect)
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
-        if index > 0 {
-            // The cost strip stands under the sheet's own header; each
-            // variable's strip names its variable and the value it settled at.
+        if let Some(role) = strip.role.words() {
+            // The cost strip stands under the sheet's own header; each other
+            // strip names its variable or goal and its value at the best
+            // candidate.
             let best = strip.values.get(best_index).copied().unwrap_or(f64::NAN);
             StripHeader::new(
                 strip.name,
-                &format!(
-                    "design variable · best {}",
-                    value_text(best, strip.unit, digits)
-                ),
+                &format!("{role} · best {}", value_text(best, strip.unit, digits)),
                 &[],
             )
             .maximizable(false)
@@ -433,12 +457,32 @@ pub fn show(
     }
 }
 
+/// What a history is a history of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    Cost,
+    Variable,
+    Goal,
+}
+
+impl Role {
+    /// What a strip's header calls it; the cost strip has the sheet's.
+    const fn words(self) -> Option<&'static str> {
+        match self {
+            Self::Cost => None,
+            Self::Variable => Some("design variable"),
+            Self::Goal => Some("goal"),
+        }
+    }
+}
+
 /// One history's strip: its values at each iteration, the best candidate
 /// marked, and the selected one when it is another.
 struct HistoryStrip<'a> {
     name: &'a str,
     /// The history's unit, none for the cost or a bare variable.
     unit: &'a str,
+    role: Role,
     iterations: &'a [f64],
     values: &'a [f64],
     x: (f64, f64),

@@ -104,6 +104,14 @@ mod tests {
             assert!(result.best_cost < 1e-20, "{result:?}");
             assert!((result.best_objectives[0].value - target).abs() < 1e-10);
             assert_eq!(result.best_objectives[0].objective.unit, unit);
+            // The goal's measured value is kept at every iteration, in its
+            // own unit, beside the cost and the variables.
+            let [goal] = result.goal_traces.as_slice() else {
+                panic!("one goal history: {:?}", result.goal_traces);
+            };
+            assert_eq!(goal.unit, unit);
+            assert_eq!(goal.values.len(), result.iterations.len());
+            assert!((goal.values[0] - target).abs() < 1e-10, "{goal:?}");
             config.objective_unit = "ns".into();
             let error = run_optimization_analysis_with_context(deck, &config, None, ctx(&NoAbort))
                 .unwrap_err();

@@ -360,6 +360,22 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 .unwrap_or((0.0, 1.0))
         })
         .collect::<Vec<_>>();
+    // Each goal's axis fits its measured history, as fixed as the cost's.
+    let goal_ranges = view
+        .goals
+        .iter()
+        .map(|(name, waveform)| {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (analysis_key, "optimization-goal", *name).hash(&mut hasher);
+            state
+                .results
+                .session
+                .derived
+                .range_or(hasher.finish(), || super::finite_extremes(&waveform.y))
+                .unwrap_or((0.0, 1.0))
+        })
+        .collect::<Vec<_>>();
     let variable_units =
         variable_units(&*state.model, view.variables.iter().map(|(name, _)| *name));
     let response = presentation::show(
@@ -378,6 +394,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             cost_range: (cost_min, cost_max),
             variable_ranges: &variable_ranges,
             variable_units: &variable_units,
+            goal_ranges: &goal_ranges,
             table: state.results.session.optimization_table,
             significant_digits,
         },

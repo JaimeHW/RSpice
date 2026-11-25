@@ -250,12 +250,27 @@ pub struct OptimizationData {
     pub costs: Vec<Value>,
     /// Variable traces by name.
     pub variable_traces: HashMap<String, Vec<Value>>,
+    /// Each goal's measured value at every recorded iteration, in the
+    /// objectives' order. Empty when the search scored a single expression,
+    /// or when its goals were not measured alike at every iteration.
+    pub goal_traces: Vec<GoalTrace>,
     /// Best cost reached.
     pub best_cost: Value,
     /// Best variable values.
     pub best_variables: HashMap<String, Value>,
     /// Whether convergence criterion was met.
     pub converged: bool,
+}
+
+/// One goal's history: what its measurement read at each recorded iteration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GoalTrace {
+    /// The measurement the goal reads.
+    pub measurement: String,
+    /// The measurement's unit; blank where the producer states none.
+    pub unit: String,
+    /// One value per recorded iteration.
+    pub values: Vec<Value>,
 }
 
 /// Search a caller-provided configured analysis while retaining the standard
@@ -457,6 +472,7 @@ where
     }
     let mut iterations = Vec::with_capacity(history_len);
     let mut costs = Vec::with_capacity(history_len);
+    let mut goal_traces = Some(Vec::new());
 
     let evaluated_objectives = RefCell::new(Vec::new());
     let evaluated_constraints = RefCell::new(Vec::new());
@@ -547,6 +563,7 @@ where
             )
         }));
     }
+    record_goal_values(&mut goal_traces, true, &evaluated_objectives.borrow());
     let mut best_objectives = evaluated_objectives.take();
     let mut best_constraints = evaluated_constraints.take();
     let mut best_observed_score = initial_cost;
@@ -582,6 +599,7 @@ where
         // The last evaluation is this accepted iterate, not a gradient probe
         // or rejected line-search point. Retain components with the same
         // feasibility-first comparison as OptimizerEngine::observe_candidate.
+        record_goal_values(&mut goal_traces, false, &evaluated_objectives.borrow());
         if cost.better_than(best_observed_score) {
             best_observed_score = cost;
             best_objectives = evaluated_objectives.take();
@@ -606,10 +624,52 @@ where
         iterations,
         costs,
         variable_traces,
+        goal_traces: goal_traces.unwrap_or_default(),
         best_cost,
         best_variables: physical_vars(best_vars),
         converged: optimizer.is_converged(target_cost),
     })
+}
+
+/// Append each goal's measured value at the iterate just recorded, or start
+/// the histories at the first. A history whose goals differ between iterates,
+/// or that read a non-finite value, is dropped whole rather than misaligned.
+fn record_goal_values(
+    goal_traces: &mut Option<Vec<GoalTrace>>,
+    first: bool,
+    observations: &[rspice_results::optimization::OptimizationObjectiveObservation],
+) {
+    let Some(traces) = goal_traces.as_mut() else {
+        return;
+    };
+    let finite = observations
+        .iter()
+        .all(|observation| observation.value.is_finite());
+    if first {
+        *traces = observations
+            .iter()
+            .map(|observation| GoalTrace {
+                measurement: observation.objective.measurement.clone(),
+                unit: observation.objective.unit.clone(),
+                values: vec![observation.value],
+            })
+            .collect();
+    } else if traces.len() == observations.len()
+        && traces
+            .iter()
+            .zip(observations)
+            .all(|(trace, observation)| trace.measurement == observation.objective.measurement)
+    {
+        for (trace, observation) in traces.iter_mut().zip(observations) {
+            trace.values.push(observation.value);
+        }
+    } else {
+        *goal_traces = None;
+        return;
+    }
+    if !finite {
+        *goal_traces = None;
+    }
 }
 
 fn propagate_optimization_fatal_error(

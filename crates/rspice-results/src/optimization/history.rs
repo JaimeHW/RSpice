@@ -9,6 +9,9 @@ pub struct OptimizationView<'a> {
     pub iterations: &'a [f64],
     pub cost: &'a RetainedWaveform,
     pub variables: Vec<(&'a str, &'a RetainedWaveform)>,
+    /// Each goal's measured history, by its measurement, in the objectives'
+    /// order; none where the run kept no whole goal history.
+    pub goals: Vec<(&'a str, &'a RetainedWaveform)>,
     pub best_cost: f64,
     pub best_objectives: &'a [super::OptimizationObjectiveObservation],
     pub best_constraints: &'a [super::OptimizationConstraintObservation],
@@ -17,10 +20,15 @@ pub struct OptimizationView<'a> {
 }
 
 /// Positions found by checking the retained candidate axes and exact optimum.
+/// What a goal's measured history is named by, before its measurement:
+/// `GOAL_gain`. Not `OPT_`, which names the design variables.
+pub const GOAL_PREFIX: &str = "GOAL_";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimizationIndices {
     cost: usize,
     variables: Vec<(String, usize)>,
+    goals: Vec<usize>,
     best_index: usize,
 }
 
@@ -91,12 +99,28 @@ impl OptimizationIndices {
                     })
                 })
         })?;
+        // A goal's history is drawn only where it is whole: one finite value
+        // at every iteration.
+        let goals = analysis
+            .waveforms
+            .iter()
+            .map(AsRef::as_ref)
+            .enumerate()
+            .filter(|(_, waveform)| {
+                waveform.name.starts_with(GOAL_PREFIX)
+                    && waveform.x == *iterations
+                    && waveform.y.len() == iterations.len()
+                    && waveform.y.samples(..).all(f64::is_finite)
+            })
+            .map(|(index, _)| index)
+            .collect();
         Some(OptimizationIndices {
             cost: cost_index,
             variables: variables
                 .into_iter()
                 .map(|(name, index, _)| ((*name).to_owned(), index))
                 .collect(),
+            goals,
             best_index,
         })
     }
@@ -150,10 +174,20 @@ impl OptimizationIndices {
                 ))
             })
             .collect::<Option<Vec<_>>>()?;
+        let goals = self
+            .goals
+            .iter()
+            .map(|index| {
+                let waveform = analysis.waveforms.get(*index)?.as_ref();
+                let name = waveform.name.strip_prefix(GOAL_PREFIX)?;
+                (waveform.x.len() == count && waveform.y.len() == count).then_some((name, waveform))
+            })
+            .collect::<Option<Vec<_>>>()?;
         Some(OptimizationView {
             iterations,
             cost,
             variables,
+            goals,
             best_cost: *best_cost,
             best_objectives,
             best_constraints,
@@ -193,6 +227,28 @@ mod tests {
         assert_eq!(view.best_index, 2);
         assert!(std::ptr::eq(view.cost, &analysis.waveforms[0]));
         assert!(std::ptr::eq(view.variables[0].1, &analysis.waveforms[1]));
+        assert!(view.goals.is_empty());
+        // A goal's history is read beside the variables, never as one.
+        let mut with_goal = analysis.clone();
+        with_goal.waveforms.push(RetainedWaveform::new(
+            format!("{GOAL_PREFIX}vout"),
+            vec![0.0, 1.0, 2.0],
+            vec![0.5, 0.7, 0.9],
+        ));
+        let goal_view = OptimizationIndices::locate(&with_goal, true)
+            .and_then(|located| {
+                located.view(&with_goal).map(|view| {
+                    (
+                        view.variables.len(),
+                        view.goals
+                            .iter()
+                            .map(|(name, _)| (*name).to_owned())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+            })
+            .expect("a goal history leaves the variables whole");
+        assert_eq!(goal_view, (1, vec!["vout".to_owned()]));
         for mutation in 0..7 {
             let mut changed = analysis.clone();
             match mutation {

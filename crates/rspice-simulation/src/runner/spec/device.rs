@@ -251,6 +251,11 @@ fn run_optimization(
                     .saturating_add(values.len())
             },
         )
+        .saturating_add(data.goal_traces.iter().fold(0usize, |count, trace| {
+            count
+                .saturating_add(data.iterations.len())
+                .saturating_add(trace.values.len())
+        }))
         .saturating_add(data.best_variables.len())
         .saturating_add(1)
         .saturating_add(data.best_objectives.len().saturating_mul(5))
@@ -280,6 +285,28 @@ fn run_optimization(
             data.iterations.clone(),
             values.clone(),
             "value",
+        );
+    }
+    // Each goal's measured history, beside the variables it answers to. Two
+    // goals on one measurement keep both histories apart.
+    let mut goal_names = std::collections::HashSet::new();
+    for trace in &data.goal_traces {
+        super::ensure_not_aborted(abort)?;
+        let mut name = trace.measurement.clone();
+        let mut repeat = 1;
+        while !goal_names.insert(name.clone()) {
+            repeat += 1;
+            name = format!("{} ({repeat})", trace.measurement);
+        }
+        insert_scalar_waveform(
+            &mut waveforms,
+            format!(
+                "{}{name}",
+                rspice_results::optimization::history::GOAL_PREFIX
+            ),
+            data.iterations.clone(),
+            trace.values.clone(),
+            &trace.unit,
         );
     }
 
