@@ -639,8 +639,8 @@ fn popover_body(ui: &mut Ui, rows: &PopoverRows, commands: Commands) -> Option<R
     let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     let footer_h = compact_height(&t.metrics) + 2.0 * FOOTER_PAD;
-    let reference_h = LineHeights::grid(&t).head
-        + t.metrics.row_h * rows.reference_labels().len() as f32;
+    let reference_h =
+        LineHeights::grid(&t).head + t.metrics.row_h * rows.reference_labels().len() as f32;
     // Below the chip the tables have the rest of the screen, less the
     // Reference rows and the foot: the plans up to half of it, the analyses
     // what the plans leave.
@@ -759,10 +759,11 @@ fn reference_section(ui: &mut Ui, rows: &PopoverRows) -> Option<RunChipRequest> 
 /// goes: the rest of the row, at a compact control's height.
 fn reference_row(ui: &mut Ui, label: &str, label_width: f32) -> Rect {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         vec2(ui.available_width(), t.metrics.row_h),
         egui::Sense::hover(),
     );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
     let height = compact_height(&t.metrics);
     // The row's last point is its rule; the control takes the rest, with
     // equal air over and under it.
