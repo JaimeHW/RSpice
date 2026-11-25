@@ -679,7 +679,7 @@ fn quick_fft_plot<W: AsRef<RetainedWaveform>>(
     // is in dBc. The page took the linear magnitude instead, so a printed
     // spectrum showed one peak and a flat floor where the sheet showed a
     // noise floor sixty decibels down and every harmonic in it.
-    quick_plot_from_scaled_series(
+    let mut plot = quick_plot_from_scaled_series(
         ResultViewer::Fft,
         "Results",
         0,
@@ -699,7 +699,46 @@ fn quick_fft_plot<W: AsRef<RetainedWaveform>>(
         None,
         &QuickAbscissa::new("Frequency", "Hz", AxisScale::Linear),
         AxisScale::Decibels,
-    )
+    )?;
+    plot.captions.push(SemanticPlotCaption {
+        text: spectrum_settings(presentation, &data),
+        position: SemanticPoint::new(PLOT_WIDTH_UM - PLOT_INSET_UM, PLOT_INSET_UM - 1_200),
+        anchor: SemanticCaptionAnchor::End,
+    });
+    Ok(plot)
+}
+
+/// The settings a spectrum was taken with, as the sheet states them: its
+/// window, with a Kaiser window's \u{3b2}, its normalisation, the record the
+/// transform read and the resolution bandwidth that leaves.
+fn spectrum_settings(
+    presentation: &ResultsQuickViewPresentation,
+    data: &rspice_results::fft::data::FftData,
+) -> String {
+    use rspice_results::fft::window::WindowFunction;
+    use rspice_results::number_format::fmt_si_significant;
+    let window = match presentation.fft_window() {
+        WindowFunction::Kaiser(beta) => {
+            format!("Kaiser \u{3b2} {}", fmt_si_significant(beta.get(), "", 4))
+        }
+        window => window.display_name().to_owned(),
+    };
+    let normalization = match presentation.fft_normalization() {
+        rspice_results::fft::data::SpectrumNormalization::Peak => "peak",
+        rspice_results::fft::data::SpectrumNormalization::Rms => "RMS",
+    };
+    let mut text = format!(
+        "{window} \u{b7} {normalization} \u{b7} {} samples",
+        data.fft_size
+    );
+    let bandwidth = data.resolution_bandwidth();
+    if bandwidth.is_finite() && bandwidth > 0.0 {
+        text.push_str(&format!(
+            " \u{b7} RBW {}",
+            fmt_si_significant(bandwidth, "Hz", 4)
+        ));
+    }
+    text
 }
 
 /// The level unit a spectrum's decibels are referenced to, as the spectrum

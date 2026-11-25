@@ -2,7 +2,11 @@
 
 use super::*;
 use rspice_results::fft::pipeline::{FftInputOptions, FftTimeWindow};
-use rspice_results::fft::{InputFidelity, data::SpectrumNormalization, window::WindowFunction};
+use rspice_results::fft::{
+    InputFidelity,
+    data::SpectrumNormalization,
+    window::{KaiserBeta, WindowFunction},
+};
 use rspice_results::histogram::HistogramDisplayMode;
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +82,10 @@ pub struct ResultsQuickViewPresentation {
     pub(super) fft_selected_source: Option<String>,
     fft_normalization: PreparedFftNormalization,
     fft_window: PreparedFftWindow,
+    /// The Kaiser window's β, as the sheet set it; absent for every other
+    /// window.
+    #[serde(default)]
+    fft_kaiser_beta: Option<f64>,
     pub(super) fft_input_fidelity: InputFidelity,
     pub(super) fft_time_window_auto: bool,
     pub(super) fft_time_window_start: f64,
@@ -128,6 +136,10 @@ impl ResultsQuickViewPresentation {
                 WindowFunction::FlatTop => PreparedFftWindow::FlatTop,
                 WindowFunction::Kaiser(_) => PreparedFftWindow::Kaiser,
                 WindowFunction::Gaussian => PreparedFftWindow::Gaussian,
+            },
+            fft_kaiser_beta: match fft.window {
+                WindowFunction::Kaiser(beta) => Some(beta.get()),
+                _ => None,
             },
             fft_input_fidelity: fft.input_fidelity,
             fft_time_window_auto: fft.time_window_auto,
@@ -185,6 +197,14 @@ impl ResultsQuickViewPresentation {
                 )));
             }
         }
+        if self
+            .fft_kaiser_beta
+            .is_some_and(|beta| KaiserBeta::new(beta).is_none())
+        {
+            return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
+                "Kaiser window \u{3b2} is out of range".to_owned(),
+            ));
+        }
         if self.fft_sample_count == 0 {
             return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
                 "FFT sample count is zero".to_owned(),
@@ -226,7 +246,11 @@ impl ResultsQuickViewPresentation {
             PreparedFftWindow::Blackman => WindowFunction::Blackman,
             PreparedFftWindow::BlackmanHarris => WindowFunction::BlackmanHarris,
             PreparedFftWindow::FlatTop => WindowFunction::FlatTop,
-            PreparedFftWindow::Kaiser => WindowFunction::KAISER,
+            PreparedFftWindow::Kaiser => WindowFunction::Kaiser(
+                self.fft_kaiser_beta
+                    .and_then(KaiserBeta::new)
+                    .unwrap_or(KaiserBeta::DEFAULT),
+            ),
             PreparedFftWindow::Gaussian => WindowFunction::Gaussian,
         }
     }

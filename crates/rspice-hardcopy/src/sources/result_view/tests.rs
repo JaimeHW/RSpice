@@ -260,3 +260,64 @@ fn a_printed_bode_gives_magnitude_and_phase_their_own_axes() {
     assert!(tops[1].ends_with('°'), "{tops:?}");
     assert_eq!(plot.x_scale, AxisScale::Logarithmic);
 }
+
+/// A spectrum prints with the window the sheet took it with, a Kaiser
+/// window's own β included, and states it with the record and resolution.
+#[test]
+fn a_printed_spectrum_keeps_and_states_the_sheets_window() {
+    use rspice_results::fft::window::{KaiserBeta, WindowFunction};
+    let time = (0..4_096)
+        .map(|index| f64::from(index) * 1.0e-6)
+        .collect::<Vec<_>>();
+    let values = time.iter().map(|t| (t * 6.0e4).sin()).collect::<Vec<_>>();
+    let run = completed(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient", 0.0)
+            .with_waveforms(vec![RetainedWaveform::new("V(out)", time, values)]),
+    );
+    let presentation = ResultsQuickViewPresentation::try_new(
+        ResultViewer::Fft,
+        RetainedQuickViewOverlays::default(),
+        QuickFftSettings {
+            selected_source: Some("V(out)".to_owned()),
+            normalization: rspice_results::fft::data::SpectrumNormalization::Peak,
+            window: WindowFunction::Kaiser(KaiserBeta::new(12.0).unwrap()),
+            input_fidelity: rspice_results::fft::InputFidelity::Reference,
+            time_window_auto: true,
+            time_window_start: 0.0,
+            time_window_end: 1.0,
+            sample_count_auto: true,
+            sample_count: 4096,
+        },
+        QuickHistogramSettings {
+            x: None,
+            y: None,
+            selected: 0,
+            measurement: None,
+            bin_count: 20,
+            custom_range: false,
+            custom_min: 0.0,
+            custom_max: 1.0,
+            mode: rspice_results::histogram::HistogramDisplayMode::Count,
+        },
+    )
+    .unwrap();
+    let restored: ResultsQuickViewPresentation =
+        serde_json::from_slice(&serde_json::to_vec(&presentation).unwrap()).unwrap();
+    assert_eq!(
+        restored.fft_window(),
+        WindowFunction::Kaiser(KaiserBeta::new(12.0).unwrap())
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 1, |_| true).unwrap();
+    let plot = quick_fft_plot(&restored, &source).unwrap();
+    let settings = plot
+        .captions
+        .iter()
+        .find(|caption| caption.text.starts_with("Kaiser"))
+        .map(|caption| caption.text.clone())
+        .unwrap_or_default();
+    assert!(
+        settings.starts_with("Kaiser \u{3b2} 12 \u{b7} peak \u{b7} ")
+            && settings.contains(" samples \u{b7} RBW "),
+        "{settings}"
+    );
+}
