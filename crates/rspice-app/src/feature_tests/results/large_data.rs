@@ -1,11 +1,12 @@
 //! Whole application frames over large data, timed: a transient of five million samples in
-//! memory, and a project of two hundred retained runs. Each case reports its frames' median and
-//! 99th percentile, gesture by gesture, the time until what a gesture draws or measures off the
-//! frame is in, the process's peak working set and the stored columns it read whole.
+//! memory, and a project of two hundred retained runs, each in Results and on Design with the
+//! dock's Plot page in front. Each case reports its frames' median and 99th percentile, gesture
+//! by gesture, the time until what a gesture draws or measures off the frame is in, the
+//! process's peak working set and the stored columns it read whole.
 //!
-//! Run by hand, each case alone, so the peak working set is the case's own:
-//! `cargo test -p rspice-app --lib large_data::five_million -- --ignored --nocapture` and
-//! `cargo test -p rspice-app --lib large_data::two_hundred -- --ignored --nocapture`.
+//! Run by hand, each case alone, so the peak working set is the case's own, for instance
+//! `cargo test -p rspice-app --lib large_data::five_million_samples_in_results -- --ignored
+//! --exact --nocapture` with the case's whole path.
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -146,19 +147,64 @@ impl Timings {
     }
 }
 
-/// The analysis shown and its strip's X extent.
-fn shown(app: &RSpiceApp) -> (AnalysisPresentationKey, f64, f64) {
-    let run = app.state.model.simulation.active_run().expect("a run is shown");
-    let analysis = &run.analyses[0];
-    let (x0, x1) = analysis.waveforms[0].x.ends().expect("rows");
-    (AnalysisPresentationKey::new(run.dataset_id, analysis), x0, x1)
+/// Where a case is drawn: the Results workspace, or Design with the dock's Plot page in front.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Place {
+    Results,
+    PlotPage,
 }
 
-/// A transient of five million samples in memory, four signals of 1.25 million rows: opened in
-/// Results, panned, zoomed, its cursor dragged, and a measurement added.
+impl Place {
+    fn show(self, app: &mut RSpiceApp) {
+        match self {
+            Self::Results => app.state.workbench.activate(Workspace::Results),
+            Self::PlotPage => {
+                app.state.workbench.activate(Workspace::Design);
+                app.state.workbench.show_plot_page();
+            }
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Results => "Results",
+            Self::PlotPage => "Design, the dock's Plot page in front",
+        }
+    }
+}
+
+/// The analysis shown and its strip's X extent.
+fn shown(app: &RSpiceApp) -> (AnalysisPresentationKey, f64, f64) {
+    let run = app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .expect("a run is shown");
+    let analysis = &run.analyses[0];
+    let (x0, x1) = analysis.waveforms[0].x.ends().expect("rows");
+    (
+        AnalysisPresentationKey::new(run.dataset_id, analysis),
+        x0,
+        x1,
+    )
+}
+
 #[test]
 #[ignore = "times whole frames over five million samples; run by hand"]
-fn five_million_samples_in_memory() {
+fn five_million_samples_in_results() {
+    five_million_samples(Place::Results);
+}
+
+#[test]
+#[ignore = "times whole frames over five million samples; run by hand"]
+fn five_million_samples_on_the_plot_page() {
+    five_million_samples(Place::PlotPage);
+}
+
+/// A transient of five million samples in memory, four signals of 1.25 million rows, shown in
+/// `place`: opened, panned, zoomed, its cursor dragged, and a measurement added.
+fn five_million_samples(place: Place) {
     const ROWS: usize = 1_250_000;
     const SIGNALS: usize = 4;
     let x: Vec<f64> = (0..ROWS).map(|row| row as f64 * 1.0e-9).collect();
@@ -179,7 +225,7 @@ fn five_million_samples_in_memory() {
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
-    app.state.workbench.activate(Workspace::Results);
+    place.show(&mut app);
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     let columns = ColumnWork::read();
@@ -215,12 +261,11 @@ fn five_million_samples_in_memory() {
         let took = app_frame(&ctx, &mut app);
         timings.frame("cursor drag", took);
     }
-    app.state.results.result_document_dialog = Some(ResultDocumentDialog::Measurement(
-        MeasurementDraft {
+    app.state.results.result_document_dialog =
+        Some(ResultDocumentDialog::Measurement(MeasurementDraft {
             expression: "max(V(s0))".to_owned(),
             ..MeasurementDraft::default()
-        },
-    ));
+        }));
     let started = Instant::now();
     commit_open_dialog(&mut app.state.results_parts());
     timings.frame("add measurement (commit)", started.elapsed());
@@ -230,7 +275,7 @@ fn five_million_samples_in_memory() {
         timings.frame("idle", took);
     }
     timings.report(
-        "five million samples in memory, Results",
+        &format!("five million samples in memory, {}", place.label()),
         &columns.since(),
     );
 }
@@ -244,11 +289,22 @@ fn deck(index: usize) -> String {
     )
 }
 
-/// A project of two hundred stored runs, saved and opened again: the project opened, its data
-/// browser drawn, runs switched between, and the newest compared against the oldest.
 #[test]
 #[ignore = "solves and times two hundred runs; run by hand"]
-fn two_hundred_runs() {
+fn two_hundred_runs_in_results() {
+    two_hundred_runs(Place::Results);
+}
+
+#[test]
+#[ignore = "solves and times two hundred runs; run by hand"]
+fn two_hundred_runs_on_the_plot_page() {
+    two_hundred_runs(Place::PlotPage);
+}
+
+/// A project of two hundred stored runs, saved and opened again, shown in `place`: the project
+/// opened, its data browser drawn, runs switched between, and, where Compare is offered, the
+/// newest compared against a baseline.
+fn two_hundred_runs(place: Place) {
     const RUNS: usize = 200;
     let folder = std::env::temp_dir().join(format!("rspice-two-hundred-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&folder).unwrap();
@@ -272,7 +328,7 @@ fn two_hundred_runs() {
     assert!(app.state.load_project_from_path(&file), "the project opens");
     timings.frame("open the project (load)", started.elapsed());
     assert_eq!(app.state.model.simulation.retained.runs.len(), RUNS);
-    app.state.workbench.activate(Workspace::Results);
+    place.show(&mut app);
     assert!(app.state.model.simulation.select_run(0));
     timings.gesture("open the project (first frame)", &ctx, &mut app);
     for _ in 0..20 {
@@ -286,26 +342,31 @@ fn two_hundred_runs() {
 
     assert!(app.state.model.simulation.select_run(0));
     timings.gesture("show the newest", &ctx, &mut app);
-    assert!(compare::compare_available(app.state.results_reads()));
-    compare::open_compare(&mut app.state.results_parts());
-    let Some(ResultDocumentDialog::Compare(mut draft)) =
-        app.state.results.result_document_dialog.clone()
-    else {
-        panic!("Compare datasets opens its form");
-    };
-    let choices = compare::choices(app.state.results_reads(), &mut draft);
-    assert_eq!(choices.refusal, None);
-    app.state.results.result_document_dialog = Some(ResultDocumentDialog::Compare(draft));
-    let started = Instant::now();
-    commit_open_dialog(&mut app.state.results_parts());
-    compare::settle_comparison(&mut app.state.results_parts());
-    timings.frame("compare (commit and settle)", started.elapsed());
-    timings.gesture("compare", &ctx, &mut app);
+    if place == Place::Results {
+        assert!(compare::compare_available(app.state.results_reads()));
+        compare::open_compare(&mut app.state.results_parts());
+        let Some(ResultDocumentDialog::Compare(mut draft)) =
+            app.state.results.result_document_dialog.clone()
+        else {
+            panic!("Compare datasets opens its form");
+        };
+        let choices = compare::choices(app.state.results_reads(), &mut draft);
+        assert_eq!(choices.refusal, None);
+        app.state.results.result_document_dialog = Some(ResultDocumentDialog::Compare(draft));
+        let started = Instant::now();
+        commit_open_dialog(&mut app.state.results_parts());
+        compare::settle_comparison(&mut app.state.results_parts());
+        timings.frame("compare (commit and settle)", started.elapsed());
+        timings.gesture("compare", &ctx, &mut app);
+    }
     for _ in 0..20 {
         let took = app_frame(&ctx, &mut app);
         timings.frame("idle", took);
     }
-    timings.report("two hundred stored runs, Results", &columns.since());
+    timings.report(
+        &format!("two hundred stored runs, {}", place.label()),
+        &columns.since(),
+    );
     drop(app);
     let _ = std::fs::remove_dir_all(&folder);
 }

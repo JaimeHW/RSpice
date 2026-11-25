@@ -13,11 +13,11 @@ mod document_edit;
 mod expression_diagnostics;
 #[cfg(not(target_arch = "wasm32"))]
 mod full_disk;
-#[cfg(not(target_arch = "wasm32"))]
-mod large_data;
 pub(super) mod histogram_publication;
 mod inspector;
 mod keys;
+#[cfg(not(target_arch = "wasm32"))]
+mod large_data;
 mod loop_gain;
 mod navigation;
 mod navigator_browser;
