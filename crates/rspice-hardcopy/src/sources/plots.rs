@@ -65,6 +65,7 @@ pub fn resolve_plot_source(
                 .collect(),
             companion: false,
             palette_slot: None,
+            key: None,
         });
     }
     let semantic = SemanticPlot {

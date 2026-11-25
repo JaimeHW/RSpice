@@ -249,6 +249,18 @@ pub struct SemanticPlotTrace {
     /// counts the network terms it lists but does not draw.
     #[serde(default)]
     pub palette_slot: Option<u16>,
+    /// How the key names the trace where that is not its label: a Bode
+    /// strip's trace without the unit its axis already states. The label
+    /// stays the trace's identity.
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+impl SemanticPlotTrace {
+    /// What the key calls the trace.
+    pub fn key_label(&self) -> &str {
+        self.key.as_deref().unwrap_or(&self.label)
+    }
 }
 
 /// One retained horizontal-axis cursor, represented by its exact source X

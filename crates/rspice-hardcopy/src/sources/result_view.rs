@@ -478,7 +478,14 @@ fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
     // Frequency is ruled in decades on the sheet, so the page rules it in
     // decades too. Magnitude in decibels and phase in degrees each get their
     // own strip and axis, as the sheet's two panes do.
-    quick_plot_from_scaled_series(
+    let keys = [
+        (format!("|{signal}| (dB)"), format!("|{signal}|")),
+        (
+            format!("phase({signal}) (\u{b0})"),
+            format!("phase({signal})"),
+        ),
+    ];
+    let mut plot = quick_plot_from_scaled_series(
         ResultViewer::Bode,
         "Results",
         0,
@@ -486,7 +493,20 @@ fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
         Some(overlay),
         &analysis_abscissa(active.analysis, AxisScale::Logarithmic),
         AxisScale::Linear,
-    )
+    )?;
+    keyed_as_the_sheet(&mut plot, &keys);
+    Ok(plot)
+}
+
+/// Name each trace in the key as the sheet's legend names it, the unit
+/// left to the axis: `keys` pairs a trace's label with its key.
+fn keyed_as_the_sheet(plot: &mut SemanticPlot, keys: &[(String, String)]) {
+    for trace in &mut plot.traces {
+        trace.key = keys
+            .iter()
+            .find(|(label, _)| *label == trace.label)
+            .map(|(_, key)| key.clone());
+    }
 }
 
 fn quick_noise_spectrum_plot<W: AsRef<RetainedWaveform>>(
@@ -1006,6 +1026,7 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
                 .collect(),
             companion: false,
             palette_slot: None,
+            key: None,
         }],
         cursors: Vec::new(),
         markers: Vec::new(),

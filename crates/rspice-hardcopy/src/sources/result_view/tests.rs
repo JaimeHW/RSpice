@@ -340,5 +340,13 @@ fn a_printed_bode_draws_the_response_the_card_measures() {
         let plot =
             quick_bode_plot(&source, &RetainedQuickViewOverlay::default(), Some(chosen)).unwrap();
         assert_eq!(plot.traces[0].label, printed);
+        // The key names each trace as the sheet's legend does; the unit
+        // is on its axis.
+        let keys = plot
+            .traces
+            .iter()
+            .map(|trace| trace.key_label())
+            .collect::<Vec<_>>();
+        assert_eq!(keys, [format!("|{chosen}|"), format!("phase({chosen})")]);
     }
 }

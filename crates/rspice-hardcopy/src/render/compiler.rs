@@ -1390,10 +1390,10 @@ impl<'a> SemanticSceneCompiler<'a> {
             }) && !self
                 .legend
                 .iter()
-                .any(|entry| entry.label == trace.label && entry.stroke == stroke)
+                .any(|entry| entry.label == trace.key_label() && entry.stroke == stroke)
             {
                 self.legend
-                    .push(LegendEntry::try_new(&trace.label, stroke)?);
+                    .push(LegendEntry::try_new(trace.key_label(), stroke)?);
             }
         }
         for cursor in &plot.cursors {

@@ -226,6 +226,7 @@ fn plane_plot(
                     .collect(),
                 companion: locus.companion,
                 palette_slot: locus.palette_slot,
+                key: None,
             })
         })
         .collect::<Result<Vec<_>, HardcopySourceError>>()?;

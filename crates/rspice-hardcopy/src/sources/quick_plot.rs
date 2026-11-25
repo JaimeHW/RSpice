@@ -302,6 +302,7 @@ pub(crate) fn quick_plot_in(
                     .collect(),
                 companion: false,
                 palette_slot: None,
+                key: None,
             })
         })
         .collect::<Result<Vec<_>, HardcopySourceError>>()?;

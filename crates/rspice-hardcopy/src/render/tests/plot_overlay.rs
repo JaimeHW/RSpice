@@ -36,6 +36,7 @@ fn overlay_plot() -> SemanticPlot {
             ],
             companion: false,
             palette_slot: None,
+            key: None,
         }],
         cursors: vec![
             SemanticPlotCursor {
