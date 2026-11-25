@@ -832,7 +832,7 @@ mod tests {
         assert_eq!(mark.status.category(), ResultOperationalCategory::Warning);
         assert_eq!(run_state_words(run), "Completed, one analysis failed");
         assert_eq!(
-            mark.as_run_details_say(run).status.label(),
+            mark.in_run_details_words(run).status.label(),
             "Completed, one analysis failed"
         );
 
@@ -987,7 +987,7 @@ impl RunMark {
 
     /// The mark as the Details' State row reads it: a run that completed
     /// with some of its analyses failed, in the words Run details uses.
-    pub(crate) fn as_run_details_say(mut self, run: &SimulationRun) -> Self {
+    pub(crate) fn in_run_details_words(mut self, run: &SimulationRun) -> Self {
         if let Some(wording) = self.status.wording.as_mut() {
             wording.label = run_state_words(run);
         }

@@ -56,7 +56,7 @@ pub(in crate::workbench) fn results(
         crate::workbench::docks::navigator::results::shown_run_reads_as(state.results_reads())
             .map(|reads_as| RunMark::shown(state, reads_as))
             .map(|mark| match state.model.simulation.active_run() {
-                Some(run) => mark.as_run_details_say(run),
+                Some(run) => mark.in_run_details_words(run),
                 None => mark,
             });
     let (details, asked) = match state.model.simulation.active_run().zip(manifest.as_deref()) {
