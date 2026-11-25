@@ -21,7 +21,7 @@
 //! at one instant cannot be written and is refused at that instant; a sample
 //! that repeats its predecessor exactly carries nothing and is dropped.
 
-use super::{NO_ACTIVE_ANALYSIS_MESSAGE, note_result_export_failure, note_result_export_success};
+use super::{NO_ACTIVE_ANALYSIS_MESSAGE, note_result_export_success};
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
@@ -258,7 +258,6 @@ pub(super) fn export_pwl(
     match export {
         Ok(()) => note_result_export_success(
             state,
-            LABEL,
             crate::workbench::workflows::export_workflow::export_completion_message(
                 LABEL,
                 &published_path,
@@ -278,7 +277,6 @@ pub(super) fn export_pwl(
             ),
         ),
         Err(error) => {
-            note_result_export_failure(state, format!("{LABEL} export failed: {error}"));
             state.report_failure(format!("{LABEL} export failed"), error.to_string());
         }
     }

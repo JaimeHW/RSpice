@@ -29,7 +29,7 @@
 
 use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
-    note_result_export_failure, note_result_export_success,
+    note_result_export_success,
 };
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
@@ -161,7 +161,6 @@ pub(super) fn export_numpy(
     {
         Ok(bytes) => bytes,
         Err(error) => {
-            note_result_export_failure(state, format!("{} encoding failed: {error}", kind.label()));
             state.report_failure(format!("{} export failed", kind.label()), error.to_string());
             return;
         }
@@ -190,7 +189,6 @@ pub(super) fn export_numpy(
         Ok(()) => {
             note_result_export_success(
                 state,
-                kind.label(),
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     kind.label(),
                     &published_path,
@@ -200,7 +198,6 @@ pub(super) fn export_numpy(
             );
         }
         Err(error) => {
-            note_result_export_failure(state, format!("{} export failed: {error}", kind.label()));
             state.report_failure(format!("{} export failed", kind.label()), error.to_string());
         }
     }

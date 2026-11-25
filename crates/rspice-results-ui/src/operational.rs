@@ -194,10 +194,6 @@ pub struct ResultOperationalStatus {
     /// What the status says in place of its state's own label, tone and
     /// message, where those would misstate it.
     pub wording: Option<StatusWording>,
-    /// Whether what the sheet showed before is still on show under a
-    /// failure: a failed action on the sheet leaves it. An analysis or a run
-    /// that failed in its own run has nothing earlier on show.
-    pub earlier_kept: bool,
 }
 
 /// What a status says under its name and detail: what happened, when that
@@ -207,12 +203,6 @@ pub struct StatusLines {
     pub message: Option<&'static str>,
     pub recovery: &'static str,
 }
-
-/// A failed action over a sheet that keeps what it showed.
-const FAILED_OVER_KEPT: StatusLines = StatusLines {
-    message: Some("The last action on this sheet failed; what the sheet showed before is kept."),
-    recovery: "Read the message, fix the cause and try again.",
-};
 
 /// A status's words and tone where they are not its state's own: a run that
 /// completed with some of its analyses failed reads as how many failed, in
@@ -232,7 +222,6 @@ impl ResultOperationalStatus {
             blocks_visuals,
             dismissible: false,
             wording: None,
-            earlier_kept: false,
         }
     }
 
@@ -254,14 +243,11 @@ impl ResultOperationalStatus {
     /// words are picked: the card, a mark's popup, the empty hint, a hover
     /// and assistive technology all read these.
     ///
-    /// A failure reads by what failed. An analysis or a run that failed in
-    /// its own run gives its reason as the detail and says to fix the cause
-    /// and run the plan again; only a failed action over a sheet that keeps
-    /// what it showed says that it is kept.
+    /// A failure is an analysis's or a run's own, in its own run: its reason
+    /// is the detail, then what to do. An action that failed over a sheet
+    /// (an export, a copy, a file picker) is never the result's state; the
+    /// toast and the log report it.
     pub fn lines(&self) -> StatusLines {
-        if self.state == ResultOperationalState::Failed && self.earlier_kept {
-            return FAILED_OVER_KEPT;
-        }
         let message = match &self.wording {
             Some(wording) => Some(wording.message),
             // The reason is the detail: it is not said twice.

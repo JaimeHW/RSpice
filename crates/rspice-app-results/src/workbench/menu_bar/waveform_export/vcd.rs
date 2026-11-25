@@ -22,7 +22,7 @@
 //! encoder, and it is stated to the reader on every successful publication.
 //! A reader who needs the strength band wants the RSpice Result Bundle.
 
-use super::{NO_ACTIVE_ANALYSIS_MESSAGE, note_result_export_failure, note_result_export_success};
+use super::{NO_ACTIVE_ANALYSIS_MESSAGE, note_result_export_success};
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -75,7 +75,6 @@ pub(super) fn export_vcd(
             );
             note_result_export_success(
                 state,
-                "VCD",
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     "VCD",
                     &published_path,
@@ -85,7 +84,6 @@ pub(super) fn export_vcd(
             );
         }
         Err(error) => {
-            note_result_export_failure(state, format!("VCD export failed: {error}"));
             state.report_failure("VCD export failed", error.to_string());
         }
     }

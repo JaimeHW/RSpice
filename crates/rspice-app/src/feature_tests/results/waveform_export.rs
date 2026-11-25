@@ -97,6 +97,7 @@ fn a_result_export_names_its_file_on_the_status_bar() {
 
 /// An export the user asked for that did not happen is said now, with the
 /// way to its Console line; the reader is not left to find it under the bell.
+/// It is said only there: the result is as it was, and its state says so.
 #[test]
 fn a_result_export_that_fails_is_toasted() {
     let mut state = state_with_typed_result(
@@ -106,6 +107,7 @@ fn a_result_export_that_fails_is_toasted() {
             vec![0.0, 2.0],
         )]),
     );
+    state.open_project_session();
     state.results.results.session.viewer =
         rspice_app_results::workbench::documents::result_document::ResultViewer::Waves;
     let io = MockExportWorkflowIo {
@@ -130,6 +132,15 @@ fn a_result_export_that_fails_is_toasted() {
     assert_eq!(
         activity[0].kind(),
         rspice_app_workbench::ui::widgets::ToastKind::Error
+    );
+    // The export failed, not the result: nothing marks the result's state.
+    // The Plot page's tab and band read "Failed" over a good run.
+    assert_eq!(
+        rspice_app_results::workbench::documents::result_document::plot_page_status(
+            &mut state.results_parts()
+        ),
+        None,
+        "a failed export is never the result's state"
     );
 }
 

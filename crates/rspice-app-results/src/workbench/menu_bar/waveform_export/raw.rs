@@ -24,7 +24,7 @@
 use super::job::{ResultExportJob, start_export_job};
 use super::{
     ALL_TRACES_HIDDEN_MESSAGE, ExportedSignals, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE,
-    event_nodes, exported_waveforms, note_result_export_failure, note_result_export_success,
+    event_nodes, exported_waveforms, note_result_export_success,
 };
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
@@ -148,7 +148,6 @@ pub(super) fn export_raw(
     match export {
         Ok(()) => note_result_export_success(
             state,
-            label,
             crate::workbench::workflows::export_workflow::export_completion_message(
                 label,
                 &published_path,
@@ -157,7 +156,6 @@ pub(super) fn export_raw(
             ),
         ),
         Err(error) => {
-            note_result_export_failure(state, format!("{label} export failed: {error}"));
             state.report_failure(format!("{label} export failed"), error.to_string());
         }
     }
@@ -237,7 +235,6 @@ fn export_raw_as_read(
     let destination = match destination {
         Ok(destination) => destination,
         Err(error) => {
-            note_result_export_failure(state, format!("{label} export failed: {error}"));
             state.report_failure(format!("{label} export failed"), error);
             return None;
         }

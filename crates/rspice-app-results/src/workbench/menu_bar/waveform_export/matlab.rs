@@ -38,7 +38,7 @@ use rspice_formats::matlab as writer;
 
 use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
-    note_result_export_failure, note_result_export_success,
+    note_result_export_success,
 };
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
@@ -118,7 +118,6 @@ pub(super) fn export_matlab(
     let bytes = match encode_matlab(&prepared) {
         Ok(bytes) => bytes,
         Err(error) => {
-            note_result_export_failure(state, format!("{LABEL} encoding failed: {error}"));
             state.report_failure(format!("{LABEL} export failed"), error.to_string());
             return;
         }
@@ -145,7 +144,6 @@ pub(super) fn export_matlab(
         Ok(()) => {
             note_result_export_success(
                 state,
-                LABEL,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     LABEL,
                     &published_path,
@@ -155,7 +153,6 @@ pub(super) fn export_matlab(
             );
         }
         Err(error) => {
-            note_result_export_failure(state, format!("{LABEL} export failed: {error}"));
             state.report_failure(format!("{LABEL} export failed"), error.to_string());
         }
     }

@@ -1704,11 +1704,6 @@ pub const fn result_analysis_data_state(
             None,
             "The relationship to the current source revision is unknown, so neither current nor out of date may be claimed.",
         ),
-        (ResultCurrentness::Recovered, _) => state(
-            "recovered",
-            Some(ResultOperationalState::Recovered),
-            "Reopened from a verified replica. Row identities were restored.",
-        ),
         (ResultCurrentness::Current | ResultCurrentness::Partial, _) => state(
             "current",
             None,

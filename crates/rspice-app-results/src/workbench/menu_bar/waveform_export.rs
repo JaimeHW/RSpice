@@ -48,24 +48,9 @@ const TYPED_RESULT_TOUCHSTONE_REFUSAL: &str =
     "Touchstone export is not compatible with the active typed result; select CSV export.";
 const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one analysis; choose it in Export result dataset\u{2026} or select CSV export.";
 
-fn note_result_export_failure(state: &mut ResultsParts<'_>, detail: impl Into<String>) {
-    let data_version = state.model.simulation.view.data_version;
-    state.results.record_runtime_condition(
-        crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
-        detail,
-        data_version,
-    );
-}
-
 /// A finished export. The Console keeps `message`, and the status bar shows
 /// it to the reader who just chose the file.
-fn note_result_export_success(state: &mut ResultsParts<'_>, format: &str, message: String) {
-    let data_version = state.model.simulation.view.data_version;
-    state.results.record_runtime_recovery_if(
-        crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
-        format!("{format} publication succeeded after the recorded export failure."),
-        data_version,
-    );
+fn note_result_export_success(state: &mut ResultsParts<'_>, message: String) {
     state.record(LogSeverity::Info, LogSource::Studio, message.clone());
     state.prompt(message);
 }
@@ -217,7 +202,6 @@ pub fn action_export_result_selection_with_io(
             let count = keys.len();
             note_result_export_success(
                 state,
-                "Result text",
                 if count == 1 {
                     "Exported 1 result quantity.".to_owned()
                 } else {
@@ -226,7 +210,6 @@ pub fn action_export_result_selection_with_io(
             );
         }
         Err(error) => {
-            note_result_export_failure(state, format!("Result text export failed: {error}"));
             state.report_failure("Result text export failed", error.to_string());
         }
     }
@@ -848,21 +831,16 @@ pub(crate) fn publish_result_text(
             crate::io::file_exchange::ensure_file_extension(&mut path, extension);
             let export = io
                 .observe_destination(&path)
-                .and_then(|destination| io.write_text_file_observed(&destination, contents))
-                .map_err(|error| (format!("{label} export failed: {error}"), error));
+                .and_then(|destination| io.write_text_file_observed(&destination, contents));
             (path, export)
         }
         Ok(None) => return,
-        Err(error) => (
-            std::path::PathBuf::new(),
-            Err((format!("{label} destination failed: {error}"), error)),
-        ),
+        Err(error) => (std::path::PathBuf::new(), Err(error)),
     };
     match export {
         Ok(()) => {
             note_result_export_success(
                 state,
-                label,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     label,
                     &path,
@@ -871,8 +849,7 @@ pub(crate) fn publish_result_text(
                 ),
             );
         }
-        Err((note, error)) => {
-            note_result_export_failure(state, note);
+        Err(error) => {
             state.report_failure(format!("{label} export failed"), error.to_string());
         }
     }
@@ -940,10 +917,6 @@ fn export_native_result_bundle(
     let bytes = match encode_native_bundle(kind, &native_dataset, u64::MAX) {
         Ok(bytes) => bytes,
         Err(error) => {
-            note_result_export_failure(
-                state,
-                format!("{} encoding failed: {error}", kind.display_name()),
-            );
             state.report_failure(
                 format!("{} export failed", kind.display_name()),
                 error.to_string(),
@@ -986,7 +959,6 @@ fn export_native_result_bundle(
             let detail = format!("{exported_signal_count} signals, {exported_point_count} points");
             note_result_export_success(
                 state,
-                kind.display_name(),
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     kind.display_name(),
                     &published_path,
@@ -996,10 +968,6 @@ fn export_native_result_bundle(
             );
         }
         Err(error) => {
-            note_result_export_failure(
-                state,
-                format!("{} export failed: {error}", kind.display_name()),
-            );
             state.report_failure(
                 format!("{} export failed", kind.display_name()),
                 error.to_string(),
@@ -1034,7 +1002,6 @@ fn export_csv(
                     );
                     note_result_export_success(
                         state,
-                        "CSV",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "CSV",
                             &path,
@@ -1044,7 +1011,6 @@ fn export_csv(
                     );
                 }
                 Err(e) => {
-                    note_result_export_failure(state, format!("CSV export failed: {e}"));
                     state.report_failure("CSV export failed", e.to_string());
                 }
             }
@@ -1053,7 +1019,6 @@ fn export_csv(
             // User cancelled - no message needed
         }
         Err(e) => {
-            note_result_export_failure(state, format!("CSV destination failed: {e}"));
             state.report_failure("CSV export failed", e.to_string());
         }
     }
@@ -1092,7 +1057,6 @@ fn export_tsv(
                     );
                     note_result_export_success(
                         state,
-                        "TSV",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "TSV",
                             &path,
@@ -1102,14 +1066,12 @@ fn export_tsv(
                     );
                 }
                 Err(error) => {
-                    note_result_export_failure(state, format!("TSV export failed: {error}"));
                     state.report_failure("TSV export failed", error.to_string());
                 }
             }
         }
         Ok(None) => {}
         Err(error) => {
-            note_result_export_failure(state, format!("TSV destination failed: {error}"));
             state.report_failure("TSV export failed", error.to_string());
         }
     }
@@ -1164,7 +1126,6 @@ fn export_touchstone(
                     );
                     note_result_export_success(
                         state,
-                        "Touchstone",
                         crate::workbench::workflows::export_workflow::export_completion_message(
                             "Touchstone",
                             &path,
@@ -1174,14 +1135,12 @@ fn export_touchstone(
                     );
                 }
                 Err(error) => {
-                    note_result_export_failure(state, format!("Touchstone export failed: {error}"));
                     state.report_failure("Touchstone export failed", error.to_string());
                 }
             }
         }
         Ok(None) => {}
         Err(error) => {
-            note_result_export_failure(state, format!("Touchstone destination failed: {error}"));
             state.report_failure("Touchstone export failed", error.to_string());
         }
     }

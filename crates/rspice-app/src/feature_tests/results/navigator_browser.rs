@@ -496,13 +496,6 @@ fn analysis_data_state_merges_one_reading_worst_first() {
     );
     assert_eq!(
         word(
-            ResultCurrentness::Recovered,
-            ResultCompletenessClass::Complete
-        ),
-        "recovered"
-    );
-    assert_eq!(
-        word(
             ResultCurrentness::Current,
             ResultCompletenessClass::Complete
         ),

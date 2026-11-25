@@ -37,13 +37,11 @@ pub(crate) enum ResultRuntimeConditionKind {
     LowMemory,
     RendererLoss,
     InterruptedOperation,
-    Failed,
     Cancelled,
-    Recovered,
 }
 
 impl ResultRuntimeConditionKind {
-    pub(crate) const ALL: [Self; 11] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::IntegrityVerifying,
         Self::OfflineCached,
         Self::SourcePermissionDenied,
@@ -52,9 +50,7 @@ impl ResultRuntimeConditionKind {
         Self::LowMemory,
         Self::RendererLoss,
         Self::InterruptedOperation,
-        Self::Failed,
         Self::Cancelled,
-        Self::Recovered,
     ];
 
     pub(crate) const fn browser_state_id(self) -> &'static str {
@@ -67,9 +63,7 @@ impl ResultRuntimeConditionKind {
             Self::LowMemory => "low-memory",
             Self::RendererLoss => "renderer-loss",
             Self::InterruptedOperation => "interrupted-operation",
-            Self::Failed => "failed",
             Self::Cancelled => "cancelled",
-            Self::Recovered => "recovered",
         }
     }
 
@@ -86,8 +80,6 @@ impl ResultRuntimeConditionKind {
             Self::InterruptedOperation | Self::Cancelled => {
                 ResultOperationalState::InterruptedOperation
             }
-            Self::Failed => ResultOperationalState::Failed,
-            Self::Recovered => ResultOperationalState::Recovered,
         }
     }
 
@@ -129,27 +121,6 @@ impl ResultsState {
         }
     }
 
-    pub(crate) fn record_runtime_recovery_if(
-        &mut self,
-        failed_kind: ResultRuntimeConditionKind,
-        detail: impl Into<String>,
-        data_version: u64,
-    ) {
-        if self
-            .operational_condition
-            .as_ref()
-            .is_some_and(|condition| {
-                condition.kind == failed_kind && condition.data_version == data_version
-            })
-        {
-            self.record_runtime_condition(
-                ResultRuntimeConditionKind::Recovered,
-                detail,
-                data_version,
-            );
-        }
-    }
-
     pub(crate) fn dismiss_runtime_condition(&mut self) {
         self.operational_condition = None;
     }
@@ -164,18 +135,16 @@ pub enum ResultCurrentness {
     Superseded,
     Unresolved,
     Corrupted,
-    Recovered,
 }
 
 impl ResultCurrentness {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 6] = [
         Self::Current,
         Self::Stale,
         Self::Partial,
         Self::Superseded,
         Self::Unresolved,
         Self::Corrupted,
-        Self::Recovered,
     ];
 
     pub(crate) const fn id(self) -> &'static str {
@@ -186,7 +155,6 @@ impl ResultCurrentness {
             Self::Superseded => "superseded",
             Self::Unresolved => "unresolved",
             Self::Corrupted => "corrupted",
-            Self::Recovered => "recovered",
         }
     }
 }
@@ -197,7 +165,7 @@ pub(crate) fn analysis_currentness(
     analysis: &AnalysisResult,
     evidence_valid: bool,
 ) -> ResultCurrentness {
-    debug_assert_eq!(ResultCurrentness::ALL.len(), 7);
+    debug_assert_eq!(ResultCurrentness::ALL.len(), 6);
     if !evidence_valid {
         return ResultCurrentness::Corrupted;
     }
@@ -274,22 +242,6 @@ pub(crate) fn run_currentness(
     }
     if run.analyses.is_empty() {
         ResultCurrentness::Unresolved
-    } else if currentness_rank(currentness) <= currentness_rank(ResultCurrentness::Unresolved)
-        && state
-            .results
-            .operational_condition
-            .as_ref()
-            .is_some_and(|condition| {
-                condition.kind == ResultRuntimeConditionKind::Recovered
-                    && condition.data_version == state.model.simulation.view.data_version
-                    && state
-                        .model
-                        .simulation
-                        .active_run()
-                        .is_some_and(|active| active.dataset_id == run.dataset_id)
-            })
-    {
-        ResultCurrentness::Recovered
     } else {
         currentness
     }
@@ -298,12 +250,11 @@ pub(crate) fn run_currentness(
 const fn currentness_rank(currentness: ResultCurrentness) -> u8 {
     match currentness {
         ResultCurrentness::Current => 0,
-        ResultCurrentness::Recovered => 1,
-        ResultCurrentness::Unresolved => 2,
-        ResultCurrentness::Superseded => 3,
-        ResultCurrentness::Stale => 4,
-        ResultCurrentness::Partial => 5,
-        ResultCurrentness::Corrupted => 6,
+        ResultCurrentness::Unresolved => 1,
+        ResultCurrentness::Superseded => 2,
+        ResultCurrentness::Stale => 3,
+        ResultCurrentness::Partial => 4,
+        ResultCurrentness::Corrupted => 5,
     }
 }
 
@@ -479,8 +430,6 @@ pub(crate) fn classify_viewer(
                     | ResultRuntimeConditionKind::RendererLoss
             ),
             wording: None,
-            // An action that failed over the sheet leaves what it showed.
-            earlier_kept: run_has_data,
         };
     }
 
@@ -619,9 +568,7 @@ mod tests {
                 "low-memory",
                 "renderer-loss",
                 "interrupted-operation",
-                "failed",
                 "cancelled",
-                "recovered",
             ]
         );
         assert_eq!(
@@ -631,48 +578,6 @@ mod tests {
         assert_eq!(
             ResultRuntimeConditionKind::EntitlementDenied.operational_state(),
             ResultOperationalState::Unsupported
-        );
-    }
-
-    #[test]
-    fn runtime_recovery_requires_the_exact_failure_kind_and_dataset_generation() {
-        let mut results = ResultsState::default();
-        results.record_runtime_condition(ResultRuntimeConditionKind::Failed, "export failed", 7);
-        results.record_runtime_recovery_if(
-            ResultRuntimeConditionKind::StorageDenied,
-            "wrong boundary",
-            7,
-        );
-        assert_eq!(
-            results
-                .operational_condition
-                .as_ref()
-                .map(|condition| condition.kind),
-            Some(ResultRuntimeConditionKind::Failed)
-        );
-        results.record_runtime_recovery_if(
-            ResultRuntimeConditionKind::Failed,
-            "export retry succeeded",
-            8,
-        );
-        assert_eq!(
-            results
-                .operational_condition
-                .as_ref()
-                .map(|condition| condition.kind),
-            Some(ResultRuntimeConditionKind::Failed)
-        );
-        results.record_runtime_recovery_if(
-            ResultRuntimeConditionKind::Failed,
-            "export retry succeeded",
-            7,
-        );
-        assert_eq!(
-            results
-                .operational_condition
-                .as_ref()
-                .map(|condition| condition.kind),
-            Some(ResultRuntimeConditionKind::Recovered)
         );
     }
 
@@ -833,21 +738,6 @@ mod tests {
             rspice_results_ui::operational::sentence(&ac),
             "Failed · AC: singular matrix at node n3 · Fix the cause and run the plan again."
         );
-
-        // A failed action over the sheet keeps what it showed, and says so.
-        let data_version = state.model.simulation.view.data_version;
-        state.results.results.record_runtime_condition(
-            ResultRuntimeConditionKind::Failed,
-            "The file could not be written.",
-            data_version,
-        );
-        let export = classify_viewer(&mut state.results_parts(), ResultViewer::Waves);
-        assert_eq!(
-            rspice_results_ui::operational::sentence(&export),
-            "Failed · The file could not be written. · The last action on this sheet failed; \
-             what the sheet showed before is kept. · Read the message, fix the cause and try again."
-        );
-        state.results.results.dismiss_runtime_condition();
 
         let mark = RunMark::of(&state.results_parts(), 0, ResultOperationalState::Failed);
         let run = &state.model.simulation.retained.runs[0];

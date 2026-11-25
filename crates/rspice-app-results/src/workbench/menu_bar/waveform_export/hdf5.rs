@@ -26,7 +26,7 @@
 
 use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
-    note_result_export_failure, note_result_export_success,
+    note_result_export_success,
 };
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
@@ -92,7 +92,6 @@ pub(super) fn export_hdf5(
     let bytes = match encode_hdf5(&prepared) {
         Ok(bytes) => bytes,
         Err(error) => {
-            note_result_export_failure(state, format!("{LABEL} encoding failed: {error}"));
             state.report_failure(format!("{LABEL} export failed"), error.to_string());
             return;
         }
@@ -119,7 +118,6 @@ pub(super) fn export_hdf5(
         Ok(()) => {
             note_result_export_success(
                 state,
-                LABEL,
                 crate::workbench::workflows::export_workflow::export_completion_message(
                     LABEL,
                     &published_path,
@@ -129,7 +127,6 @@ pub(super) fn export_hdf5(
             );
         }
         Err(error) => {
-            note_result_export_failure(state, format!("{LABEL} export failed: {error}"));
             state.report_failure(format!("{LABEL} export failed"), error.to_string());
         }
     }

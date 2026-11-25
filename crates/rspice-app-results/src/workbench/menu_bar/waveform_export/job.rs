@@ -13,7 +13,7 @@ use crate::workbench::workflows::export_workflow::{
     NativeExportWorkflowIo, ObservedExportDestination, export_completion_message, publish_streamed,
 };
 
-use super::{note_result_export_failure, note_result_export_success};
+use super::note_result_export_success;
 
 /// Bytes written between two reports of an export's progress and two looks at its Cancel.
 const CHECK_BYTES: u64 = 1 << 20;
@@ -99,11 +99,9 @@ pub fn finish_export_job(
     match export.job.take_outcome() {
         Some(JobOutcome::Done(detail)) => note_result_export_success(
             state,
-            label,
             export_completion_message(label, &export.path, Some(detail), &NativeExportWorkflowIo),
         ),
         Some(JobOutcome::Failed(reason)) => {
-            note_result_export_failure(state, format!("{label} export failed: {reason}"));
             state.report_failure(format!("{label} export failed"), reason);
         }
         Some(JobOutcome::Cancelled) | None => state.prompt(format!(
