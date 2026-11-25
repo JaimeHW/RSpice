@@ -8,7 +8,16 @@
 //! even divisions to rule.
 
 use super::*;
+use crate::sources::report_layout::set_width;
+use rspice_fonts::Role;
 
+/// A value's lettering.
+const VALUE_TEXT_UM: u64 = 2_300;
+/// The room left of a frame a value can take: the inset, less the space
+/// before the frame and a little air at the edge.
+const VALUE_GUTTER_UM: u64 = crate::sources::PLOT_INSET_UM.unsigned_abs() - 1_700;
+/// How far a unit set on its own line stands above its value's baseline.
+const UNIT_RISE_UM: i64 = 3_100;
 /// How far a value label's baseline stands below its tick.
 const VALUE_DROP_UM: u64 = 700;
 /// How far a value label's capitals rise above its tick.
@@ -161,14 +170,29 @@ impl SemanticSceneCompiler<'_> {
                 }
             };
             let color = SemanticColor::Secondary;
-            self.add_text_placed(
-                caption,
-                &tick.label,
-                SceneFont::Monospace,
-                2_300,
-                color,
-                (anchor, SceneTextRotation::Upright),
-            )?;
+            // A value whose unit makes it wider than the gutter keeps its
+            // number on its rule and stands the unit on the line above,
+            // rather than running past the edge of the page.
+            let lines = match tick.label.split_once(' ') {
+                Some((value, unit))
+                    if tick.axis == crate::sources::SemanticAxisKind::Vertical
+                        && set_width(Role::Mono, &tick.label, VALUE_TEXT_UM) > VALUE_GUTTER_UM =>
+                {
+                    vec![(value, 0), (unit, UNIT_RISE_UM)]
+                }
+                _ => vec![(tick.label.as_str(), 0)],
+            };
+            for (text, rise) in lines {
+                let at = self.offset_scene_point(caption, 0, -rise)?;
+                self.add_text_placed(
+                    at,
+                    text,
+                    SceneFont::Monospace,
+                    VALUE_TEXT_UM,
+                    color,
+                    (anchor, SceneTextRotation::Upright),
+                )?;
+            }
         }
         Ok(())
     }
