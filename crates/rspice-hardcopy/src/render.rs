@@ -773,7 +773,21 @@ pub fn scene_from_resolved(
             compiler.symbol_document(symbol, None, Default::default())?
         }
         HardcopySemanticDocument::Plot(plot) => compiler.plot(plot)?,
-        HardcopySemanticDocument::ResultSummary(summary) => compiler.result_summary(summary)?,
+        HardcopySemanticDocument::ResultSummary(summary) => {
+            // A summary that runs on prints each page on a sheet of its own,
+            // as the plan declares it; one page is no section.
+            let pages = source
+                .hardcopy_sections_for_setup(schematic_output)
+                .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+            compiler.result_summary(
+                summary,
+                (!pages.is_empty()).then(|| PageSections {
+                    source_key: source.source_key(),
+                    display_name: source.authority().display_name(),
+                    pages: &pages,
+                }),
+            )?;
+        }
         HardcopySemanticDocument::Report(report) => {
             // Each page is a section of the plan, printed on a sheet of its own.
             let pages = source
@@ -781,7 +795,7 @@ pub fn scene_from_resolved(
                 .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
             compiler.report(
                 report,
-                Some(ReportPageSections {
+                Some(PageSections {
                     source_key: source.source_key(),
                     display_name: source.authority().display_name(),
                     pages: &pages,
@@ -806,8 +820,9 @@ pub fn scene_from_resolved(
     Ok(scene)
 }
 
-/// The plan's sections a report's pages are drawn into, one to a page.
-pub(crate) struct ReportPageSections<'a> {
+/// The plan's sections a report's or a summary's pages are drawn into, one
+/// to a page.
+pub(crate) struct PageSections<'a> {
     source_key: &'a str,
     display_name: &'a str,
     pages: &'a [rspice_hardcopy_contract::HardcopyContentSection],
@@ -849,7 +864,9 @@ fn scene_from_clipped_aggregate(
                 compiler.symbol_document(symbol, None, Default::default())?
             }
             HardcopySemanticDocument::Plot(plot) => compiler.plot(plot)?,
-            HardcopySemanticDocument::ResultSummary(summary) => compiler.result_summary(summary)?,
+            HardcopySemanticDocument::ResultSummary(summary) => {
+                compiler.result_summary(summary, None)?
+            }
             HardcopySemanticDocument::Report(report) => compiler.report(report, None)?,
             HardcopySemanticDocument::Aggregate(_) => {
                 return Err(conversion_error("nested aggregate hardcopy source"));

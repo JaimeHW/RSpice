@@ -58,6 +58,14 @@ pub(crate) enum LaidSummary {
     },
 }
 
+impl LaidSummary {
+    /// The page it falls on.
+    pub(crate) fn page(&self) -> u64 {
+        let (Self::Title { y, .. } | Self::TableTitle { y, .. } | Self::Row { y, .. }) = self;
+        y / SUMMARY_PAGE_PITCH_UM
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SummaryLayout {
     pub pages: u64,

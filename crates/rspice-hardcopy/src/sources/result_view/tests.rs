@@ -521,6 +521,104 @@ fn a_table_sheet_prints_the_tables_it_showed() {
     }
 }
 
+/// A table too long for one page prints as the print dialog plans it: a
+/// page to a sheet.
+#[test]
+fn a_long_printed_table_prints_a_page_to_a_sheet() {
+    use crate::render::{HardcopyRenderer, HardcopySceneMetadata};
+    use rspice_hardcopy_contract::{
+        BackgroundMode, Bleed, ColorMapping, DecorationSetup, FontPolicy, HardcopyPlan,
+        HardcopySetup, Length, Orientation, OutputFormat, PageMargins, PaperSize,
+        PhysicalPageSetup, RenderSetup, RenderTarget, ScaleMode, StandardPaper, TilingMode,
+        TilingSetup, Watermark,
+    };
+    let run = completed(
+        AnalysisResult::new(2, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![
+            RetainedWaveform::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0]),
+        ]),
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 2, |_| true).unwrap();
+    let presentation: ResultsQuickViewPresentation = serde_json::from_str(
+        r#"{
+        "viewer": "Table", "fft_selected_source": null,
+        "fft_normalization": "peak", "fft_window": "hanning",
+        "fft_input_fidelity": "reference", "fft_time_window_auto": true,
+        "fft_time_window_start": 0.0, "fft_time_window_end": 1.0,
+        "fft_sample_count_auto": true, "fft_sample_count": 4096,
+        "histogram_selected": 0, "histogram_bin_count": 20,
+        "histogram_custom_range": false, "histogram_custom_min": 0.0,
+        "histogram_custom_max": 1.0, "histogram_mode": "count"
+    }"#,
+    )
+    .unwrap();
+    let presentation = presentation
+        .with_sheet_reading(QuickSheetReading {
+            analysis_id: Some(2),
+            tables: vec![SemanticTable {
+                title: "200 rows".to_owned(),
+                columns: vec!["Row".to_owned(), "V(out)".to_owned()],
+                rows: (0..200)
+                    .map(|row| vec![row.to_string(), format!("{row}.000 mV")])
+                    .collect(),
+            }],
+            figures: Vec::new(),
+        })
+        .unwrap();
+    let resolved = resolve_results_quick_view_parts(
+        "table".to_owned(),
+        ProjectId::new(),
+        HardcopyScope::ActivePlotDocument,
+        &source,
+        &presentation,
+    )
+    .unwrap();
+    let setup = HardcopySetup::try_new(
+        PhysicalPageSetup::try_new(
+            PaperSize::Standard(StandardPaper::Letter),
+            PageMargins::uniform(Length::from_micrometres(10_000)),
+            Bleed::None,
+            Orientation::Landscape,
+        )
+        .unwrap(),
+        ScaleMode::FitPrintableArea,
+        TilingSetup::try_new(TilingMode::Automatic, Length::ZERO, true).unwrap(),
+        RenderSetup::try_new(
+            RenderTarget::ExportArtifact,
+            OutputFormat::PdfVector,
+            ColorMapping::PrintSafeEngineeringPalette,
+            BackgroundMode::White,
+            FontPolicy::new(true, true),
+            true,
+        )
+        .unwrap(),
+        DecorationSetup::try_new(true, true, true, Watermark::None).unwrap(),
+        resolved.default_print_mapping().clone(),
+    )
+    .unwrap();
+    let sections = resolved
+        .hardcopy_sections_for_setup(setup.schematic())
+        .unwrap();
+    assert!(sections.len() > 1, "{} sections", sections.len());
+    let extent = resolved
+        .content_extent_for_setup(setup.schematic())
+        .unwrap();
+    let plan = HardcopyPlan::compile_with_sections(
+        resolved.authority().clone(),
+        setup,
+        extent,
+        sections.clone(),
+    )
+    .unwrap();
+    let publication = HardcopyRenderer::render_resolved(
+        &plan,
+        &resolved,
+        HardcopySceneMetadata::try_new("Table", "RSpice tests").unwrap(),
+    )
+    .unwrap();
+    let pdf = lopdf::Document::load_mem(publication.single_part().unwrap().bytes()).unwrap();
+    assert_eq!(pdf.get_pages().len(), sections.len());
+}
+
 /// The figures a card shows print on one line, and a name the card gives
 /// twice running reads once, with both its readings.
 #[test]

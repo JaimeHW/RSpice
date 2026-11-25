@@ -92,7 +92,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                 self.symbol_document(symbol, None, SchematicParameterLabelVisibility::default())
             }
             HardcopySemanticDocument::Plot(plot) => self.plot(plot),
-            HardcopySemanticDocument::ResultSummary(summary) => self.result_summary(summary),
+            HardcopySemanticDocument::ResultSummary(summary) => self.result_summary(summary, None),
             HardcopySemanticDocument::Report(report) => self.report(report, None),
             HardcopySemanticDocument::Aggregate(_) => Err(conversion_error(
                 "nested semantic aggregates are not supported",
@@ -1536,6 +1536,7 @@ impl<'a> SemanticSceneCompiler<'a> {
     pub(super) fn result_summary(
         &mut self,
         summary: &SemanticResultSummary,
+        sections: Option<PageSections<'_>>,
     ) -> Result<(), HardcopyRenderError> {
         use crate::sources::result_summary_layout::{
             LaidSummary, SUMMARY_MARGIN_UM, SUMMARY_TITLE_UM, TABLE_TITLE_UM, lay_out_summary,
@@ -1549,7 +1550,23 @@ impl<'a> SemanticSceneCompiler<'a> {
         let at = |x: u64, y: u64| {
             ScenePoint::new(Length::from_micrometres(x), Length::from_micrometres(y))
         };
-        for item in lay_out_summary(summary).items {
+        let layout = lay_out_summary(summary);
+        if sections
+            .as_ref()
+            .is_some_and(|sections| sections.pages.len() as u64 != layout.pages)
+        {
+            return Err(HardcopyRenderError::AggregatePaginationMismatch);
+        }
+        // The pages are drawn in turn, so each page's primitives are the
+        // section the plan prints on its sheet.
+        let mut page = 0;
+        let mut primitive_start = self.primitives.len();
+        for item in layout.items {
+            while page < item.page() {
+                self.close_page_section(sections.as_ref(), page, primitive_start);
+                page += 1;
+                primitive_start = self.primitives.len();
+            }
             match item {
                 LaidSummary::Title { y, text } => self.add_text(
                     at(SUMMARY_MARGIN_UM, y),
@@ -1607,13 +1624,44 @@ impl<'a> SemanticSceneCompiler<'a> {
                 }
             }
         }
+        while page < layout.pages {
+            self.close_page_section(sections.as_ref(), page, primitive_start);
+            page += 1;
+            primitive_start = self.primitives.len();
+        }
         Ok(())
+    }
+
+    /// Close `page`, whose primitives run from `primitive_start` to the end,
+    /// as the plan's section for it.
+    fn close_page_section(
+        &mut self,
+        sections: Option<&PageSections<'_>>,
+        page: u64,
+        primitive_start: usize,
+    ) {
+        let Some(sections) = sections else {
+            return;
+        };
+        let section = sections.pages[page as usize];
+        let (x, y) = section.origin();
+        self.aggregate_sections.push(AggregateSection {
+            ordinal: section.ordinal(),
+            source_key: sections.source_key.to_owned(),
+            display_name: sections.display_name.to_owned(),
+            content_digest: section.content_digest(),
+            origin: ScenePoint::new(x, y),
+            extent: section.extent(),
+            page_break_before: section.page_break_before(),
+            primitive_start,
+            primitive_end: self.primitives.len(),
+        });
     }
 
     pub(super) fn report(
         &mut self,
         report: &SemanticReport,
-        sections: Option<ReportPageSections<'_>>,
+        sections: Option<PageSections<'_>>,
     ) -> Result<(), HardcopyRenderError> {
         use crate::sources::report_layout::{Laid, lay_out};
         const PAGE_GAP: u64 = 5_000;
@@ -1701,21 +1749,7 @@ impl<'a> SemanticSceneCompiler<'a> {
                     }
                 }
             }
-            if let Some(sections) = &sections {
-                let section = sections.pages[page_index];
-                let (x, y) = section.origin();
-                self.aggregate_sections.push(AggregateSection {
-                    ordinal: section.ordinal(),
-                    source_key: sections.source_key.to_owned(),
-                    display_name: sections.display_name.to_owned(),
-                    content_digest: section.content_digest(),
-                    origin: ScenePoint::new(x, y),
-                    extent: section.extent(),
-                    page_break_before: section.page_break_before(),
-                    primitive_start,
-                    primitive_end: self.primitives.len(),
-                });
-            }
+            self.close_page_section(sections.as_ref(), page_index as u64, primitive_start);
         }
         self.add_mapping_legend(PrintObjectKind::Layer, "layer:report-content", stroke)?;
         Ok(())
