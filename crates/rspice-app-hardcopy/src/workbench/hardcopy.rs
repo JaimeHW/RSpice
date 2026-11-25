@@ -117,9 +117,10 @@ const fn clipboard_takes_pictures() -> bool {
 }
 
 /// The report route's toolbar: its document actions, in the order the
-/// toolbar lays them out. The mockup's Build review draft action stays off
-/// it until exact plot artwork publication and the release handoff complete
-/// the full contract: the route never offers an artifact it cannot produce.
+/// toolbar lays them out, ending with the export of the report the route
+/// shows. The mockup's Build review draft action stays off it until exact
+/// plot artwork publication and the release handoff complete the full
+/// contract: the route never offers an artifact it cannot produce.
 const REPORT_TOOLS: &[ToolbarTool] = &[
     ToolbarTool {
         key: HardcopyCommand::SaveReportDocument.key(),
@@ -135,6 +136,11 @@ const REPORT_TOOLS: &[ToolbarTool] = &[
         key: HardcopyCommand::ReportPageProperties.key(),
         icon: WorkbenchIcon::Sliders,
         label: "Page properties",
+    },
+    ToolbarTool {
+        key: HardcopyCommand::ExportActiveView.key(),
+        icon: WorkbenchIcon::Export,
+        label: "Export report",
     },
 ];
 
