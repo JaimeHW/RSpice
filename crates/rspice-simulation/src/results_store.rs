@@ -281,7 +281,7 @@ pub(crate) fn create_segment() -> Result<(PathBuf, TemporaryIo), String> {
         NEXT_SEGMENT.fetch_add(1, Ordering::Relaxed)
     ));
     FileIo::create(&path)
-        .map(|io| (path.clone(), TemporaryIo(io)))
+        .map(|io| (path.clone(), TemporaryIo::new(io)))
         .map_err(|error| format!("{}: {error}", path.display()))
 }
 
@@ -326,11 +326,10 @@ pub(crate) fn close_recovered_segment(
         .ok()?
         .x_range()?
         .1;
-    let writer = rspice_results_store::SegmentWriter::reopen(
-        TemporaryIo(FileIo::open_writable(path).ok()?),
-        through,
-    )
-    .ok()?;
+    let io = TemporaryIo::new(FileIo::open_writable(path).ok()?);
+    #[cfg(any(test, feature = "test-support"))]
+    let io = io.faulted_at(path);
+    let writer = rspice_results_store::SegmentWriter::reopen(io, through).ok()?;
     let (_, io) = writer.finish(status).ok()?;
     rspice_results_store::SegmentReader::open(
         Box::new(io.into_file()) as rspice_results::store_reader::SegmentBytes
@@ -345,25 +344,57 @@ pub(crate) fn close_recovered_segment(
 /// segment in general is synced when its run ends (on macOS a full flush of the drive's cache,
 /// which waits for every other process's writes too). A run kept with a project is made durable
 /// when the project is saved.
-pub struct TemporaryIo(FileIo);
+pub struct TemporaryIo {
+    file: FileIo,
+    #[cfg(any(test, feature = "test-support"))]
+    fault: Option<write_faults::Faulted>,
+}
 
 impl TemporaryIo {
+    fn new(file: FileIo) -> Self {
+        Self {
+            file,
+            #[cfg(any(test, feature = "test-support"))]
+            fault: None,
+        }
+    }
+
     pub(crate) fn into_file(self) -> FileIo {
-        self.0
+        self.file
+    }
+
+    /// The segment at `path` of a transient whose deck is titled `title`, written through the
+    /// fault a test armed for that title, if one did.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn faulted_for(mut self, title: &str, path: &Path) -> Self {
+        self.fault = write_faults::for_segment(title, path).map(write_faults::Faulted::new);
+        self
+    }
+
+    /// The segment at `path` opened again, through the fault its run was written through: the
+    /// volume is as full as the run left it.
+    #[cfg(any(test, feature = "test-support"))]
+    fn faulted_at(mut self, path: &Path) -> Self {
+        self.fault = write_faults::at(path).map(write_faults::Faulted::new);
+        self
     }
 }
 
 impl SegmentIo for TemporaryIo {
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> std::io::Result<()> {
-        self.0.read_at(offset, buf)
+        self.file.read_at(offset, buf)
     }
 
     fn write_at(&mut self, offset: u64, data: &[u8]) -> std::io::Result<()> {
-        self.0.write_at(offset, data)
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(fault) = &self.fault {
+            fault.write(offset, data.len())?;
+        }
+        self.file.write_at(offset, data)
     }
 
     fn truncate(&mut self, len: u64) -> std::io::Result<()> {
-        self.0.truncate(len)
+        self.file.truncate(len)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -371,7 +402,119 @@ impl SegmentIo for TemporaryIo {
     }
 
     fn size(&self) -> std::io::Result<u64> {
-        self.0.size()
+        self.file.size()
+    }
+
+    fn closing(&mut self) {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(fault) = &mut self.fault {
+            fault.closing = true;
+        }
+    }
+}
+
+/// A full volume, for tests: a write a segment makes past a set length is refused as the
+/// operating system refuses one on a volume with no room left (`ENOSPC`), never by filling a
+/// real disk. A fault is armed for the transients whose deck title holds a marker, so a test
+/// faults its own run and no other test's running beside it.
+#[cfg(any(test, feature = "test-support"))]
+pub mod write_faults {
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    /// Where the volume fills.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct WriteFault {
+        /// The segment's length past which a write is refused.
+        pub past: u64,
+        /// Whether the writes that close the segment still fit, as when the run's own rows
+        /// filled the volume, or are refused too, as when another program took the last byte.
+        pub closing_fits: bool,
+    }
+
+    /// A fault armed for the transients whose deck title holds `marker`, with the segments it
+    /// was applied to.
+    struct Arming {
+        marker: String,
+        fault: WriteFault,
+        segments: Vec<PathBuf>,
+    }
+
+    static ARMED: Mutex<Vec<Arming>> = Mutex::new(Vec::new());
+
+    fn armed() -> std::sync::MutexGuard<'static, Vec<Arming>> {
+        ARMED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Fault the segment of every transient whose deck title holds `marker`, and the segment
+    /// opened again to close it, until the guard drops.
+    #[must_use]
+    pub fn arm(marker: &str, fault: WriteFault) -> Armed {
+        armed().push(Arming {
+            marker: marker.to_owned(),
+            fault,
+            segments: Vec::new(),
+        });
+        Armed(marker.to_owned())
+    }
+
+    /// A fault armed by [`arm`], disarmed when dropped.
+    pub struct Armed(String);
+
+    impl Drop for Armed {
+        fn drop(&mut self) {
+            armed().retain(|arming| arming.marker != self.0);
+        }
+    }
+
+    /// The fault armed for a transient titled `title`, remembered for its segment at `path`.
+    pub(super) fn for_segment(title: &str, path: &Path) -> Option<WriteFault> {
+        let mut armed = armed();
+        let arming = armed
+            .iter_mut()
+            .find(|arming| title.contains(arming.marker.as_str()))?;
+        arming.segments.push(path.to_path_buf());
+        Some(arming.fault)
+    }
+
+    /// The fault the segment at `path` was written through.
+    pub(super) fn at(path: &Path) -> Option<WriteFault> {
+        armed()
+            .iter()
+            .find(|arming| arming.segments.iter().any(|segment| segment == path))
+            .map(|arming| arming.fault)
+    }
+
+    /// A fault on one segment, which knows when its writer began closing it.
+    pub(super) struct Faulted {
+        fault: WriteFault,
+        pub(super) closing: bool,
+    }
+
+    impl Faulted {
+        pub(super) fn new(fault: WriteFault) -> Self {
+            Self {
+                fault,
+                closing: false,
+            }
+        }
+
+        pub(super) fn write(&self, offset: u64, len: usize) -> std::io::Result<()> {
+            // Closing writes land where a refused chunk would have, below the fault, so a volume
+            // with no room for them refuses them wherever they land.
+            let fits = if self.closing {
+                self.fault.closing_fits
+            } else {
+                offset.saturating_add(len as u64) <= self.fault.past
+            };
+            if fits {
+                Ok(())
+            } else {
+                Err(std::io::ErrorKind::StorageFull.into())
+            }
+        }
     }
 }
 

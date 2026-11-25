@@ -274,6 +274,43 @@ pub fn run_manual_batch_session<H: RunHost + Default>(source: &str) -> H {
     state
 }
 
+/// Run `source` as a manual deck through the real controller in `state`, beside the runs it
+/// already holds, to its end however it ends; the run it added.
+pub fn run_manual_deck_in<H: RunHost>(state: &mut H, source: &str) -> crate::state::SimulationRun {
+    let model = state.model_mut();
+    model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    model
+        .simulation
+        .source
+        .netlist_content
+        .set(source.to_owned());
+    let before = model.simulation.retained.runs.len();
+    let mut controller = SimulationController::new();
+    controller
+        .prepare_deck_run(&*state)
+        .expect("fixture source passes complete preparation");
+    let export_io = MockExportWorkflowIo::default();
+    state.model_mut().simulation.execution.trigger_simulation = true;
+    controller.update(state, &export_io);
+    let deadline = Instant::now() + FIXTURE_BATCH_LIMIT;
+    while controller.has_active_batch() {
+        assert!(Instant::now() < deadline, "fixture batch timed out");
+        std::thread::sleep(Duration::from_millis(1));
+        controller.update(state, &export_io);
+    }
+    let runs = &state.model().simulation.retained.runs;
+    assert_eq!(
+        runs.len(),
+        before + 1,
+        "{}",
+        state.model().simulation.execution.status
+    );
+    runs.iter()
+        .max_by_key(|run| run.id)
+        .expect("the run is retained")
+        .clone()
+}
+
 fn run_batch(
     mut state: RunTestHost,
     controller: SimulationController,

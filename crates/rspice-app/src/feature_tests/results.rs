@@ -11,6 +11,8 @@ mod cross_probe;
 mod deck_outputs;
 mod document_edit;
 mod expression_diagnostics;
+#[cfg(not(target_arch = "wasm32"))]
+mod full_disk;
 pub(super) mod histogram_publication;
 mod inspector;
 mod keys;

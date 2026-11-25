@@ -88,6 +88,8 @@ impl EngineBridge {
                 format!("{STORE_OBJECT} could not be created: {cause}"),
             )))
         })?;
+        #[cfg(any(test, feature = "test-support"))]
+        let io = io.faulted_for(&netlist.title, &path);
         let dir = path.parent().unwrap_or(&path).to_path_buf();
         let free = crate::results_store::free_space(&path);
         let budget = crate::results_store::storage_budget();
