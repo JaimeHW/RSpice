@@ -683,6 +683,27 @@ impl calculator::evaluator::EvaluationContext for MeasuredOperands<'_> {
         clipped(self.values.get_magnitude(signal, dataset)?, self.window)
     }
 
+    /// A stored trace read over the whole record is reduced a block at a time,
+    /// as the calculator reads one. A window is read as values, clipped. The
+    /// form measures on the frame as the draft changes, so a trace longer than
+    /// the loaded-results budget is refused as a whole read refuses it, never
+    /// passed over there.
+    fn stored_columns(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Option<(
+        &rspice_results::waveform::WaveformValues,
+        &rspice_results::waveform::WaveformValues,
+    )> {
+        if self.window.is_some() {
+            return None;
+        }
+        self.values
+            .stored_columns(signal, dataset)
+            .filter(|(x, y)| x.fits_whole_read() && y.fits_whole_read())
+    }
+
     fn get_event_word(
         &self,
         signal: &str,
@@ -787,6 +808,27 @@ mod tests {
     };
     use crate::workbench::documents::result_document::test_host::ResultsTestHost;
     use crate::workbench::state::Workspace;
+
+    /// The form measures a stored trace a block at a time, as the calculator
+    /// reads one: adding `max(V(out))` over a stored run read both of its
+    /// columns whole on the frame.
+    #[test]
+    fn a_measurement_of_a_stored_trace_reads_no_column_whole() {
+        use rspice_results::waveform::column_work::ColumnWork;
+        let time: Vec<f64> = (0..=1_000).map(|row| f64::from(row) * 1.0e-5).collect();
+        let ramp: Vec<f64> = (0..=1_000).map(|row| f64::from(row) / 100.0).collect();
+        let (analysis, _columns) =
+            crate::workbench::documents::result_document::test_fixtures::stored_transient(
+                time,
+                vec![("V(out)".to_owned(), ramp)],
+                Some([7; 32]),
+            );
+        let before = ColumnWork::read();
+        assert_eq!(evaluate(&analysis, "max(V(out))"), Ok(10.0));
+        let work = before.since();
+        assert_eq!(work.stored_reads, 0, "a stored column was read whole");
+        assert!(work.stored_views > 0, "the trace was not read a block at a time");
+    }
 
     /// A digital net is measured from its event history, as `.MEASURE` reads
     /// `D(name)`: each crossing is dated at the step that makes it, and an

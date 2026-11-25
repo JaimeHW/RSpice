@@ -715,17 +715,26 @@ impl WaveformValues {
     /// the loaded-results budget ([`set_whole_read_budget`]) is refused with a typed failure; a
     /// reader of a long window reads it by range, block, tile or point instead.
     pub fn read_whole(&self) -> Result<Cow<'_, [f64]>, ColumnReadFailure> {
-        if let Repr::Stored(stored) = &self.0 {
+        if let Repr::Stored(stored) = &self.0
+            && !self.fits_whole_read()
+        {
             let bytes = (self.len() as u64).saturating_mul(8);
             let budget = WHOLE_READ_BUDGET.load(std::sync::atomic::Ordering::Relaxed);
-            if bytes > budget {
-                return Err(stored.failed(format!(
-                    "its {} samples ({bytes} bytes) are more than the {budget} bytes the loaded                      results may hold: read it by window",
-                    self.len()
-                )));
-            }
+            return Err(stored.failed(format!(
+                "its {} samples ({bytes} bytes) are more than the {budget} bytes the loaded \
+                 results may hold: read it by window",
+                self.len()
+            )));
         }
         self.read_range(0..self.len())
+    }
+
+    /// Whether [`Self::read_whole`] reads these samples rather than refusing them: samples held
+    /// in memory, or a stored window no larger than the loaded-results budget.
+    pub fn fits_whole_read(&self) -> bool {
+        !matches!(self.0, Repr::Stored(_))
+            || (self.len() as u64).saturating_mul(8)
+                <= WHOLE_READ_BUDGET.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Samples `range` a block at a time: one slice of memory, or blocks of at most
