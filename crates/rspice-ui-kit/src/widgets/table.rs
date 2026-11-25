@@ -351,6 +351,8 @@ pub struct Cell {
     /// How many levels of a tree the words step in.
     indent: u8,
     twist: Twist,
+    /// A check box before the words, after any twist, ticked while true.
+    check: Option<bool>,
     /// What the row names has unsaved changes: the document tab's neutral
     /// dot follows the words.
     unsaved: bool,
@@ -388,6 +390,7 @@ impl Cell {
             says_hint: false,
             indent: 0,
             twist: Twist::None,
+            check: None,
             unsaved: false,
             wash: None,
             prefix_slot: false,
@@ -530,6 +533,14 @@ impl Cell {
         self
     }
 
+    /// The same words behind a check box, ticked while `on`: whether what
+    /// the row names takes part, such as an analysis a run includes. A click
+    /// on the box, and Space on the selected row, ask to flip it.
+    pub fn check(mut self, on: bool) -> Self {
+        self.check = Some(on);
+        self
+    }
+
     /// The same words followed by the document tab's neutral dot: what the
     /// row names has unsaved changes. The dot says nothing is wrong, only
     /// that the saved version differs.
@@ -644,6 +655,9 @@ pub struct TableResponse {
     /// The row a twist click, Left or Right asked to open (true) or close
     /// (false); the page shows or hides its children.
     pub expand: Option<(usize, bool)>,
+    /// The row whose check box a click or Space asked to tick (true) or
+    /// clear (false); the page changes what the row names.
+    pub checked: Option<(usize, bool)>,
     /// Left (-1) or Right (1) while the table has the keyboard, when the key
     /// neither opens, closes nor moves within it: a page whose lists stand
     /// side by side, as a column browser's do, moves to the neighbouring one.
@@ -793,6 +807,9 @@ struct Keys {
     extend: bool,
     /// Left or right by one cell.
     across: Option<isize>,
+    /// Space, left with the input: it flips a checked row, and is a letter
+    /// of type-ahead otherwise.
+    space: bool,
     enter: bool,
     f2: bool,
     delete: bool,
@@ -842,6 +859,7 @@ impl Keys {
             let enter = take(Key::Enter);
             let f2 = take(Key::F2);
             let delete = take(Key::Delete);
+            let space = input.modifiers.is_none() && input.key_pressed(Key::Space);
             let all = multi && input.consume_key(Modifiers::COMMAND, Key::A);
             let menu = input.consume_key(Modifiers::SHIFT, Key::F10) || menu_key;
             let typed = input
@@ -867,6 +885,7 @@ impl Keys {
                 step,
                 extend,
                 across,
+                space,
                 enter,
                 f2,
                 delete,
@@ -1381,7 +1400,20 @@ impl<'a> DataTable<'a> {
                     },
                 );
             });
-            let keys = Keys::read(ui, self.multi);
+            let mut keys = Keys::read(ui, self.multi);
+            // Space flips the selected row's check box, unless the reader is
+            // part-way through typing a name, where it is one more letter.
+            let typing = !memory.typed.trim().is_empty()
+                && ui.input(|input| input.time) - memory.typed_at <= TYPE_AHEAD_PAUSE;
+            if keys.space
+                && !typing
+                && let Some(row) = state.selected_row().filter(|row| shown.contains(row))
+                && let Some(on) = rows.get(row).iter().find_map(|cell| cell.check)
+            {
+                response.checked = Some((row, !on));
+                keys.typed = keys.typed.replacen(' ', "", 1);
+                ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Space));
+            }
             if keys.step.is_some() || keys.across.is_some() {
                 // The arrows moved the selection, not the keyboard focus:
                 // the frame the table took focus it had no filter yet.
@@ -1842,6 +1874,9 @@ impl<'a> DataTable<'a> {
         response.edited = response.edited.or(row.edited);
         if let Some(open) = row.twist {
             response.expand = Some((index, open));
+        }
+        if let Some(on) = row.check {
+            response.checked = Some((index, on));
         }
         if row.double_clicked {
             response.double_clicked = Some(CellRef {

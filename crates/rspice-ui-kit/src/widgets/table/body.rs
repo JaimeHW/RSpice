@@ -65,6 +65,9 @@ pub(super) fn whole_width(ui: &Ui, cell: &Cell) -> f32 {
     if cell.icon.is_some() {
         words += LEAD_ICON_SIDE + LEAD_ICON_GAP;
     }
+    if cell.check.is_some() {
+        words += LEAD_ICON_SIDE + LEAD_ICON_GAP;
+    }
     if let Some(suffix) = &cell.suffix {
         words += width(format!(" \u{b7} {suffix}"));
     }
@@ -112,6 +115,9 @@ pub(super) struct RowResponse {
     /// The reader clicked the row's twist: whether the row should now be
     /// open.
     pub(super) twist: Option<bool>,
+    /// The reader clicked the row's check box: whether it should now be
+    /// ticked.
+    pub(super) check: Option<bool>,
     /// A press held still on the row past the longest click, under a coarse
     /// pointer: when it began and where.
     pub(super) held: Option<(f64, Pos2)>,
@@ -285,6 +291,7 @@ impl DataTable<'_> {
             column: pressed_column,
             marked: false,
             twist: None,
+            check: None,
             held: None,
             dropped: None,
         };
@@ -413,9 +420,9 @@ impl DataTable<'_> {
                 .is_some_and(|painted| painted.elided);
                 span.max = (span.max - width - STATE_GAP).max(span.min);
             }
-            if let Some(open) = self.lead_in(ui, index, cell, cell_rect, clip, &mut span) {
-                answered.twist = Some(open);
-            }
+            let (twist, check) = self.lead_in(ui, index, cell, cell_rect, clip, &mut span);
+            answered.twist = answered.twist.or(twist);
+            answered.check = answered.check.or(check);
             // The cell after what stands before its words: where a click
             // opens it, and where its field goes.
             let after_lead = cell_rect.with_min_x(cell_rect.min.x + span.min - words_start);
@@ -623,9 +630,10 @@ impl DataTable<'_> {
         answered
     }
 
-    /// Paint what stands before a cell's words, a tree's indent, its twist
-    /// and an icon, and move `span` past them. Returns, when the reader
-    /// clicked the twist, whether the row should now be open.
+    /// Paint what stands before a cell's words, a tree's indent, its twist,
+    /// a check box and an icon, and move `span` past them. Returns, when the
+    /// reader clicked the twist, whether the row should now be open, and,
+    /// when they clicked the check box, whether it should now be ticked.
     fn lead_in(
         &self,
         ui: &Ui,
@@ -634,7 +642,7 @@ impl DataTable<'_> {
         rect: Rect,
         clip: Rect,
         span: &mut egui::Rangef,
-    ) -> Option<bool> {
+    ) -> (Option<bool>, Option<bool>) {
         let t = Tokens::get(ui.ctx());
         span.min += f32::from(cell.indent) * TREE_INDENT;
         let mut toggled = None;
@@ -679,6 +687,49 @@ impl DataTable<'_> {
             }
             span.min += room;
         }
+        let mut checked = None;
+        if let Some(on) = cell.check {
+            // The box stands where a leading icon would, and the box and the
+            // air to the words are its target.
+            let target = Rect::from_x_y_ranges(
+                span.min..=span.min + LEAD_ICON_SIDE + LEAD_ICON_GAP,
+                rect.y_range(),
+            )
+            .intersect(clip);
+            let check = ui.interact(
+                target,
+                ui.id().with((self.id, "check", index)),
+                Sense::CLICK,
+            );
+            check.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    ui.is_enabled(),
+                    on,
+                    cell.text.clone(),
+                )
+            });
+            #[cfg(any(test, feature = "test-support"))]
+            crate::probe::probe(ui, &format!("table.check.{index}"), target);
+            crate::widgets::command_form::paint_check_box(
+                &ui.painter().with_clip_rect(clip),
+                &t,
+                Rect::from_center_size(
+                    pos2(span.min + LEAD_ICON_SIDE * 0.5, rect.center().y),
+                    egui::Vec2::splat(LEAD_ICON_SIDE),
+                ),
+                on,
+                if check.hovered() {
+                    t.color.border_strong
+                } else {
+                    t.color.border
+                },
+            );
+            if check.clicked() {
+                checked = Some(!on);
+            }
+            span.min += LEAD_ICON_SIDE + LEAD_ICON_GAP;
+        }
         if let Some(icon) = cell.icon {
             icon.paint(
                 &ui.painter().with_clip_rect(clip),
@@ -691,7 +742,7 @@ impl DataTable<'_> {
             span.min += LEAD_ICON_SIDE + LEAD_ICON_GAP;
         }
         span.min = span.min.min(span.max);
-        toggled
+        (toggled, checked)
     }
 
     /// Paint a row's selection mark, the way a coarse pointer selects

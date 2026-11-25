@@ -1558,23 +1558,7 @@ fn mark_control(
     };
     let painter = ui.painter();
     match kind {
-        MarkKind::Check => {
-            painter.rect(
-                mark,
-                3.0,
-                t.color.bg_inset,
-                egui::Stroke::new(1.0, border),
-                egui::StrokeKind::Inside,
-            );
-            if on {
-                // A tick on the 14-unit box: down to the base, then up and out.
-                let at = |x: f32, y: f32| pos2(mark.left() + x, mark.top() + y);
-                painter.add(egui::Shape::line(
-                    vec![at(3.5, 7.2), at(6.0, 9.8), at(10.6, 4.4)],
-                    egui::Stroke::new(1.6, t.color.text),
-                ));
-            }
-        }
+        MarkKind::Check => paint_check_box(painter, &t, mark, on, border),
         MarkKind::Radio => {
             painter.circle(
                 mark.center(),
@@ -1597,6 +1581,33 @@ fn mark_control(
     );
     theme::paint_focus_ring_outset(ui, &response, mark);
     response
+}
+
+/// A check box filling `mark`, a 14-unit square: the text's own colour on the
+/// field well, ticked while `on`, its edge in `border`. A form's checks and a
+/// table's checked rows paint this one box.
+pub(crate) fn paint_check_box(
+    painter: &egui::Painter,
+    t: &Tokens,
+    mark: Rect,
+    on: bool,
+    border: egui::Color32,
+) {
+    painter.rect(
+        mark,
+        3.0,
+        t.color.bg_inset,
+        egui::Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+    if on {
+        // A tick on the 14-unit box: down to the base, then up and out.
+        let at = |x: f32, y: f32| pos2(mark.left() + x, mark.top() + y);
+        painter.add(egui::Shape::line(
+            vec![at(3.5, 7.2), at(6.0, 9.8), at(10.6, 4.4)],
+            egui::Stroke::new(1.6, t.color.text),
+        ));
+    }
 }
 
 /// One list entry: its value, shortened from the middle when it is longer

@@ -132,6 +132,8 @@ struct Picker {
     multi: bool,
     /// The list is asked to take the keyboard.
     focus: bool,
+    /// Each name stands behind a check box, ticked on the even rows.
+    checked: bool,
     /// The input's clock, which every frame advances.
     time: f64,
 }
@@ -146,6 +148,7 @@ impl Picker {
             state: TableState::default(),
             multi,
             focus: false,
+            checked: false,
             time: ctx.input(|input| input.time),
         }
     }
@@ -183,6 +186,7 @@ impl Picker {
             state,
             multi,
             focus,
+            checked,
             ..
         } = self;
         let mut response = TableResponse::default();
@@ -195,7 +199,13 @@ impl Picker {
                 table = table.multi_select();
             }
             response = table.show(ui, |row| {
-                vec![Cell::text(names[row]), Cell::text("schematic")]
+                let name = Cell::text(names[row]);
+                let name = if *checked {
+                    name.check(row % 2 == 0)
+                } else {
+                    name
+                };
+                vec![name, Cell::text("schematic")]
             });
         });
         (response, geometry, output)
@@ -228,6 +238,21 @@ impl Picker {
         let at = geometry
             .one(&format!("table.mark.{row}"))
             .unwrap_or_else(|| panic!("row {row} has a mark"))
+            .center();
+        let response = self.frame(
+            press(at, PointerButton::Primary, Modifiers::NONE),
+            Modifiers::NONE,
+        );
+        let _ = self.frame(Vec::new(), Modifiers::NONE);
+        response
+    }
+
+    /// A click on row `row`'s check box, and the frame after it.
+    fn click_check(&mut self, row: usize) -> TableResponse {
+        let (_, geometry, _) = self.pass(Vec::new(), Modifiers::NONE, 0.1);
+        let at = geometry
+            .one(&format!("table.check.{row}"))
+            .unwrap_or_else(|| panic!("row {row} has a check box"))
             .center();
         let response = self.frame(
             press(at, PointerButton::Primary, Modifiers::NONE),
@@ -484,6 +509,51 @@ fn enter_f2_and_delete_are_reported_for_the_page_to_act_on() {
             Some(1),
             "{metric}: a double-click runs the row"
         );
+    }
+}
+
+/// A row's check box asks to flip by a click on the box, which leaves the
+/// row's own click and the selection alone, and by Space on the selected row.
+/// A Space typed part-way through a name is one more letter of it, and a
+/// list without check boxes leaves Space to type-ahead.
+#[test]
+fn a_rows_check_box_flips_by_a_click_on_it_or_by_space() {
+    for (metric, ctx) in metrics() {
+        let mut list = Picker::new(&ctx, false);
+        list.checked = true;
+        let response = list.click_check(3);
+        assert_eq!(response.checked, Some((3, true)), "{metric}: ticks row 3");
+        assert_eq!(response.clicked, None, "{metric}: the box is not the row");
+        assert_eq!(list.state.selected_row(), None, "{metric}");
+
+        let _ = list.click(2, Modifiers::NONE);
+        let response = list.key(Key::Space, Modifiers::NONE);
+        assert_eq!(
+            response.checked,
+            Some((2, false)),
+            "{metric}: Space clears the selected row's tick"
+        );
+        assert_eq!(list.state.selected_row(), Some(2), "{metric}");
+
+        let _ = list.pass(vec![Event::Text("b".to_owned())], Modifiers::NONE, 2.0);
+        assert_eq!(list.state.selected_row(), Some(5), "{metric}: Bandgap_v2");
+        let (response, _, _) = list.pass(
+            vec![
+                key(Key::Space, Modifiers::NONE),
+                Event::Text(" ".to_owned()),
+            ],
+            Modifiers::NONE,
+            0.2,
+        );
+        assert_eq!(
+            response.checked, None,
+            "{metric}: a Space part-way through a name is typed"
+        );
+
+        list.checked = false;
+        let _ = list.click(4, Modifiers::NONE);
+        let response = list.key(Key::Space, Modifiers::NONE);
+        assert_eq!(response.checked, None, "{metric}: no box, nothing to flip");
     }
 }
 
