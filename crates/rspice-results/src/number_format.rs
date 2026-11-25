@@ -161,21 +161,29 @@ pub fn si_tick_label(value: f64, unit: &str, digits: usize) -> String {
     let mantissa = trimmed(format!("{scaled:.digits$}"));
     let exponent = si_exponent(index).replace('-', "−");
     let prefix = si_prefix(index);
-    format!("{mantissa}{exponent} {prefix}{unit}")
-        .trim_end()
-        .to_owned()
+    if is_plane_angle(unit) {
+        format!("{mantissa}{exponent}{prefix}{unit}")
+    } else {
+        format!("{mantissa}{exponent} {prefix}{unit}")
+            .trim_end()
+            .to_owned()
+    }
 }
 
 /// A ladder tick with the unit its axis has no caption to carry:
 /// `tick_with_unit("2m", "V")` → `"2 mV"`, `tick_with_unit("1.5", "V")` →
-/// `"1.5 V"`.
+/// `"1.5 V"`, and a plane angle against its number, `"45°"`.
 ///
 /// The spelling [`si_tick_label`] gives a tick that is not on a ladder, so a
 /// number reads one way on every surface whose ticks state their own unit.
 pub fn tick_with_unit(label: &str, unit: &str) -> String {
     let mantissa = label.trim_end_matches(char::is_alphabetic);
     let prefix = &label[mantissa.len()..];
-    format!("{mantissa} {prefix}{unit}").trim_end().to_owned()
+    if is_plane_angle(unit) {
+        format!("{mantissa}{prefix}{unit}")
+    } else {
+        format!("{mantissa} {prefix}{unit}").trim_end().to_owned()
+    }
 }
 
 /// A value in free text: `significant_digits` significant digits, an SI
@@ -480,7 +488,7 @@ pub fn leaves_prefix_slot_blank(reading: &str) -> bool {
 }
 
 /// Whether `unit` names a plane angle, which stands against its number.
-fn is_plane_angle(unit: &str) -> bool {
+pub(crate) fn is_plane_angle(unit: &str) -> bool {
     unit == "°" || unit.starts_with("°/")
 }
 
@@ -503,8 +511,9 @@ const COORDINATE_DIGITS: usize = 6;
 /// A swept value spelled as a netlist states it, the way LTspice's `.step`
 /// legend and ADE's design-point labels name a point: the scale suffix on
 /// the number, `2k`, `1.5Meg`, `10µ`, and the unit after it where the swept
-/// thing names one, `2kΩ`, `1MΩ`, `27°C`. A bare number keeps SPICE's
-/// `Meg`, where a lone `M` is milli; before a unit the letters are SI's.
+/// thing names one, `2kΩ`, `1MΩ`. A temperature keeps the space every
+/// reading of one has, `27 °C`. A bare number keeps SPICE's `Meg`, where a
+/// lone `M` is milli; before a unit the letters are SI's.
 pub fn spice_coordinate(value: f64, unit: &str) -> String {
     let prefixed = unit.is_empty() || unit_takes_prefix(unit);
     let (number, prefix) = significant_number(value, COORDINATE_DIGITS, prefixed, Zeros::Trim);
@@ -513,7 +522,12 @@ pub fn spice_coordinate(value: f64, unit: &str) -> String {
     } else {
         prefix
     };
-    format!("{number}{prefix}{unit}")
+    let space = if unit.starts_with('°') && !is_plane_angle(unit) {
+        " "
+    } else {
+        ""
+    };
+    format!("{number}{prefix}{space}{unit}")
 }
 
 /// The unit a `.STEP` of a device's own value sweeps, read from the
@@ -951,8 +965,8 @@ mod tests {
         assert_eq!(spice_coordinate(2000.0, "Ω"), "2kΩ");
         assert_eq!(spice_coordinate(1.0e6, "Ω"), "1MΩ");
         assert_eq!(spice_coordinate(1.5, "V"), "1.5V");
-        assert_eq!(spice_coordinate(27.0, "°C"), "27°C");
-        assert_eq!(spice_coordinate(-40.0, "°C"), "−40°C");
+        assert_eq!(spice_coordinate(27.0, "°C"), "27 °C");
+        assert_eq!(spice_coordinate(-40.0, "°C"), "−40 °C");
         // A `.STEP DEC` point keeps the digits a legend prints, not twelve.
         assert_eq!(spice_coordinate(10f64.powf(1.0 / 3.0), ""), "2.15443");
         // Points a digit apart in the deck stay apart.
@@ -981,6 +995,9 @@ mod tests {
         assert_eq!(tick_with_unit("4k", ""), "4 k");
         assert_eq!(tick_with_unit("2m", "V"), si_tick_label(2e-3, "V", 2));
         assert_eq!(tick_with_unit("500µ", "s"), si_tick_label(5e-4, "s", 2));
+        // A phase axis's top tick names its degree against the number.
+        assert_eq!(tick_with_unit("45", "°"), "45°");
+        assert_eq!(si_tick_label(45.0, "°", 2), "45°");
     }
 
     /// A step with no positive magnitude falls back to three decimals.

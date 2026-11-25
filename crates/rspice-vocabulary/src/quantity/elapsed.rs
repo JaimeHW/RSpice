@@ -1,7 +1,7 @@
 //! Formatting a span of wall-clock time for display.
 
-/// A span of wall-clock time as a person reads it: `0.043 s`, `12.40 s`,
-/// `3 min 25 s`, `2 h 4 min 9 s`.
+/// A span of wall-clock time as a person reads it: `0 s`, `0.043 s`,
+/// `12.40 s`, `3 min 25 s`, `2 h 4 min 9 s`.
 ///
 /// Under a minute the reading keeps the precision a timing comparison needs;
 /// past one, it is whole seconds, because a long run read as `12345.67 s`
@@ -11,6 +11,10 @@
 pub fn format_elapsed(seconds: f64) -> String {
     if !seconds.is_finite() || seconds < 0.0 {
         return "not available".to_owned();
+    }
+    // No time at all has no resolution to state.
+    if seconds == 0.0 {
+        return "0 s".to_owned();
     }
     // Each branch decides on the value it will print, so 59.996 s reads as
     // `1 min 0 s` rather than `60.00 s`.
@@ -36,7 +40,8 @@ mod tests {
     #[test]
     fn a_span_reads_in_the_largest_units_that_fit() {
         for (seconds, expected) in [
-            (0.0, "0.000 s"),
+            (0.0, "0 s"),
+            (0.0004, "0.000 s"),
             (0.0434, "0.043 s"),
             (0.9994, "0.999 s"),
             (0.9996, "1.00 s"),

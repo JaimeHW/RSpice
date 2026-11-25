@@ -303,7 +303,7 @@ mod duration_tests {
             with_unix_epoch(Ok(Duration::from_secs(2_000)), || duration_words(
                 &run, &manifest
             )),
-            "7.250 s",
+            "7.25 s",
             "a finished run states the time it took"
         );
     }

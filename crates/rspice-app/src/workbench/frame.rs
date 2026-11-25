@@ -1481,7 +1481,7 @@ mod tests {
         assert_eq!(activity[0].title(), "Run 1 complete");
         assert_eq!(
             activity[0].message(),
-            "1 analysis saved \u{b7} 0.000 s",
+            "1 analysis saved \u{b7} 0 s",
             "one analysis is an analysis, not an \"analys\"; a run with no plan names none"
         );
         assert_eq!(activity[0].kind(), ToastKind::Success);
@@ -2262,7 +2262,7 @@ mod tests {
                 [
                     NOTHING_RETAINED.to_owned(),
                     "The project could not be saved".to_owned(),
-                    "no analyses saved \u{b7} 0.000 s".to_owned(),
+                    "no analyses saved \u{b7} 0 s".to_owned(),
                 ],
                 "{attention:?}: every outcome is kept in the bell"
             );

@@ -269,7 +269,7 @@ pub struct AnalysisResultStepCoordinate {
 
 impl AnalysisResultStepCoordinate {
     /// The coordinate spelled as the netlist states it: `r=2k`, `R1=2kΩ`,
-    /// `temp=27°C`.
+    /// `temp=27 °C`.
     #[must_use]
     pub fn label(&self) -> String {
         format!(

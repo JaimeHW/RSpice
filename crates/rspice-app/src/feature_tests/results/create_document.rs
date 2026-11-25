@@ -994,7 +994,7 @@ fn a_bode_document_of_a_temperature_run_draws_every_member() {
     let sheet = output_curves(&nodes);
     let members: Vec<String> = ["−40", "0", "27", "85", "125"]
         .iter()
-        .map(|temperature| format!("|V(OUT)| · temp={temperature}°C"))
+        .map(|temperature| format!("|V(OUT)| · temp={temperature} °C"))
         .collect();
     assert!(
         !sheet.is_empty() && sheet.iter().all(|chip| members.contains(chip)),

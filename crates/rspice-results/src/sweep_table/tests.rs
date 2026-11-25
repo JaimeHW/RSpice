@@ -265,11 +265,11 @@ fn a_pvt_family_reads_its_corners_and_temperatures() {
     assert_eq!(
         table.rows,
         [
-            "tt, temp=27°C",
-            "ff, temp=\u{2212}40°C",
-            "ss, temp=125°C",
-            "tt, temp=\u{2212}40°C",
-            "tt, temp=125°C"
+            "tt, temp=27 °C",
+            "ff, temp=\u{2212}40 °C",
+            "ss, temp=125 °C",
+            "tt, temp=\u{2212}40 °C",
+            "tt, temp=125 °C"
         ]
     );
     assert_eq!(

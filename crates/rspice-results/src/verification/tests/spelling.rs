@@ -16,3 +16,13 @@ fn a_prefix_never_stands_alone() {
     assert_eq!(difference_text(4.0e-5, 1.16e-3, "A"), "+40 \u{b5}A");
     assert_eq!(difference_text(0.0, 1.2e-3, "A"), "0.0 mA");
 }
+
+/// A difference from a value in degrees stands against its number, as the
+/// value does: a margin of 5° under 45°, of a quarter degree over 45.12°.
+#[test]
+fn a_difference_in_degrees_stands_against_its_number() {
+    assert_eq!(format_value(45.0, "\u{b0}"), "45\u{b0}");
+    assert_eq!(difference_text(-5.0, 45.0, "\u{b0}"), "\u{2212}5\u{b0}");
+    assert_eq!(difference_text(0.25, 45.12, "\u{b0}"), "+0.25\u{b0}");
+    assert_eq!(difference_text(0.0, 45.12, "\u{b0}"), "0.00\u{b0}");
+}

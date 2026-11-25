@@ -485,7 +485,7 @@ fn swap_menu(ui: &mut Ui, caption: egui::Rect, table: &SweepTable, x: usize) -> 
 /// Each row of a swept number as the netlist spells it, `2k`, `500`,
 /// `1Meg`, with its scale suffix held in a slot as wide as the column's
 /// widest, so right-aligned in mono the digits of every row end in one
-/// column: `500 `, ` 2k`. A unit that takes no prefix, `125°C`, has no slot.
+/// column: `500 `, ` 2k`. A unit that takes no prefix, `125 °C`, has no slot.
 fn slotted_spellings(axis: &rspice_results::sweep_table::SweptAxis) -> Vec<String> {
     let unit = axis.unit.as_str();
     let spelled: Vec<String> = (0..axis.values.len())

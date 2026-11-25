@@ -2,6 +2,7 @@
 use super::*;
 use egui::{Color32, ScrollArea, Sense, Stroke, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
+use rspice_results::number_format::{SHARE_PLACES, fixed_places};
 use rspice_results::report_document::{
     ReportBlock, ReportBlockId, ReportBlockKind, ReportDocument, ReportPage, ReportPageId,
     ReportReferenceMode, ReportSourceId,
@@ -35,7 +36,10 @@ pub fn summary_cells(metrics: SummaryMetrics) -> [(String, &'static str); 3] {
     let fraction = |(passing, total): (usize, usize)| format!("{passing} / {total}");
     let joint_yield = match metrics.joint_yield {
         Some(JointYield::Counted { passing, total, .. }) if total > 0 => {
-            format!("{:.1}%", passing as f64 / total as f64 * 100.0)
+            format!(
+                "{} %",
+                fixed_places(passing as f64 / total as f64 * 100.0, SHARE_PLACES)
+            )
         }
         Some(JointYield::DifferentTrials) => "not computed".to_owned(),
         _ => not_run(),

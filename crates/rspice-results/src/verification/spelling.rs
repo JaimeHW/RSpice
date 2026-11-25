@@ -9,7 +9,7 @@
 //! letter never stands alone where a unit would be: half of a unitless
 //! number is `0.5`, never `500 m`, which reads as metres.
 
-use crate::number_format::{fmt_si_significant, unit_takes_prefix};
+use crate::number_format::{fmt_si_significant, is_plane_angle, unit_takes_prefix};
 use crate::specification::SpecificationComparison;
 
 /// Whether [`format_value`] prints `value` with an SI prefix: `1.160 mA` is,
@@ -18,10 +18,13 @@ fn prefixed(value: f64, unit: &str) -> bool {
     unit_takes_prefix(unit) && !format_value(value, unit).ends_with(&format!(" {unit}"))
 }
 
-/// `number` followed by `unit`, or alone when there is no unit.
+/// `number` followed by `unit`, or alone when there is no unit; a plane
+/// angle stands against its number.
 fn with_unit(number: &str, unit: &str) -> String {
     if unit.is_empty() {
         number.to_owned()
+    } else if is_plane_angle(unit) {
+        format!("{number}{unit}")
     } else {
         format!("{number} {unit}")
     }
@@ -106,7 +109,10 @@ pub fn difference_text(difference: f64, of: f64, unit: &str) -> String {
             ""
         };
         let shown = format_value(of, unit);
-        let (number, rest) = shown.split_once(' ').unwrap_or((shown.as_str(), ""));
+        let (number, rest) = shown
+            .split_once(' ')
+            .or_else(|| Some((shown.strip_suffix(unit)?, unit)))
+            .unwrap_or((shown.as_str(), ""));
         let (mantissa, exponent) = number
             .find(['e', 'E'])
             .map_or((number, ""), |at| number.split_at(at));

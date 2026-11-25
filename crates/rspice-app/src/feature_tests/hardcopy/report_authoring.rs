@@ -980,7 +980,7 @@ fn report_summary_states_the_sheets_joint_yield_on_a_failing_run() {
     assert_eq!(metrics.joint_yield, sheet.joint_yield);
     assert_eq!(
         summary_cells(metrics).map(|(value, _)| value),
-        ["0 / 1", "92.5%", "not run"]
+        ["0 / 1", "92.5 %", "not run"]
     );
 }
 

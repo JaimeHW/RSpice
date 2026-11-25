@@ -44,7 +44,7 @@ use crate::derived::DerivedSeries;
 pub(super) struct MemberSlot {
     /// The member's analysis in the run.
     pub analysis: usize,
-    /// How the legend names the member: `r=2k`, `trial 3`, `ff, temp=125°C`.
+    /// How the legend names the member: `r=2k`, `trial 3`, `ff, temp=125 °C`.
     pub label: String,
     /// The identity every curve of the member shares on the strip.
     pub key: u64,

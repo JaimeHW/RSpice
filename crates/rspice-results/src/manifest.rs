@@ -225,7 +225,7 @@ impl ManifestViewModel {
                 || "not retained".to_owned(),
                 |target| target.label().to_owned(),
             ),
-            elapsed_time: format!("{:.3} s", run.elapsed_time),
+            elapsed_time: rspice_vocabulary::quantity::format_elapsed(run.elapsed_time),
             inventory_title: inventory_title(run.lifecycle).to_owned(),
             inventory_status: inventory_status(run.lifecycle).to_owned(),
             integrity,
@@ -471,7 +471,12 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
             };
             carrier_frequency_hz.map_or_else(
                 || quantity.to_owned(),
-                |carrier| format!("{quantity} / {} carrier", format_frequency(carrier)),
+                |carrier| {
+                    format!(
+                        "{quantity} / {} carrier",
+                        crate::number_format::fmt_si_significant(carrier, "Hz", CARRIER_DIGITS)
+                    )
+                },
             )
         }
         AnalysisResultFamilyMetadata::SParameter {
@@ -494,17 +499,9 @@ fn family_values_label(family: &AnalysisResultFamilyMetadata) -> String {
     }
 }
 
-fn format_frequency(value: f64) -> String {
-    if value >= 1.0e9 {
-        format!("{:.6} GHz", value / 1.0e9)
-    } else if value >= 1.0e6 {
-        format!("{:.6} MHz", value / 1.0e6)
-    } else if value >= 1.0e3 {
-        format!("{:.6} kHz", value / 1.0e3)
-    } else {
-        format!("{value:.6} Hz")
-    }
-}
+/// Significant digits a carrier is named to: the frequency the netlist
+/// stated, whole, as a swept coordinate is, and no zeros it did not write.
+const CARRIER_DIGITS: usize = 6;
 
 fn payload_values_label(payload: &AnalysisResultPayload) -> String {
     match payload {

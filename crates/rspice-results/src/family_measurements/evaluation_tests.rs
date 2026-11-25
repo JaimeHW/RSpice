@@ -127,8 +127,8 @@ fn a_step_member_that_is_also_a_pvt_point_keeps_its_family_name() {
     assert_eq!(
         labels,
         [
-            "Transient \u{00b7} temp=0°C",
-            "Transient \u{00b7} temp=25°C"
+            "Transient \u{00b7} temp=0 °C",
+            "Transient \u{00b7} temp=25 °C"
         ]
     );
 }

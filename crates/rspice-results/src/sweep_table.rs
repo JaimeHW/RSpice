@@ -67,7 +67,7 @@ impl SweptAxis {
         }
     }
 
-    /// Row `row`'s value as the netlist states it: `2k`, `125°C`, `FF`.
+    /// Row `row`'s value as the netlist states it: `2k`, `125 °C`, `FF`.
     #[must_use]
     pub fn spelled(&self, row: usize) -> String {
         match self.values.get(row) {
@@ -141,7 +141,7 @@ pub struct SweepOutput {
 /// A family as rows of swept quantities and measured values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SweepTable {
-    /// Each row's name, as a legend names the member: `r=2k`, `FF · 125°C`.
+    /// Each row's name, as a legend names the member: `r=2k`, `FF · 125 °C`.
     pub rows: Vec<String>,
     /// The analysis each row's values came from: the member itself for an
     /// expanded family, the family's one analysis for an in-analysis one.
@@ -744,7 +744,7 @@ fn varying(axes: Vec<SweptAxis>) -> Vec<SweptAxis> {
 }
 
 /// A point named by every axis that varies, as a legend names it:
-/// `r=2k, C1=10pF`, `ff, temp=125°C`.
+/// `r=2k, C1=10pF`, `ff, temp=125 °C`.
 #[must_use]
 pub fn point_name(axes: &[SweptAxis], row: usize) -> String {
     axes.iter()

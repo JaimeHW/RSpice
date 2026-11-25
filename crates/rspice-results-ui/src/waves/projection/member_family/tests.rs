@@ -501,11 +501,11 @@ fn a_five_corner_ac_run_draws_five_named_curves_on_one_strip() {
         })
         .collect();
     let expected: Vec<(String, String)> = [
-        ("tt, temp=27°C", 1.0_f64),
-        ("ff, temp=\u{2212}40°C", 1.2),
-        ("ss, temp=125°C", 0.8),
-        ("fs, temp=27°C", 1.1),
-        ("sf, temp=27°C", 0.9),
+        ("tt, temp=27 °C", 1.0_f64),
+        ("ff, temp=\u{2212}40 °C", 1.2),
+        ("ss, temp=125 °C", 0.8),
+        ("fs, temp=27 °C", 1.1),
+        ("sf, temp=27 °C", 0.9),
     ]
     .into_iter()
     .map(|(corner, gain)| {
