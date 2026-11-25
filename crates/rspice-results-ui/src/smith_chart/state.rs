@@ -45,53 +45,7 @@ impl SParamTrace {
     }
 }
 
-/// How a complex response that is not a network coefficient lands on the
-/// chart.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ResponseReading {
-    /// The response is a reflection coefficient and is drawn as it is.
-    #[default]
-    Reflection,
-    /// The response is an impedance in ohms: Γ = (Z − Z₀)/(Z + Z₀).
-    Impedance,
-    /// The response is an admittance in siemens: Γ = (1 − Y·Z₀)/(1 + Y·Z₀).
-    Admittance,
-}
-
-impl ResponseReading {
-    /// Segmented-control labels, in [`Self::index`] order.
-    pub const OPTIONS: [&'static str; 3] = ["Γ", "Z", "Y"];
-
-    pub const fn index(self) -> usize {
-        match self {
-            Self::Reflection => 0,
-            Self::Impedance => 1,
-            Self::Admittance => 2,
-        }
-    }
-
-    pub const fn from_index(index: usize) -> Self {
-        match index {
-            1 => Self::Impedance,
-            2 => Self::Admittance,
-            _ => Self::Reflection,
-        }
-    }
-
-    /// The reflection coefficient a response sample stands for against
-    /// `reference_ohm`. A response at the chart's singular point (Z = −Z₀)
-    /// is not finite and is not drawn.
-    pub fn reflection(self, value: Complex64, reference_ohm: f64) -> Complex64 {
-        match self {
-            Self::Reflection => value,
-            Self::Impedance => (value - reference_ohm) / (value + reference_ohm),
-            Self::Admittance => {
-                let normalized = value * reference_ohm;
-                (1.0 - normalized) / (1.0 + normalized)
-            }
-        }
-    }
-}
+pub use rspice_results::smith::ResponseReading;
 
 /// Which Smith-chart circles a two-port S-parameter sheet draws.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -164,7 +118,7 @@ impl Default for SmithSheetState {
         Self {
             grid: super::grid::SmithGrid::default(),
             reading: ResponseReading::default(),
-            reference_ohm: 50.0,
+            reference_ohm: rspice_results::smith::DEFAULT_REFERENCE_OHM,
             reference_draft: None,
             responses: Vec::new(),
             expression_draft: None,

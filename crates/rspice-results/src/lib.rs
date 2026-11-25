@@ -82,6 +82,7 @@ pub mod saved_output;
 #[cfg(feature = "engine-evidence")]
 pub mod sensitivity;
 pub mod simulation_values;
+pub mod smith;
 pub mod soa_evidence;
 #[cfg(feature = "engine-evidence")]
 pub mod soa_source;

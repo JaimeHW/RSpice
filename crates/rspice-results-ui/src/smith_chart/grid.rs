@@ -8,46 +8,7 @@
 
 use num_complex::Complex64;
 
-/// Which coordinate grid a Smith pane draws.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum SmithGrid {
-    /// Constant resistance and reactance.
-    #[default]
-    Impedance,
-    /// Constant conductance and susceptance.
-    Admittance,
-    /// Both, the admittance grid drawn in its own ink.
-    ImpedanceAdmittance,
-}
-
-impl SmithGrid {
-    /// Segmented-control labels, in [`Self::index`] order.
-    pub const OPTIONS: [&'static str; 3] = ["Z", "Y", "Z+Y"];
-
-    pub const fn index(self) -> usize {
-        match self {
-            Self::Impedance => 0,
-            Self::Admittance => 1,
-            Self::ImpedanceAdmittance => 2,
-        }
-    }
-
-    pub const fn from_index(index: usize) -> Self {
-        match index {
-            1 => Self::Admittance,
-            2 => Self::ImpedanceAdmittance,
-            _ => Self::Impedance,
-        }
-    }
-
-    pub const fn draws_impedance(self) -> bool {
-        matches!(self, Self::Impedance | Self::ImpedanceAdmittance)
-    }
-
-    pub const fn draws_admittance(self) -> bool {
-        matches!(self, Self::Admittance | Self::ImpedanceAdmittance)
-    }
-}
+pub use rspice_results::smith::SmithGrid;
 
 /// The normalized values the grid draws and labels: resistance and
 /// conductance circles, and reactance and susceptance arcs of either sign.

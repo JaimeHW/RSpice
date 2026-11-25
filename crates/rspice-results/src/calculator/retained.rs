@@ -130,6 +130,39 @@ pub fn evaluated_waveform(
     }
 }
 
+/// A complex locus the calculator reads off `waveforms` for `text`: its
+/// sweep, then its real and imaginary parts, as a Smith chart draws a
+/// response the reader typed. A real-valued result is a locus on the real
+/// axis; a scalar is not a locus at all.
+#[cfg(feature = "engine-evidence")]
+pub fn complex_locus<W: AsRef<RetainedWaveform>>(
+    waveforms: &[W],
+    text: &str,
+) -> Result<(Vec<f64>, Vec<f64>, Vec<f64>), String> {
+    let expression =
+        super::spice_parser::try_parse(text).map_err(|error| format!("parse error: {error}"))?;
+    let context = WaveformsContext::with_policy(waveforms, ComplexExpressionPolicy::Rectangular);
+    let value =
+        super::evaluator::evaluate(&expression, &context).map_err(|error| error.to_string())?;
+    let waveform = evaluated_waveform(value, text, None)
+        .map_err(|_| "a constant is not a locus".to_owned())?;
+    let collect =
+        |values: &crate::waveform::SharedWaveformValues| values.samples(..).collect::<Vec<f64>>();
+    let (real, imag) = match &waveform.complex {
+        Some(complex) => (collect(&complex.real), collect(&complex.imag)),
+        None => (collect(&waveform.y), vec![0.0; waveform.y.len()]),
+    };
+    let frequencies = collect(&waveform.x);
+    if frequencies.is_empty() || frequencies.len() != real.len() || frequencies.len() != imag.len()
+    {
+        return Err("the expression produced no samples".to_owned());
+    }
+    if !frequencies.windows(2).all(|pair| pair[0] < pair[1]) {
+        return Err("the expression's sweep is not strictly increasing".to_owned());
+    }
+    Ok((frequencies, real, imag))
+}
+
 /// Evaluation context backed by one analysis' waveform list — used by the
 /// Results workspace, where each strip evaluates expressions against its
 /// own analysis instead of the live (active-analysis) waveform set.

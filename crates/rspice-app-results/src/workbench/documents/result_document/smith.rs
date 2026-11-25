@@ -257,38 +257,13 @@ fn text_key(text: &str) -> u64 {
 type EvaluatedLocus = (Vec<f64>, Vec<f64>, Vec<f64>);
 
 /// Evaluate a reader's expression on the active analysis as a complex
-/// locus: frequencies and rectangular components. A real-valued result is a
-/// locus on the real axis; a scalar is not a locus at all.
+/// locus: frequencies and rectangular components. The print reads a response
+/// by the same rule.
 fn evaluate_expression(
     analysis: &crate::state::AnalysisResult,
     text: &str,
 ) -> Result<EvaluatedLocus, String> {
-    use crate::analysis::calculator;
-    let expression =
-        calculator::parser::try_parse(text).map_err(|error| format!("parse error: {error}"))?;
-    let context = calculator::WaveformsContext::with_policy(
-        &analysis.waveforms,
-        crate::state::ComplexExpressionPolicy::Rectangular,
-    );
-    let value = calculator::evaluator::evaluate(&expression, &context)
-        .map_err(|error| error.to_string())?;
-    let waveform = rspice_results::calculator::retained::evaluated_waveform(value, text, None)
-        .map_err(|_| "a constant is not a locus".to_owned())?;
-    // An evaluated locus, held in memory.
-    let collect = |values: &SharedWaveformValues| values.samples(..).collect::<Vec<f64>>();
-    let (real, imag) = match &waveform.complex {
-        Some(complex) => (collect(&complex.real), collect(&complex.imag)),
-        None => (collect(&waveform.y), vec![0.0; waveform.y.len()]),
-    };
-    let frequencies = collect(&waveform.x);
-    if frequencies.is_empty() || frequencies.len() != real.len() || frequencies.len() != imag.len()
-    {
-        return Err("the expression produced no samples".to_owned());
-    }
-    if !frequencies.windows(2).all(|pair| pair[0] < pair[1]) {
-        return Err("the expression's sweep is not strictly increasing".to_owned());
-    }
-    Ok((frequencies, real, imag))
+    rspice_results::calculator::retained::complex_locus(&analysis.waveforms, text)
 }
 
 /// The two-port of the selected analysis, resolved once per owner. A stored sweep the reader
