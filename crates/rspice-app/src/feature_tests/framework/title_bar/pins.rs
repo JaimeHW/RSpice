@@ -548,6 +548,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Event history | result-events |  | hidden",
             "  Safe operating area | result-safe-operating-area |  | hidden",
             "  Optimization | result-optimization |  | hidden",
+            "  Sweep | result-sweep |  | hidden",
             "  Sample table | result-table |  | hidden",
             "---",
             "New result document… | create-result-document |  | off: no retained result dataset is available",
