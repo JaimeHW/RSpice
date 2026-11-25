@@ -96,11 +96,11 @@ fn locus(state: &mut ResultsParts<'_>) -> Locus {
     let version = state.model.simulation.view.data_version;
     let locus = read_locus(state.results_reads(), source);
     if let Locus::Ready(derived) = &locus
-        && !state
+        && state
             .results
             .nyquist
             .get(&source)
-            .is_some_and(|held| held.version == version)
+            .is_none_or(|held| held.version != version)
     {
         let nyquist = &mut state.results.nyquist;
         nyquist.retain(|_, held| held.version == version);

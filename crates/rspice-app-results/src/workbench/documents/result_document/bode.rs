@@ -195,13 +195,12 @@ fn resolve_model(
             )
             .ok_or(NoMargins::NoResponse)?
             .metrics;
-            let d = BodeDerived {
+            BodeDerived {
                 version,
                 analysis_index: shape.analysis_index,
                 mag_index: shape.mag_index,
                 metrics,
-            };
-            d
+            }
         }
     };
 
