@@ -80,6 +80,17 @@ impl ResultOperationalState {
         }
     }
 
+    /// Whether the state's card offers Run again: a result the design moved
+    /// on from, and a run that was cancelled or cut short, with or without
+    /// the part it computed. A failed run offers what marks its failure
+    /// instead.
+    pub const fn offers_run_again(self) -> bool {
+        matches!(
+            self,
+            Self::Stale | Self::InterruptedOperation | Self::Partial
+        )
+    }
+
     pub const fn category(self) -> ResultOperationalCategory {
         match self {
             Self::Complete => ResultOperationalCategory::Normal,
@@ -182,6 +193,19 @@ pub struct ResultOperationalStatus {
     pub detail: Option<String>,
     pub blocks_visuals: bool,
     pub dismissible: bool,
+    /// What the status says in place of its state's own label, tone and
+    /// message, where those would misstate it.
+    pub wording: Option<StatusWording>,
+}
+
+/// A status's words and tone where they are not its state's own: a run that
+/// completed with some of its analyses failed reads as how many failed, in
+/// the warning tone, rather than as a failed run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusWording {
+    pub label: String,
+    pub category: ResultOperationalCategory,
+    pub message: &'static str,
 }
 
 impl ResultOperationalStatus {
@@ -191,7 +215,29 @@ impl ResultOperationalStatus {
             detail: None,
             blocks_visuals,
             dismissible: false,
+            wording: None,
         }
+    }
+
+    /// What the status is called: its wording's label, else its state's.
+    pub fn label(&self) -> &str {
+        self.wording
+            .as_ref()
+            .map_or(self.state.label(), |wording| wording.label.as_str())
+    }
+
+    /// The tone the status is marked in: its wording's, else its state's.
+    pub fn category(&self) -> ResultOperationalCategory {
+        self.wording
+            .as_ref()
+            .map_or(self.state.category(), |wording| wording.category)
+    }
+
+    /// What the status says happened: its wording's, else its state's.
+    pub fn message(&self) -> &'static str {
+        self.wording
+            .as_ref()
+            .map_or(self.state.message(), |wording| wording.message)
     }
 }
 
@@ -201,6 +247,20 @@ pub struct FailureSiteControl<'a> {
     pub elided: usize,
     pub headline: &'a str,
     pub marked: bool,
+}
+
+/// Display facts for the card's Run again, which runs the plan through the
+/// same command as Run plan: why that command cannot run now, if it cannot.
+pub struct RunAgainControl {
+    pub unavailable: Option<&'static str>,
+}
+
+/// What a state's card can act on, as the host verified it: the failure's
+/// named objects, and whether the plan can run again.
+#[derive(Default)]
+pub struct CardOffers<'a> {
+    pub failure_site: Option<FailureSiteControl<'a>>,
+    pub run_again: Option<RunAgainControl>,
 }
 
 /// What the control marking a failure's named objects says.
@@ -233,12 +293,14 @@ pub(crate) fn failure_site_hint(offer: &FailureSiteControl<'_>) -> String {
     }
 }
 
-/// Presentation outcome; the host applies dismiss and highlight requests.
+/// Presentation outcome; the host applies dismiss, highlight and run-again
+/// requests.
 #[derive(Default)]
 pub struct OperationalResponse {
     pub blocks_visuals: bool,
     pub dismiss: bool,
     pub highlight: bool,
+    pub run_again: bool,
 }
 
 /// Whether `status` leaves the viewer readable and says so beside it: a
@@ -251,18 +313,18 @@ pub fn marks_beside_viewer(status: &ResultOperationalStatus) -> bool {
 /// Present `status` in the well when it takes the well over: the card of
 /// the state, or the hint of an empty well. A state the viewer stays
 /// readable under is marked beside it instead, so the well spends nothing on
-/// it. Query failure-site display facts only when a card will be shown.
+/// it. Query what the card offers only when a card will be shown.
 pub fn show<'a>(
     ui: &mut Ui,
     status: &ResultOperationalStatus,
-    failure_site: impl FnOnce() -> Option<FailureSiteControl<'a>>,
+    offers: impl FnOnce() -> CardOffers<'a>,
 ) -> OperationalResponse {
     if status.state == ResultOperationalState::Complete || marks_beside_viewer(status) {
         return OperationalResponse::default();
     }
     // An empty well is not an alarm. It reads the way an empty schematic
     // sheet does: guidance set on the canvas, with no card behind it.
-    if status.blocks_visuals && status.state.category() == ResultOperationalCategory::Empty {
+    if status.blocks_visuals && status.category() == ResultOperationalCategory::Empty {
         let response = show_empty_hint(ui, status);
         announce_status(ui, &response, status);
         return OperationalResponse {
@@ -271,11 +333,11 @@ pub fn show<'a>(
         };
     }
     let t = Tokens::get(ui.ctx());
-    let offer = failure_site();
+    let offers = offers();
     let card = OperationalCard {
         status,
-        icon_tone: icon_tone(status.state.category(), &t.color),
-        offer: offer.as_ref(),
+        icon_tone: icon_tone(status.category(), &t.color),
+        offers: &offers,
     };
     let mut actions = OperationalResponse {
         blocks_visuals: true,
@@ -290,16 +352,16 @@ pub fn show<'a>(
 /// the category's glyph and the state's name, in a face of `size`, at the
 /// height of the controls around it, so the well beneath keeps every point
 /// of its height for the plot. Its hover reads the whole sentence; a press
-/// opens it, with whatever the state offers. Query failure-site display
-/// facts only when that opens.
+/// opens it, with whatever the state offers. Query what it offers only when
+/// that opens.
 pub fn show_mark<'a>(
     ui: &mut Ui,
     status: &ResultOperationalStatus,
     size: f32,
-    failure_site: impl FnOnce() -> Option<FailureSiteControl<'a>>,
+    offers: impl FnOnce() -> CardOffers<'a>,
 ) -> OperationalResponse {
     let t = Tokens::get(ui.ctx());
-    let category = status.state.category();
+    let category = status.category();
     let tone = icon_tone(category, &t.color);
     let name = mark_name(ui, status, size, t.color.text);
     let height = ui.spacing().interact_size.y;
@@ -327,11 +389,11 @@ pub fn show_mark<'a>(
     let mut actions = OperationalResponse::default();
     egui::Popup::menu(&response).show(|ui| {
         ui.set_max_width(OPERATIONAL_MARK_POPUP_WIDTH);
-        let offer = failure_site();
+        let offers = offers();
         OperationalCard {
             status,
             icon_tone: tone,
-            offer: offer.as_ref(),
+            offers: &offers,
         }
         .contents(ui, &mut actions);
     });
@@ -351,7 +413,7 @@ fn mark_name(
     color: egui::Color32,
 ) -> std::sync::Arc<egui::Galley> {
     ui.painter().layout_no_wrap(
-        status.state.label().to_owned(),
+        status.label().to_owned(),
         theme::sans(size, FontWeight::Medium),
         color,
     )
@@ -366,10 +428,10 @@ fn mark_width_of(name: &egui::Galley) -> f32 {
 
 /// Everything a state says, as one sentence for a hover.
 pub fn sentence(status: &ResultOperationalStatus) -> String {
-    [Some(status.state.label()), status.detail.as_deref()]
+    [Some(status.label()), status.detail.as_deref()]
         .into_iter()
         .flatten()
-        .chain([status.state.message(), status.state.recovery()])
+        .chain([status.message(), status.state.recovery()])
         .collect::<Vec<_>>()
         .join(" · ")
 }
@@ -378,7 +440,7 @@ pub fn sentence(status: &ResultOperationalStatus) -> String {
 /// tone: what a tab carries after its name for the state of what it shows.
 pub fn paint_status_glyph(ui: &Ui, rect: egui::Rect, status: &ResultOperationalStatus) {
     let t = Tokens::get(ui.ctx());
-    let category = status.state.category();
+    let category = status.category();
     operational_icon(category).paint(ui.painter(), rect, icon_tone(category, &t.color));
 }
 
@@ -387,19 +449,17 @@ pub fn paint_status_glyph(ui: &Ui, rect: egui::Rect, status: &ResultOperationalS
 fn announce_status(ui: &Ui, response: &egui::Response, status: &ResultOperationalStatus) {
     let accessible = format!(
         "{}: {} {}",
-        status.state.label(),
-        status.detail.as_deref().unwrap_or(status.state.message()),
+        status.label(),
+        status.detail.as_deref().unwrap_or(status.message()),
         status.state.recovery()
     );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, accessible.as_str()));
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(
-            if status.state.category() == ResultOperationalCategory::Error {
-                egui::accesskit::Role::Alert
-            } else {
-                egui::accesskit::Role::Status
-            },
-        );
+        node.set_role(if status.category() == ResultOperationalCategory::Error {
+            egui::accesskit::Role::Alert
+        } else {
+            egui::accesskit::Role::Status
+        });
         node.set_label(accessible);
     });
 }
@@ -448,7 +508,7 @@ fn show_empty_hint(ui: &Ui, status: &ResultOperationalStatus) -> egui::Response 
     };
 
     let mut rows = vec![set(
-        status.state.label(),
+        status.label(),
         theme::sans(EMPTY_HINT_TITLE_SIZE, FontWeight::Medium),
         t.color.text_dim,
     )];
@@ -458,7 +518,7 @@ fn show_empty_hint(ui: &Ui, status: &ResultOperationalStatus) -> egui::Response 
             .detail
             .as_deref()
             .into_iter()
-            .chain([status.state.message(), status.state.recovery()])
+            .chain([status.message(), status.state.recovery()])
             .map(|copy| set(copy, line.clone(), t.color.text_faint)),
     );
 
@@ -533,7 +593,7 @@ fn icon_tone(
 struct OperationalCard<'a> {
     status: &'a ResultOperationalStatus,
     icon_tone: egui::Color32,
-    offer: Option<&'a FailureSiteControl<'a>>,
+    offers: &'a CardOffers<'a>,
 }
 
 impl OperationalCard<'_> {
@@ -567,11 +627,7 @@ impl OperationalCard<'_> {
                 egui::Vec2::splat(OPERATIONAL_CARD_ICON),
                 egui::Sense::hover(),
             );
-            operational_icon(self.status.state.category()).paint(
-                ui.painter(),
-                glyph,
-                self.icon_tone,
-            );
+            operational_icon(self.status.category()).paint(ui.painter(), glyph, self.icon_tone);
             let copy = (width - OPERATIONAL_CARD_ICON - OPERATIONAL_CARD_ICON_GAP).max(1.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(copy, 0.0),
@@ -580,7 +636,7 @@ impl OperationalCard<'_> {
                     ui.set_width(copy);
                     ui.spacing_mut().item_spacing.y = 3.0;
                     ui.label(
-                        egui::RichText::new(self.status.state.label())
+                        egui::RichText::new(self.status.label())
                             .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
                             .color(t.color.text),
                     );
@@ -592,7 +648,7 @@ impl OperationalCard<'_> {
                         );
                     }
                     ui.label(
-                        egui::RichText::new(self.status.state.message())
+                        egui::RichText::new(self.status.message())
                             .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                             .color(t.color.text_dim),
                     );
@@ -604,10 +660,19 @@ impl OperationalCard<'_> {
                 },
             );
         });
-        if self.offer.is_some() || self.status.dismissible {
+        let run_again = self
+            .offers
+            .run_again
+            .as_ref()
+            .filter(|_| self.status.state.offers_run_again());
+        let failure_site = self.offers.failure_site.as_ref();
+        if failure_site.is_some() || run_again.is_some() || self.status.dismissible {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
-                if let Some(offer) = self.offer {
+                if let Some(control) = run_again {
+                    actions.run_again = run_again_button(ui, control);
+                }
+                if let Some(offer) = failure_site {
                     actions.highlight = show_failure_site_control(ui, offer);
                 }
                 if self.status.dismissible {
@@ -682,6 +747,20 @@ fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> boo
         );
     }
     clicked
+}
+
+/// Run again: the card's one primary action, which runs the plan as Run
+/// plan does, and is unavailable for the reason that command gives.
+fn run_again_button(ui: &mut Ui, control: &RunAgainControl) -> bool {
+    let response = rspice_ui_kit::widgets::Button::new("Run again")
+        .accent()
+        .enabled(control.unavailable.is_none())
+        .show(ui);
+    match control.unavailable {
+        Some(reason) => response.on_disabled_hover_text(reason),
+        None => response.on_hover_text("Run the plan again, as Run plan does"),
+    }
+    .clicked()
 }
 
 /// The marking control alone.

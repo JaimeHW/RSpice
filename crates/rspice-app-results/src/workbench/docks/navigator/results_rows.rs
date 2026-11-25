@@ -1786,7 +1786,9 @@ pub(super) fn result_analysis_completeness(
         SimulationRunLifecycle::Preparing
         | SimulationRunLifecycle::Running
         | SimulationRunLifecycle::Cancelling => ResultCompletenessClass::Loading,
-        SimulationRunLifecycle::Completed if analysis.success => ResultCompletenessClass::Complete,
+        SimulationRunLifecycle::Completed | SimulationRunLifecycle::Failed if analysis.success => {
+            ResultCompletenessClass::Complete
+        }
         SimulationRunLifecycle::Aborted => ResultCompletenessClass::Cancelled,
         SimulationRunLifecycle::LegacyUnknown if analysis.success => {
             ResultCompletenessClass::Partial

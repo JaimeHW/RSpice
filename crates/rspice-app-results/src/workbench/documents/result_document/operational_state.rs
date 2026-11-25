@@ -6,7 +6,10 @@
 //! row happens to be selected.
 
 use egui::Ui;
-use rspice_results_ui::operational::{self, ResultOperationalState, ResultOperationalStatus};
+use rspice_results_ui::operational::{
+    self, CardOffers, ResultOperationalCategory, ResultOperationalState, ResultOperationalStatus,
+    RunAgainControl, StatusWording,
+};
 
 use super::{AnalysisPresentationKey, ResultViewer, ResultsParts, ResultsReads, ResultsState};
 use crate::state::{
@@ -14,6 +17,8 @@ use crate::state::{
 };
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
+use crate::workbench::framework::command_registry::{CommandAvailability, ids};
+use crate::workbench::framework::feature::Execute;
 use crate::workbench::framework::requests::MarkFailureSites;
 use rspice_app_state::workbench::app_state::model::Model;
 
@@ -324,11 +329,71 @@ fn running_words(drawn_live: bool, progress: Option<f64>) -> String {
 
 fn failed_status(run: &SimulationRun, blocks_visuals: bool) -> ResultOperationalStatus {
     ResultOperationalStatus {
-        state: ResultOperationalState::Failed,
         detail: failed_analysis_detail(run),
-        blocks_visuals,
-        dismissible: false,
+        ..ResultOperationalStatus::canonical(ResultOperationalState::Failed, blocks_visuals)
     }
+}
+
+/// Whether `analysis` failed. A live partial is written `success == false`
+/// with a reserved message, so it is told from a real failure first: an
+/// analysis still streaming has not failed.
+fn analysis_failed(analysis: &AnalysisResult) -> bool {
+    !analysis.success && !analysis.is_live_partial()
+}
+
+/// What a run's own mark says of a run whose data reads as failed. A run
+/// some of whose analyses failed completed: it reads as how many failed, in
+/// the warning tone, and as Failed only when every analysis failed.
+pub(crate) fn run_failure_status(run: &SimulationRun) -> ResultOperationalStatus {
+    let failed = run
+        .analyses
+        .iter()
+        .filter(|analysis| analysis_failed(analysis))
+        .count();
+    let of = run.analyses.len();
+    ResultOperationalStatus {
+        wording: (failed > 0 && failed < of).then(|| StatusWording {
+            label: format!("{failed} of {of} failed"),
+            category: ResultOperationalCategory::Warning,
+            message: "The run completed; each analysis that failed is marked in its listing, with its reason.",
+        }),
+        ..failed_status(run, false)
+    }
+}
+
+/// What became of `run`, as Run details and the Details' State row say it:
+/// its lifecycle, and for a run that completed with some of its analyses
+/// failed, how many. A run any of whose analyses failed ends Failed, so a
+/// failed run with an analysis that completed reads as completed too.
+pub(crate) fn run_state_words(run: &SimulationRun) -> String {
+    let failed = run
+        .analyses
+        .iter()
+        .filter(|analysis| analysis_failed(analysis))
+        .count();
+    let completed = match run.lifecycle {
+        SimulationRunLifecycle::Completed => failed > 0,
+        SimulationRunLifecycle::Failed => failed > 0 && failed < run.analyses.len(),
+        _ => false,
+    };
+    if completed {
+        return if failed == 1 {
+            "Completed, one analysis failed".to_owned()
+        } else {
+            format!("Completed, {failed} analyses failed")
+        };
+    }
+    match run.lifecycle {
+        SimulationRunLifecycle::LegacyUnknown => "Not recorded",
+        SimulationRunLifecycle::Preparing => "Preparing",
+        SimulationRunLifecycle::Running => "Running",
+        SimulationRunLifecycle::Cancelling => "Stopping",
+        SimulationRunLifecycle::Completed => "Completed",
+        SimulationRunLifecycle::Failed => "Failed",
+        SimulationRunLifecycle::Aborted => "Stopped",
+        SimulationRunLifecycle::Interrupted => "Interrupted",
+    }
+    .to_owned()
 }
 
 /// What actually failed in `run`, in the words of the owner that produced it.
@@ -343,10 +408,15 @@ fn failed_status(run: &SimulationRun, blocks_visuals: bool) -> ResultOperational
 /// is told from a real failure before the success bit is read at all: a run
 /// still streaming has not failed.
 fn failed_analysis_detail(run: &SimulationRun) -> Option<String> {
-    let analysis = run
-        .analyses
-        .iter()
-        .find(|analysis| !analysis.success && !analysis.is_live_partial())?;
+    analysis_failure_detail(
+        run.analyses
+            .iter()
+            .find(|analysis| analysis_failed(analysis))?,
+    )
+}
+
+/// What failed in `analysis`, as [`failed_analysis_detail`] says it.
+fn analysis_failure_detail(analysis: &AnalysisResult) -> Option<String> {
     let name = analysis.label.as_str();
     if let Some(attribution) = analysis.failure_attribution.as_ref() {
         return Some(format!("{name}: {}", attribution.class.headline()));
@@ -408,6 +478,7 @@ pub(crate) fn classify_viewer(
                 ResultRuntimeConditionKind::IntegrityVerifying
                     | ResultRuntimeConditionKind::RendererLoss
             ),
+            wording: None,
         };
     }
 
@@ -463,10 +534,9 @@ pub(crate) fn classify_viewer(
                 !run_has_data,
             );
         }
-        SimulationRunLifecycle::Failed => {
-            return failed_status(run, !run_has_data);
-        }
-        SimulationRunLifecycle::Completed | SimulationRunLifecycle::LegacyUnknown => {}
+        SimulationRunLifecycle::Failed
+        | SimulationRunLifecycle::Completed
+        | SimulationRunLifecycle::LegacyUnknown => {}
     }
 
     if !run_has_data {
@@ -476,8 +546,36 @@ pub(crate) fn classify_viewer(
             failed_status(run, true)
         };
     }
-    if !run.success || run.analyses.iter().any(|analysis| !analysis.success) {
-        return failed_status(run, false);
+    // A sheet reads the analysis it shows, not the run's worst: a transient
+    // that completed is not failed because the run's AC analysis did. The
+    // failure takes the well over when the sheet has nothing of it to draw.
+    let shown = state
+        .model
+        .simulation
+        .view
+        .active_analysis_idx
+        .and_then(|index| run.analyses.get(index));
+    let failure = match shown {
+        Some(analysis) if analysis_failed(analysis) => Some(ResultOperationalStatus {
+            detail: analysis_failure_detail(analysis),
+            ..ResultOperationalStatus::canonical(ResultOperationalState::Failed, false)
+        }),
+        Some(_) => None,
+        // No analysis chosen: the sheet draws the run, failed when every
+        // analysis did, or when the run failed with none to blame.
+        None if run.analyses.iter().all(analysis_failed)
+            || !run.analyses.iter().any(analysis_failed) && !run.success =>
+        {
+            Some(failed_status(run, false))
+        }
+        None => None,
+    };
+    if let Some(failure) = failure {
+        let drawable = super::viewer_availability(state.results_reads(), viewer).available;
+        return ResultOperationalStatus {
+            blocks_visuals: !drawable,
+            ..failure
+        };
     }
 
     let currentness = run_currentness(state.results_reads(), run, |_| true);
@@ -490,11 +588,9 @@ pub(crate) fn classify_viewer(
 
     if !super::viewer_availability(state.results_reads(), viewer).available {
         return ResultOperationalStatus {
-            state: ResultOperationalState::Unsupported,
             detail: super::viewer_unavailability_reason(state.results_reads(), viewer)
                 .map(str::to_owned),
-            blocks_visuals: true,
-            dismissible: false,
+            ..ResultOperationalStatus::canonical(ResultOperationalState::Unsupported, true)
         };
     }
 
@@ -693,6 +789,60 @@ mod tests {
         assert_eq!(drawn.detail.as_deref(), Some(note));
         assert!(!drawn.blocks_visuals, "the plot so far stays in view");
     }
+
+    /// A sheet reads the analysis it shows, not the run's worst. In a run
+    /// whose transient completed and whose AC analysis failed, the
+    /// transient's sheet carries no state at all, so nothing marks its tab
+    /// or its well; the AC sheet, with nothing of its own to draw, is the
+    /// failure, which takes its well. The run's own mark says the run
+    /// completed with one of its two analyses failed, in the warning tone,
+    /// and reads Failed only once every analysis failed.
+    #[test]
+    fn a_sheet_reads_its_own_analysis_not_the_runs_worst() {
+        let mut state = ResultsTestHost::default();
+        state.platform.project_lifecycle.authority.open_session();
+        let run = state.model.simulation.start_run();
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            ]),
+        );
+        let mut ac = AnalysisResult::new(2, AnalysisType::Ac, "AC");
+        ac.success = false;
+        ac.error_message = Some("singular matrix at node n3".to_owned());
+        run.add_analysis(ac);
+        run.mark_running().expect("the run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Failed)
+            .expect("the run ends");
+
+        state.model.simulation.view.active_analysis_idx = Some(0);
+        let tran = classify_viewer(&mut state.results_parts(), ResultViewer::Waves);
+        assert_eq!(tran.state, ResultOperationalState::Complete);
+        assert!(notable_status(&mut state.results_parts(), ResultViewer::Waves).is_none());
+
+        state.model.simulation.view.active_analysis_idx = Some(1);
+        let ac = classify_viewer(&mut state.results_parts(), ResultViewer::Waves);
+        assert_eq!(ac.state, ResultOperationalState::Failed);
+        assert!(ac.blocks_visuals, "the AC sheet has nothing to draw");
+        assert_eq!(ac.detail.as_deref(), Some("AC: singular matrix at node n3"));
+
+        let mark = RunMark::of(&state.results_parts(), 0, ResultOperationalState::Failed);
+        let run = &state.model.simulation.retained.runs[0];
+        assert_eq!(mark.status.label(), "1 of 2 failed");
+        assert_eq!(mark.status.category(), ResultOperationalCategory::Warning);
+        assert_eq!(run_state_words(run), "Completed, one analysis failed");
+        assert_eq!(
+            mark.as_run_details_say(run).status.label(),
+            "Completed, one analysis failed"
+        );
+
+        state.model.simulation.retained.runs[0].analyses[0].success = false;
+        let mark = RunMark::of(&state.results_parts(), 0, ResultOperationalState::Failed);
+        let run = &state.model.simulation.retained.runs[0];
+        assert_eq!(run_state_words(run), "Failed");
+        assert_eq!(mark.status.label(), "Failed");
+        assert_eq!(mark.status.category(), ResultOperationalCategory::Error);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -712,9 +862,13 @@ pub(super) fn show_result_operational_status(
         return false;
     }
     let mut offered = None;
+    let run_plan = state.run_plan;
     let response = operational::show(ui, status, || {
         offered = offered_failure_sites(state);
-        offered.as_ref().map(OfferedFailureSites::control)
+        CardOffers {
+            failure_site: offered.as_ref().map(OfferedFailureSites::control),
+            run_again: run_again_control(run_plan),
+        }
     });
     apply_operational_response(state, &response, offered.as_ref());
     response.blocks_visuals
@@ -751,48 +905,93 @@ pub(super) fn show_status_mark(ui: &mut Ui, state: &mut ResultsParts<'_>) -> boo
         return false;
     };
     let mut offered = None;
+    let run_plan = state.run_plan;
     let response = operational::show_mark(ui, &status, crate::ui::tokens::FS_1, || {
         offered = offered_failure_sites(state);
-        offered.as_ref().map(OfferedFailureSites::control)
+        CardOffers {
+            failure_site: offered.as_ref().map(OfferedFailureSites::control),
+            run_again: run_again_control(run_plan),
+        }
     });
     apply_operational_response(state, &response, offered.as_ref());
     true
 }
 
 /// The mark a run carries in the data browser's row and the Details' State
-/// row: the state its data reads as, in the state's own words (Out of date,
-/// Running, Failed). The shown run's mark is the one its sheet reads, detail
-/// and all, and its popup can act on it, marking the failure's sites or
-/// dismissing a notice.
+/// row: what became of the run, in the state's own words (Out of date,
+/// Running, Failed), or for a run that completed with some of its analyses
+/// failed, how many failed. The shown run's mark is the one its sheet reads
+/// when that is the run's reading, detail and all, and its popup can act on
+/// it: mark the failure's sites, dismiss a notice, or run the plan again.
 pub(crate) struct RunMark {
     status: ResultOperationalStatus,
     /// The failure's sites the shown run's popup offers to mark.
     offered: Option<OfferedFailureSites>,
+    /// What Run plan answered, for the popup's Run again.
+    run_plan: CommandAvailability,
     shown: bool,
 }
 
 impl RunMark {
-    /// The mark of a run that is not shown, whose data reads as `reads_as`.
-    pub(crate) fn of(reads_as: ResultOperationalState) -> Self {
+    /// The mark of the retained run at `run_index`, whose data reads as
+    /// `reads_as`.
+    pub(crate) fn of(
+        state: &ResultsParts<'_>,
+        run_index: usize,
+        reads_as: ResultOperationalState,
+    ) -> Self {
+        let run = state.model.simulation.retained.runs.get(run_index);
+        let status = match run {
+            Some(run) if reads_as == ResultOperationalState::Failed => run_failure_status(run),
+            _ => ResultOperationalStatus::canonical(reads_as, false),
+        };
         Self {
-            status: ResultOperationalStatus::canonical(reads_as, false),
+            status,
             offered: None,
+            run_plan: state.run_plan,
             shown: false,
         }
     }
 
-    /// The shown run's mark: the state its sheet reads, when that is the
-    /// reading its data has, else the reading alone.
+    /// The shown run's mark. A failed run's is the run's own reading, which
+    /// says how many of its analyses failed whatever the sheet shows; any
+    /// other's is the state its sheet reads, when that is the reading its
+    /// data has, else the reading alone.
     pub(crate) fn shown(state: &mut ResultsParts<'_>, reads_as: ResultOperationalState) -> Self {
+        let Some(run_index) = state.model.simulation.view.active_run_idx else {
+            return Self {
+                status: ResultOperationalStatus::canonical(reads_as, false),
+                offered: None,
+                run_plan: state.run_plan,
+                shown: false,
+            };
+        };
+        if reads_as == ResultOperationalState::Failed {
+            return Self {
+                offered: offered_failure_sites(state),
+                shown: true,
+                ..Self::of(state, run_index, reads_as)
+            };
+        }
         let status = classify_viewer(state, state.results.session.viewer);
         if !same_reading(status.state, reads_as) {
-            return Self::of(reads_as);
+            return Self::of(state, run_index, reads_as);
         }
         Self {
             offered: offered_failure_sites(state),
             status,
+            run_plan: state.run_plan,
             shown: true,
         }
+    }
+
+    /// The mark as the Details' State row reads it: a run that completed
+    /// with some of its analyses failed, in the words Run details uses.
+    pub(crate) fn as_run_details_say(mut self, run: &SimulationRun) -> Self {
+        if let Some(wording) = self.status.wording.as_mut() {
+            wording.label = run_state_words(run);
+        }
+        self
     }
 
     pub(crate) fn width(&self, ui: &Ui) -> f32 {
@@ -814,12 +1013,14 @@ impl RunMark {
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         child.spacing_mut().interact_size.y = slot.height();
-        operational::show_mark(&mut child, &self.status, RUN_MARK_SIZE, || {
-            self.offered.as_ref().map(OfferedFailureSites::control)
+        operational::show_mark(&mut child, &self.status, RUN_MARK_SIZE, || CardOffers {
+            failure_site: self.offered.as_ref().map(OfferedFailureSites::control),
+            run_again: run_again_control(self.run_plan),
         })
     }
 
-    /// Carry out what the shown run's popup asked.
+    /// Carry out what the popup asked: Run again from any run's, and what
+    /// acts on the shown result from the shown run's.
     pub(crate) fn apply(
         &self,
         state: &mut ResultsParts<'_>,
@@ -827,8 +1028,28 @@ impl RunMark {
     ) {
         if self.shown {
             apply_operational_response(state, response, self.offered.as_ref());
+        } else if response.run_again {
+            run_again(state);
         }
     }
+}
+
+/// The card's Run again as Run plan answered: offered while Run plan is
+/// offered at all, and unavailable for its reason.
+fn run_again_control(run_plan: CommandAvailability) -> Option<RunAgainControl> {
+    match run_plan {
+        CommandAvailability::Available => Some(RunAgainControl { unavailable: None }),
+        CommandAvailability::Disabled(reason) => Some(RunAgainControl {
+            unavailable: Some(reason),
+        }),
+        CommandAvailability::Hidden => None,
+    }
+}
+
+/// Run the plan again through Run plan's own command, once the frame's
+/// contribution returns.
+fn run_again(state: &mut ResultsParts<'_>) {
+    state.workbench.outbox.push(Execute(ids::RUN_SIMULATION));
 }
 
 /// The face a run's mark names its state in: the run's own row size.
@@ -859,6 +1080,9 @@ fn apply_operational_response(
     }
     if response.highlight {
         toggle_failure_site_marking(state, offered);
+    }
+    if response.run_again {
+        run_again(state);
     }
 }
 

@@ -475,6 +475,31 @@ pub(super) fn show_surface<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::Ui
     }
 }
 
+/// [`show_surface`], in a context holding the dispatcher's answers for the
+/// commands `F` reads when `reads(app)` says the stage reads them, and both
+/// modal facts.
+pub(super) fn show_surface_reading<F: Registered>(
+    app: &mut RSpiceApp,
+    ui: &mut egui::Ui,
+    reads: impl FnOnce(&RSpiceApp) -> bool,
+) {
+    if let Some(surface) = F::registry().surface_section() {
+        (surface.show)(&mut surface_cx::<F>(app, reads), ui);
+    }
+}
+
+/// [`show_inspector`], in a context holding the dispatcher's answers for the
+/// commands `F` reads when `reads(app)` says the section reads them.
+pub(super) fn show_inspector_reading<F: Registered>(
+    app: &mut RSpiceApp,
+    ui: &mut egui::Ui,
+    reads: impl FnOnce(&RSpiceApp) -> bool,
+) {
+    if let Some(inspector) = F::registry().inspector_section() {
+        (inspector.show)(&mut cx_with_foreign_answers::<F>(app, reads), ui);
+    }
+}
+
 /// Draw `F`'s navigator section in the navigator's `ui`. The caller answers
 /// what it raised straight after.
 pub(super) fn show_navigator<F: Registered>(app: &mut RSpiceApp, ui: &mut egui::Ui) {

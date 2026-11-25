@@ -54,7 +54,11 @@ pub(in crate::workbench) fn results(
     let manifest = active_manifest(state);
     let mark =
         crate::workbench::docks::navigator::results::shown_run_reads_as(state.results_reads())
-            .map(|reads_as| RunMark::shown(state, reads_as));
+            .map(|reads_as| RunMark::shown(state, reads_as))
+            .map(|mark| match state.model.simulation.active_run() {
+                Some(run) => mark.as_run_details_say(run),
+                None => mark,
+            });
     let (details, asked) = match state.model.simulation.active_run().zip(manifest.as_deref()) {
         Some((run, manifest)) => result_authority::result_run(
             ui,

@@ -137,8 +137,14 @@ pub trait ConsoleHost: ProblemsHost + ListingSource {
     }
 
     /// Draw the Plot page: its toolbar band, then the retained result's
-    /// plot, flush to the dock's sides and foot.
-    fn plot_page(&mut self, _ui: &mut egui::Ui) {}
+    /// plot, flush to the dock's sides and foot. `run_plan` is what Run plan
+    /// answers now, for the Run again the band's state offers.
+    fn plot_page(
+        &mut self,
+        _ui: &mut egui::Ui,
+        _run_plan: crate::workbench::framework::command_registry::CommandAvailability,
+    ) {
+    }
 
     /// Draw the Measurements page over the shown result; `false` when it
     /// draws none, for the console's own page to stand.

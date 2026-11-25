@@ -86,7 +86,10 @@ pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
             .max_rect(content_rect)
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
-            ConsolePage::Plot => app.session_mut().plot_page(ui),
+            ConsolePage::Plot => {
+                let run_plan = app.availability(ids::RUN_SIMULATION);
+                app.session_mut().plot_page(ui, run_plan);
+            }
             ConsolePage::Console => {
                 // The command decides what Clear may clear and does the
                 // clearing; the toolbar only offers it.

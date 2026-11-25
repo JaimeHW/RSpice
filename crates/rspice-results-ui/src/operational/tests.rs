@@ -53,7 +53,7 @@ fn a_blocking_card_is_published_once() {
         };
         update = ctx
             .run_ui(input, |ui| {
-                let _ = show(ui, &status, || None);
+                let _ = show(ui, &status, CardOffers::default);
             })
             .platform_output
             .accesskit_update;
@@ -72,4 +72,52 @@ fn a_blocking_card_is_published_once() {
         .count();
     assert_eq!(titles, 1, "the card's title is published {titles} times");
     assert_eq!(alerts, 1, "the corrupted state is announced {alerts} times");
+}
+
+/// Run again is the card's primary action where running the plan again makes
+/// the result whole: out of date, cancelled, or cut short. It answers as Run
+/// plan does, enabled or unavailable for that command's reason, and a failed
+/// run's card offers what marks its failure instead.
+#[test]
+fn run_again_answers_as_run_plan_does() {
+    use ResultOperationalState::{Failed, InterruptedOperation, Partial, Stale};
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let run_again = |state: ResultOperationalState, unavailable: Option<&'static str>| {
+        let status = ResultOperationalStatus::canonical(state, true);
+        let mut nodes = Vec::new();
+        for _ in 0..2 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, WELL)),
+                ..Default::default()
+            };
+            nodes = ctx
+                .run_ui(input, |ui| {
+                    let _ = show(ui, &status, || CardOffers {
+                        run_again: Some(RunAgainControl { unavailable }),
+                        ..CardOffers::default()
+                    });
+                })
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit operational-card tree")
+                .nodes;
+        }
+        nodes
+            .into_iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Run again")
+            })
+            .map(|(_, node)| node.is_disabled())
+    };
+    assert_eq!(run_again(Stale, None), Some(false));
+    assert_eq!(run_again(InterruptedOperation, None), Some(false));
+    assert_eq!(run_again(Partial, None), Some(false));
+    assert_eq!(
+        run_again(Stale, Some("a run is already in progress")),
+        Some(true),
+        "Run again is unavailable while Run plan is"
+    );
+    assert_eq!(run_again(Failed, None), None);
 }

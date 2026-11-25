@@ -838,6 +838,23 @@ pub struct ResultsParts<'a> {
     /// Every command the application registers: what a chord pressed over
     /// the plot is resolved against and a command's shortcut is labelled by.
     pub(crate) commands: &'static Registry,
+    /// What Run plan answered when the parts were lent, for the Run again a
+    /// state's card offers; hidden where the lender did not ask.
+    pub(crate) run_plan: crate::workbench::framework::command_registry::CommandAvailability,
+}
+
+impl ResultsParts<'_> {
+    /// These parts, holding what Run plan answers now: the card of a result
+    /// the design moved on from, or of a cancelled run, offers Run again
+    /// through it.
+    #[must_use]
+    pub fn with_run_plan(
+        mut self,
+        run_plan: crate::workbench::framework::command_registry::CommandAvailability,
+    ) -> Self {
+        self.run_plan = run_plan;
+        self
+    }
 }
 
 impl ResultsReads<'_> {

@@ -170,6 +170,9 @@ impl Feature for ResultsFeature {
     type State = ResultsState;
     type Session = WorkbenchSession;
     type Handles = crate::workbench::framework::feature::NoHandles;
+    /// A state's card offers Run again, drawn as Run plan is answered.
+    const FOREIGN_AVAILABILITY: &'static [crate::state::command_catalog::CommandKey] =
+        &[ids::RUN_SIMULATION];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ResultsCommand>();
@@ -189,27 +192,37 @@ impl Feature for ResultsFeature {
 /// The data browser, over the results workspace's parts and Run details…,
 /// which it opens on a retained run.
 fn show_data_browser(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
-    let (mut parts, run_details) = cx.state.parts_and_run_details(
+    let run_plan = cx.foreign_availability(ids::RUN_SIMULATION);
+    let (parts, run_details) = cx.state.parts_and_run_details(
         cx.model,
         cx.wb,
         cx.platform,
         &mut cx.runs.preflight,
         cx.commands,
     );
-    crate::workbench::docks::navigator::results::results(ui, &mut parts, run_details);
+    crate::workbench::docks::navigator::results::results(
+        ui,
+        &mut parts.with_run_plan(run_plan),
+        run_details,
+    );
 }
 
 /// The results inspector, over the same parts and Run details…, which it
 /// opens on the run it names.
 fn show_inspector(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
-    let (mut parts, run_details) = cx.state.parts_and_run_details(
+    let run_plan = cx.foreign_availability(ids::RUN_SIMULATION);
+    let (parts, run_details) = cx.state.parts_and_run_details(
         cx.model,
         cx.wb,
         cx.platform,
         &mut cx.runs.preflight,
         cx.commands,
     );
-    crate::workbench::docks::inspector::results::results(ui, &mut parts, run_details);
+    crate::workbench::docks::inspector::results::results(
+        ui,
+        &mut parts.with_run_plan(run_plan),
+        run_details,
+    );
 }
 
 /// The Results stage, over the workspace's parts, the run controller its
@@ -217,13 +230,17 @@ fn show_inspector(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
 /// selected; then the result document's two forms, the last things the
 /// stage draws.
 fn show_surface(cx: &mut Cx<'_, ResultsFeature>, ui: &mut egui::Ui) {
-    let mut parts = cx.state.parts(
-        cx.model,
-        cx.wb,
-        cx.platform,
-        &mut cx.runs.preflight,
-        cx.commands,
-    );
+    let run_plan = cx.foreign_availability(ids::RUN_SIMULATION);
+    let mut parts = cx
+        .state
+        .parts(
+            cx.model,
+            cx.wb,
+            cx.platform,
+            &mut cx.runs.preflight,
+            cx.commands,
+        )
+        .with_run_plan(run_plan);
     surface::show(ui, &mut parts, cx.handles.run_controller);
     render_create_result_document(cx, ui.ctx());
     render_result_document_dialog(cx, ui.ctx());

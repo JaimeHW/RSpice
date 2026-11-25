@@ -1624,8 +1624,9 @@ pub(crate) fn shown_run_reads_as(state: ResultsReads<'_>) -> Option<ResultOperat
     result_analysis_data_state(currentness, result_run_completeness(run)).reads_as
 }
 
-/// The mark each listed run's row carries, in the order of `runs`: the
-/// shown run's as its sheet reads it, any other's as its data reads.
+/// The mark each listed run's row carries, in the order of `runs`: what
+/// became of each run, the shown run's as its sheet reads it where that is
+/// the run's reading.
 pub(super) fn run_marks(state: &mut ResultsParts<'_>, runs: &[ResultRun]) -> Vec<Option<RunMark>> {
     let shown = state.model.simulation.view.active_run_idx;
     runs.iter()
@@ -1634,7 +1635,7 @@ pub(super) fn run_marks(state: &mut ResultsParts<'_>, runs: &[ResultRun]) -> Vec
             Some(if shown == Some(run.run_index) {
                 RunMark::shown(state, reads_as)
             } else {
-                RunMark::of(reads_as)
+                RunMark::of(state, run.run_index, reads_as)
             })
         })
         .collect()

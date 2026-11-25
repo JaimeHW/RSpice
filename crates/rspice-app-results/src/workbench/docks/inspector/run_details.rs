@@ -31,6 +31,7 @@ use crate::state::{SimulationRunLifecycle, SimulationState};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::result_document::ResultsParts;
+use crate::workbench::documents::result_document::operational_state::run_state_words;
 use rspice_results::number_format::fmt_si_significant;
 use rspice_ui_kit::panels::Problem;
 use rspice_ui_kit::widgets::table::{
@@ -406,23 +407,18 @@ fn summary(
         .iter()
         .filter(|analysis| !analysis.success && !analysis.is_live_partial())
         .count();
-    let state = match (run.lifecycle, failed) {
-        (SimulationRunLifecycle::Completed, 0) => Line::new("State", "Completed"),
-        (SimulationRunLifecycle::Completed, 1) => {
-            Line::new("State", "Completed, one analysis failed").marked(Some(Problem::Warning))
-        }
-        (SimulationRunLifecycle::Completed, failed) => {
-            Line::new("State", format!("Completed, {failed} analyses failed"))
-                .marked(Some(Problem::Warning))
-        }
-        (SimulationRunLifecycle::Failed, _) => {
-            Line::new("State", "Failed").marked(Some(Problem::Failure))
-        }
-        (SimulationRunLifecycle::Interrupted, _) => {
-            Line::new("State", "Interrupted").marked(Some(Problem::Warning))
-        }
-        (lifecycle, _) => Line::new("State", lifecycle_words(lifecycle)),
+    // A run some of whose analyses failed completed: it is marked as a
+    // warning, and as a failure only when nothing of it completed.
+    let partly = failed > 0 && failed < run.analyses.len();
+    let mark = match (run.lifecycle, failed) {
+        (SimulationRunLifecycle::Completed, 0) => None,
+        (SimulationRunLifecycle::Completed, _) => Some(Problem::Warning),
+        (SimulationRunLifecycle::Failed, _) if partly => Some(Problem::Warning),
+        (SimulationRunLifecycle::Failed, _) => Some(Problem::Failure),
+        (SimulationRunLifecycle::Interrupted, _) => Some(Problem::Warning),
+        _ => None,
     };
+    let state = Line::new("State", run_state_words(run)).marked(mark);
     let mut lines = vec![
         Line::new("Run", run.name()),
         state,
@@ -456,20 +452,6 @@ fn summary(
         });
     }
     lines
-}
-
-/// A run's lifecycle as a reader says it.
-const fn lifecycle_words(lifecycle: SimulationRunLifecycle) -> &'static str {
-    match lifecycle {
-        SimulationRunLifecycle::LegacyUnknown => "Not recorded",
-        SimulationRunLifecycle::Preparing => "Preparing",
-        SimulationRunLifecycle::Running => "Running",
-        SimulationRunLifecycle::Cancelling => "Stopping",
-        SimulationRunLifecycle::Completed => "Completed",
-        SimulationRunLifecycle::Failed => "Failed",
-        SimulationRunLifecycle::Aborted => "Stopped",
-        SimulationRunLifecycle::Interrupted => "Interrupted",
-    }
 }
 
 /// The Inputs section's facts, and which of them are links.

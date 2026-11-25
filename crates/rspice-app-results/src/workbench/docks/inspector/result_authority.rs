@@ -10,7 +10,7 @@ use super::super::super::design_system::{
     panel_inset, property_row, property_row_problem, section_header,
 };
 use crate::ui::widgets::Button;
-use crate::workbench::documents::result_document::operational_state::RunMark;
+use crate::workbench::documents::result_document::operational_state::{RunMark, run_state_words};
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_results::saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
 use rspice_results_ui::operational::{self, OperationalResponse};
@@ -74,6 +74,10 @@ pub(super) fn result_run(
     let mut asked = OperationalResponse::default();
     let problem = match run.lifecycle {
         SimulationRunLifecycle::Completed => None,
+        // A run some of whose analyses completed completed itself.
+        SimulationRunLifecycle::Failed if run.analyses.iter().any(|analysis| analysis.success) => {
+            Some(Some(Problem::Warning))
+        }
         SimulationRunLifecycle::Failed => Some(Some(Problem::Failure)),
         SimulationRunLifecycle::Aborted | SimulationRunLifecycle::Interrupted => {
             Some(Some(Problem::Warning))
@@ -92,7 +96,7 @@ pub(super) fn result_run(
         );
         asked = mark.show_in(ui, slot, run.dataset_id);
     } else if let Some(problem) = problem {
-        property_row_problem(ui, "State", &manifest.lifecycle, problem);
+        property_row_problem(ui, "State", &run_state_words(run), problem);
     }
     if let Some(recorded) = run
         .prepared_receipt()

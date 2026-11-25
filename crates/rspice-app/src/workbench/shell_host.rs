@@ -238,7 +238,10 @@ impl Host for RSpiceApp {
                         );
                     }
                     Workspace::Stimulus => stimulus::show(ui, &mut features::cx(app)),
-                    Workspace::Results => features::show_surface::<ResultsFeature>(app, ui),
+                    // A state's card offers Run again as Run plan answers.
+                    Workspace::Results => {
+                        features::show_surface_reading::<ResultsFeature>(app, ui, |_| true);
+                    }
                     Workspace::Verify => verify::show(ui, &mut features::cx(app)),
                     Workspace::Models => features::show_surface::<ModelsFeature>(app, ui),
                     Workspace::Netlist => {
@@ -306,7 +309,7 @@ impl Host for RSpiceApp {
                         app.after_contribution();
                     }
                     Workspace::Results => {
-                        features::show_navigator::<ResultsFeature>(app, ui);
+                        features::show_navigator_reading::<ResultsFeature>(app, ui, |_| true);
                         app.after_contribution();
                     }
                     // The Project workspace keeps no navigator: each page's
@@ -322,7 +325,7 @@ impl Host for RSpiceApp {
                 }
             }
             Point::Inspector(InspectorScope::AnyWorkspace) => {
-                features::show_inspector::<ResultsFeature>(app, ui);
+                features::show_inspector_reading::<ResultsFeature>(app, ui, |_| true);
                 app.after_contribution();
             }
             // A workspace's own inspector section.
@@ -388,7 +391,7 @@ impl Host for RSpiceApp {
                         app.after_contribution();
                     }
                     Workspace::Results => {
-                        features::show_inspector::<ResultsFeature>(app, ui);
+                        features::show_inspector_reading::<ResultsFeature>(app, ui, |_| true);
                         app.after_contribution();
                     }
                     Workspace::Verify => features::show_inspector::<SimulateFeature>(app, ui),
@@ -1035,10 +1038,14 @@ impl ConsoleHost for AppState {
         )
     }
 
-    fn plot_page(&mut self, ui: &mut egui::Ui) {
+    fn plot_page(
+        &mut self,
+        ui: &mut egui::Ui,
+        run_plan: rspice_app_workbench::workbench::framework::command_registry::CommandAvailability,
+    ) {
         rspice_app_results::workbench::documents::result_document::show_plot_page(
             ui,
-            &mut self.results_parts(),
+            &mut self.results_parts().with_run_plan(run_plan),
         );
     }
 

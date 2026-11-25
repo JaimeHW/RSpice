@@ -108,6 +108,7 @@ impl ResultsState {
             platform,
             preflight,
             commands,
+            run_plan: crate::workbench::framework::command_registry::CommandAvailability::Hidden,
         };
         (parts, &mut self.run_details)
     }
