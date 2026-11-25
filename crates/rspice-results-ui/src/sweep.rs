@@ -9,7 +9,7 @@
 //! one row per point, exactly its rows tall.
 
 use crate::presentation::{PlotView, table_row_menu, well_hint, with_table_state};
-use crate::strip::{LegendChip, StripHeader};
+use crate::strip::{LegendChip, LegendGlyph, StripHeader};
 use egui::Ui;
 use rspice_results::sweep_table::{OutputKind, SweepCurve, SweepTable};
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
@@ -313,6 +313,7 @@ fn draw_plot(
                 name: &curve.label,
                 color: curve_color(ui, curve.levels.first().copied().unwrap_or(0)),
                 on: true,
+                glyph: LegendGlyph::Line,
             })
             .collect()
     } else {
