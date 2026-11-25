@@ -304,27 +304,104 @@ pub fn fmt_signed_reading(value: f64, unit: &str, significant_digits: usize) -> 
 #[must_use]
 pub fn fmt_complex(real: f64, imaginary: f64, unit: &str, significant_digits: usize) -> String {
     let larger = real.abs().max(imaginary.abs());
-    let (real, imaginary, prefix) = if larger > 0.0 && larger.is_finite() {
+    SharedReading::new(larger, larger, unit, significant_digits).complex(real, imaginary, unit)
+}
+
+/// The most decades one resolution reads a set of values across: past it,
+/// the smallest would keep none of its digits beside the largest.
+pub const SHARED_DECADES: i32 = 4;
+
+/// How values read side by side, as the cells of one matrix do: at one
+/// resolution, or each on its own decade where one resolution cannot read
+/// them all.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SharedReading {
+    /// Every value under one ladder index and to one count of decimals: the
+    /// largest at the reader's digits, every other at its resolution.
+    Fixed {
+        index: i32,
+        decimals: usize,
+        prefixed: bool,
+    },
+    /// Each value in engineering notation at the reader's digits, its decade
+    /// an exponent on the number, so one unit still names every part.
+    Engineering { significant_digits: usize },
+    /// No finite, nonzero value to take a resolution from.
+    Bare,
+}
+
+impl SharedReading {
+    /// The reading of values in `unit` whose largest part is `largest` and
+    /// whose smallest nonzero magnitude is `smallest`: one resolution, the
+    /// largest's at `significant_digits`, unless they span more than
+    /// [`SHARED_DECADES`] decades, when each reads in engineering notation.
+    #[must_use]
+    pub fn new(largest: f64, smallest: f64, unit: &str, significant_digits: usize) -> Self {
+        let digits = significant_digits.clamp(1, 17);
+        if !(largest > 0.0 && largest.is_finite()) {
+            return Self::Bare;
+        }
+        if smallest > 0.0 && smallest.is_finite() && largest / smallest > 10f64.powi(SHARED_DECADES)
+        {
+            return Self::Engineering {
+                significant_digits: digits,
+            };
+        }
         let prefixed = unit_takes_prefix(unit);
-        let (text, index) = placed_significant(
-            larger,
-            significant_digits.clamp(1, 17),
-            prefixed,
-            Zeros::Keep,
-        );
+        let (text, index) = placed_significant(largest, digits, prefixed, Zeros::Keep);
         let decimals = text.split_once('.').map_or(0, |(_, digits)| digits.len());
-        let (exponent, prefix) = decade(index, prefixed);
-        let part = |value: f64| fixed_places(si_scaled(value, index), decimals) + &exponent;
-        (part(real), part(imaginary), prefix)
-    } else {
-        let part = |value: f64| significant_number(value, 1, false, Zeros::Trim).0;
-        (part(real), part(imaginary), "")
-    };
-    let (sign, imaginary) = match imaginary.strip_prefix('\u{2212}') {
-        Some(magnitude) => ('\u{2212}', magnitude.to_owned()),
-        None => ('+', imaginary),
-    };
-    joined(&format!("{real} {sign} {imaginary}j"), prefix, unit)
+        Self::Fixed {
+            index,
+            decimals,
+            prefixed,
+        }
+    }
+
+    /// `value`'s number under this reading, and the prefix its unit takes.
+    fn part(self, value: f64) -> (String, &'static str) {
+        match self {
+            Self::Fixed {
+                index,
+                decimals,
+                prefixed,
+            } => {
+                let (exponent, prefix) = decade(index, prefixed);
+                (
+                    fixed_places(si_scaled(value, index), decimals) + &exponent,
+                    prefix,
+                )
+            }
+            Self::Engineering { significant_digits } if value != 0.0 && value.is_finite() => {
+                let (text, index) =
+                    placed_significant(value.abs(), significant_digits, true, Zeros::Keep);
+                let sign = if value < 0.0 { "\u{2212}" } else { "" };
+                (format!("{sign}{text}{}", decade(index, false).0), "")
+            }
+            Self::Engineering { .. } | Self::Bare => {
+                (significant_number(value, 1, false, Zeros::Trim).0, "")
+            }
+        }
+    }
+
+    /// `value` in `unit` under this reading: `0.0100`, `12.00e−6`,
+    /// `0.050 kΩ`.
+    #[must_use]
+    pub fn reading(self, value: f64, unit: &str) -> String {
+        let (number, prefix) = self.part(value);
+        joined(&number, prefix, unit)
+    }
+
+    /// A complex value in `unit` under this reading, its unit named once:
+    /// `0.2500 − 0.0100j`.
+    #[must_use]
+    pub fn complex(self, real: f64, imaginary: f64, unit: &str) -> String {
+        let ((real, prefix), (imaginary, _)) = (self.part(real), self.part(imaginary));
+        let (sign, imaginary) = match imaginary.strip_prefix('\u{2212}') {
+            Some(magnitude) => ('\u{2212}', magnitude.to_owned()),
+            None => ('+', imaginary),
+        };
+        joined(&format!("{real} {sign} {imaginary}j"), prefix, unit)
+    }
 }
 
 /// A value whose unit is not known, in the suffix notation SPICE and ADE's
@@ -1243,6 +1320,42 @@ mod tests {
         assert_eq!(fmt_complex(50.0, 25.0, "Ω", 4), "50.00 + 25.00j Ω");
         assert_eq!(fmt_complex(0.0, -0.0, "V", 4), "0 + 0j V");
         assert_eq!(fmt_complex(1.0, -1.0e-9, "V", 4), "1.000 + 0.000j V");
+    }
+
+    /// Values read side by side take one resolution, the largest part's at
+    /// the reader's digits, and one prefix; past four decades apart, each
+    /// reads in engineering notation at those digits instead.
+    #[test]
+    fn values_side_by_side_read_at_one_resolution() {
+        let shared = SharedReading::new(0.25, 0.01, "", 4);
+        assert_eq!(shared.complex(0.25, 0.0, ""), "0.2500 + 0.0000j");
+        assert_eq!(shared.complex(0.01, -0.0, ""), "0.0100 + 0.0000j");
+        assert_eq!(shared.reading(-0.01, ""), "\u{2212}0.0100");
+        let ohms = SharedReading::new(1_200.0, 50.0, "\u{3a9}", 4);
+        assert_eq!(ohms.reading(50.0, "\u{3a9}"), "0.050 k\u{3a9}");
+        assert_eq!(
+            ohms.complex(1_200.0, 50.0, "\u{3a9}"),
+            "1.200 + 0.050j k\u{3a9}"
+        );
+        // Four decades apart still read at one resolution; past four, not.
+        assert!(matches!(
+            SharedReading::new(1.0, 1.0e-4, "", 4),
+            SharedReading::Fixed { decimals: 3, .. }
+        ));
+        let apart = SharedReading::new(0.25, 1.2e-5, "", 4);
+        assert_eq!(
+            apart.complex(0.25, -1.2e-5, ""),
+            "250.0e\u{2212}3 \u{2212} 12.00e\u{2212}6j"
+        );
+        assert_eq!(apart.complex(1.0, 0.0, ""), "1.000 + 0j");
+        assert_eq!(
+            SharedReading::new(2.0e6, 10.0, "\u{3a9}", 4).complex(2.0e6, -10.0, "\u{3a9}"),
+            "2.000e6 \u{2212} 10.00j \u{3a9}"
+        );
+        assert_eq!(
+            SharedReading::new(0.0, 0.0, "", 4).complex(0.0, 0.0, ""),
+            "0 + 0j"
+        );
     }
 
     /// In a column or a readout list a value keeps the reader's digits, so

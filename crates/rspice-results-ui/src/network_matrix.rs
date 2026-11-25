@@ -5,6 +5,7 @@ use egui::Ui;
 use rspice_results::engine_evidence::{
     MAX_NETWORK_DIAGNOSTIC_PORTS, NoAbort, SampledPassivity, network_quality_with_abort,
 };
+use rspice_results::number_format::SharedReading;
 use rspice_results::waveform::{HeldColumn, RetainedTrace, WaveformValues};
 use rspice_results::{
     analysis_result::AnalysisResult,
@@ -78,9 +79,8 @@ pub struct OpenCoefficient {
     pub frequency: f64,
 }
 
-/// One coefficient in `unit` as the representation shows it, its phase in
-/// the unit Angle display chose. A coefficient with a unit reads its
-/// decibels against one of that unit: dBΩ, dBS.
+/// One coefficient in `unit`, read on its own, as the representation shows
+/// it: [`MatrixReading::cell`] of a matrix of one.
 pub fn formatted(
     real: f64,
     imaginary: f64,
@@ -89,34 +89,133 @@ pub fn formatted(
     angle_display: AngleDisplay,
     significant_digits: usize,
 ) -> String {
-    let digits = significant_digits;
-    let decibels = format!("dB{unit}");
-    if real == 0.0 && imaginary == 0.0 && representation != 0 {
-        return if representation == 2 {
-            format!("−∞ {decibels} · phase undefined")
-        } else {
-            "0 · phase undefined".to_owned()
-        };
-    }
-    let phase = || {
-        let radians = imaginary.atan2(real);
-        match angle_display {
-            AngleDisplay::Degrees => fmt_column_reading(radians.to_degrees(), "°", digits),
-            AngleDisplay::Radians => fmt_column_reading(radians, "rad", digits),
+    MatrixReading::of(
+        [(unit, real, imaginary)],
+        representation,
+        significant_digits,
+    )
+    .cell(real, imaginary, unit, representation, angle_display)
+}
+
+/// How one matrix's coefficients read together at one sample, so the matrix
+/// reads with one count of decimals in every cell and both parts.
+///
+/// The coefficients of one unit take one resolution and one prefix, the
+/// largest part's at the sheet's digits; where they span more than four
+/// decades, which would leave the smallest no digit at that resolution, each
+/// part reads in engineering notation at those digits instead. Phases in
+/// radians read at the largest phase's resolution. Decibels and degrees read
+/// to the hundredth whatever the matrix holds.
+#[derive(Debug, Clone)]
+pub struct MatrixReading<'a> {
+    coefficients: Vec<(&'a str, SharedReading)>,
+    radians: SharedReading,
+    significant_digits: usize,
+}
+
+impl<'a> MatrixReading<'a> {
+    /// The reading of `cells`, each its unit and its real and imaginary
+    /// parts, as `representation` shows them.
+    pub fn of(
+        cells: impl IntoIterator<Item = (&'a str, f64, f64)>,
+        representation: usize,
+        significant_digits: usize,
+    ) -> Self {
+        // Each unit's largest part and smallest nonzero magnitude.
+        let mut spans: Vec<(&'a str, f64, f64)> = Vec::new();
+        let mut largest_phase = 0.0_f64;
+        for (unit, real, imaginary) in cells {
+            if !(real.is_finite() && imaginary.is_finite()) {
+                continue;
+            }
+            let magnitude = real.hypot(imaginary);
+            let part = if representation == 0 {
+                real.abs().max(imaginary.abs())
+            } else {
+                magnitude
+            };
+            let index = spans
+                .iter()
+                .position(|(held, ..)| *held == unit)
+                .unwrap_or_else(|| {
+                    spans.push((unit, 0.0, f64::INFINITY));
+                    spans.len() - 1
+                });
+            let span = &mut spans[index];
+            span.1 = span.1.max(part);
+            if magnitude > 0.0 {
+                span.2 = span.2.min(magnitude);
+                largest_phase = largest_phase.max(imaginary.atan2(real).abs());
+            }
         }
-    };
-    match representation {
-        1 => format!(
-            "{} ∠ {}",
-            fmt_column_reading(real.hypot(imaginary), unit, digits),
-            phase()
-        ),
-        2 => format!(
-            "{} ∠ {}",
-            fmt_column_reading(magnitude_db(real, imaginary), &decibels, digits),
-            phase()
-        ),
-        _ => crate::presentation::complex_readout(real, imaginary, unit, digits),
+        Self {
+            coefficients: spans
+                .into_iter()
+                .map(|(unit, largest, smallest)| {
+                    (
+                        unit,
+                        SharedReading::new(largest, smallest, unit, significant_digits),
+                    )
+                })
+                .collect(),
+            // A phase is bounded by a half turn, so it reads at one
+            // resolution, as a degree reads to the hundredth.
+            radians: SharedReading::new(largest_phase, 0.0, "rad", significant_digits),
+            significant_digits,
+        }
+    }
+
+    /// One coefficient in `unit` as the representation shows it, its phase
+    /// in the unit Angle display chose. A coefficient with a unit reads its
+    /// decibels against one of that unit: dBΩ, dBS.
+    pub fn cell(
+        &self,
+        real: f64,
+        imaginary: f64,
+        unit: &str,
+        representation: usize,
+        angle_display: AngleDisplay,
+    ) -> String {
+        let digits = self.significant_digits;
+        let decibels = format!("dB{unit}");
+        if real == 0.0 && imaginary == 0.0 && representation != 0 {
+            return if representation == 2 {
+                format!("−∞ {decibels} · phase undefined")
+            } else {
+                "0 · phase undefined".to_owned()
+            };
+        }
+        let shared = self
+            .coefficients
+            .iter()
+            .find(|(held, _)| *held == unit)
+            .map_or_else(
+                || {
+                    let alone = real.abs().max(imaginary.abs());
+                    SharedReading::new(alone, alone, unit, digits)
+                },
+                |(_, shared)| *shared,
+            );
+        let phase = || {
+            let radians = imaginary.atan2(real);
+            match angle_display {
+                AngleDisplay::Degrees => fmt_column_reading(radians.to_degrees(), "°", digits),
+                AngleDisplay::Radians => self.radians.reading(radians, "rad"),
+            }
+        };
+        match representation {
+            1 => format!(
+                "{} ∠ {}",
+                shared.reading(real.hypot(imaginary), unit),
+                phase()
+            ),
+            2 => format!(
+                "{} ∠ {}",
+                fmt_column_reading(magnitude_db(real, imaginary), &decibels, digits),
+                phase()
+            ),
+            _ => shared.complex(real, imaginary, unit),
+        }
     }
 }
 
@@ -779,6 +878,17 @@ pub fn show(
     } else {
         ui.available_height()
     };
+    let reading = MatrixReading::of(
+        (0..ports)
+            .flat_map(|row| (0..ports).map(move |column| (row, column)))
+            .map(|(row, column)| {
+                let (_, _, real, imaginary) = entry(row, column);
+                let (out, input) = position(row, column);
+                (form.unit(out, input), real, imaginary)
+            }),
+        controls.representation,
+        significant_digits,
+    );
     let (response, chosen) = with_table_state(ui, "network-matrix", |ui, state| {
         let response = DataTable::new("rspice.results.network-matrix", &columns, ports)
             .state(state)
@@ -792,13 +902,12 @@ pub fn show(
                     let (out, input) = position(row, column);
                     let unit = form.unit(out, input);
                     let text = if real.is_finite() && imaginary.is_finite() {
-                        formatted(
+                        reading.cell(
                             real,
                             imaginary,
                             unit,
                             controls.representation,
                             angle_display,
-                            significant_digits,
                         )
                     } else {
                         "\u{2014}".to_owned()
@@ -965,6 +1074,59 @@ mod tests {
         assert_eq!(
             formatted(100.0, 0.0, "Ω", 2, AngleDisplay::Degrees, 4),
             "40.00 dBΩ ∠ 0.00\u{b0}"
+        );
+    }
+
+    /// A matrix reads with one count of decimals in every cell and both
+    /// parts, the largest part's at the sheet's digits: a quarter and a
+    /// hundredth read `0.2500` and `0.0100`, never `0.01000`. Past four
+    /// decades apart every part reads in engineering notation instead.
+    #[test]
+    fn a_matrix_reads_with_one_count_of_decimals() {
+        let cells = |matrix: &[(f64, f64)], representation: usize, angle: AngleDisplay| {
+            let reading = MatrixReading::of(
+                matrix
+                    .iter()
+                    .map(|(real, imaginary)| ("", *real, *imaginary)),
+                representation,
+                4,
+            );
+            matrix
+                .iter()
+                .map(|(real, imaginary)| reading.cell(*real, *imaginary, "", representation, angle))
+                .collect::<Vec<_>>()
+        };
+        let mixed = [(0.25, 0.0), (0.01, 0.0), (0.01, -0.002), (0.25, 0.0)];
+        assert_eq!(
+            cells(&mixed, 0, AngleDisplay::Degrees),
+            [
+                "0.2500 + 0.0000j",
+                "0.0100 + 0.0000j",
+                "0.0100 \u{2212} 0.0020j",
+                "0.2500 + 0.0000j"
+            ]
+        );
+        assert_eq!(
+            cells(&mixed[..2], 1, AngleDisplay::Radians),
+            ["0.2500 ∠ 0 rad", "0.0100 ∠ 0 rad"]
+        );
+        let apart = [(0.5, 0.0), (2.0e-5, -1.0e-5)];
+        assert_eq!(
+            cells(&apart, 0, AngleDisplay::Degrees),
+            [
+                "500.0e\u{2212}3 + 0j",
+                "20.00e\u{2212}6 \u{2212} 10.00e\u{2212}6j"
+            ]
+        );
+        // Each unit of a mixed-unit matrix reads at its own resolution.
+        let chain = MatrixReading::of([("", 0.5, 0.0), ("Ω", 50.0, 0.0)], 0, 4);
+        assert_eq!(
+            chain.cell(0.5, 0.0, "", 0, AngleDisplay::Degrees),
+            "0.5000 + 0.0000j"
+        );
+        assert_eq!(
+            chain.cell(50.0, 0.0, "Ω", 0, AngleDisplay::Degrees),
+            "50.00 + 0.00j Ω"
         );
     }
 }
