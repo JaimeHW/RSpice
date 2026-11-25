@@ -5,8 +5,14 @@
 //! every run — which is what lets a printed artifact be checked against a
 //! digest. Conformance level is taken from the plan rather than inferred, so a
 //! document claiming PDF/A carries what that level actually requires.
+//!
+//! The PDF is tagged: each line of text is a paragraph of its structure in
+//! the order the scene draws it, each figure a figure carrying its
+//! alternative text, and every rule, frame, band and mark an artifact, so a
+//! reader that speaks the page reads what it says and not how it is drawn.
 
 use super::*;
+use krilla::tagging::{Artifact, ArtifactType, ContentTag, SpanTag, Tag, TagGroup, TagTree};
 
 /// One PDF font per bundled face, one per installed face a page letters
 /// in, and the runs a scene font letters in.
@@ -79,7 +85,7 @@ pub(super) fn render_pdf(
         no_device_cs: archival,
         xmp_metadata: archival,
         configuration,
-        enable_tagging: false,
+        enable_tagging: true,
         ..SerializeSettings::default()
     };
     let fonts = PdfFonts::load()?;
@@ -107,6 +113,7 @@ pub(super) fn render_pdf(
         metadata = metadata.creation_date(timestamp.as_krilla());
     }
     document.set_metadata(metadata);
+    let mut structure = TagTree::new();
 
     for preview_page in plan.pagination().pages() {
         let geometry = preview_page.geometry();
@@ -136,6 +143,7 @@ pub(super) fn render_pdf(
         let mut page = document.start_page_with(page_settings);
         let mut surface = page.surface();
         if let Some(background) = background_color(plan) {
+            surface.start_tagged(artifact());
             set_pdf_fill(&mut surface, background, NormalizedF32::ONE);
             surface.set_stroke(None);
             let mut builder = PathBuilder::new();
@@ -143,6 +151,7 @@ pub(super) fn render_pdf(
             if let Some(path) = builder.finish() {
                 surface.draw_path(&path);
             }
+            surface.end_tagged();
         }
         let mut clip_builder = PathBuilder::new();
         clip_builder.push_rect(pdf_rect(content)?);
@@ -152,14 +161,25 @@ pub(super) fn render_pdf(
         surface.push_clip_path(&clip, &FillRule::NonZero);
         let transform = page_transform(preview_page);
         for primitive in page_primitives(scene, preview_page)? {
-            draw_pdf_primitive(&mut surface, &fonts, plan, transform, primitive)?;
+            draw_tagged_pdf_primitive(
+                &mut surface,
+                &fonts,
+                plan,
+                transform,
+                primitive,
+                &mut structure,
+            )?;
         }
         surface.pop();
-        draw_pdf_decorations(&mut surface, &fonts, plan, scene, preview_page)?;
+        surface.start_tagged(artifact());
+        let decorated = draw_pdf_decorations(&mut surface, &fonts, plan, scene, preview_page);
         draw_pdf_trim_marks(&mut surface, plan, preview_page);
+        surface.end_tagged();
+        decorated?;
         surface.finish();
         page.finish();
     }
+    document.set_tag_tree(structure);
     document
         .finish()
         .map_err(|error| HardcopyRenderError::PdfSerialization(error.to_string()))
@@ -403,6 +423,58 @@ pub(super) fn set_pdf_stroke(surface: &mut krilla::surface::Surface<'_>, stroke:
         dash: dash.map(|array| StrokeDash { array, offset: 0.0 }),
         ..Stroke::default()
     }));
+}
+
+/// What a page draws that is not part of what it says: a rule, a frame, a
+/// band or a mark.
+fn artifact() -> ContentTag<'static> {
+    ContentTag::Artifact(Artifact::with_kind(ArtifactType::Other))
+}
+
+/// Draw `primitive` and place it in the document's structure: text as a
+/// paragraph, a figure as a figure with its alternative text, anything else
+/// as an artifact.
+fn draw_tagged_pdf_primitive(
+    surface: &mut krilla::surface::Surface<'_>,
+    fonts: &PdfFonts,
+    plan: &HardcopyPlan,
+    transform: PageTransform,
+    primitive: &ScenePrimitive,
+    structure: &mut TagTree,
+) -> Result<(), HardcopyRenderError> {
+    let group = match primitive {
+        ScenePrimitive::ClippedGroup {
+            source_origin,
+            destination_origin,
+            primitives,
+            ..
+        } => {
+            let transform = transform.remap(*source_origin, *destination_origin);
+            for primitive in primitives {
+                draw_tagged_pdf_primitive(surface, fonts, plan, transform, primitive, structure)?;
+            }
+            return Ok(());
+        }
+        ScenePrimitive::Text { .. } => {
+            Some((ContentTag::Span(SpanTag::empty()), TagGroup::new(Tag::P)))
+        }
+        ScenePrimitive::RasterImage {
+            alternative_text, ..
+        } => Some((
+            ContentTag::Other,
+            TagGroup::new(Tag::Figure(Some(alternative_text.clone()))),
+        )),
+        _ => None,
+    };
+    let (tag, group) = group.map_or((artifact(), None), |(tag, group)| (tag, Some(group)));
+    let identifier = surface.start_tagged(tag);
+    let drawn = draw_pdf_primitive(surface, fonts, plan, transform, primitive);
+    surface.end_tagged();
+    if let Some(mut group) = group {
+        group.push(identifier);
+        structure.push(group);
+    }
+    drawn
 }
 
 pub(super) fn draw_pdf_primitive(
