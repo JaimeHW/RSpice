@@ -10,7 +10,7 @@ use crate::tokens::Tokens;
 
 use super::cursor::{CursorId, CursorPair};
 use super::decimate::DecimationCache;
-use super::format::{fmt_si_signed, fmt_si_significant, tick_with_unit};
+use super::format::{fmt_reading, fmt_si_signed, fmt_signed_reading, tick_with_unit};
 use super::scale::{LabelColumn, XScale, even_labels};
 use super::spec::{Axis, MarkerShape, PlotSpec, Trace};
 use crate::palette::TRACE_HUES;
@@ -1838,7 +1838,7 @@ pub fn show(
             format!(
                 "H{} {}",
                 slot + 1,
-                fmt_si_significant(
+                fmt_reading(
                     spec.y.display_value(y),
                     &spec.y.unit,
                     spec.significant_digits
@@ -1873,11 +1873,19 @@ pub fn show(
             Align2::RIGHT_CENTER,
             format!(
                 "\u{0394}Y {}",
-                fmt_si_signed(
-                    (h2 - h1) * spec.y.display_scale,
-                    &spec.y.unit,
-                    spec.significant_digits
-                )
+                if super::format::reads_at_fixed_places(&spec.y.unit) {
+                    fmt_signed_reading(
+                        (h2 - h1) * spec.y.display_scale,
+                        &spec.y.unit,
+                        spec.significant_digits,
+                    )
+                } else {
+                    fmt_si_signed(
+                        (h2 - h1) * spec.y.display_scale,
+                        &spec.y.unit,
+                        spec.significant_digits,
+                    )
+                }
             ),
             theme::mono(9.0, FontWeight::Medium),
             c.canvas_text,

@@ -3,7 +3,7 @@
 //! host does, and the resulting window asserted.
 
 use super::*;
-use crate::plot::{Axis, Trace, XScale};
+use crate::plot::{Axis, Trace, XScale, fmt_si_significant};
 
 const SIZE: egui::Vec2 = egui::vec2(480.0, 300.0);
 const X0: (f64, f64) = (0.0, 1.0);
