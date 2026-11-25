@@ -157,7 +157,8 @@ fn assert_one_loops_margins(state: &mut AppState) {
     };
     let (phase, unity_at, gain, inversion_at) = (&phase.1, &unity_at.1, &gain.1, &inversion_at.1);
     let leading = |text: &str| -> f64 {
-        text.split(' ')
+        text.trim_end_matches('\u{b0}')
+            .split(' ')
             .next()
             .and_then(|number| number.parse().ok())
             .unwrap_or_else(|| panic!("a number leads {text:?}"))
@@ -168,7 +169,9 @@ fn assert_one_loops_margins(state: &mut AppState) {
     let phase_margin = 180.0 - 3.0 * unity.atan().to_degrees();
     let gain_margin = 20.0 * 2f64.log10();
     assert!(
-        phase.ends_with(" \u{b0}")
+        // A degree sign sets against its number; a unit word keeps its space.
+        phase.ends_with('\u{b0}')
+            && !phase.ends_with(" \u{b0}")
             && gain.ends_with(" dB")
             && unity_at.ends_with(" kHz")
             && inversion_at.ends_with(" kHz"),
