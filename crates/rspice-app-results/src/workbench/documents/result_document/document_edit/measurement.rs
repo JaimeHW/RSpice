@@ -34,6 +34,17 @@ pub fn open_measurement(state: &mut ResultsParts<'_>) {
     ));
 }
 
+/// The result document a measurement lands in: Results' own while Results
+/// is in front. Over the dock under a drawing, a netlist or a plan there is
+/// none, and the run's working view keeps it, as over a quick view.
+fn measured_document(state: ResultsReads<'_>) -> Option<ResultDocumentId> {
+    if state.workbench.plots_in_dock() {
+        None
+    } else {
+        active_document_id(state)
+    }
+}
+
 /// What the measurement form's expression last measured, and over what. The
 /// form is drawn on every frame, and measuring reads every sample the
 /// expression names, so it measures again only when the expression or the
@@ -88,7 +99,7 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
             };
         }
     };
-    let pane = active_document_id(state).and_then(|document_id| {
+    let pane = measured_document(state).and_then(|document_id| {
         let (_, pane_id) = super::super::persistent_document::reading_position(state, document_id)?;
         let document = state
             .model
@@ -297,7 +308,7 @@ pub(super) fn commit(
     };
     // Over a quick view the run's working view keeps it, on the pane of the
     // analysis shown, so it is read on every run of the plan.
-    let (document_id, pane_id) = match active_document_id(state.results_reads()) {
+    let (document_id, pane_id) = match measured_document(state.results_reads()) {
         Some(document_id) => {
             let (_, pane_id) = super::super::persistent_document::reading_position(
                 state.results_reads(),
@@ -1053,6 +1064,45 @@ mod tests {
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect_text(shape, text)),
             _ => {}
         }
+    }
+
+    /// Off Results the dock's Plot and Measurements pages show the run the
+    /// page plots. Add measurement there keeps the measurement with that
+    /// run's working view, the one the Measurements page reads; it was
+    /// refused with "Open a result in Results".
+    #[test]
+    fn over_the_drawing_the_dock_keeps_a_measurement_with_the_runs_view() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 1.0e-3, 2.0e-3], vec![1.5; 3], "#fff"),
+            ]),
+        );
+        let mut host = ResultsTestHost::default();
+        host.model.simulation.retained.runs = vec![run].into();
+        assert!(host.model.simulation.select_run(0));
+        assert!(host.model.simulation.select_analysis(0));
+        host.workbench.activate(Workspace::Design);
+        let draft = MeasurementDraft {
+            expression: "rms(V(out))".to_owned(),
+            ..MeasurementDraft::default()
+        };
+        let closed = commit(&mut host.results_parts(), &draft);
+        assert!(matches!(closed, Ok(None)), "{:?}", closed.err());
+        let view = shown_view(host.results_reads()).expect("the run's working view");
+        let document = host
+            .model
+            .workspace
+            .content
+            .visualization_document(view)
+            .expect("the view is the project's");
+        assert!(
+            document
+                .measurements()
+                .iter()
+                .any(|kept| kept.expression.as_deref() == Some("rms(V(out))")),
+            "the Measurements page reads the view that keeps it"
+        );
     }
 
     /// Add measurement's result line reads in the expression's unit, as the

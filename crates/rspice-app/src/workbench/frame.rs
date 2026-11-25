@@ -61,6 +61,15 @@ fn poll_waiting_preparations(app: &mut RSpiceApp) {
 /// for the next at once, so what it changed is drawn.
 fn show_document(ui: &mut egui::Ui, app: &mut RSpiceApp) {
     surfaces::show(ui, app);
+    // The Results stage draws a result's forms over its sheet. Add
+    // measurement also opens over the dock's Plot and Measurements pages on
+    // any other page, and its form draws over that page here.
+    let results_key = DialogKey("results.result_document");
+    if app.state.workbench.working_route().surface_id() != SurfaceId::Results
+        && features::dialog_open(&app.state, results_key)
+    {
+        features::render_dialog(app, ui.ctx(), results_key);
+    }
     if app.carry_out_held_commands() {
         ui.ctx().request_repaint();
     }

@@ -252,7 +252,8 @@ fn the_cursor_commands_move_the_stepping_cursor_to_each_feature() {
 /// The command palette is a route of its own, opened over Results. What it
 /// lists as available is what runs once it closes, on Results beneath it, so
 /// Add measurement is offered there. It read "open a result in Results" in
-/// the palette while a result was open in Results.
+/// the palette while a result was open in Results. Over another page it is
+/// offered while the dock's Plot page shows the result.
 #[test]
 fn the_palette_offers_add_measurement_over_results() {
     use rspice_app_workbench::workbench::routing::navigation::RouteTransitionSource;
@@ -290,6 +291,14 @@ fn the_palette_offers_add_measurement_over_results() {
         harness.availability(measurement),
         CommandAvailability::Disabled("open a result in Results"),
         "and still refused over another surface"
+    );
+    // The dock's Plot page in front of the drawing shows the result: Add
+    // measurement measures it there.
+    harness.wb.show_plot_page();
+    assert_eq!(
+        harness.availability(measurement),
+        CommandAvailability::Available,
+        "offered over the dock's Plot page"
     );
 }
 

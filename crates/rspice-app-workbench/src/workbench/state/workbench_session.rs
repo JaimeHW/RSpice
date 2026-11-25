@@ -916,8 +916,21 @@ impl WorkbenchSession {
     /// an owner workspace.
     #[must_use]
     pub fn plots_in_dock(&self) -> bool {
+        self.route_plots_in_dock(self.current_route().surface_id())
+    }
+
+    /// Whether the dock's Plot page is in front of the page the reader
+    /// works on, the command palette over it included: a page that plots in
+    /// the dock, with the dock open on Plot.
+    #[must_use]
+    pub fn plot_page_in_front(&self) -> bool {
+        self.route_plots_in_dock(self.working_route().surface_id())
+            && self.dock_shows(ConsolePage::Plot)
+    }
+
+    fn route_plots_in_dock(&self, surface: SurfaceId) -> bool {
         matches!(
-            (self.workspace, self.current_route().surface_id()),
+            (self.workspace, surface),
             (Workspace::Design, SurfaceId::Design)
                 | (Workspace::Netlist, SurfaceId::Netlist)
                 | (Workspace::Simulate, SurfaceId::Simulate)

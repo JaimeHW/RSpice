@@ -638,8 +638,15 @@ impl CommandSet for ResultsCommand {
                 available_or(retained.has_results(), "no result dataset is available")
             }
             Self::CompareResultDatasets => compare_availability(state),
-            // Add measurement draws over the result viewer, and over a quick
-            // view it evaluates without keeping, so it needs only a result.
+            // Add measurement draws over the result viewer, over a quick view
+            // it evaluates without keeping, and over the dock's Plot page in
+            // front of a drawing, a netlist or a plan, so it needs only a
+            // result.
+            Self::MeasurementLibrary
+                if workbench.plot_page_in_front() && retained.has_results() =>
+            {
+                CommandAvailability::Available
+            }
             Self::MeasurementLibrary | Self::VisualizationDocumentProperties => {
                 if !on_results_surface {
                     CommandAvailability::Disabled("open a result in Results")

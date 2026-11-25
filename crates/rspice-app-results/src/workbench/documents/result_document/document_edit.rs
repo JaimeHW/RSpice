@@ -77,11 +77,14 @@ pub fn transact(
 /// Drawing a page re-selects the active run once per pane, so a document's
 /// pane is resolved from its binding, never from the active selection.
 fn reading_analysis(state: ResultsReads<'_>) -> Result<(&SimulationRun, &AnalysisResult), String> {
-    if state.workbench.workspace != Workspace::Results {
+    // The dock under a drawing, a netlist or a plan reads the run its Plot
+    // page draws, as a quick view does: Results' document is not in front.
+    let in_dock = state.workbench.plots_in_dock();
+    if state.workbench.workspace != Workspace::Results && !in_dock {
         return Err("Open a result in Results.".to_owned());
     }
     let runs = &state.model.simulation.retained.runs;
-    if let Some(document_id) = active_document_id(state) {
+    if !in_dock && let Some(document_id) = active_document_id(state) {
         let (_, pane_id) = super::persistent_document::reading_position(state, document_id)
             .ok_or_else(|| "The result document has no pane.".to_owned())?;
         let binding = project_document(state, document_id)?
