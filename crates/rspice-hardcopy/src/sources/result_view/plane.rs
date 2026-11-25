@@ -766,12 +766,7 @@ fn nyquist_loci<W: AsRef<RetainedWaveform>>(
             analysis.waveforms[imaginary].as_ref(),
         );
         let (frequency, re) = whole_pair(real)?;
-        let im = imaginary.y.read_whole().map_err(|failure| {
-            HardcopySourceError::InvalidVisualizationSource(format!(
-                "{} could not be read: {failure}",
-                imaginary.name
-            ))
-        })?;
+        let im = whole(&imaginary.name, &imaginary.y)?;
         let locus = NyquistData::from_arrays(LOOP_GAIN_LOCUS_LABEL, &frequency, &re, &im);
         let mut loci = Vec::new();
         with_mirror(
@@ -797,9 +792,9 @@ fn nyquist_loci<W: AsRef<RetainedWaveform>>(
         let Some(complex) = waveform.complex.as_ref() else {
             continue;
         };
-        let frequency = waveform.x.samples(..).collect::<Vec<_>>();
-        let re = complex.real.samples(..).collect::<Vec<_>>();
-        let im = complex.imag.samples(..).collect::<Vec<_>>();
+        let frequency = whole(&waveform.name, &waveform.x)?;
+        let re = whole(&waveform.name, &complex.real)?;
+        let im = whole(&waveform.name, &complex.imag)?;
         let locus = NyquistData::from_arrays(&waveform.name, &frequency, &re, &im);
         let mirror = format!("{} (\u{2212}\u{3c9})", waveform.name);
         with_mirror(&locus, &waveform.name, &mirror, &mut loci);

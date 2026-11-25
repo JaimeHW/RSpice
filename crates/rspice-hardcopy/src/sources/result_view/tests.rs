@@ -384,6 +384,66 @@ fn a_printed_polar_reads_its_angles_and_rings_as_the_sheet() {
     }
 }
 
+/// A stored series a page needs whole is asked of the reader service, as the
+/// sheets ask, and is the series the store holds.
+#[test]
+fn a_stored_source_is_asked_of_the_reader_service() {
+    use rspice_results::waveform::{
+        ColumnSource, Read, ReadService, ReadValue, StoredWindow, WindowLead, perform, read_through,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Asked(AtomicUsize);
+    impl ReadService for Asked {
+        fn request(
+            &self,
+            _run: u64,
+            values: &WaveformValues,
+            x: &WaveformValues,
+            read: Read,
+        ) -> Option<ReadValue> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Some(perform(values, x, read))
+        }
+    }
+    struct Column(Vec<f64>);
+    impl ColumnSource for Column {
+        fn name(&self) -> &str {
+            "column"
+        }
+        fn store(&self) -> String {
+            "run.rsr".to_owned()
+        }
+        fn rows(&self) -> u64 {
+            self.0.len() as u64
+        }
+        fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+            let first = usize::try_from(first).map_err(|error| error.to_string())?;
+            out.copy_from_slice(&self.0[first..first + out.len()]);
+            Ok(())
+        }
+    }
+    let stored = |values: &[f64]| {
+        WaveformValues::stored(
+            std::sync::Arc::new(Column(values.to_vec())),
+            StoredWindow {
+                first: 0,
+                rows: values.len() as u64,
+                lead: WindowLead::None,
+            },
+        )
+        .unwrap()
+    };
+    static SERVICE: Asked = Asked(AtomicUsize::new(0));
+    let (time, level) = ([0.0, 1.0, 2.0], [3.0, 4.0, 5.0]);
+    let mut waveform = RetainedWaveform::new("V(out)", time.to_vec(), level.to_vec());
+    waveform.x = stored(&time);
+    waveform.y = stored(&level);
+    let (x, y) = read_through(&SERVICE, || whole_pair(&waveform)).unwrap();
+    assert_eq!((&x[..], &y[..]), (&time[..], &level[..]));
+    assert_eq!(SERVICE.0.load(Ordering::SeqCst), 2);
+}
+
 /// A table sheet prints the tables it showed under the analysis's name,
 /// and never tables read off another analysis.
 #[test]

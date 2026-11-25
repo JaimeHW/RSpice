@@ -13,8 +13,11 @@ use rspice_results::noise_spectrum::{
 };
 use rspice_results::result_digest::ResultDigestEncoding;
 use rspice_results::{
-    analysis_result::AnalysisResult, analysis_type::AnalysisType,
-    family_metadata::AnalysisResultFamilyMetadata, run::SimulationRun, waveform::RetainedWaveform,
+    analysis_result::AnalysisResult,
+    analysis_type::AnalysisType,
+    family_metadata::AnalysisResultFamilyMetadata,
+    run::SimulationRun,
+    waveform::{HeldColumn, RetainedWaveform, WaveformValues},
 };
 use rspice_vocabulary::product::{DatasetId, ObjectRevision, ProjectId, RunId};
 use uuid::Uuid;
@@ -1137,21 +1140,34 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
     })
 }
 
-/// A source's two columns, each borrowed or read.
-type ColumnPair<'a> = (std::borrow::Cow<'a, [f64]>, std::borrow::Cow<'a, [f64]>);
+/// A source's two columns, as the reader service holds them.
+type ColumnPair = (HeldColumn, HeldColumn);
 
-/// Both columns of an eye's source: the eye folds every sample of the record, as the eye
-/// sheet does, so it reads them whole, and a record past the whole-read budget is refused.
-fn whole_pair(waveform: &RetainedWaveform) -> Result<ColumnPair<'_>, HardcopySourceError> {
-    let refused = |failure: rspice_results::waveform::ColumnReadFailure| {
-        HardcopySourceError::InvalidVisualizationSource(format!(
-            "{} could not be read: {failure}",
-            waveform.name
-        ))
-    };
+/// Every sample of `values`, of the series `name`, for a page that needs a whole series at
+/// once, as an eye folds its record and a Nyquist locus traces its sweep. It is asked of the
+/// reader service, as the sheets ask: a stored series is read on the service's thread, held
+/// under its one budget and shared with the sheet that draws it. Off the frame, where a page is
+/// resolved, the page waits for it; on the frame it is refused while it is still being read. A
+/// series past the budget is refused.
+pub(super) fn whole(
+    name: &str,
+    values: &WaveformValues,
+) -> Result<HeldColumn, HardcopySourceError> {
+    values
+        .fetch_whole_or_wait()
+        .into_result()
+        .map_err(|reason| {
+            HardcopySourceError::InvalidVisualizationSource(format!(
+                "{name} could not be read: {reason}"
+            ))
+        })
+}
+
+/// Both columns of a source, each asked of the reader service whole.
+fn whole_pair(waveform: &RetainedWaveform) -> Result<ColumnPair, HardcopySourceError> {
     Ok((
-        waveform.x.read_whole().map_err(refused)?,
-        waveform.y.read_whole().map_err(refused)?,
+        whole(&waveform.name, &waveform.x)?,
+        whole(&waveform.name, &waveform.y)?,
     ))
 }
 
