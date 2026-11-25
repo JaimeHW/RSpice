@@ -64,11 +64,4 @@ impl SheetBarHost for Host<'_, '_> {
     fn purpose(&self) -> String {
         sheet_purpose(self.0.results_reads())
     }
-    fn status_mark(&mut self, ui: &mut Ui) {
-        // A project document's pane says how it tracks its run on its own
-        // banner; the mark is the quick view's.
-        if self.0.results.session.persistent_pane_context.is_none() {
-            super::operational_state::show_status_mark(ui, self.0, true);
-        }
-    }
 }

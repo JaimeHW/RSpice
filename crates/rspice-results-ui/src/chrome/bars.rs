@@ -52,10 +52,6 @@ pub trait SheetBarHost {
     fn table_actions(&mut self, ui: &mut Ui);
     fn domain_controls(&mut self, ui: &mut Ui) -> bool;
     fn purpose(&self) -> String;
-    /// The state the sheet's viewer stays readable under, as a mark at the
-    /// bar's right end: Out of date, Partial, Running. Nothing when the
-    /// result is complete or the state takes the well over.
-    fn status_mark(&mut self, _ui: &mut Ui) {}
 }
 
 /// A word naming the control after it in a sheet bar: sans, sentence case,
@@ -216,30 +212,8 @@ pub fn show(ui: &mut Ui, host: &mut impl SheetBarHost) {
     let spacing = child.spacing_mut();
     spacing.interact_size.y = control;
     spacing.button_padding.y = ((control - words) * 0.5 - stroke).max(0.0);
-    // The sheet's state stands at the bar's right end, after its outputs,
-    // so a result read as out of date costs the plot no row of its own.
-    child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        host.status_mark(ui);
-        let rest = ui.available_size();
-        ui.allocate_ui_with_layout(
-            rest,
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| sheet_bar_controls(ui, host, viewer, structured, &t),
-        );
-    });
-}
-
-/// The bar's controls left of its state: the structured strip, the plot
-/// instrument, or a sheet's domain controls and outputs.
-fn sheet_bar_controls(
-    child: &mut Ui,
-    host: &mut impl SheetBarHost,
-    viewer: ResultViewer,
-    structured: bool,
-    t: &Tokens,
-) {
     if structured {
-        show_structured_result_strip(child, host);
+        show_structured_result_strip(&mut child, host);
     } else if matches!(
         viewer,
         ResultViewer::Waves
@@ -248,7 +222,7 @@ fn sheet_bar_controls(
             | ResultViewer::SParameters
             | ResultViewer::NoiseContrib
     ) {
-        host.instrument(child);
+        host.instrument(&mut child);
     } else {
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // The evidence sheets exist to be recorded, so they carry the same

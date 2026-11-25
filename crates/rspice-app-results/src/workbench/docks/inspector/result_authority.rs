@@ -10,8 +10,10 @@ use super::super::super::design_system::{
     panel_inset, property_row, property_row_problem, section_header,
 };
 use crate::ui::widgets::Button;
+use crate::workbench::documents::result_document::operational_state::RunMark;
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_results::saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
+use rspice_results_ui::operational::{self, OperationalResponse};
 use rspice_ui_kit::panels::Problem;
 use rspice_ui_kit::panels::section_block_gap;
 
@@ -61,11 +63,37 @@ pub(super) fn result_run(
     run: &crate::state::SimulationRun,
     manifest: &rspice_results::manifest::ManifestViewModel,
     configurations: &rspice_design::configuration_set::ConfigurationSetCatalog,
-) -> Option<u64> {
+    mark: Option<&RunMark>,
+) -> (Option<u64>, OperationalResponse) {
     use crate::state::SimulationRunLifecycle;
 
     section_header(ui, "Run", None);
     property_row(ui, "Dataset", &manifest.run_label);
+    // The run's state, while it is not complete: the mark its row in the
+    // data browser carries, else the words of a run that ended short.
+    let mut asked = OperationalResponse::default();
+    let problem = match run.lifecycle {
+        SimulationRunLifecycle::Completed => None,
+        SimulationRunLifecycle::Failed => Some(Some(Problem::Failure)),
+        SimulationRunLifecycle::Aborted | SimulationRunLifecycle::Interrupted => {
+            Some(Some(Problem::Warning))
+        }
+        _ => Some(None),
+    };
+    if let Some(mark) = mark {
+        let row = property_row(ui, "State", "");
+        let (_, value_left) =
+            rspice_ui_kit::panels::property_row_control_columns(ui, row.rect.width());
+        // The mark's glyph stands where a value's first letter does.
+        let left = row.rect.left() + value_left - operational::OPERATIONAL_MARK_PADDING_X;
+        let slot = Rect::from_min_max(
+            Pos2::new(left, row.rect.top()),
+            Pos2::new(left + mark.width(ui), row.rect.bottom()),
+        );
+        asked = mark.show_in(ui, slot, run.dataset_id);
+    } else if let Some(problem) = problem {
+        property_row_problem(ui, "State", &manifest.lifecycle, problem);
+    }
     if let Some(recorded) = run
         .prepared_receipt()
         .and_then(|receipt| receipt.configuration())
@@ -83,22 +111,12 @@ pub(super) fn result_run(
         );
     }
     property_row(ui, "Duration", &run_duration(ui, run, manifest));
-    let problem = match run.lifecycle {
-        SimulationRunLifecycle::Completed => None,
-        SimulationRunLifecycle::Failed => Some(Some(Problem::Failure)),
-        SimulationRunLifecycle::Aborted | SimulationRunLifecycle::Interrupted => {
-            Some(Some(Problem::Warning))
-        }
-        _ => Some(None),
-    };
-    if let Some(problem) = problem {
-        property_row_problem(ui, "State", &manifest.lifecycle, problem);
-    }
     section_block_gap(ui);
-    Button::new("Run details\u{2026}")
+    let details = Button::new("Run details\u{2026}")
         .show(ui)
         .clicked()
-        .then_some(run.id)
+        .then_some(run.id);
+    (details, asked)
 }
 
 /// The analysis's saved outputs, one row each: the output's name, then the

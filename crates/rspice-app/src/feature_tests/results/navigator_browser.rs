@@ -478,7 +478,7 @@ fn analysis_data_state_merges_one_reading_worst_first() {
     // Only a complete, readable analysis reports its currentness.
     assert_eq!(
         word(ResultCurrentness::Stale, ResultCompletenessClass::Complete),
-        "stale"
+        "out of date"
     );
     assert_eq!(
         word(

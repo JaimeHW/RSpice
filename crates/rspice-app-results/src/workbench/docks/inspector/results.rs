@@ -13,6 +13,7 @@ use crate::workbench::app_state::Model;
 use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::analysis_evidence_failure;
 use crate::workbench::documents::result_document::manifest::active_manifest;
+use crate::workbench::documents::result_document::operational_state::RunMark;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use rspice_results_ui::session::PaneAxis;
 
@@ -51,18 +52,25 @@ pub(in crate::workbench) fn results(
 
     // The workspace's memoized projection: taking it fresh re-digested the run.
     let manifest = active_manifest(state);
-    let details = match state.model.simulation.active_run().zip(manifest.as_deref()) {
+    let mark =
+        crate::workbench::docks::navigator::results::shown_run_reads_as(state.results_reads())
+            .map(|reads_as| RunMark::shown(state, reads_as));
+    let (details, asked) = match state.model.simulation.active_run().zip(manifest.as_deref()) {
         Some((run, manifest)) => result_authority::result_run(
             ui,
             run,
             &manifest.model,
             &state.model.workspace.content.configuration_sets,
+            mark.as_ref(),
         ),
         None => {
             muted_inspector_copy(ui, "No run selected.");
-            None
+            (None, Default::default())
         }
     };
+    if let Some(mark) = &mark {
+        mark.apply(state, &asked);
+    }
     if let Some(run_id) = details {
         run_details::open(run_details, &state.model.simulation, run_id);
     }

@@ -2152,7 +2152,7 @@ pub fn show_plot_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 ui,
                 "Nothing to plot from this run: its values are on the drawing, and Open in Results shows every sheet",
             );
-        } else if viewer_well_is_open(ui, state, true) {
+        } else if viewer_well_is_open(ui, state) {
             waves::show_compact(ui, state);
         }
     });
@@ -2196,7 +2196,7 @@ fn plot_page_band(ui: &mut Ui, state: &mut ResultsParts<'_>, sheets: &[ResultVie
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
-                    if operational_state::show_status_mark(ui, state, true) {
+                    if operational_state::show_status_mark(ui, state) {
                         instrument::separator(ui);
                     }
                     if sheets.len() > 1 {
@@ -2789,8 +2789,7 @@ fn show_viewer_well(
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
 ) {
-    let marked_beside = result_stage_bar_visible(state.results_reads());
-    if !viewer_well_is_open(ui, state, marked_beside) {
+    if !viewer_well_is_open(ui, state) {
         return;
     }
     let viewer = state.results.session.viewer;
@@ -2852,9 +2851,7 @@ fn show_viewer_well(
 /// Paint the viewer well's backdrop and name it, then say whether a viewer
 /// draws in it: not while the result's state takes the well over, nor while
 /// there are no results at all, when the well says so instead.
-/// `marked_beside` says something beside the viewer carries a state the
-/// viewer stays readable under, so the well spends nothing on it.
-fn viewer_well_is_open(ui: &mut Ui, state: &mut ResultsParts<'_>, marked_beside: bool) -> bool {
+fn viewer_well_is_open(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     apply_pending_view_gesture(ui, state);
     let t = Tokens::get(ui.ctx());
     // The document well backdrop; viewers paint on top.
@@ -2874,7 +2871,7 @@ fn viewer_well_is_open(ui: &mut Ui, state: &mut ResultsParts<'_>, marked_beside:
     });
 
     let operational = operational_state::classify_viewer(state, viewer);
-    if operational_state::show_result_operational_status(ui, state, &operational, marked_beside) {
+    if operational_state::show_result_operational_status(ui, state, &operational) {
         return false;
     }
 

@@ -8,14 +8,16 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::browser_plot::result_quantity_ticked;
+use crate::workbench::documents::result_document::operational_state::RunMark;
 use crate::workbench::documents::result_document::{
-    AnalysisPresentationKey, ResultsParts, retained_evidence_is_valid,
+    AnalysisPresentationKey, ResultsParts, ResultsReads, retained_evidence_is_valid,
 };
 use crate::workbench::framework::requests::{ExportResultQuantities, FocusNavigatorSearch};
 use crate::workbench::results::commands::ResultsCommand;
 use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, SourceWaveformPresentationKey,
 };
+use rspice_results_ui::operational::ResultOperationalState;
 use rspice_results_ui::selection::{ResultBrowserSelectionKey, ResultExpressionPresentationKey};
 
 use super::super::super::commands::result_navigation::{open_run_log, ticked_result_quantities};
@@ -694,7 +696,8 @@ pub(in crate::workbench) fn results(
                         },
                     );
                 }
-                for run in runs.iter() {
+                let marks = run_marks(state, runs);
+                for (run, mark) in runs.iter().zip(&marks) {
                     let run_active = active_run == Some(run.run_index);
                     // A run whose results store no folder holds, or holds damaged, says so
                     // before anything about its data.
@@ -722,7 +725,7 @@ pub(in crate::workbench) fn results(
                     } else if unread.is_some() {
                         "results not found"
                     } else {
-                        data_state_meta(run.data_state)
+                        ""
                     };
                     let overlaid = state.model.simulation.is_dataset_overlaid(run.dataset_id);
                     let pinned = state
@@ -752,7 +755,12 @@ pub(in crate::workbench) fn results(
                         run_active,
                         run_meta,
                         overlaid,
+                        mark.as_ref().map(|mark| mark.width(ui)),
                     );
+                    if let (Some(mark), Some(slot)) = (mark, responses.mark) {
+                        let asked = mark.show_in(ui, slot, run.dataset_id);
+                        mark.apply(state, &asked);
+                    }
                     if responses.selection.clicked() {
                         // A plan's run is shown through the plan's view and
                         // stays shown, as choosing it on the toolbar's run
@@ -1575,31 +1583,61 @@ pub(super) enum ResultsBrowserScope {
 /// visible at once, so a facet over these words would narrow a list the reader
 /// can already read; and because integrity failure *is* corrupted currentness,
 /// separate controls could be aimed at each other to name an empty set. The
-/// word has three homes and no fourth: the dataset row states its binding's
-/// condition, the analysis head's retained fraction carries the reason on its
-/// tooltip, and the inspector states it for one selected quantity.
-/// The word and its consequence travel together, so no caller can look one up
-/// from the other's display text.
+/// reading has three homes and no fourth: the run's row marks its
+/// binding's condition, the analysis head's retained fraction carries the
+/// reason on its tooltip, and the inspector states it for one selected
+/// quantity. The word and its consequence travel together, so no caller can
+/// look one up from the other's display text.
 #[derive(Clone, Copy)]
 pub struct ResultAnalysisDataState {
     pub word: &'static str,
     pub note: &'static str,
+    /// The state the run's row marks, only when it asks something of the
+    /// reader: a current dataset is the normal case and its row says nothing
+    /// about it.
+    ///
+    /// Nor does an unresolved one. "Unresolved" means the run records no
+    /// source revision to compare with the design: it came from a netlist the
+    /// reader ran, a file they imported, or a session from before runs
+    /// recorded one. The results are exact and nothing about them can be
+    /// brought up to date from here, so a mark would ask a question the
+    /// reader had no way to answer. Its word stays searchable, as every
+    /// state word does.
+    pub reads_as: Option<ResultOperationalState>,
 }
 
-/// A dataset row's state word, only when it asks something of the reader: a
-/// current dataset is the normal case and its row says nothing about it.
-///
-/// Nor does an unresolved one. "Unresolved" means the run records no source
-/// revision to compare with the design: it came from a netlist the reader
-/// ran, a file they imported, or a session from before runs recorded one.
-/// The results are exact and nothing about them can be brought up to date
-/// from here, so the word asked a question the reader had no way to answer.
-/// It stays searchable, as every state word does.
-pub(super) fn data_state_meta(state: ResultAnalysisDataState) -> &'static str {
-    match state.word {
-        "current" | "unresolved" => "",
-        word => word,
-    }
+/// What the shown run's data reads as, as its row in the data browser marks
+/// it, for the Details to mark the same.
+pub(crate) fn shown_run_reads_as(state: ResultsReads<'_>) -> Option<ResultOperationalState> {
+    let run = state.model.simulation.active_run()?;
+    let currentness =
+        crate::workbench::documents::result_document::operational_state::run_currentness(
+            state,
+            run,
+            |analysis| {
+                retained_evidence_is_valid(
+                    state,
+                    AnalysisPresentationKey::new(run.dataset_id, analysis),
+                )
+            },
+        );
+    result_analysis_data_state(currentness, result_run_completeness(run)).reads_as
+}
+
+/// The mark each listed run's row carries, in the order of `runs`: the
+/// shown run's as its sheet reads it, any other's as its data reads.
+pub(super) fn run_marks(state: &mut ResultsParts<'_>, runs: &[ResultRun]) -> Vec<Option<RunMark>> {
+    let shown = state.model.simulation.view.active_run_idx;
+    runs.iter()
+        .map(|run| {
+            let reads_as = run.data_state.reads_as?;
+            Some(if shown == Some(run.run_index) {
+                RunMark::shown(state, reads_as)
+            } else {
+                RunMark::of(reads_as)
+            })
+        })
+        .collect()
 }
 
 pub const fn result_analysis_data_state(
@@ -1608,8 +1646,16 @@ pub const fn result_analysis_data_state(
 ) -> ResultAnalysisDataState {
     use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
 
-    const fn state(word: &'static str, note: &'static str) -> ResultAnalysisDataState {
-        ResultAnalysisDataState { word, note }
+    const fn state(
+        word: &'static str,
+        reads_as: Option<ResultOperationalState>,
+        note: &'static str,
+    ) -> ResultAnalysisDataState {
+        ResultAnalysisDataState {
+            word,
+            note,
+            reads_as,
+        }
     }
 
     // Severity first: an unreadable payload outranks a short retained scope,
@@ -1617,42 +1663,54 @@ pub const fn result_analysis_data_state(
     match (currentness, completeness) {
         (ResultCurrentness::Corrupted, _) => state(
             "corrupted",
+            Some(ResultOperationalState::Corrupted),
             "Payload validation failed on load. Metadata stays readable; numeric actions stay blocked.",
         ),
         (_, ResultCompletenessClass::Failed) => state(
             "failed",
+            Some(ResultOperationalState::Failed),
             "The analysis stopped before it finished. Only the points it computed are kept; nothing is extrapolated.",
         ),
         (_, ResultCompletenessClass::Cancelled) => state(
             "cancelled",
+            Some(ResultOperationalState::InterruptedOperation),
             "The run was cancelled. Complete sample chunks were retained; nothing partial was synthesized.",
         ),
         (_, ResultCompletenessClass::Loading) => state(
             "loading",
+            Some(ResultOperationalState::Streaming),
             "Sample pages are still arriving. Counts grow; stable row identities are preserved.",
         ),
         (_, ResultCompletenessClass::Partial) => state(
             "partial",
+            Some(ResultOperationalState::Partial),
             "Retained scope is narrower than the declared inventory. Absent quantities are named, never invented.",
         ),
         (ResultCurrentness::Stale, _) => state(
-            "stale",
+            "out of date",
+            Some(ResultOperationalState::Stale),
             "The design changed after this run. These results stay open for review; actions that need current results are unavailable.",
         ),
+        // A later run covering the same analysis leaves this one out of date,
+        // as the sheet reads it.
         (ResultCurrentness::Superseded, _) => state(
             "superseded",
+            Some(ResultOperationalState::Stale),
             "A later run covers this same analysis instance. The dataset itself is unchanged.",
         ),
         (ResultCurrentness::Unresolved, _) => state(
             "unresolved",
-            "The relationship to the current source revision is unknown, so neither current nor stale may be claimed.",
+            None,
+            "The relationship to the current source revision is unknown, so neither current nor out of date may be claimed.",
         ),
         (ResultCurrentness::Recovered, _) => state(
             "recovered",
+            Some(ResultOperationalState::Recovered),
             "Reopened from a verified replica. Row identities were restored.",
         ),
         (ResultCurrentness::Current | ResultCurrentness::Partial, _) => state(
             "current",
+            None,
             "Matches the current source revision, verified on load, complete against its declared inventory.",
         ),
     }
@@ -2310,6 +2368,8 @@ pub(super) struct ResultRun {
 struct ResultDatasetRowResponses {
     selection: Response,
     overlay: Option<Response>,
+    /// Where the run's mark stands, after its label, when it has one.
+    mark: Option<egui::Rect>,
 }
 
 /// Locate results: the folder the reader picks is searched for the results store of every run
@@ -2353,6 +2413,7 @@ fn result_dataset_row(
     selected: bool,
     meta: &str,
     overlaid: bool,
+    mark_width: Option<f32>,
 ) -> ResultDatasetRowResponses {
     let t = Tokens::get(ui.ctx());
     let height = t.metrics.row_h;
@@ -2489,8 +2550,10 @@ fn result_dataset_row(
         .size()
         .x;
     let label_left = rect.left() + 45.0;
-    let label_right = selection_rect.right() - 14.0 - meta_width;
-    ui.painter()
+    let mark_room = mark_width.map_or(0.0, |width| width + RUN_MARK_GAP);
+    let label_right = selection_rect.right() - 14.0 - meta_width - mark_room;
+    let label_end = ui
+        .painter()
         .with_clip_rect(egui::Rect::from_x_y_ranges(
             label_left..=label_right.max(label_left),
             rect.y_range(),
@@ -2505,7 +2568,9 @@ fn result_dataset_row(
             } else {
                 t.color.text_dim
             },
-        );
+        )
+        .right()
+        .min(label_right);
     ui.painter().text(
         egui::pos2(selection_rect.right() - 8.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
@@ -2514,7 +2579,24 @@ fn result_dataset_row(
         t.color.text_faint,
     );
     theme::paint_focus_ring(ui, &selection, selection_rect);
-    ResultDatasetRowResponses { selection, overlay }
+    let mark = mark_width.map(|width| run_mark_slot(rect, label_end + RUN_MARK_GAP, width));
+    ResultDatasetRowResponses {
+        selection,
+        overlay,
+        mark,
+    }
+}
+
+/// The gap between a run's name and its mark.
+pub(super) const RUN_MARK_GAP: f32 = 6.0;
+
+/// Where a run row `row` sets its mark `width` wide from `left`: a control
+/// one point inside the row at its top and foot.
+pub(super) fn run_mark_slot(row: egui::Rect, left: f32, width: f32) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(left, row.top() + 1.0),
+        egui::pos2(left + width, row.bottom() - 1.0),
+    )
 }
 
 pub(super) struct ResultAnalysis {

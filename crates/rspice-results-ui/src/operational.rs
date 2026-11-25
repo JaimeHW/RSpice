@@ -242,25 +242,22 @@ pub struct OperationalResponse {
 }
 
 /// Whether `status` leaves the viewer readable and says so beside it: a
-/// mark in the sheet's bar, or the pane's first row, rather than anything in
-/// the well.
+/// mark on the dock's Plot page and on the data browser's run row, rather
+/// than anything in the well.
 pub fn marks_beside_viewer(status: &ResultOperationalStatus) -> bool {
     status.state != ResultOperationalState::Complete && !status.blocks_visuals
 }
 
-/// Present `status` in the well: the card or hint of a state that takes
-/// the well over, or, when nothing beside the viewer carries it
-/// (`marked_beside` false), the one-line banner over a readable viewer.
-/// Query failure-site display facts only when a card will be shown.
+/// Present `status` in the well when it takes the well over: the card of
+/// the state, or the hint of an empty well. A state the viewer stays
+/// readable under is marked beside it instead, so the well spends nothing on
+/// it. Query failure-site display facts only when a card will be shown.
 pub fn show<'a>(
     ui: &mut Ui,
     status: &ResultOperationalStatus,
-    marked_beside: bool,
     failure_site: impl FnOnce() -> Option<FailureSiteControl<'a>>,
 ) -> OperationalResponse {
-    if status.state == ResultOperationalState::Complete
-        || (marked_beside && marks_beside_viewer(status))
-    {
+    if status.state == ResultOperationalState::Complete || marks_beside_viewer(status) {
         return OperationalResponse::default();
     }
     // An empty well is not an alarm. It reads the way an empty schematic
@@ -281,68 +278,49 @@ pub fn show<'a>(
         offer: offer.as_ref(),
     };
     let mut actions = OperationalResponse {
-        blocks_visuals: status.blocks_visuals,
+        blocks_visuals: true,
         ..Default::default()
     };
-    let response = if status.blocks_visuals {
-        card.show_centered(ui, &mut actions)
-    } else {
-        card.show_banner(ui, &mut actions)
-    };
+    let response = card.show_centered(ui, &mut actions);
     announce_status(ui, &response, status);
     actions
 }
 
-/// A state the viewer stays readable under, as a bar carries it: the
-/// category's glyph and, when `labelled`, the state's name, at the bar's
-/// control height, so the well beneath keeps every point of its height for
-/// the plot. Its hover reads the whole sentence; a press opens it, with
-/// whatever the state offers. Query failure-site display facts only when
-/// that opens.
+/// A state the viewer stays readable under, as a band or a row carries it:
+/// the category's glyph and the state's name, in a face of `size`, at the
+/// height of the controls around it, so the well beneath keeps every point
+/// of its height for the plot. Its hover reads the whole sentence; a press
+/// opens it, with whatever the state offers. Query failure-site display
+/// facts only when that opens.
 pub fn show_mark<'a>(
     ui: &mut Ui,
     status: &ResultOperationalStatus,
-    labelled: bool,
+    size: f32,
     failure_site: impl FnOnce() -> Option<FailureSiteControl<'a>>,
 ) -> OperationalResponse {
     let t = Tokens::get(ui.ctx());
     let category = status.state.category();
     let tone = icon_tone(category, &t.color);
-    let name = labelled.then(|| {
-        ui.painter().layout_no_wrap(
-            status.state.label().to_owned(),
-            theme::sans(tokens::FS_1, FontWeight::Medium),
-            t.color.text,
-        )
-    });
+    let name = mark_name(ui, status, size, t.color.text);
     let height = ui.spacing().interact_size.y;
-    let width = name.as_ref().map_or(height, |name| {
-        2.0 * OPERATIONAL_MARK_PADDING_X
-            + OPERATIONAL_BANNER_ICON
-            + OPERATIONAL_BANNER_ICON_GAP
-            + name.size().x
-    });
+    let width = mark_width_of(&name);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     if response.hovered() {
         ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
     }
-    let glyph_x = if name.is_some() {
-        rect.left() + OPERATIONAL_MARK_PADDING_X + 0.5 * OPERATIONAL_BANNER_ICON
-    } else {
-        rect.center().x
-    };
     let glyph = egui::Rect::from_center_size(
-        egui::pos2(glyph_x, rect.center().y),
-        egui::Vec2::splat(OPERATIONAL_BANNER_ICON),
+        egui::pos2(
+            rect.left() + OPERATIONAL_MARK_PADDING_X + 0.5 * OPERATIONAL_MARK_ICON,
+            rect.center().y,
+        ),
+        egui::Vec2::splat(OPERATIONAL_MARK_ICON),
     );
     operational_icon(category).paint(ui.painter(), glyph, tone);
-    if let Some(name) = name {
-        let origin = egui::pos2(
-            glyph.right() + OPERATIONAL_BANNER_ICON_GAP,
-            (rect.center().y - 0.5 * name.size().y).round(),
-        );
-        ui.painter().galley(origin, name, t.color.text);
-    }
+    let origin = egui::pos2(
+        glyph.right() + OPERATIONAL_MARK_ICON_GAP,
+        (rect.center().y - 0.5 * name.size().y).round(),
+    );
+    ui.painter().galley(origin, name, t.color.text);
     theme::paint_focus_ring(ui, &response, rect);
     let response = response.on_hover_text(sentence(status));
     announce_status(ui, &response, status);
@@ -358,6 +336,32 @@ pub fn show_mark<'a>(
         .contents(ui, &mut actions);
     });
     actions
+}
+
+/// How wide [`show_mark`] draws `status` with its name in a face of `size`,
+/// for a row that sets the mark among what it paints.
+pub fn mark_width(ui: &Ui, status: &ResultOperationalStatus, size: f32) -> f32 {
+    mark_width_of(&mark_name(ui, status, size, egui::Color32::PLACEHOLDER))
+}
+
+fn mark_name(
+    ui: &Ui,
+    status: &ResultOperationalStatus,
+    size: f32,
+    color: egui::Color32,
+) -> std::sync::Arc<egui::Galley> {
+    ui.painter().layout_no_wrap(
+        status.state.label().to_owned(),
+        theme::sans(size, FontWeight::Medium),
+        color,
+    )
+}
+
+fn mark_width_of(name: &egui::Galley) -> f32 {
+    2.0 * OPERATIONAL_MARK_PADDING_X
+        + OPERATIONAL_MARK_ICON
+        + OPERATIONAL_MARK_ICON_GAP
+        + name.size().x
 }
 
 /// Everything a state says, as one sentence for a hover.
@@ -378,11 +382,11 @@ pub fn paint_status_glyph(ui: &Ui, rect: egui::Rect, status: &ResultOperationalS
     operational_icon(category).paint(ui.painter(), rect, icon_tone(category, &t.color));
 }
 
-/// Name the state to assistive technology on whatever response shows it.
+/// Name the state to assistive technology on whatever response shows it, in
+/// the words the screen shows: the role says it is a status.
 fn announce_status(ui: &Ui, response: &egui::Response, status: &ResultOperationalStatus) {
     let accessible = format!(
-        "{} status, {}: {} {}",
-        status.state.id(),
+        "{}: {} {}",
         status.state.label(),
         status.detail.as_deref().unwrap_or(status.state.message()),
         status.state.recovery()
@@ -408,16 +412,12 @@ const OPERATIONAL_CARD_GUTTER: f32 = 16.0;
 const OPERATIONAL_CARD_PADDING: i8 = 14;
 const OPERATIONAL_CARD_ICON: f32 = 20.0;
 const OPERATIONAL_CARD_ICON_GAP: f32 = 10.0;
-/// The banner's own geometry: one line, inset at the sides as the dock's
-/// pages inset their text, with its glyph at the size of a toolbar icon and
-/// a gap between its parts.
-const OPERATIONAL_BANNER_PADDING_X: f32 = 10.0;
-const OPERATIONAL_BANNER_ICON: f32 = 14.0;
-const OPERATIONAL_BANNER_ICON_GAP: f32 = 7.0;
-const OPERATIONAL_BANNER_GAP: f32 = 10.0;
-/// The bar mark's inset either side of its glyph and name, as a compact
-/// button insets its label, and the width its popup wraps the state's copy at.
-const OPERATIONAL_MARK_PADDING_X: f32 = 6.0;
+/// The mark's glyph, at the size of a toolbar icon, and the gap before the
+/// state's name; its inset either side of the two, as a compact button
+/// insets its label; and the width its popup wraps the state's copy at.
+const OPERATIONAL_MARK_ICON: f32 = 14.0;
+const OPERATIONAL_MARK_ICON_GAP: f32 = 7.0;
+pub const OPERATIONAL_MARK_PADDING_X: f32 = 6.0;
 const OPERATIONAL_MARK_POPUP_WIDTH: f32 = 340.0;
 
 /// The empty schematic sheet's hint, as `schematic::view::scene` paints it:
@@ -537,111 +537,6 @@ struct OperationalCard<'a> {
 }
 
 impl OperationalCard<'_> {
-    /// The banner over a viewer that is still read: one line of the design's
-    /// row height, flush across the well under the sheet's bar, as the
-    /// tracking banner stands. The glyph, the state's name, what happened and
-    /// what to do, then what the state offers at the right. A boxed card
-    /// inset on every side took four lines and a margin of the well for one
-    /// sentence; a sentence longer than the line now ends in an ellipsis and
-    /// is read whole on hover, so the strip never grows to hold it.
-    fn show_banner(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
-        let t = Tokens::get(ui.ctx());
-        let control = rspice_ui_kit::widgets::compact_height(&t.metrics);
-        let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), t.metrics.row_h.max(control)),
-            egui::Sense::hover(),
-        );
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
-        let mut row = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(rect.shrink2(egui::vec2(OPERATIONAL_BANNER_PADDING_X, 0.0)))
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        );
-        row.set_clip_rect(rect.intersect(ui.clip_rect()));
-        // A standard control in this row stands at the compact height, so
-        // the row stays one line whatever the state offers.
-        row.spacing_mut().interact_size.y = control;
-        row.spacing_mut().item_spacing.x = OPERATIONAL_BANNER_GAP;
-        // The actions are set first, from the right, so the copy knows the
-        // room they leave.
-        if self.status.dismissible {
-            actions.dismiss = rspice_ui_kit::widgets::Button::new("Dismiss")
-                .compact()
-                .show(&mut row)
-                .on_hover_text("Dismiss this recorded runtime notice")
-                .clicked();
-        }
-        if let Some(offer) = self.offer {
-            if let Some(note) = failure_site_note(offer) {
-                row.label(
-                    egui::RichText::new(note)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-            }
-            actions.highlight = failure_site_button(&mut row, offer, true);
-        }
-        row.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = OPERATIONAL_BANNER_ICON_GAP;
-            let (glyph, _) = ui.allocate_exact_size(
-                egui::Vec2::splat(OPERATIONAL_BANNER_ICON),
-                egui::Sense::hover(),
-            );
-            operational_icon(self.status.state.category()).paint(
-                ui.painter(),
-                glyph,
-                self.icon_tone,
-            );
-            let galley = ui
-                .painter()
-                .layout_job(self.banner_copy(&t, ui.available_width().max(1.0)));
-            let (copy, hover) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
-            let elided = galley.elided;
-            ui.painter().galley(copy.min, galley, t.color.text);
-            if elided {
-                hover.on_hover_text(sentence(self.status));
-            }
-        });
-        response
-    }
-
-    /// The banner's one line: the state's name in the ink a title takes,
-    /// then its detail, what happened and what to do, each quieter than the
-    /// last, cut with an ellipsis at `width`.
-    fn banner_copy(&self, t: &Tokens, width: f32) -> egui::text::LayoutJob {
-        let format = |weight, color| egui::TextFormat {
-            font_id: theme::sans(tokens::FS_1, weight),
-            color,
-            valign: egui::Align::Center,
-            ..Default::default()
-        };
-        let mut job = egui::text::LayoutJob::default();
-        job.append(
-            self.status.state.label(),
-            0.0,
-            format(FontWeight::SemiBold, t.color.text),
-        );
-        if let Some(detail) = self.status.detail.as_deref() {
-            job.append(
-                detail,
-                OPERATIONAL_BANNER_GAP,
-                format(FontWeight::Medium, t.color.text),
-            );
-        }
-        job.append(
-            self.status.state.message(),
-            OPERATIONAL_BANNER_GAP,
-            format(FontWeight::Regular, t.color.text_dim),
-        );
-        job.append(
-            self.status.state.recovery(),
-            OPERATIONAL_BANNER_GAP,
-            format(FontWeight::Regular, t.color.text_faint),
-        );
-        job.wrap = egui::text::TextWrapping::truncate_at_width(width);
-        job
-    }
-
     /// Draw the card across the width its caller already fixed: elevated
     /// and shadowed over the well it has taken over.
     fn show(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
@@ -777,7 +672,7 @@ impl OperationalCard<'_> {
 /// paints its own focus ring, so nothing is given up by drawing it in the
 /// chrome every other control on this surface uses.
 fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> bool {
-    let clicked = failure_site_button(ui, offer, false);
+    let clicked = failure_site_button(ui, offer);
     if let Some(note) = failure_site_note(offer) {
         let t = Tokens::get(ui.ctx());
         ui.label(
@@ -789,11 +684,9 @@ fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> boo
     clicked
 }
 
-/// The marking control alone; a banner's line takes the compact form.
-fn failure_site_button(ui: &mut Ui, offer: &FailureSiteControl<'_>, compact: bool) -> bool {
-    let label = failure_site_label(offer);
-    let button = rspice_ui_kit::widgets::Button::new(&label);
-    if compact { button.compact() } else { button }
+/// The marking control alone.
+fn failure_site_button(ui: &mut Ui, offer: &FailureSiteControl<'_>) -> bool {
+    rspice_ui_kit::widgets::Button::new(&failure_site_label(offer))
         .show(ui)
         .on_hover_text(failure_site_hint(offer))
         .clicked()

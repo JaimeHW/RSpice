@@ -14,9 +14,10 @@ use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use super::super::super::design_system::WorkbenchIcon;
 use super::results::{
-    ResultAnalysis, ResultArtifact, ResultArtifactKind, ResultRun, ResultSignalVirtualRow,
-    ResultsBrowserKind, ResultsBrowserScope, data_state_meta, result_browser_dataset_expanded,
-    result_browser_group_expanded, result_browser_instance_expanded, results_browser_clear_filters,
+    RUN_MARK_GAP, ResultAnalysis, ResultArtifact, ResultArtifactKind, ResultRun,
+    ResultSignalVirtualRow, ResultsBrowserKind, ResultsBrowserScope,
+    result_browser_dataset_expanded, result_browser_group_expanded,
+    result_browser_instance_expanded, results_browser_clear_filters, run_mark_slot, run_marks,
     set_result_browser_dataset_expanded, set_result_browser_group_expanded,
     set_result_browser_instance_expanded,
 };
@@ -1015,6 +1016,7 @@ pub(super) fn show_virtualized_result_signals(
     // A row labels the conductor the design drew; its identity stays the deck
     // name the engine answered under.
     let notations = bus_notations(&state.model.workspace, &state.model.schematic);
+    let marks = run_marks(state, runs);
     let rows = list.len();
     let signal_rows = list.quantity_rows;
 
@@ -1063,6 +1065,7 @@ pub(super) fn show_virtualized_result_signals(
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| match row {
                         ResultSignalVirtualRow::Dataset { run, expanded } => {
+                            let mark = marks[run].as_ref();
                             let run = &runs[run];
                             let count = run
                                 .analyses
@@ -1071,21 +1074,25 @@ pub(super) fn show_virtualized_result_signals(
                                     analysis.signals.len() + analysis.artifacts.len()
                                 })
                                 .sum::<usize>();
-                            let domain = data_state_meta(run.data_state);
-                            let head = result_browser_analysis_head(
+                            let (head, slot) = result_browser_analysis_head(
                                 ui,
                                 None,
                                 HeadLabel::Run {
                                     name: &run.name,
                                     label: &run.label,
+                                    mark: mark.map(|mark| mark.width(ui)),
                                 },
-                                domain,
+                                "",
                                 count,
                                 count,
                                 active_run == Some(run.run_index),
                                 run.success,
                                 expanded,
                             );
+                            if let (Some(mark), Some(slot)) = (mark, slot) {
+                                let asked = mark.show_in(ui, slot, run.dataset_id);
+                                mark.apply(state, &asked);
+                            }
                             if head.clicked() {
                                 set_result_browser_dataset_expanded(
                                     ui.ctx(),
@@ -1133,7 +1140,7 @@ pub(super) fn show_virtualized_result_signals(
                             let analysis_active = active_run == Some(run.run_index)
                                 && active_analysis == Some(analysis.analysis_index);
                             let shown = analysis.signals.len() + analysis.artifacts.len();
-                            let head = result_browser_analysis_head(
+                            let (head, _) = result_browser_analysis_head(
                                 ui,
                                 Some(analysis.short_label),
                                 HeadLabel::Analysis(&analysis.label),
@@ -1971,13 +1978,21 @@ pub(super) fn result_browser_manifest_row(
 /// kind glyph, name, domain caption, and quantity count identify the retained
 /// analysis a quantity belongs to, so no row has to repeat any of it.
 /// What a group head names: a run by its name, its whole label (the start
-/// it carries) said to assistive tools and shown on hover; an analysis by its
-/// label, in the mono face its code reads in.
+/// it carries) said to assistive tools and shown on hover, and room for its
+/// mark that wide when its data reads as anything; an analysis by its label,
+/// in the mono face its code reads in.
 #[derive(Clone, Copy)]
 enum HeadLabel<'a> {
-    Run { name: &'a str, label: &'a str },
+    Run {
+        name: &'a str,
+        label: &'a str,
+        mark: Option<f32>,
+    },
     Analysis(&'a str),
 }
+
+/// A group head's response, and where a run's mark stands after its name.
+type HeadResponse = (Response, Option<egui::Rect>);
 
 fn result_browser_analysis_head(
     ui: &mut Ui,
@@ -1989,7 +2004,7 @@ fn result_browser_analysis_head(
     selected: bool,
     ok: bool,
     expanded: bool,
-) -> Response {
+) -> HeadResponse {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let height = result_browser_row_height(&t);
@@ -1999,14 +2014,18 @@ fn result_browser_analysis_head(
     } else {
         1
     };
-    let (label, spoken, label_font) = match head {
-        HeadLabel::Run { name, label } => {
-            (name, label, theme::sans(tokens::FS_0, FontWeight::Medium))
-        }
+    let (label, spoken, label_font, mark) = match head {
+        HeadLabel::Run { name, label, mark } => (
+            name,
+            label,
+            theme::sans(tokens::FS_0, FontWeight::Medium),
+            mark,
+        ),
         HeadLabel::Analysis(label) => (
             label,
             label,
             theme::mono(tokens::FS_0, FontWeight::SemiBold),
+            None,
         ),
     };
     let (rect, response) = ui.allocate_exact_size(
@@ -2036,7 +2055,7 @@ fn result_browser_analysis_head(
         )
     });
     if !ui.is_rect_visible(rect) {
-        return response;
+        return (response, None);
     }
     // A run heads everything under it with the panel fill. An analysis is a
     // row inside its run, stepped in one level, so a run and its analyses
@@ -2137,8 +2156,9 @@ fn result_browser_analysis_head(
 
     // Label and domain share one baseline; the domain elides first because the
     // label is the identity the head exists to state. A run that did not
-    // finish wears the mark that owns that colour, in front of its name.
-    if !ok {
+    // finish wears the mark that owns that colour, in front of its name,
+    // unless its own mark after the name says so.
+    if !ok && mark.is_none() {
         use crate::ui::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
         crate::ui::widgets::paint_problem_mark(
             ui.painter(),
@@ -2151,12 +2171,15 @@ fn result_browser_analysis_head(
         text_left += PROBLEM_MARK_ADVANCE;
     }
     let text_right = rect.right() - 8.0 - count_width - 8.0;
+    // A run's mark follows its name, so a long name elides short of the mark
+    // as it does short of the count.
+    let label_right = text_right - mark.map_or(0.0, |width| width + RUN_MARK_GAP);
     // A long name elides short of the count rather than painting under it.
     let label = super::super::super::design_system::elide_text(
         ui,
         label,
         &label_font,
-        text_right - text_left,
+        label_right - text_left,
     );
     let label_end = ui
         .painter()
@@ -2194,7 +2217,8 @@ fn result_browser_analysis_head(
         }
     }
     theme::paint_focus_ring(ui, &response, rect);
-    response
+    let slot = mark.map(|width| run_mark_slot(rect, label_end + RUN_MARK_GAP, width));
+    (response, slot)
 }
 
 pub(super) fn expression_header(ui: &mut Ui, state: &mut ResultsParts<'_>) {

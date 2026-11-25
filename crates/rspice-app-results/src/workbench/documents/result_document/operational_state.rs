@@ -701,18 +701,18 @@ mod tests {
 
 /// Present one canonical Results operational state without replacing valid
 /// retained evidence. Blocking states own the well; warnings and recovery
-/// notices consume only a bounded banner above the still-usable viewer.
+/// notices spend none of it, marked on the Plot page's band and the data
+/// browser's run row instead.
 pub(super) fn show_result_operational_status(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     status: &ResultOperationalStatus,
-    marked_beside: bool,
 ) -> bool {
     if states_its_own_failure(state.results_reads(), status) {
         return false;
     }
     let mut offered = None;
-    let response = operational::show(ui, status, marked_beside, || {
+    let response = operational::show(ui, status, || {
         offered = offered_failure_sites(state);
         offered.as_ref().map(OfferedFailureSites::control)
     });
@@ -722,9 +722,7 @@ pub(super) fn show_result_operational_status(
 
 /// The state the quick view's sheet stays readable under, when it is one a
 /// mark beside the viewer carries.
-pub(super) fn status_beside_viewer(
-    state: &mut ResultsParts<'_>,
-) -> Option<ResultOperationalStatus> {
+fn status_beside_viewer(state: &mut ResultsParts<'_>) -> Option<ResultOperationalStatus> {
     let viewer = state.results.session.viewer;
     let status = classify_viewer(state, viewer);
     (operational::marks_beside_viewer(&status)
@@ -746,20 +744,101 @@ pub(crate) fn notable_status(
     .then_some(status)
 }
 
-/// Draw the quick view's state as a mark where `ui` stands — the sheet
-/// bar's right end or the Plot page's band, `labelled` — and carry out what
-/// its popup asked. Returns whether there was a state to mark.
-pub(super) fn show_status_mark(ui: &mut Ui, state: &mut ResultsParts<'_>, labelled: bool) -> bool {
+/// Draw the quick view's state as a mark on the Plot page's band, and carry
+/// out what its popup asked. Returns whether there was a state to mark.
+pub(super) fn show_status_mark(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     let Some(status) = status_beside_viewer(state) else {
         return false;
     };
     let mut offered = None;
-    let response = operational::show_mark(ui, &status, labelled, || {
+    let response = operational::show_mark(ui, &status, crate::ui::tokens::FS_1, || {
         offered = offered_failure_sites(state);
         offered.as_ref().map(OfferedFailureSites::control)
     });
     apply_operational_response(state, &response, offered.as_ref());
     true
+}
+
+/// The mark a run carries in the data browser's row and the Details' State
+/// row: the state its data reads as, in the state's own words (Out of date,
+/// Running, Failed). The shown run's mark is the one its sheet reads, detail
+/// and all, and its popup can act on it, marking the failure's sites or
+/// dismissing a notice.
+pub(crate) struct RunMark {
+    status: ResultOperationalStatus,
+    /// The failure's sites the shown run's popup offers to mark.
+    offered: Option<OfferedFailureSites>,
+    shown: bool,
+}
+
+impl RunMark {
+    /// The mark of a run that is not shown, whose data reads as `reads_as`.
+    pub(crate) fn of(reads_as: ResultOperationalState) -> Self {
+        Self {
+            status: ResultOperationalStatus::canonical(reads_as, false),
+            offered: None,
+            shown: false,
+        }
+    }
+
+    /// The shown run's mark: the state its sheet reads, when that is the
+    /// reading its data has, else the reading alone.
+    pub(crate) fn shown(state: &mut ResultsParts<'_>, reads_as: ResultOperationalState) -> Self {
+        let status = classify_viewer(state, state.results.session.viewer);
+        if !same_reading(status.state, reads_as) {
+            return Self::of(reads_as);
+        }
+        Self {
+            offered: offered_failure_sites(state),
+            status,
+            shown: true,
+        }
+    }
+
+    pub(crate) fn width(&self, ui: &Ui) -> f32 {
+        operational::mark_width(ui, &self.status, RUN_MARK_SIZE)
+    }
+
+    /// Draw the mark in `slot`, at the slot's height, and say what its popup
+    /// asked.
+    pub(crate) fn show_in(
+        &self,
+        ui: &mut Ui,
+        slot: egui::Rect,
+        id: impl std::hash::Hash + std::fmt::Debug,
+    ) -> operational::OperationalResponse {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("run-mark", id))
+                .max_rect(slot)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        child.spacing_mut().interact_size.y = slot.height();
+        operational::show_mark(&mut child, &self.status, RUN_MARK_SIZE, || {
+            self.offered.as_ref().map(OfferedFailureSites::control)
+        })
+    }
+
+    /// Carry out what the shown run's popup asked.
+    pub(crate) fn apply(
+        &self,
+        state: &mut ResultsParts<'_>,
+        response: &operational::OperationalResponse,
+    ) {
+        if self.shown {
+            apply_operational_response(state, response, self.offered.as_ref());
+        }
+    }
+}
+
+/// The face a run's mark names its state in: the run's own row size.
+const RUN_MARK_SIZE: f32 = crate::ui::tokens::FS_0;
+
+/// Whether the state a sheet reads and the state a run's data reads as are
+/// one reading: the same state, or a run still in progress either way.
+fn same_reading(sheet: ResultOperationalState, data: ResultOperationalState) -> bool {
+    use ResultOperationalState::{Loading, Streaming};
+    sheet == data || matches!((sheet, data), (Loading | Streaming, Loading | Streaming))
 }
 
 /// A failed solve on its own operating-point sheet: the sheet says so on

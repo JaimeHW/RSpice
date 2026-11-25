@@ -53,7 +53,7 @@ fn a_blocking_card_is_published_once() {
         };
         update = ctx
             .run_ui(input, |ui| {
-                let _ = show(ui, &status, false, || None);
+                let _ = show(ui, &status, || None);
             })
             .platform_output
             .accesskit_update;

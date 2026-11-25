@@ -419,6 +419,94 @@ fn probing_a_net_opens_the_plot_page() {
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
 }
 
+/// A result the design moved on from says so where the reader looks for the
+/// run, never in the bar over its sheet: on Design the Plot tab carries the
+/// state's glyph and its sentence, and the band leads with its mark; in
+/// Results the run's row in the data browser and the Details' State row
+/// carry the mark, and a press on it opens what the state says.
+#[test]
+fn an_out_of_date_result_is_marked_on_the_plot_tab_and_the_runs_row() {
+    let marks = |user: &User| -> Vec<egui::Rect> {
+        user.named
+            .iter()
+            .filter(|(name, _)| name.starts_with("Out of date: "))
+            .map(|(_, rect)| *rect)
+            .collect()
+    };
+    let mut user = example_project();
+    user.app.state.workbench.activate(Workspace::Design);
+    run_to_its_end(&mut user);
+    assert!(
+        !user
+            .named
+            .iter()
+            .any(|(name, _)| name.starts_with("Plot, ")),
+        "a complete result leaves the tab its name alone"
+    );
+    assert!(marks(&user).is_empty());
+
+    user.app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("a plan")
+        .insert(rspice_app_state::simulation::plan::AnalysisKind::Ac)
+        .expect("the plan takes an analysis");
+    user.app
+        .state
+        .model
+        .sim_setup
+        .refresh_legacy_analysis_projections();
+    user.settle();
+
+    assert!(
+        user.named
+            .iter()
+            .any(|(name, _)| name.starts_with("Plot, Out of date \u{b7} ")),
+        "the Plot tab carries the state and reads its sentence"
+    );
+    let band = marks(&user);
+    let page = plot_page(&user);
+    assert_eq!(band.len(), 1, "the band leads with the mark: {band:?}");
+    assert!(page.contains(band[0].center()));
+
+    user.click("Open in Results");
+    user.app.state.workbench.navigator_visible = true;
+    user.app.state.workbench.inspector_visible = true;
+    user.settle();
+    let viewer = user
+        .named
+        .iter()
+        .find(|(name, _)| name.ends_with("result viewer"))
+        .map(|(_, rect)| *rect)
+        .expect("Results shows its sheet");
+    let shown = marks(&user);
+    assert_eq!(
+        shown.len(),
+        2,
+        "the run's row and the Details' State row: {shown:?}"
+    );
+    assert!(
+        shown
+            .iter()
+            .all(|mark| mark.right() <= viewer.left() || mark.left() >= viewer.right()),
+        "nothing over the sheet carries it: {shown:?} beside {viewer:?}"
+    );
+    assert!(user.find("Out of date").is_none());
+    let row = shown
+        .iter()
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .copied()
+        .expect("the browser's mark");
+    user.press(row.center(), egui::PointerButton::Primary);
+    user.settle();
+    assert!(
+        user.find("Out of date").is_some(),
+        "a press opens what the state says"
+    );
+}
+
 /// Placing a cursor on the Plot page reads it there: the dock stays on the
 /// page, and a cursor placed in Results opens no dock the reader collapsed.
 #[test]
