@@ -64,9 +64,7 @@ fn capture_quick_view_overlay(
             .result_presentation_policy()
             .cursor_interpolation()
         {
-            CursorInterpolation::MonotoneCubicWhereValid => {
-                RetainedCursorInterpolation::Linear
-            }
+            CursorInterpolation::MonotoneCubicWhereValid => RetainedCursorInterpolation::Linear,
             CursorInterpolation::Linear => RetainedCursorInterpolation::Linear,
             CursorInterpolation::NearestAcceptedPoint => RetainedCursorInterpolation::Nearest,
         },
