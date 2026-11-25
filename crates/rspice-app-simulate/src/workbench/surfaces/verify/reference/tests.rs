@@ -471,7 +471,10 @@ fn the_reference_view_is_one_table_and_the_selected_waveform() {
     );
     let rows = geometry.all("table.row");
     assert_eq!(rows.len(), 5, "four measurements and one waveform");
-    assert!(rows.iter().all(|row| row.height() == crate::ui::widgets::table::TABLE_ROW_H));
+    assert!(
+        rows.iter()
+            .all(|row| row.height() == crate::ui::widgets::table::TABLE_ROW_H)
+    );
     assert_eq!(rows[0].top(), head.bottom());
     let detail = geometry.one("split").expect("the waveform's overlay");
     let last = rows.last().expect("rows");
