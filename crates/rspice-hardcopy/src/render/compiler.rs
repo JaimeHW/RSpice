@@ -1272,12 +1272,36 @@ impl<'a> SemanticSceneCompiler<'a> {
             StrokePattern::Solid,
             None,
         )?;
-        let frame = SceneRect::try_new(
-            Length::from_micrometres(12_700),
-            Length::from_micrometres(12_700),
-            Length::from_micrometres(self.extent.width().micrometres().saturating_sub(25_400)),
-            Length::from_micrometres(self.extent.height().micrometres().saturating_sub(25_400)),
-        )?;
+        // The frame the plot's strips declare, or for a plot that declares
+        // none, its page inset by a margin.
+        let frame = match (plot.frames.first(), plot.frames.last()) {
+            (Some(first), Some(last)) => {
+                let top_left = self.semantic_point(first.minimum)?;
+                let bottom_right = self.semantic_point(last.maximum)?;
+                SceneRect::try_new(
+                    top_left.x,
+                    top_left.y,
+                    Length::from_micrometres(
+                        bottom_right
+                            .x
+                            .micrometres()
+                            .saturating_sub(top_left.x.micrometres()),
+                    ),
+                    Length::from_micrometres(
+                        bottom_right
+                            .y
+                            .micrometres()
+                            .saturating_sub(top_left.y.micrometres()),
+                    ),
+                )?
+            }
+            _ => SceneRect::try_new(
+                Length::from_micrometres(12_700),
+                Length::from_micrometres(12_700),
+                Length::from_micrometres(self.extent.width().micrometres().saturating_sub(25_400)),
+                Length::from_micrometres(self.extent.height().micrometres().saturating_sub(25_400)),
+            )?,
+        };
         // Each strip is boxed on its own; a plot that declares no strips is
         // boxed by its page.
         if plot.frames.is_empty() {
@@ -1692,18 +1716,11 @@ impl<'a> SemanticSceneCompiler<'a> {
                         width,
                         height,
                     } => {
-                        let figure = &report.figures[*figure];
-                        self.primitives.push(ScenePrimitive::RasterImage {
-                            rect: SceneRect::try_new(
-                                Length::from_micrometres(*x),
-                                Length::from_micrometres(top + y),
-                                Length::from_micrometres(*width),
-                                Length::from_micrometres(*height),
-                            )?,
-                            png: figure.payload.clone(),
-                            content_digest: figure.artifact_digest,
-                            alternative_text: figure.alternative_text.clone(),
-                        });
+                        self.report_figure(
+                            &report.figures[*figure],
+                            at(*x, *y),
+                            (*width, *height),
+                        )?;
                     }
                 }
             }
@@ -1759,7 +1776,7 @@ fn authenticate_report_block(
         .iter()
         .find(|figure| figure.block_id == block_id)
         .ok_or_else(|| refuse("has no resolved figure"))?;
-    if figure.media_type != "image/png"
+    if figure.media_type != rspice_results::report_figure::REPORT_FIGURE_MEDIA_TYPE
         || figure.caption != value.caption
         || figure.alternative_text != value.alternative_text
         || figure.sizing != value.sizing
@@ -1768,16 +1785,11 @@ fn authenticate_report_block(
             "holds a figure that differs from the one it describes",
         ));
     }
-    let (pixel_width, pixel_height) = png_dimensions(&figure.payload)?;
-    if pixel_width != figure.width_pixels || pixel_height != figure.height_pixels {
-        return Err(HardcopyRenderError::InvalidEmbeddedFigure(format!(
-            "report block {block_id}: its PNG dimensions changed after source resolution"
-        )));
-    }
     Ok(())
 }
 
 mod plot_grid;
+mod report_figure;
 mod schematic_marks;
 mod schematic_text;
 mod sheet_frame;

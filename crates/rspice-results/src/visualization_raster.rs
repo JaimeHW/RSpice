@@ -293,6 +293,8 @@ pub struct ResolvedCartesianLineScene {
     dataset_bindings: Vec<DatasetBinding>,
     x_range: AxisRange,
     y_range: AxisRange,
+    x_axis: Axis,
+    y_axis: Axis,
     traces: Vec<ResolvedRasterTrace>,
     cursors: Vec<ResolvedRasterCursor>,
 }
@@ -331,6 +333,25 @@ impl ResolvedCartesianLineScene {
     #[must_use]
     pub const fn y_range(&self) -> AxisRange {
         self.y_range
+    }
+
+    /// The pane's abscissa, as it names, scales and pins it.
+    #[must_use]
+    pub const fn x_axis(&self) -> &Axis {
+        &self.x_axis
+    }
+
+    /// The pane's ordinate, as it names, scales and pins it.
+    #[must_use]
+    pub const fn y_axis(&self) -> &Axis {
+        &self.y_axis
+    }
+
+    /// Refuses a scene a picture of the pane cannot draw: a picture maps
+    /// both axes linearly, so it has no place for a decade.
+    pub fn require_linear_axes(&self) -> Result<(), VisualizationRasterError> {
+        require_linear_axis(&self.x_axis)?;
+        require_linear_axis(&self.y_axis)
     }
 
     #[must_use]
@@ -580,8 +601,6 @@ pub fn resolve_cartesian_line_scene(
             "exactly one horizontal and one vertical-left axis are required".to_owned(),
         ));
     }
-    require_linear_axis(x_axis)?;
-    require_linear_axis(y_axis)?;
 
     let visible = document
         .traces()
@@ -798,6 +817,8 @@ pub fn resolve_cartesian_line_scene(
         dataset_bindings: actual_bindings,
         x_range,
         y_range,
+        x_axis: x_axis.clone(),
+        y_axis: y_axis.clone(),
         traces,
         cursors,
     })
@@ -809,6 +830,7 @@ pub fn rasterize_cartesian_line_scene(
     profile: &VisualizationRasterProfile,
 ) -> Result<VisualizationRasterArtifact, VisualizationRasterError> {
     profile.validate()?;
+    scene.require_linear_axes()?;
     validate_range(scene.x_range, "horizontal axis")?;
     validate_range(scene.y_range, "vertical axis")?;
 
@@ -2060,15 +2082,66 @@ mod tests {
             Err(VisualizationRasterError::UnsupportedValueType { .. })
         ));
 
+        // A logarithmic pane resolves; only a picture of it is refused.
         let style = fixture(ValueType::Real, AxisScale::Logarithmic);
+        let scene = resolve_cartesian_line_scene(
+            &style.document,
+            &reference(&style),
+            style.page_id,
+            style.pane_id,
+        )
+        .unwrap();
         assert!(matches!(
-            resolve_cartesian_line_scene(
-                &style.document,
-                &reference(&style),
-                style.page_id,
-                style.pane_id
-            ),
+            rasterize_cartesian_line_scene(&scene, &VisualizationRasterProfile::default()),
             Err(VisualizationRasterError::UnsupportedAxisScale { .. })
         ));
+    }
+
+    /// A report keeps a pane as the plot it draws: its axes as the pane
+    /// names, scales and pins them, and each trace's samples, a missing one
+    /// breaking the line. A logarithmic pane is kept as readily as a linear
+    /// one.
+    #[test]
+    fn a_pane_is_kept_as_the_plot_it_draws_on_any_scale() {
+        use crate::report_figure::{REPORT_FIGURE_MEDIA_TYPE, ReportFigure, freeze_report_figure};
+
+        let mut fixture = fixture(ValueType::Real, AxisScale::Logarithmic);
+        let mut wire = serde_json::to_value(&fixture.document).unwrap();
+        wire["datasets"][0]["rows"][2]["values"][1] =
+            serde_json::json!({"type":"missing","value":"real"});
+        fixture.document = serde_json::from_value(wire).unwrap();
+        let artifact = freeze_report_figure(
+            &fixture.document,
+            &reference(&fixture),
+            fixture.page_id,
+            fixture.pane_id,
+        )
+        .unwrap();
+        assert_eq!(artifact.media_type(), REPORT_FIGURE_MEDIA_TYPE);
+        let figure = ReportFigure::read(&artifact).unwrap();
+        assert_eq!(
+            (figure.x_axis.label.as_str(), figure.x_axis.unit.as_deref()),
+            ("Time", Some("s"))
+        );
+        assert_eq!(figure.x_axis.scale, AxisScale::Linear);
+        assert_eq!(figure.y_axis.scale, AxisScale::Logarithmic);
+        assert_eq!(figure.y_axis.unit.as_deref(), Some("V"));
+        assert_eq!(figure.traces.len(), 1);
+        assert_eq!(figure.traces[0].label, "V(out)");
+        assert_eq!(
+            figure.traces[0].paths,
+            vec![vec![(0.0, 0.0), (1.0, 1.0)], vec![(3.0, 0.75)]]
+        );
+        assert_eq!(
+            figure.artifact().unwrap(),
+            artifact,
+            "a kept figure reads back as itself"
+        );
+
+        let picture = FrozenReportArtifact::new("image/png", vec![0x89; 16]).unwrap();
+        assert!(
+            ReportFigure::read(&picture).is_err(),
+            "a picture is not a figure"
+        );
     }
 }

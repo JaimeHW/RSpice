@@ -2,10 +2,8 @@
 
 use super::*;
 use crate::results::report_document::{FigureSizing, PlotFigureBlock, ReportFigureSourceLocator};
+use crate::results::report_figure::freeze_report_figure;
 use crate::results::visualization_document::{PageId, PaneId};
-use crate::results::visualization_raster::{
-    VisualizationRasterProfile, render_visualization_report_figure,
-};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReportFigureOption {
@@ -147,25 +145,17 @@ pub fn commit_insert_result_document(cx: &mut Cx<'_, HardcopyFeature>) {
                 return;
             }
         };
-        let raster = match render_visualization_report_figure(
-            &figure,
-            &snapshot,
-            option.page_id,
-            option.pane_id,
-            &VisualizationRasterProfile::default(),
-        ) {
-            Ok(raster) => raster,
-            Err(error) => {
-                cx.state.report_authoring.transaction_error = Some(format!(
-                    "The selected result figure cannot be frozen for publication: {error}"
-                ));
-                return;
-            }
-        };
-        ReportReferenceMode::Frozen {
-            snapshot,
-            artifact: raster.artifact().clone(),
-        }
+        let artifact =
+            match freeze_report_figure(&figure, &snapshot, option.page_id, option.pane_id) {
+                Ok(artifact) => artifact,
+                Err(error) => {
+                    cx.state.report_authoring.transaction_error = Some(format!(
+                        "The selected result figure cannot be frozen for publication: {error}"
+                    ));
+                    return;
+                }
+            };
+        ReportReferenceMode::Frozen { snapshot, artifact }
     } else {
         ReportReferenceMode::Linked { snapshot }
     };

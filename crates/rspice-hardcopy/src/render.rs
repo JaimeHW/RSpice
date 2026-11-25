@@ -528,6 +528,12 @@ pub enum ScenePrimitive {
         source_extent: ContentExtent,
         primitives: Vec<ScenePrimitive>,
     },
+    /// A report's figure: what draws it, and the words a reader who cannot
+    /// see it is given instead.
+    Figure {
+        alternative_text: String,
+        primitives: Vec<ScenePrimitive>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1056,6 +1062,13 @@ fn translate_primitives(
                     clip_extent,
                     source_extent,
                     primitives,
+                },
+                ScenePrimitive::Figure {
+                    alternative_text,
+                    primitives,
+                } => ScenePrimitive::Figure {
+                    alternative_text,
+                    primitives: translate_primitives(primitives, origin)?,
                 },
             })
         })

@@ -65,18 +65,26 @@ fn report_with_block(kind: ReportBlockKind) -> ReportDocument {
     report
 }
 
-fn opaque_rgb8_png(width: u32, height: u32) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut bytes, width, height);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        writer
-            .write_image_data(&vec![0x55; width as usize * height as usize * 3])
-            .unwrap();
+/// A kept plot of one trace over a decade and a half of frequency.
+fn kept_figure() -> FrozenReportArtifact {
+    use crate::results::report_figure::{FigureAxis, FigureTrace, ReportFigure};
+    let axis = |label: &str, unit: &str, scale| FigureAxis {
+        label: label.to_owned(),
+        unit: Some(unit.to_owned()),
+        scale,
+        pinned: None,
+    };
+    ReportFigure {
+        x_axis: axis("Frequency", "Hz", AxisScale::Logarithmic),
+        y_axis: axis("Gain", "dB", AxisScale::Decibels),
+        traces: vec![FigureTrace {
+            label: "Gain".to_owned(),
+            paths: vec![vec![(10.0, 40.0), (100.0, 38.0), (300.0, 20.0)]],
+        }],
+        cursors: Vec::new(),
     }
-    bytes
+    .artifact()
+    .unwrap()
 }
 
 #[test]
@@ -397,7 +405,7 @@ fn frozen_report_evidence_is_self_contained_and_remains_typed() {
 }
 
 #[test]
-fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
+fn frozen_figure_is_fully_validated_and_retained_semantically() {
     let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x52; 32]));
     let snapshot = ReportReferenceSnapshot::new(
         ReportSourceId::VisualizationDocument {
@@ -408,7 +416,7 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
         vec![binding],
     )
     .unwrap();
-    let png = opaque_rgb8_png(128, 128);
+    let kept = kept_figure();
     let report = report_with_block(ReportBlockKind::PlotFigure(PlotFigureBlock {
         caption: "Authenticated locus".to_owned(),
         alternative_text: "Exact retained visualization.".to_owned(),
@@ -416,7 +424,7 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
         source_locator: None,
         reference: ReportReferenceMode::Frozen {
             snapshot: snapshot.clone(),
-            artifact: FrozenReportArtifact::new("image/png", png.clone()).unwrap(),
+            artifact: kept.clone(),
         },
     }));
     let resolved = resolve_report_source(ReportHardcopySource {
@@ -430,14 +438,7 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
         panic!("expected semantic report")
     };
     assert_eq!(semantic.figures.len(), 1);
-    assert_eq!(semantic.figures[0].payload, png);
-    assert_eq!(
-        (
-            semantic.figures[0].width_pixels,
-            semantic.figures[0].height_pixels
-        ),
-        (128, 128)
-    );
+    assert_eq!(semantic.figures[0].payload, kept.payload());
     assert_eq!(semantic.figures[0].caption, "Authenticated locus");
 
     let linked_locator = ReportFigureSourceLocator {
@@ -470,7 +471,7 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
                 linked_block_id,
                 snapshot.clone(),
                 linked_locator,
-                FrozenReportArtifact::new("image/png", png.clone()).unwrap(),
+                kept.clone(),
             )
             .unwrap(),
         ],
@@ -487,10 +488,14 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
         panic!("expected linked semantic report")
     };
     assert_eq!(linked_semantic.figures.len(), 1);
-    assert_eq!(linked_semantic.figures[0].payload, png);
+    assert_eq!(linked_semantic.figures[0].payload, kept.payload());
 
-    let mut trailing = opaque_rgb8_png(128, 128);
-    trailing.extend_from_slice(b"trailing");
+    // A payload under a figure's name that is not a plot print can lay out.
+    let trailing = FrozenReportArtifact::new(
+        crate::results::report_figure::REPORT_FIGURE_MEDIA_TYPE,
+        br#"{"traces":[]}"#.to_vec(),
+    )
+    .unwrap();
     let invalid = report_with_block(ReportBlockKind::PlotFigure(PlotFigureBlock {
         caption: "Invalid".to_owned(),
         alternative_text: "Trailing data".to_owned(),
@@ -498,7 +503,7 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
         source_locator: None,
         reference: ReportReferenceMode::Frozen {
             snapshot,
-            artifact: FrozenReportArtifact::new("image/png", trailing).unwrap(),
+            artifact: trailing,
         },
     }));
     assert!(matches!(
@@ -509,7 +514,7 @@ fn frozen_png_figure_is_fully_validated_and_retained_semantically() {
             scope: HardcopyScope::CompleteReport,
         }),
         Err(HardcopySourceError::InvalidReportSource(reason))
-            if reason.contains("after IEND")
+            if reason.contains("not a plot print can lay out")
     ));
 }
 

@@ -1147,6 +1147,13 @@ fn convert_primitive(
                 primitive: "an embedded raster image",
             });
         }
+        // A published scene draws a figure's lines and words; its
+        // description stays with the printed copy.
+        ScenePrimitive::Figure { primitives, .. } => {
+            for primitive in primitives {
+                convert_primitive(primitive, source, out)?;
+            }
+        }
         ScenePrimitive::ClippedGroup { .. } => {
             return Err(PublicationBuildError::UnsupportedPrimitive {
                 source: source.to_string(),

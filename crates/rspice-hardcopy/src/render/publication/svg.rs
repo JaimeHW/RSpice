@@ -438,6 +438,20 @@ pub(super) fn write_svg_primitive(
                 write_svg_primitive(output, faces, plan, transform, primitive);
             }
         }
+        ScenePrimitive::Figure {
+            alternative_text,
+            primitives,
+        } => {
+            // One image to a reader who hears the page, described by its
+            // alternative text rather than read out line by line.
+            output.push_str("<g role=\"img\" aria-label=\"");
+            escape_xml_into(alternative_text, output);
+            output.push_str("\">");
+            for primitive in primitives {
+                write_svg_primitive(output, faces, plan, transform, primitive);
+            }
+            output.push_str("</g>");
+        }
     }
 }
 
@@ -517,7 +531,9 @@ fn collect_primitive_fills(primitive: &ScenePrimitive, fills: &mut Vec<SceneFill
     if let Some(fill) = primitive_fill(primitive) {
         fills.push(fill);
     }
-    if let ScenePrimitive::ClippedGroup { primitives, .. } = primitive {
+    if let ScenePrimitive::ClippedGroup { primitives, .. }
+    | ScenePrimitive::Figure { primitives, .. } = primitive
+    {
         for primitive in primitives {
             collect_primitive_fills(primitive, fills);
         }
@@ -533,7 +549,8 @@ pub(super) fn primitive_fill(primitive: &ScenePrimitive) -> Option<SceneFill> {
         | ScenePrimitive::Ellipse { .. }
         | ScenePrimitive::RasterImage { .. }
         | ScenePrimitive::Text { .. }
-        | ScenePrimitive::ClippedGroup { .. } => None,
+        | ScenePrimitive::ClippedGroup { .. }
+        | ScenePrimitive::Figure { .. } => None,
     }
 }
 

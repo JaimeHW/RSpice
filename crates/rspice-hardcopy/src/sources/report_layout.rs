@@ -31,9 +31,10 @@ const CELL_PAD_X_UM: u64 = 1_500;
 const CELL_PAD_Y_UM: u64 = 900;
 /// The indent of a list item's text, a quotation and a code line.
 const INDENT_UM: u64 = 5_000;
-/// A figure's pixels print at 96 to the inch at natural size.
-const FIGURE_PIXELS_PER_INCH: u64 = 96;
-const MICROMETRES_PER_INCH: u64 = 25_400;
+/// A figure at its natural size: a plot nearly a portrait page's measure
+/// across, in a sheet strip's proportions. A plot has no size of its own;
+/// print lays it out at whatever size the figure is given.
+const FIGURE_NATURAL_UM: (u64, u64) = (160_000, 100_000);
 
 /// One stretch of report text set in one face.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -525,7 +526,7 @@ impl Flow {
                     .iter()
                     .position(|figure| figure.block_id == block.id())
                 {
-                    self.figure(index, &report.figures[index], value);
+                    self.figure(index, value);
                 }
             }
             ReportBlockKind::DataTable(value) => {
@@ -677,7 +678,7 @@ impl Flow {
 
     /// A figure at the size its block asks for, its caption under it. "Fit
     /// page" gives it a page of its own and fills it.
-    fn figure(&mut self, index: usize, figure: &SemanticReportFigure, value: &PlotFigureBlock) {
+    fn figure(&mut self, index: usize, value: &PlotFigureBlock) {
         self.figures += 1;
         let caption = vec![
             Run::new(format!("Figure {}. ", self.figures), Role::SansSemibold),
@@ -685,13 +686,7 @@ impl Flow {
         ];
         let caption_lines = wrap_runs(&caption, TABLE_UM, self.measure());
         let caption_height = 1_500 + caption_lines.len() as u64 * leading(TABLE_UM);
-        let natural_width = (u64::from(figure.width_pixels) * MICROMETRES_PER_INCH)
-            .div_ceil(FIGURE_PIXELS_PER_INCH);
-        let natural_height = (u64::from(figure.height_pixels) * MICROMETRES_PER_INCH)
-            .div_ceil(FIGURE_PIXELS_PER_INCH);
-        if natural_width == 0 || natural_height == 0 {
-            return;
-        }
+        let (natural_width, natural_height) = FIGURE_NATURAL_UM;
         if value.sizing == FigureSizing::FitPage && !self.fresh {
             self.continue_page();
         }
@@ -706,8 +701,16 @@ impl Flow {
             FigureSizing::Natural => fill.min(1.0),
             FigureSizing::FitWidth | FigureSizing::FitPage => fill,
         };
-        let width = (natural_width as f64 * scale).floor() as u64;
-        let height = (natural_height as f64 * scale).floor() as u64;
+        // A plot has no proportions of its own, so a figure given a page
+        // takes all of it.
+        let (width, height) = if value.sizing == FigureSizing::FitPage {
+            (wide, tall)
+        } else {
+            (
+                (natural_width as f64 * scale).floor() as u64,
+                (natural_height as f64 * scale).floor() as u64,
+            )
+        };
         self.room(height + caption_height);
         let x = MARGIN_UM + (wide - width.min(wide)) / 2;
         let y = self.y;

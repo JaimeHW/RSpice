@@ -53,12 +53,15 @@ impl QuickAbscissa {
 pub(crate) struct StripRect {
     pub(crate) top: i64,
     pub(crate) height: i64,
+    /// The height of the whole plot area a point is mapped into before it
+    /// is moved into this strip.
+    pub(crate) area_height: i64,
 }
 
 impl StripRect {
     /// `point`, mapped into the whole plot area, moved into this strip.
     pub(crate) fn place(self, point: SemanticPoint) -> SemanticPoint {
-        let plot_height = i128::from(PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM);
+        let plot_height = i128::from(self.area_height);
         let offset = i128::from(point.y_um - PLOT_INSET_UM) * i128::from(self.height);
         let y = i64::try_from(offset / plot_height).unwrap_or(0);
         SemanticPoint::new(point.x_um, self.top + y)
@@ -78,6 +81,7 @@ pub(crate) fn strip_rects(count: usize, plot_height: i64) -> Vec<StripRect> {
         .map(|index| StripRect {
             top: PLOT_INSET_UM + index * (height + STRIP_GAP_UM),
             height,
+            area_height: plot_height,
         })
         .collect()
 }
@@ -106,7 +110,8 @@ mod tests {
             one,
             [StripRect {
                 top: PLOT_INSET_UM,
-                height: plot_height
+                height: plot_height,
+                area_height: plot_height,
             }]
         );
         let point = SemanticPoint::new(5, PLOT_INSET_UM + 1_234);

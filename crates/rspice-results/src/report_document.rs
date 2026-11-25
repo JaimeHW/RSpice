@@ -720,12 +720,9 @@ impl ReportReferenceFigureArtifact {
             });
         }
         self.artifact.validate()?;
-        if self.artifact.media_type() != "image/png" {
-            return Err(ReportError::InvalidValue {
-                field: "report-reference-figure-artifact.media-type",
-                message: "resolved report figure artifacts must use image/png".to_owned(),
-            });
-        }
+        // A resolved figure is the plot its pane draws, kept as a report
+        // keeps one.
+        crate::report_figure::ReportFigure::read(&self.artifact)?;
         Ok(())
     }
 }

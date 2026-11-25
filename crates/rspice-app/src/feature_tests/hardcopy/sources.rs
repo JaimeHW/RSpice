@@ -667,18 +667,27 @@ fn report_with_block(kind: ReportBlockKind) -> ReportDocument {
     report
 }
 
-fn opaque_rgb8_png(width: u32, height: u32) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut bytes, width, height);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        writer
-            .write_image_data(&vec![0x55; width as usize * height as usize * 3])
-            .unwrap();
+/// A kept plot of one trace over a decade of frequency.
+fn kept_figure() -> FrozenReportArtifact {
+    use rspice_app_state::results::report_figure::{FigureAxis, FigureTrace, ReportFigure};
+    use rspice_app_state::results::visualization_document::AxisScale;
+    let axis = |label: &str, unit: &str, scale| FigureAxis {
+        label: label.to_owned(),
+        unit: Some(unit.to_owned()),
+        scale,
+        pinned: None,
+    };
+    ReportFigure {
+        x_axis: axis("Frequency", "Hz", AxisScale::Logarithmic),
+        y_axis: axis("Gain", "dB", AxisScale::Decibels),
+        traces: vec![FigureTrace {
+            label: "Gain".to_owned(),
+            paths: vec![vec![(10.0, 40.0), (100.0, 20.0)]],
+        }],
+        cursors: Vec::new(),
     }
-    bytes
+    .artifact()
+    .unwrap()
 }
 
 fn sheet_definition(name: &str) -> SheetDefinition {
@@ -907,8 +916,7 @@ fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snap
                     source_locator: None,
                     reference: ReportReferenceMode::Frozen {
                         snapshot,
-                        artifact: FrozenReportArtifact::new("image/png", opaque_rgb8_png(128, 128))
-                            .unwrap(),
+                        artifact: kept_figure(),
                     },
                 }),
             }],
@@ -934,12 +942,11 @@ fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snap
     assert_eq!(semantic.figures.len(), 2);
     assert_eq!(semantic.figures[0].caption, "Retained waveform");
     assert_eq!(semantic.figures[1].caption, "Frozen follow-up");
-    assert_eq!(semantic.figures[0].media_type, "image/png");
-    assert!(
-        semantic.figures[0]
-            .payload
-            .starts_with(b"\x89PNG\r\n\x1a\n")
+    assert_eq!(
+        semantic.figures[0].media_type,
+        rspice_app_state::results::report_figure::REPORT_FIGURE_MEDIA_TYPE
     );
+    assert!(semantic.figures[0].payload.starts_with(b"{"));
 
     let prepared = prepare_retained_hardcopy_resolution(
         source_reads(&state),

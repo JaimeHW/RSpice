@@ -51,7 +51,7 @@ use rspice_results::visualization_document::AxisScale;
 
 use super::{
     HardcopySourceError, MAX_WORKER_SNAPSHOT_BYTES, WORKER_SNAPSHOT_SCHEMA_VERSION,
-    canonical_digest, default_print_mapping, validate_frozen_report_png,
+    canonical_digest, default_print_mapping, validate_frozen_report_figure,
 };
 
 /// One exact point in the source's natural physical coordinate system.
@@ -485,9 +485,9 @@ pub struct SemanticReportFigure {
     pub block_id: ReportBlockId,
     pub artifact_digest: ContentDigest,
     pub media_type: String,
+    /// The plot the figure keeps, as its artifact keeps it; print lays it
+    /// out at the size the report gives the figure.
     pub payload: Vec<u8>,
-    pub width_pixels: u32,
-    pub height_pixels: u32,
     pub caption: String,
     pub alternative_text: String,
     pub sizing: FigureSizing,
@@ -1166,13 +1166,7 @@ pub(super) fn validate_worker_semantics(
                         figure.block_id
                     )));
                 }
-                let (width, height) = validate_frozen_report_png(figure.block_id, &artifact)?;
-                if (width, height) != (figure.width_pixels, figure.height_pixels) {
-                    return Err(HardcopySourceError::InvalidWorkerSnapshot(format!(
-                        "report figure {} dimension mismatch",
-                        figure.block_id
-                    )));
-                }
+                validate_frozen_report_figure(figure.block_id, &artifact)?;
             }
         }
         HardcopySemanticDocument::Schematic(schematic) => {

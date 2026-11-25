@@ -13,6 +13,12 @@ pub fn resolve_plot_source(
     ) {
         return Err(HardcopySourceError::UnsupportedScope(source.scope));
     }
+    // A pane printed as a page is mapped linearly; a logarithmic pane
+    // prints as a report figure, ruled by its decades.
+    source
+        .scene
+        .require_linear_axes()
+        .map_err(map_visualization_error)?;
     if source.scene.traces().is_empty() {
         return Err(HardcopySourceError::UnretainedResult(
             "the active pane has no retained visible trace samples".to_owned(),
@@ -65,8 +71,7 @@ pub fn resolve_plot_source(
         viewer: ResultViewer::Waves,
         page_id: source.scene.page_id().get(),
         pane_id: source.scene.pane_id().get(),
-        // The Cartesian raster scene resolves only linear axes today; a
-        // logarithmic pane is refused upstream by `resolve_cartesian_line_scene`.
+        // Refused above unless both axes are linear.
         x_scale: AxisScale::Linear,
         y_scale: AxisScale::Linear,
         axis_ticks: Vec::new(),

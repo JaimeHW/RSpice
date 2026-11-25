@@ -17,9 +17,7 @@ use crate::results::report_document::{
     ReportReferenceInventory, ReportReferenceInventoryEntry, ReportReferenceMode,
     ReportReferenceSnapshot, ReportSourceId,
 };
-use crate::results::visualization_raster::{
-    VisualizationRasterProfile, render_visualization_report_figure,
-};
+use crate::results::report_figure::freeze_report_figure;
 use rspice_hardcopy_contract::HardcopyScope;
 use rspice_hardcopy_contract::sources::HardcopySourceError;
 
@@ -272,21 +270,10 @@ fn resolve_linked_figure_artifact(
         })?;
     let figure =
         super::visualization_figure_copy(&reads.model.simulation.retained.runs, source_document)?;
-    let raster = render_visualization_report_figure(
-        &figure,
-        captured,
-        page.id,
-        pane.id,
-        &VisualizationRasterProfile::default(),
-    )
-    .map_err(|error| HardcopySourceError::InvalidVisualizationSource(error.to_string()))?;
-    ReportReferenceFigureArtifact::new(
-        block_id,
-        captured.clone(),
-        locator,
-        raster.artifact().clone(),
-    )
-    .map_err(|error| HardcopySourceError::InvalidReportSource(error.to_string()))
+    let artifact = freeze_report_figure(&figure, captured, page.id, pane.id)
+        .map_err(|error| HardcopySourceError::InvalidVisualizationSource(error.to_string()))?;
+    ReportReferenceFigureArtifact::new(block_id, captured.clone(), locator, artifact)
+        .map_err(|error| HardcopySourceError::InvalidReportSource(error.to_string()))
 }
 
 fn unique_run_for_dataset<'a>(

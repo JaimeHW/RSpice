@@ -2089,6 +2089,22 @@ pub(super) fn validate_primitive(
                     })?;
             Ok(())
         }
+        ScenePrimitive::Figure {
+            alternative_text,
+            primitives,
+        } => {
+            validate_text("figure alternative text", alternative_text, 16_384)?;
+            if primitives.is_empty() || primitives.len() > MAX_SCENE_PRIMITIVES {
+                return Err(HardcopyRenderError::ResourceLimit {
+                    scope: "figure primitives",
+                    maximum: MAX_SCENE_PRIMITIVES as u64,
+                });
+            }
+            for primitive in primitives {
+                validate_primitive(primitive, extent, text_bytes)?;
+            }
+            Ok(())
+        }
         ScenePrimitive::ClippedGroup {
             source_origin,
             destination_origin,
@@ -2180,14 +2196,17 @@ pub(super) fn primitive_vertex_count(primitive: &ScenePrimitive) -> usize {
         ScenePrimitive::Circle { .. } | ScenePrimitive::Ellipse { .. } => 4,
         ScenePrimitive::RasterImage { .. } => 4,
         ScenePrimitive::Text { .. } => 1,
-        ScenePrimitive::ClippedGroup { primitives, .. } => {
+        ScenePrimitive::ClippedGroup { primitives, .. }
+        | ScenePrimitive::Figure { primitives, .. } => {
             primitives.iter().map(primitive_vertex_count).sum()
         }
     }
 }
 
 pub(super) fn primitive_hatch_line_count(primitive: &ScenePrimitive) -> u64 {
-    if let ScenePrimitive::ClippedGroup { primitives, .. } = primitive {
+    if let ScenePrimitive::ClippedGroup { primitives, .. }
+    | ScenePrimitive::Figure { primitives, .. } = primitive
+    {
         return primitives.iter().map(primitive_hatch_line_count).sum();
     }
     let Some(SceneFill::CrossHatch { spacing, .. }) = primitive_fill(primitive) else {
@@ -2212,7 +2231,9 @@ pub(super) fn primitive_hatch_line_count(primitive: &ScenePrimitive) -> u64 {
         | ScenePrimitive::Ellipse { .. }
         | ScenePrimitive::RasterImage { .. }
         | ScenePrimitive::Text { .. } => 0,
-        ScenePrimitive::ClippedGroup { .. } => unreachable!("handled before fill resolution"),
+        ScenePrimitive::ClippedGroup { .. } | ScenePrimitive::Figure { .. } => {
+            unreachable!("handled before fill resolution")
+        }
     };
     span.div_ceil(spacing.micrometres()).saturating_mul(2)
 }
@@ -2229,7 +2250,8 @@ pub(super) fn scene_contains_text(scene: &HardcopyScene) -> bool {
     fn contains_text(primitive: &ScenePrimitive) -> bool {
         match primitive {
             ScenePrimitive::Text { .. } => true,
-            ScenePrimitive::ClippedGroup { primitives, .. } => primitives.iter().any(contains_text),
+            ScenePrimitive::ClippedGroup { primitives, .. }
+            | ScenePrimitive::Figure { primitives, .. } => primitives.iter().any(contains_text),
             _ => false,
         }
     }
@@ -2290,7 +2312,9 @@ fn validate_render_budget(
         image_bytes: &mut u64,
         image_pixels: &mut u64,
     ) -> Result<(), HardcopyRenderError> {
-        if let ScenePrimitive::ClippedGroup { primitives, .. } = primitive {
+        if let ScenePrimitive::ClippedGroup { primitives, .. }
+        | ScenePrimitive::Figure { primitives, .. } = primitive
+        {
             for primitive in primitives {
                 accumulate(
                     primitive,

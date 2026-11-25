@@ -455,6 +455,22 @@ fn draw_tagged_pdf_primitive(
             }
             return Ok(());
         }
+        ScenePrimitive::Figure {
+            alternative_text,
+            primitives,
+        } => {
+            // One figure in the structure, described by its alternative
+            // text, however many lines and words draw it.
+            let mut group = TagGroup::new(Tag::Figure(Some(alternative_text.clone())));
+            let identifier = surface.start_tagged(ContentTag::Other);
+            let drawn = primitives.iter().try_for_each(|primitive| {
+                draw_pdf_primitive(surface, fonts, plan, transform, primitive)
+            });
+            surface.end_tagged();
+            group.push(identifier);
+            structure.push(group);
+            return drawn;
+        }
         ScenePrimitive::Text { .. } => {
             Some((ContentTag::Span(SpanTag::empty()), TagGroup::new(Tag::P)))
         }
@@ -703,6 +719,11 @@ pub(super) fn draw_pdf_primitive(
             ..
         } => {
             let transform = transform.remap(*source_origin, *destination_origin);
+            for primitive in primitives {
+                draw_pdf_primitive(surface, fonts, plan, transform, primitive)?;
+            }
+        }
+        ScenePrimitive::Figure { primitives, .. } => {
             for primitive in primitives {
                 draw_pdf_primitive(surface, fonts, plan, transform, primitive)?;
             }

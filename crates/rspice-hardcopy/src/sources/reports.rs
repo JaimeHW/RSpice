@@ -125,14 +125,12 @@ pub fn resolve_report_source(
                 resolved.artifact()
             }
         };
-        let (width_pixels, height_pixels) = validate_frozen_report_png(block_id, artifact)?;
+        validate_frozen_report_figure(block_id, artifact)?;
         figures.push(SemanticReportFigure {
             block_id,
             artifact_digest: artifact.content_digest(),
             media_type: artifact.media_type().to_owned(),
             payload: artifact.payload().to_vec(),
-            width_pixels,
-            height_pixels,
             caption: figure.caption,
             alternative_text: figure.alternative_text,
             sizing: figure.sizing,

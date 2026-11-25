@@ -8,6 +8,7 @@ mod mapping;
 mod plots;
 mod prepared;
 mod quick_plot;
+mod report_figure;
 pub(crate) mod report_layout;
 mod reports;
 mod result_documents;
@@ -25,7 +26,7 @@ pub(crate) use schematic_text::{
 };
 
 pub use aggregation::resolve_hardcopy_source_set_with;
-use artifacts::validate_frozen_report_png;
+use artifacts::validate_frozen_report_figure;
 pub use design::{drawing_sheet_title_values, resolve_symbol_document};
 pub use geometry::{
     authored_sheet_bounds, clipped_plot_paths, compact_display, map_plot_point, schematic_bounds,
@@ -39,6 +40,7 @@ use mapping::default_print_mapping;
 pub(crate) use mapping::{SYMBOL_PRINT_INK, TRACE_PRINT_INKS, WIRE_PRINT_INK};
 pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
 pub use prepared::{PreparedRetainedHardcopyResolution, RetainedHardcopySourceInput};
+pub(crate) use quick_plot::PlotArea;
 pub(crate) use quick_plot::print_read;
 pub use quick_plot::{
     PRINT_COLUMNS_PER_INCH, PlotFrame, QuickAbscissa, QuickResultSeries,
@@ -47,6 +49,7 @@ pub use quick_plot::{
     print_columns, quick_plot_from_scaled_series, quick_plot_from_series, stable_page_id,
     stable_quick_trace_id,
 };
+pub(crate) use report_figure::report_figure_plot;
 pub use reports::{ReportHardcopySource, resolve_report_source};
 pub use result_documents::{resolve_results_quick_view_stack, results_stack_identity};
 pub use result_summary::semantic_result_summary;

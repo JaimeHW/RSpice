@@ -537,22 +537,50 @@ fn a_report_exports_a_page_to_a_sheet_with_its_body_at_ten_points() {
     );
 }
 
-fn opaque_png(width: u32, height: u32) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut bytes, width, height);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        writer
-            .write_image_data(&vec![0x55; width as usize * height as usize * 3])
-            .unwrap();
+/// A kept open- and closed-loop gain, over five decades of frequency, with
+/// a cursor at 10 kHz.
+fn bode_figure() -> FrozenReportArtifact {
+    use rspice_results::report_figure::{FigureAxis, FigureCursor, FigureTrace, ReportFigure};
+    use rspice_results::visualization_document::AxisScale;
+    let axis = |label: &str, unit: &str, scale| FigureAxis {
+        label: label.to_owned(),
+        unit: Some(unit.to_owned()),
+        scale,
+        pinned: None,
+    };
+    let decades = |gains: [f64; 6]| {
+        vec![
+            (0..6)
+                .map(|decade| (10.0_f64.powi(decade + 1), gains[decade as usize]))
+                .collect(),
+        ]
+    };
+    ReportFigure {
+        x_axis: axis("Frequency", "Hz", AxisScale::Logarithmic),
+        y_axis: axis("Gain", "dB", AxisScale::Decibels),
+        traces: vec![
+            FigureTrace {
+                label: "Open loop".to_owned(),
+                paths: decades([80.0, 80.0, 60.0, 40.0, 20.0, 0.0]),
+            },
+            FigureTrace {
+                label: "Closed loop".to_owned(),
+                paths: decades([20.0, 20.0, 20.0, 20.0, 18.0, 0.0]),
+            },
+        ],
+        cursors: vec![FigureCursor {
+            label: "A".to_owned(),
+            x: 1.0e4,
+        }],
     }
-    bytes
+    .artifact()
+    .unwrap()
 }
 
 /// A figure set to fit the page fills it, and the PDF carries its
-/// alternative text in its structure rather than printing it.
+/// alternative text in its structure rather than printing it. The figure
+/// prints as lines and words, ruled on its decades and keyed, not as a
+/// picture.
 #[test]
 fn a_fit_page_figure_fills_the_page_and_its_alternative_text_is_structure() {
     use crate::render::{HardcopyRenderer, HardcopySceneMetadata};
@@ -573,7 +601,7 @@ fn a_fit_page_figure_fills_the_page_and_its_alternative_text_is_structure() {
                 Vec::new(),
             )
             .unwrap(),
-            artifact: FrozenReportArtifact::new("image/png", opaque_png(320, 180)).unwrap(),
+            artifact: bode_figure(),
         },
     });
     let document = report_document(
@@ -615,6 +643,57 @@ fn a_fit_page_figure_fills_the_page_and_its_alternative_text_is_structure() {
     let sections = resolved
         .hardcopy_sections_for_setup(setup.schematic())
         .unwrap();
+    let scene = crate::render::scene_from_resolved(
+        &resolved,
+        resolved.default_print_mapping(),
+        setup.schematic(),
+        HardcopySceneMetadata::try_new("Report", "RSpice tests").unwrap(),
+    )
+    .unwrap();
+    let (alternative_text, drawn) = scene
+        .primitives()
+        .iter()
+        .find_map(|primitive| match primitive {
+            crate::render::ScenePrimitive::Figure {
+                alternative_text,
+                primitives,
+            } => Some((alternative_text, primitives)),
+            _ => None,
+        })
+        .expect("the figure is one primitive");
+    assert!(alternative_text.starts_with("Gain falls"));
+    let words = drawn
+        .iter()
+        .filter_map(|primitive| match primitive {
+            crate::render::ScenePrimitive::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for word in [
+        "100",
+        "1k",
+        "10k",
+        "100k",
+        "Open loop",
+        "Closed loop",
+        "A",
+        "FREQ \u{b7} Hz",
+    ] {
+        assert!(words.contains(&word), "{word:?} in {words:?}");
+    }
+    assert!(words.iter().any(|word| word.ends_with("dB")), "{words:?}");
+    let lines = drawn
+        .iter()
+        .filter(|primitive| matches!(primitive, crate::render::ScenePrimitive::Polyline { .. }))
+        .count();
+    assert!(lines >= 2, "each trace draws as a line");
+    assert!(
+        !drawn.iter().any(|primitive| matches!(
+            primitive,
+            crate::render::ScenePrimitive::RasterImage { .. }
+        )),
+        "a figure is not a picture"
+    );
     let plan = rspice_hardcopy_contract::HardcopyPlan::compile_with_sections(
         resolved.authority().clone(),
         setup,

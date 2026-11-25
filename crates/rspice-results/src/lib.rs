@@ -66,6 +66,7 @@ pub mod provenance;
 #[cfg(feature = "engine-evidence")]
 pub mod renderability;
 pub mod report_document;
+pub mod report_figure;
 #[cfg(feature = "engine-evidence")]
 pub mod result_digest;
 pub mod result_import;

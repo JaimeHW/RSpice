@@ -18,6 +18,30 @@ pub use overlay::{
 pub use strips::QuickAbscissa;
 use strips::{StripRect, strip_rects};
 
+/// Where a printed plot's frames stand: from the page gutter at its top
+/// left, `plot_width` across and `plot_height` down, with `foot` under
+/// them for the abscissa's values, its caption and its anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlotArea {
+    pub plot_width: i64,
+    pub plot_height: i64,
+    pub foot: i64,
+}
+
+impl PlotArea {
+    /// A plot page: its frames inset from every edge.
+    pub const PAGE: Self = Self {
+        plot_width: PLOT_WIDTH_UM - 2 * PLOT_INSET_UM,
+        plot_height: PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM,
+        foot: PLOT_INSET_UM,
+    };
+
+    /// The foot of the area, where the abscissa's anchor stands over.
+    fn bottom(self) -> i64 {
+        PLOT_INSET_UM + self.plot_height + self.foot
+    }
+}
+
 #[derive(Debug)]
 pub struct QuickResultSeries {
     pub identity: String,
@@ -65,6 +89,31 @@ pub fn quick_plot_from_series(
 /// own, stacked under one abscissa as the sheet stacks them: a 1 mA current
 /// drawn against a 1 V axis is a flat line at zero.
 pub fn quick_plot_from_scaled_series(
+    viewer: ResultViewer,
+    page: &str,
+    pane_id: u64,
+    series: Vec<QuickResultSeries>,
+    overlay: Option<&RetainedQuickViewOverlay>,
+    abscissa: &QuickAbscissa,
+    y_scale: AxisScale,
+) -> Result<SemanticPlot, HardcopySourceError> {
+    quick_plot_in(
+        PlotArea::PAGE,
+        viewer,
+        page,
+        pane_id,
+        series,
+        overlay,
+        abscissa,
+        y_scale,
+    )
+}
+
+/// The same plot, its frames standing in `area`: a page of their own, or
+/// the box a report gives a figure.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn quick_plot_in(
+    area: PlotArea,
     viewer: ResultViewer,
     page: &str,
     pane_id: u64,
@@ -152,8 +201,7 @@ pub fn quick_plot_from_scaled_series(
         overlay.framed_x(x_scale, (x_minimum, x_maximum))
     });
     let (x_minimum, x_maximum) = nondegenerate_range(x_minimum, x_maximum);
-    let plot_width = PLOT_WIDTH_UM - 2 * PLOT_INSET_UM;
-    let plot_height = PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM;
+    let (plot_width, plot_height) = (area.plot_width, area.plot_height);
     let frames = (0..units.len())
         .map(|strip| {
             let data = available_range(
@@ -198,7 +246,7 @@ pub fn quick_plot_from_scaled_series(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let (axis_ticks, captions) = strip_axes(&frames, &rects, &units, abscissa, y_scale)?;
+    let (axis_ticks, captions) = strip_axes(area, &frames, &rects, &units, abscissa, y_scale)?;
     let (cursors, markers) = overlay.map_or_else(
         || Ok((Vec::new(), Vec::new())),
         |overlay| {
@@ -298,6 +346,7 @@ fn available_range(values: impl Iterator<Item = f64>) -> Result<(f64, f64), Hard
 /// gutter of that row, and each strip's ordinate with its unit on its top
 /// value, as the sheet states them.
 fn strip_axes(
+    area: PlotArea,
     frames: &[PlotFrame],
     rects: &[StripRect],
     units: &[&str],
@@ -334,7 +383,7 @@ fn strip_axes(
     if let Some(anchor) = x_anchor {
         captions.push(SemanticPlotCaption::new(
             format!("x: {anchor}"),
-            SemanticPoint::new(PLOT_INSET_UM, PLOT_HEIGHT_UM - 1_500),
+            SemanticPoint::new(PLOT_INSET_UM, area.bottom() - 1_500),
         ));
     }
     for ((frame, rect), unit) in frames.iter().zip(rects).zip(units) {

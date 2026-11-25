@@ -731,6 +731,8 @@ pub(super) fn semantic_position_in_scene(
     )
 }
 
+/// `(x, y)` on a frame `plot_width` by `plot_height` whose top-left corner
+/// stands `PLOT_INSET_UM` in from each edge, the ordinate rising up it.
 pub fn map_plot_point(
     (x, y): (f64, f64),
     x_minimum: f64,
@@ -742,7 +744,11 @@ pub fn map_plot_point(
 ) -> Result<SemanticPoint, HardcopySourceError> {
     let mapped_x = map_result_coordinate(x, x_minimum, x_span, PLOT_INSET_UM, plot_width)?;
     let mapped_y = map_result_coordinate(y, y_minimum, y_span, PLOT_INSET_UM, plot_height)?;
-    Ok(SemanticPoint::new(mapped_x, PLOT_HEIGHT_UM - mapped_y))
+    // Flipped within the frame itself, so a frame of any height keeps
+    // its top at the inset; flipping within a page height put a figure's
+    // plot off its own frame.
+    let flipped_y = 2 * PLOT_INSET_UM + plot_height - mapped_y;
+    Ok(SemanticPoint::new(mapped_x, flipped_y))
 }
 
 /// Liang-Barsky clipping avoids raster-size-dependent results and retains

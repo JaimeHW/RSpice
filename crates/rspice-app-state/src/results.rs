@@ -3,7 +3,7 @@
 #[cfg(any(test, feature = "test-support"))]
 pub mod safety;
 pub use rspice_results::{
-    report_document, viewer_catalog, visualization_document, visualization_raster,
+    report_document, report_figure, viewer_catalog, visualization_document, visualization_raster,
 };
 
 /// Verify's verdict on a specification, and the spelling Verify states its
