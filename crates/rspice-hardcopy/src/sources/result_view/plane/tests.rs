@@ -84,12 +84,7 @@ fn the_nyquist_print_draws_a_stability_runs_loop_gain() {
         .map(|caption| caption.text.as_str())
         .collect::<Vec<_>>();
     assert!(captions.contains(&"\u{2212}1 + j0"), "{captions:?}");
-    assert!(
-        captions
-            .iter()
-            .any(|caption| caption.starts_with("GM 6.02")),
-        "{captions:?}"
-    );
+    assert!(captions.contains(&"GM 6.02 dB"), "{captions:?}");
 }
 
 /// The plane fills the plot area on one scale: the unit circle prints

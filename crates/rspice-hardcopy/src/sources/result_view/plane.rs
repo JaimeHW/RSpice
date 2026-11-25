@@ -6,7 +6,7 @@
 //! `equal_scale_ranges` fills its rect, rather than letterboxing a square.
 
 use super::*;
-use rspice_results::number_format::fmt_si_significant;
+use rspice_results::number_format::{fmt_column_reading, fmt_si_significant};
 use rspice_results::nyquist::{
     LOOP_GAIN_LOCUS_LABEL, NyquistData, NyquistMargin, loop_gain_traces,
 };
@@ -882,9 +882,10 @@ pub(super) fn quick_nyquist_plot<W: AsRef<RetainedWaveform>>(
             captions.extend(plane.label(
                 (crossing, 0.0),
                 (900, 2_600),
+                // Decibels read to two places, as the sheet tags the margin.
                 format!(
                     "GM {}",
-                    fmt_si_significant(20.0 * margin.value.log10(), "dB", READOUT_DIGITS)
+                    fmt_column_reading(20.0 * margin.value.log10(), "dB", READOUT_DIGITS)
                 ),
                 SemanticCaptionAnchor::Start,
             ));
