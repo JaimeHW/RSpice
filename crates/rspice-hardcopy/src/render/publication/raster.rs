@@ -121,7 +121,7 @@ pub(super) fn aggregate_raster_pixels(
 /// names loses every word on the page without failing anything. Built once:
 /// the faces are fixed for the life of the process, and a page is not the unit
 /// at which a font database should be parsed.
-fn publication_fontdb() -> Arc<usvg::fontdb::Database> {
+pub(in crate::render) fn publication_fontdb() -> Arc<usvg::fontdb::Database> {
     static DATABASE: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
     Arc::clone(DATABASE.get_or_init(|| {
         let mut database = usvg::fontdb::Database::new();
@@ -162,7 +162,7 @@ pub(super) fn rasterize_page_at_dimensions(
     width: u32,
     height: u32,
 ) -> Result<RasterPage, HardcopyRenderError> {
-    let svg = render_page_svg(plan, scene, page)?;
+    let svg = render_page_svg(plan, scene, page, PageFonts::Elsewhere)?;
     let options = usvg::Options {
         dpi: f32::from(dpi),
         font_family: PUBLICATION_SANS.to_owned(),

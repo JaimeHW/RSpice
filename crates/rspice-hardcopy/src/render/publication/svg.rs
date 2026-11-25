@@ -1,7 +1,8 @@
 //! Emitting a page as SVG.
 //!
 //! The faces a page's text is lettered in, and only those, are embedded
-//! rather than referenced; text in a face installed on the machine that
+//! rather than referenced, each cut to the outlines the page letters; text
+//! in a face installed on the machine that
 //! printed it is drawn as the outlines of its glyphs, each defined once per
 //! page. Hatch patterns are emitted as definitions
 //! keyed by fill, so an exported page renders identically
@@ -13,10 +14,24 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 
+mod font_subset;
+use font_subset::Lettered;
+
+/// Where the data of the faces a page embeds is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PageFonts {
+    /// In the page, cut to what it letters: an SVG file.
+    InPage,
+    /// Not in the page: a browser print carries the faces once for all its
+    /// pages, and a raster page is lettered from the faces themselves.
+    Elsewhere,
+}
+
 pub(super) fn render_page_svg(
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
+    page_fonts: PageFonts,
 ) -> Result<String, HardcopyRenderError> {
     let geometry = page.geometry();
     let (page_width, page_height) = geometry.physical_size();
@@ -92,8 +107,8 @@ pub(super) fn render_page_svg(
     write_svg_decorations(&mut output, &mut faces, plan, scene, page)?;
     output.push_str("</svg>");
     let mut fonts = String::new();
-    if plan.setup().render().fonts().embed_fonts() {
-        write_embedded_svg_fonts(&mut fonts, &faces.lettered);
+    if page_fonts == PageFonts::InPage && plan.setup().render().fonts().embed_fonts() {
+        write_embedded_svg_fonts(&mut fonts, &faces);
     }
     faces.write_outlines(&mut fonts);
     output.insert_str(fonts_at, &fonts);
@@ -104,6 +119,8 @@ pub(super) fn render_page_svg(
 #[derive(Default)]
 pub(super) struct PageFaces {
     pub(super) lettered: BTreeSet<PrintFace>,
+    /// What the page letters in each face it embeds.
+    pub(super) letters: BTreeMap<Face, Lettered>,
     /// The page's number, which every outline's id starts with, so the
     /// pages of a browser print, one document, never share an id.
     page: u32,
@@ -181,33 +198,53 @@ pub(super) fn add_page_faces(
     scene: &HardcopyScene,
     page: &PreviewPage,
 ) -> Result<(), HardcopyRenderError> {
-    let mut discarded = String::new();
     let mut page_faces = PageFaces::default();
-    let transform = page_transform(page);
-    for primitive in page_primitives(scene, page)? {
-        write_svg_primitive(&mut discarded, &mut page_faces, plan, transform, primitive);
-        discarded.clear();
-    }
-    write_svg_decorations(&mut discarded, &mut page_faces, plan, scene, page)?;
+    add_page_letters(&mut page_faces, plan, scene, page)?;
     faces.extend(page_faces.lettered);
     Ok(())
 }
 
-/// An `@font-face` rule, with the face's data inline, for each embedded
-/// face in `faces`. An installed face is drawn as outlines instead.
-pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &BTreeSet<PrintFace>) {
+/// Adds to `faces` what `page`'s text letters in each face, by the same walk.
+pub(super) fn add_page_letters(
+    faces: &mut PageFaces,
+    plan: &HardcopyPlan,
+    scene: &HardcopyScene,
+    page: &PreviewPage,
+) -> Result<(), HardcopyRenderError> {
+    let mut discarded = String::new();
+    let transform = page_transform(page);
+    for primitive in page_primitives(scene, page)? {
+        write_svg_primitive(&mut discarded, faces, plan, transform, primitive);
+        discarded.clear();
+    }
+    write_svg_decorations(&mut discarded, faces, plan, scene, page)?;
+    Ok(())
+}
+
+/// An `@font-face` rule, with the face's data inline, for each face the
+/// text of `faces` is lettered in, cut to the outlines it letters. An
+/// installed face is drawn as outlines instead.
+pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &PageFaces) {
     let encoded = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
-    let embedded: Vec<Face> = faces.iter().filter_map(|face| face.bundled()).collect();
+    let embedded: Vec<Face> = faces
+        .lettered
+        .iter()
+        .filter_map(|face| face.bundled())
+        .collect();
     if embedded.is_empty() {
         return;
     }
     output.push_str("<style>");
     for face in embedded {
         let (family, weight) = publication_face(face);
+        let cut = faces
+            .letters
+            .get(&face)
+            .and_then(|letters| font_subset::subset(face.bytes(), letters));
         write!(
             output,
             "@font-face{{font-family:'{family}';font-style:normal;font-weight:{weight};src:url(data:font/ttf;base64,{}) format('truetype');}}",
-            encoded(face.bytes())
+            encoded(cut.as_deref().unwrap_or(face.bytes()))
         )
         .expect("write to string");
     }
@@ -593,6 +630,26 @@ pub(super) fn write_svg_text_runs(
     let own = font.role().print_primary();
     let pieces = rspice_fonts::print::line(font.role(), text);
     faces.lettered.extend(pieces.iter().map(|piece| piece.face));
+    for piece in &pieces {
+        let Some(face) = piece.face.bundled() else {
+            continue;
+        };
+        let letters = faces.letters.entry(face).or_default();
+        letters
+            .glyphs
+            .extend(piece.glyphs.iter().map(|glyph| glyph.id));
+        if piece.replacement {
+            letters.characters.insert(rspice_fonts::REPLACEMENT);
+        } else {
+            letters.characters.extend(
+                piece
+                    .glyphs
+                    .iter()
+                    .filter_map(|glyph| text.get(glyph.text.clone()))
+                    .flat_map(str::chars),
+            );
+        }
+    }
     if let [piece] = pieces.as_slice()
         && piece.face == own
         && !piece.right_to_left

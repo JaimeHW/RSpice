@@ -318,35 +318,8 @@ fn the_render_budget_allows_for_the_faces_a_page_letters_in() {
 /// faces the SVG embeds, under the families the SVG names them, as a
 /// browser does.
 fn laid_out_glyphs(svg: &str) -> (Vec<(u32, f32)>, f32) {
-    use base64::Engine as _;
-
-    let mut database = usvg::fontdb::Database::new();
-    for rule in svg.split("@font-face{").skip(1) {
-        let family = rule
-            .split("font-family:'")
-            .nth(1)
-            .and_then(|rest| rest.split('\'').next())
-            .expect("a face names its family");
-        let data = rule
-            .split("base64,")
-            .nth(1)
-            .and_then(|rest| rest.split(')').next())
-            .expect("a face carries its data");
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(data)
-            .unwrap();
-        for id in database.load_font_source(usvg::fontdb::Source::Binary(Arc::new(bytes))) {
-            let mut face = database.face(id).cloned().unwrap();
-            face.families = vec![(
-                family.to_owned(),
-                usvg::fontdb::Language::English_UnitedStates,
-            )];
-            database.push_face_info(face);
-            database.remove_face(id);
-        }
-    }
     let options = usvg::Options {
-        fontdb: Arc::new(database),
+        fontdb: Arc::new(embedded_database(svg)),
         ..usvg::Options::default()
     };
     let tree = usvg::Tree::from_str(svg, &options).unwrap();
@@ -383,6 +356,39 @@ fn laid_out_glyphs(svg: &str) -> (Vec<(u32, f32)>, f32) {
         }
     }
     (glyphs, size)
+}
+
+/// The faces `svg` embeds, under the families it names them, as a browser
+/// reads them.
+fn embedded_database(svg: &str) -> usvg::fontdb::Database {
+    use base64::Engine as _;
+
+    let mut database = usvg::fontdb::Database::new();
+    for rule in svg.split("@font-face{").skip(1) {
+        let family = rule
+            .split("font-family:'")
+            .nth(1)
+            .and_then(|rest| rest.split('\'').next())
+            .expect("a face names its family");
+        let data = rule
+            .split("base64,")
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .expect("a face carries its data");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .unwrap();
+        for id in database.load_font_source(usvg::fontdb::Source::Binary(Arc::new(bytes))) {
+            let mut face = database.face(id).cloned().unwrap();
+            face.families = vec![(
+                family.to_owned(),
+                usvg::fontdb::Language::English_UnitedStates,
+            )];
+            database.push_face_info(face);
+            database.remove_face(id);
+        }
+    }
+    database
 }
 
 /// Each glyph of `value` where print sets it, `size` units to the em, from
@@ -474,6 +480,74 @@ fn an_svg_viewer_sets_every_glyph_where_print_does() {
                 );
             }
         }
+    }
+}
+
+/// An SVG carries each face cut to the outlines its text letters, and a
+/// viewer draws the page from them as from the whole faces: Latin kerned,
+/// Arabic joined, Hebrew and Thai marked, pixel for pixel.
+#[test]
+fn an_svg_carries_every_outline_its_text_draws() {
+    let mut lines = vec![
+        (SceneFont::Sans, "AVATAR To Wa \u{2248} 1.2 mA"),
+        (SceneFont::Monospace, "R1 10 kΩ α ⌀6 ⏚"),
+        (SceneFont::SansSemibold, "Run 1 \u{b7} TRAN \u{2212}3 dB"),
+    ];
+    #[cfg(not(target_arch = "wasm32"))]
+    lines.extend([
+        (SceneFont::Sans, "מגבר R1 = 10 kΩ (V+)"),
+        (SceneFont::Sans, "لا إله قيمة 123"),
+        (SceneFont::SansSemibold, "مَرْحَبًا R2"),
+        (SceneFont::Sans, "שָׁלוֹם R3"),
+        (SceneFont::Sans, "ภาษาไทย น้ำ"),
+    ]);
+    for (font, value) in lines {
+        let content = extent(150_000, 40_000);
+        let scene = HardcopyScene::try_new(
+            content,
+            HardcopySceneMetadata::try_new("Lettering", "RSpice hardcopy tests").unwrap(),
+            vec![text(font, value, 20_000)],
+            Vec::new(),
+        )
+        .unwrap();
+        let plan = undecorated_plan(OutputFormat::SvgVector, content);
+        let publication = HardcopyRenderer::render(&plan, &scene).unwrap();
+        let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+        let whole: usize = rspice_fonts::print::line(font.role(), value)
+            .iter()
+            .filter_map(|piece| piece.face.bundled())
+            .collect::<std::collections::BTreeSet<_>>()
+            .iter()
+            .map(|face| face.bytes().len())
+            .sum();
+        assert!(
+            svg.len() < whole,
+            "{value:?}: {} bytes of SVG for {whole} bytes of faces",
+            svg.len()
+        );
+        let draw = |fontdb| {
+            let options = usvg::Options {
+                fontdb,
+                ..usvg::Options::default()
+            };
+            let tree = usvg::Tree::from_str(svg, &options).unwrap();
+            let mut pixmap = resvg::tiny_skia::Pixmap::new(900, 240).unwrap();
+            resvg::render(
+                &tree,
+                resvg::tiny_skia::Transform::from_scale(
+                    900.0 / tree.size().width(),
+                    240.0 / tree.size().height(),
+                ),
+                &mut pixmap.as_mut(),
+            );
+            pixmap.take()
+        };
+        let carried = draw(Arc::new(embedded_database(svg)));
+        assert!(carried.iter().any(|&byte| byte != 0), "{value:?} draws");
+        assert!(
+            carried == draw(crate::render::publication::publication_fontdb()),
+            "{value:?} draws from the faces it carries as from the whole faces"
+        );
     }
 }
 

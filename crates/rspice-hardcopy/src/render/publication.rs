@@ -30,6 +30,8 @@ use provenance::*;
 /// The dialog asks the publisher what it can afford rather than predicting it,
 /// so this crosses the module boundary the glob import above does not.
 pub use raster::max_raster_dpi;
+#[cfg(test)]
+pub(in crate::render) use raster::publication_fontdb;
 use raster::*;
 
 use svg::*;
@@ -1402,7 +1404,7 @@ impl HardcopyRenderer {
                 let mut parts = Vec::with_capacity(plan.pagination().pages().len());
                 for page in plan.pagination().pages() {
                     parts.push(make_part(
-                        render_page_svg(plan, scene, page)?.into_bytes(),
+                        render_page_svg(plan, scene, page, PageFonts::InPage)?.into_bytes(),
                         "image/svg+xml",
                         "svg",
                         format!("page-{:04}-{}.svg", page.number(), page.coordinate()),
@@ -1692,7 +1694,17 @@ fn render_browser_print_html(
         )
         .expect("write to string");
     }
-    html.push_str("@media screen{body{padding:12mm;background:#c7cbd0}.rspice-print-page{margin:0 auto 12mm;box-shadow:0 2mm 6mm rgba(0,0,0,.28);background:#fff}}@media print{body{background:transparent}.rspice-print-page{margin:0}}</style></head>");
+    html.push_str("@media screen{body{padding:12mm;background:#c7cbd0}.rspice-print-page{margin:0 auto 12mm;box-shadow:0 2mm 6mm rgba(0,0,0,.28);background:#fff}}@media print{body{background:transparent}.rspice-print-page{margin:0}}</style>");
+    // The faces travel once, cut to what every page letters: a face
+    // declared again under the same name would stand in for the first.
+    if plan.setup().render().fonts().embed_fonts() {
+        let mut faces = PageFaces::default();
+        for page in plan.pagination().pages() {
+            add_page_letters(&mut faces, plan, scene, page)?;
+        }
+        write_embedded_svg_fonts(&mut html, &faces);
+    }
+    html.push_str("</head>");
     write!(
         html,
         "<body data-rspice-plan=\"{}\" data-rspice-source=\"{}\" data-rspice-orientation=\"{orientation}\">",
@@ -1710,7 +1722,7 @@ fn render_browser_print_html(
             plan.pagination().pages().len()
         )
         .expect("write to string");
-        html.push_str(&render_page_svg(plan, scene, page)?);
+        html.push_str(&render_page_svg(plan, scene, page, PageFonts::Elsewhere)?);
         html.push_str("</section>");
     }
     // Deliberately script-free. The authenticated browser-print adapter owns
