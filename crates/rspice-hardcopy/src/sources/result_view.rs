@@ -19,7 +19,9 @@ use rspice_results::{
 use rspice_vocabulary::product::{DatasetId, ObjectRevision, ProjectId, RunId};
 use uuid::Uuid;
 
+mod plane;
 mod presentation;
+use plane::{quick_nyquist_plot, quick_polar_plot, quick_smith_plot};
 pub use presentation::{QuickFftSettings, QuickHistogramSettings, ResultsQuickViewPresentation};
 
 /// A successful retained analysis borrowed from its terminal owning run.
@@ -116,18 +118,16 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         ResultViewer::Hist => {
             HardcopySemanticDocument::Plot(quick_histogram_plot(presentation, active)?)
         }
-        ResultViewer::Nyquist => {
-            HardcopySemanticDocument::Plot(quick_complex_plot(active, ResultViewer::Nyquist)?)
-        }
-        ResultViewer::Smith => {
-            HardcopySemanticDocument::Plot(quick_complex_plot(active, ResultViewer::Smith)?)
-        }
+        ResultViewer::Nyquist => HardcopySemanticDocument::Plot(quick_nyquist_plot(
+            active,
+            &presentation.overlay.for_analysis(active.analysis.id),
+        )?),
+        ResultViewer::Smith => HardcopySemanticDocument::Plot(quick_smith_plot(active)?),
         // The polar sheet's evidence is the same retained complex locus; the
-        // printed figure states it on the coefficient plane, where a page has
-        // no reader to rotate the ruling for.
-        ResultViewer::Polar => {
-            HardcopySemanticDocument::Plot(quick_complex_plot(active, ResultViewer::Polar)?)
-        }
+        // printed figure states it on the coefficient plane, ringed at the
+        // magnitudes its axis rules, where a page has no reader to rotate the
+        // ruling for.
+        ResultViewer::Polar => HardcopySemanticDocument::Plot(quick_polar_plot(active)?),
         ResultViewer::NoiseContrib => HardcopySemanticDocument::Plot(quick_noise_spectrum_plot(
             active,
             &presentation.overlay.for_analysis(active.analysis.id),
@@ -900,6 +900,7 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
                 .iter()
                 .map(|(x, y)| (x.to_bits(), y.to_bits()))
                 .collect(),
+            companion: false,
         }],
         cursors: Vec::new(),
         markers: Vec::new(),
@@ -909,42 +910,8 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
             minimum: SemanticPoint::new(PLOT_INSET_UM, PLOT_INSET_UM),
             maximum: SemanticPoint::new(PLOT_INSET_UM + width, PLOT_INSET_UM + height),
         }],
+        guides: Vec::new(),
     })
-}
-
-fn quick_complex_plot<W: AsRef<RetainedWaveform>>(
-    active: &RetainedQuickViewSource<'_, W>,
-    viewer: ResultViewer,
-) -> Result<SemanticPlot, HardcopySourceError> {
-    let series = active
-        .analysis
-        .waveforms
-        .iter()
-        .filter(|waveform| (active.is_visible)(waveform))
-        .map(AsRef::as_ref)
-        .filter_map(|waveform| waveform.complex.as_ref().map(|complex| (waveform, complex)))
-        .map(|(waveform, complex)| QuickResultSeries {
-            identity: format!(
-                "{}:{}:{}:{}:complex",
-                active.dataset_id, active.run_id, active.analysis.id, waveform.name
-            ),
-            label: waveform.name.clone(),
-            unit: String::new(),
-            points: complex
-                .real
-                .samples(..)
-                .zip(complex.imag.samples(..))
-                .collect(),
-        })
-        .collect();
-    quick_plot_from_series(
-        viewer,
-        "Results",
-        0,
-        series,
-        None,
-        &QuickAbscissa::new("Re", "", AxisScale::Linear),
-    )
 }
 
 /// A source's two columns, each borrowed or read.

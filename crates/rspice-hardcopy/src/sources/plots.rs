@@ -57,6 +57,7 @@ pub fn resolve_plot_source(
                 .iter()
                 .map(|(x, y)| (x.to_bits(), y.to_bits()))
                 .collect(),
+            companion: false,
         });
     }
     let semantic = SemanticPlot {
@@ -79,6 +80,7 @@ pub fn resolve_plot_source(
         annotations: Vec::new(),
         captions: Vec::new(),
         frames: Vec::new(),
+        guides: Vec::new(),
     };
     let identity = HardcopySourceIdentity::try_new(
         source.source_key,

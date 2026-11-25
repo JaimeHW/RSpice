@@ -1314,20 +1314,29 @@ impl<'a> SemanticSceneCompiler<'a> {
             });
         }
         self.plot_grid(plot, frame)?;
-        for (index, trace) in plot.traces.iter().enumerate() {
+        let mut series = 0_u16;
+        for trace in &plot.traces {
             let stable_id = format!("trace:{}", trace.trace_id);
-            let stroke = self.mapped_stroke(
-                PrintObjectKind::Trace,
-                &stable_id,
-                // Solid in its series colour, as the sheet draws it; a page
-                // without colour draws the series' own line instead.
+            // Solid in its series colour, as the sheet draws it; a page
+            // without colour draws the series' own line instead. A companion
+            // closes the series before it, thin and dashed in its colour.
+            let style = if trace.companion {
                 StrokeStyle::try_new(
-                    SemanticColor::Trace(index as u16),
+                    SemanticColor::Trace(series.saturating_sub(1)),
+                    Length::from_micrometres(200),
+                    StrokePattern::Dashed,
+                    None,
+                )?
+            } else {
+                series += 1;
+                StrokeStyle::try_new(
+                    SemanticColor::Trace(series - 1),
                     Length::from_micrometres(300),
                     StrokePattern::Solid,
-                    Some(index as u16),
-                )?,
-            );
+                    Some(series - 1),
+                )?
+            };
+            let stroke = self.mapped_stroke(PrintObjectKind::Trace, &stable_id, style);
             for path in &trace.paths {
                 if let [point] = path.as_slice() {
                     self.primitives.push(ScenePrimitive::Circle {

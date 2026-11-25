@@ -188,13 +188,31 @@ pub(super) fn default_print_mapping(
                 "orange · solid",
                 "gray · solid",
             ];
-            for (index, trace) in plot.traces.iter().enumerate() {
-                let redundancy = series_redundancy(index);
+            let mut series = 0;
+            for trace in &plot.traces {
+                // A companion branch closes the series before it: the same
+                // ink, thin and dashed, as the sheet draws it.
+                let (redundancy, screen_style) = if trace.companion {
+                    (
+                        PrintRedundancy::DashedLine {
+                            width: Length::from_micrometres(200),
+                            dash: Length::from_micrometres(1_500),
+                            gap: Length::from_micrometres(1_000),
+                        },
+                        "series color · thin dashed",
+                    )
+                } else {
+                    series += 1;
+                    (
+                        series_redundancy(series - 1),
+                        SCREEN_STYLES[(series - 1) % SCREEN_STYLES.len()],
+                    )
+                };
                 entries.push(mapping_entry(
                     PrintObjectKind::Trace,
                     format!("trace:{}", trace.trace_id),
                     trace.label.clone(),
-                    SCREEN_STYLES[index % SCREEN_STYLES.len()],
+                    screen_style,
                     PrintColor::Black,
                     redundancy,
                     true,

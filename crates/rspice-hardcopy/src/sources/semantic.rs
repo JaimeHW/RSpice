@@ -239,6 +239,10 @@ pub struct SemanticPlotTrace {
     /// Exact retained samples as IEEE-754 bit patterns. Specialized viewers
     /// derive their geometry without losing source precision to page mapping.
     pub source_samples: Vec<(u64, u64)>,
+    /// The branch that closes the trace before it, drawn thin and dashed in
+    /// that trace's colour: a Nyquist locus's negative frequencies.
+    #[serde(default)]
+    pub companion: bool,
 }
 
 /// One retained horizontal-axis cursor, represented by its exact source X
@@ -357,6 +361,23 @@ pub struct SemanticPlot {
     /// framed by its page's one box.
     #[serde(default)]
     pub frames: Vec<SemanticPlotFrame>,
+    /// The plane's rulings that are not straight gridlines, drawn under the
+    /// traces.
+    #[serde(default)]
+    pub guides: Vec<SemanticPlotGuide>,
+}
+
+/// A ruling a figure is read against that is not a straight gridline: a
+/// Smith chart's circles and arcs, a polar chart's rings, the unit circle a
+/// Nyquist plot's phase margin is read on, the point its criterion turns on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticPlotGuide {
+    /// Clipped to the plot area, in page coordinates.
+    pub paths: Vec<Vec<SemanticPoint>>,
+    /// The boundary the plane is read against, drawn as firmly as the frame;
+    /// otherwise a gridline.
+    pub major: bool,
 }
 
 const fn linear_axis() -> AxisScale {

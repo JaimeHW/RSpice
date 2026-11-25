@@ -827,11 +827,9 @@ pub fn quick_result_availability(
                 ).and_then(|index| variables.get(index))
                     .is_some_and(|variable| !variable.samples.is_empty())
         ),
-        ResultViewer::Nyquist => visible_waveforms().any(|waveform| {
-            waveform.complex.as_ref().is_some_and(|complex| {
-                !complex.real.is_empty() && complex.real.len() == complex.imag.len()
-            })
-        }),
+        // The sheet's own rule: a stability run's loop gain, kept as two
+        // real traces, or a retained complex response.
+        ResultViewer::Nyquist => analysis_supports_viewer(viewer, analysis, |_| {}),
         ResultViewer::Smith => smith_analysis_is_renderable(analysis, |_| {}),
         ResultViewer::NetworkMatrix | ResultViewer::SParameters => {
             analysis_supports_viewer(viewer, analysis, |_| {})
@@ -973,6 +971,35 @@ pub fn quick_result_analysis_index(
                     .iter()
                     .position(|analysis| analysis.analysis_type == AnalysisType::DcSweep)
             }),
+        // The sheet's binding: the selected analysis when it measured a loop
+        // gain, else the run's first that did. A run that measured none
+        // prints the selected complex response.
+        ResultViewer::Nyquist => {
+            let loop_gain = |analysis: &AnalysisResult| {
+                analysis.success
+                    && rspice_results::nyquist::loop_gain_traces(
+                        analysis.analysis_type,
+                        &analysis.waveforms,
+                    )
+                    .is_some()
+            };
+            globally_selected
+                .filter(|&index| run.analyses.get(index).is_some_and(loop_gain))
+                .or_else(|| run.analyses.iter().position(loop_gain))
+                .or_else(|| {
+                    globally_selected
+                        .filter(|&index| {
+                            run.analyses.get(index).is_some_and(|analysis| {
+                                analysis_supports_viewer(viewer, analysis, |_| {})
+                            })
+                        })
+                        .or_else(|| {
+                            run.analyses.iter().position(|analysis| {
+                                analysis_supports_viewer(viewer, analysis, |_| {})
+                            })
+                        })
+                })
+        }
         ResultViewer::Bode => globally_selected
             .filter(|&index| {
                 run.analyses

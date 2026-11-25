@@ -31,7 +31,9 @@ impl SemanticSceneCompiler<'_> {
                 None,
             )
         };
-        if plot.axis_ticks.is_empty() {
+        // A plane ruled by its own guides, as a Smith chart is, has no even
+        // divisions to rule.
+        if plot.axis_ticks.is_empty() && plot.guides.is_empty() {
             let bottom =
                 Length::from_micrometres(frame.y.micrometres() + frame.height.micrometres());
             for division in 1..10_u64 {
@@ -43,6 +45,34 @@ impl SemanticSceneCompiler<'_> {
                 });
             }
             return Ok(());
+        }
+        for guide in &plot.guides {
+            let stroke = if guide.major {
+                StrokeStyle::try_new(
+                    SemanticColor::Secondary,
+                    Length::from_micrometres(220),
+                    StrokePattern::Solid,
+                    None,
+                )?
+            } else {
+                StrokeStyle::try_new(
+                    SemanticColor::Grid,
+                    Length::from_micrometres(120),
+                    StrokePattern::Solid,
+                    None,
+                )?
+            };
+            for path in guide.paths.iter().filter(|path| path.len() >= 2) {
+                self.primitives.push(ScenePrimitive::Polyline {
+                    points: path
+                        .iter()
+                        .map(|point| self.semantic_point(*point))
+                        .collect::<Result<_, _>>()?,
+                    closed: false,
+                    stroke,
+                    fill: None,
+                });
+            }
         }
         for tick in &plot.axis_ticks {
             let (from, to) = (

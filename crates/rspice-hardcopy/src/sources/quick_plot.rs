@@ -248,6 +248,7 @@ pub fn quick_plot_from_scaled_series(
                         (x.to_bits(), y.to_bits())
                     })
                     .collect(),
+                companion: false,
             })
         })
         .collect::<Result<Vec<_>, HardcopySourceError>>()?;
@@ -270,6 +271,7 @@ pub fn quick_plot_from_scaled_series(
                 maximum: SemanticPoint::new(PLOT_INSET_UM + plot_width, rect.bottom()),
             })
             .collect(),
+        guides: Vec::new(),
     })
 }
 

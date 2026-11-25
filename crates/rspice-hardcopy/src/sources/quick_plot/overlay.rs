@@ -256,6 +256,11 @@ impl RetainedQuickViewOverlay {
         self.viewport.and_then(|viewport| viewport.x)
     }
 
+    /// The ordinate window the reader had pinned, in source units, if any.
+    pub(crate) fn window_y(&self) -> Option<(f64, f64)> {
+        self.viewport.and_then(|viewport| viewport.y)
+    }
+
     /// The Y a marker's tag sits at, resampled off its anchored trace exactly
     /// as the sheet resamples it every frame.
     pub(super) fn marker_y(&self, points: &[(f64, f64)], x: f64) -> f64 {
