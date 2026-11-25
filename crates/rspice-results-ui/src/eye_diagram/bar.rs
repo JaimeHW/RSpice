@@ -36,15 +36,32 @@ const CLOCKS: [&str; 3] = ["Recovered", "Ideal", "Signal"];
 /// The level choices, as the segmented control spells them.
 const LEVEL_CHOICES: [&str; 3] = ["2", "3", "4"];
 
+/// A mask file the reader asked for, which the host writes or reads through
+/// the application's file exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaskFile {
+    /// Write the mask's vertices to a text file.
+    Save,
+    /// Read a custom mask from a text file of vertices.
+    Open,
+}
+
+/// What the reader did in the bar: the settings they changed, for the host
+/// to keep for the result, and a mask file they asked for.
+#[derive(Debug, Default)]
+pub struct BarChange {
+    pub settings: Option<EyeSettings>,
+    pub mask_file: Option<MaskFile>,
+}
+
 /// The sheet's controls, left in its bar. `sources` are the signals the
-/// analysis saved, in the order it saved them. Returns the settings the
-/// reader set, when they changed one, for the host to keep for the result.
+/// analysis saved, in the order it saved them.
 pub fn domain_bar(
     ui: &mut Ui,
     eye: &EyeDiagramState,
     sources: &[String],
     significant_digits: usize,
-) -> Option<EyeSettings> {
+) -> BarChange {
     let before = eye.settings().clone();
     let mut settings = before.clone();
     let fold = Fold::measure(ui, &settings);
@@ -89,11 +106,23 @@ pub fn domain_bar(
     }
 
     ui.add_space(GROUP_GAP);
-    display_menu(ui, eye, &mut settings, sources, significant_digits, fold);
+    let mut mask_file = None;
+    display_menu(
+        ui,
+        eye,
+        &mut settings,
+        sources,
+        significant_digits,
+        fold,
+        &mut mask_file,
+    );
     settings.mask.clear_test();
     let mut held = before;
     held.mask.clear_test();
-    (settings != held && settings.validate().is_ok()).then_some(settings)
+    BarChange {
+        settings: (settings != held && settings.validate().is_ok()).then_some(settings),
+        mask_file,
+    }
 }
 
 /// What the eye's mask test found, right in the bar: the samples inside it
@@ -319,6 +348,7 @@ fn display_menu(
     sources: &[String],
     significant_digits: usize,
     fold: Fold,
+    mask_file: &mut Option<MaskFile>,
 ) {
     let display = Button::new("Display")
         .menu()
@@ -350,14 +380,19 @@ fn display_menu(
                         rate_select(ui, settings);
                         ui.end_row();
                     }
-                    mask_rows(ui, eye, settings);
+                    mask_rows(ui, eye, settings, mask_file);
                 });
         });
 }
 
 /// The mask: whether it is drawn, its shape and size, where it sits and how
 /// much larger it is tested, a fit to the eye, and its text file.
-fn mask_rows(ui: &mut Ui, eye: &EyeDiagramState, settings: &mut EyeSettings) {
+fn mask_rows(
+    ui: &mut Ui,
+    eye: &EyeDiagramState,
+    settings: &mut EyeSettings,
+    mask_file: &mut Option<MaskFile>,
+) {
     bar_label(ui, "Mask");
     ui.checkbox(&mut settings.show_mask, "Draw and test");
     ui.end_row();
@@ -452,9 +487,30 @@ fn mask_rows(ui: &mut Ui, eye: &EyeDiagramState, settings: &mut EyeSettings) {
         {
             *mask = fitted;
         }
+    });
+    ui.end_row();
+
+    bar_label(ui, "File");
+    ui.horizontal(|ui| {
+        if ui
+            .button("Open mask\u{2026}")
+            .on_hover_text("A custom mask from a text file of vertices")
+            .clicked()
+        {
+            *mask_file = Some(MaskFile::Open);
+            ui.close();
+        }
+        if ui
+            .button("Save mask\u{2026}")
+            .on_hover_text("The mask's vertices, one per line, in a text file")
+            .clicked()
+        {
+            *mask_file = Some(MaskFile::Save);
+            ui.close();
+        }
         if ui
             .button("Copy as text")
-            .on_hover_text("The mask's vertices, one per line, for a mask file")
+            .on_hover_text("The mask's vertices, one per line, as a mask file holds them")
             .clicked()
         {
             ui.ctx().copy_text(mask.to_text(eye.mask_frame().amplitude));

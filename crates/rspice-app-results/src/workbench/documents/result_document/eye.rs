@@ -5,9 +5,36 @@ use super::{
     ResultViewer,
     frame_work::{self, DatasetWalk},
 };
+use crate::io::file_exchange::{self, FileKind};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use egui::Ui;
-use rspice_results_ui::eye_diagram::{bar, view};
+use rspice_results_ui::eye_diagram::bar::{self, MaskFile};
+use rspice_results_ui::eye_diagram::state::{EyeMask, MaskShape};
+use rspice_results_ui::eye_diagram::{EyeSettings, view};
+
+/// A mask file, as the picker offers it: the vertices `EyeMask::to_text`
+/// writes and `EyeMask::from_text` reads.
+const MASK_FILE: FileKind = FileKind {
+    label: "Eye mask",
+    extensions: &["txt"],
+    subject: "The mask file",
+    fallback_name: "eye-mask.txt",
+};
+
+/// A mask file is read whatever its size, to what the browser page can hold.
+fn mask_file_bytes() -> usize {
+    usize::try_from(file_exchange::BROWSER_PAGE_BYTES).unwrap_or(usize::MAX)
+}
+
+/// The exchange a Save mask… press writes through.
+fn mask_save_id() -> egui::Id {
+    egui::Id::new("rspice.results.eye.mask-save")
+}
+
+/// The exchange an Open mask… press reads through.
+fn mask_open_id() -> egui::Id {
+    egui::Id::new("rspice.results.eye.mask-open")
+}
 
 /// Take in the settings kept for the result shown, so its levels, error rate
 /// and mask are the ones the reader left.
@@ -36,19 +63,78 @@ pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         })
         .unwrap_or_default();
     let significant_digits = significant_digits(state.results_reads());
-    let changed = bar::domain_bar(
+    let change = bar::domain_bar(
         ui,
         &state.analysis.eye_diagram_state,
         &sources,
         significant_digits,
     );
-    if let Some(settings) = changed
-        && let Some(owner) = state.model.active_specialized_viewer_cache_provenance()
-    {
-        state.analysis.eye_diagram_state.adopt_settings(&settings);
+    if let Some(settings) = change.settings {
+        keep_settings(state, settings);
+    }
+    if let Some(asked) = change.mask_file {
+        ask_for_mask_file(ui.ctx(), state, asked);
+    }
+    take_mask_files(ui.ctx(), state);
+    true
+}
+
+/// Show `settings` and keep them for the result shown.
+fn keep_settings(state: &mut ResultsParts<'_>, settings: EyeSettings) {
+    state.analysis.eye_diagram_state.adopt_settings(&settings);
+    if let Some(owner) = state.model.active_specialized_viewer_cache_provenance() {
         state.results.set_eye_settings(owner, settings);
     }
-    true
+}
+
+/// Start the mask file exchange the reader asked for: the mask's vertices
+/// written to a file they choose, or a file they choose read as a mask.
+fn ask_for_mask_file(ctx: &egui::Context, state: &mut ResultsParts<'_>, asked: MaskFile) {
+    let started = match asked {
+        MaskFile::Save => {
+            let eye = &state.analysis.eye_diagram_state;
+            let text = eye.settings().mask.to_text(eye.mask_frame().amplitude);
+            file_exchange::save_file(
+                ctx,
+                mask_save_id(),
+                MASK_FILE,
+                MASK_FILE.fallback_name.to_owned(),
+                text.into_bytes(),
+            )
+        }
+        MaskFile::Open => {
+            file_exchange::open_file(ctx, mask_open_id(), MASK_FILE, mask_file_bytes())
+        }
+    };
+    if let Err(refusal) = started {
+        state.prompt(refusal);
+    }
+}
+
+/// Take what a mask file exchange came to. A mask read draws and tests as
+/// the custom mask its vertices outline, where the reader's margin and
+/// offset place it; a file that is not a mask says why and changes nothing.
+fn take_mask_files(ctx: &egui::Context, state: &mut ResultsParts<'_>) {
+    match file_exchange::take_saved(ctx, mask_save_id()) {
+        Some(Ok(Some(saved))) => state.prompt(format!("Saved the mask to {}", saved.name)),
+        Some(Err(error)) => state.prompt(error),
+        Some(Ok(None)) | None => {}
+    }
+    match file_exchange::take_opened(ctx, mask_open_id()) {
+        Some(Ok(Some(opened))) => match EyeMask::from_text(&opened.text) {
+            Ok(read) => {
+                let mut settings = state.analysis.eye_diagram_state.settings().clone();
+                settings.mask.shape = MaskShape::Custom;
+                settings.mask.vertices = read.vertices;
+                settings.show_mask = true;
+                keep_settings(state, settings);
+                state.prompt(format!("Opened the mask in {}", opened.name));
+            }
+            Err(error) => state.prompt(format!("{} is not a mask: {error}", opened.name)),
+        },
+        Some(Err(error)) => state.prompt(error),
+        Some(Ok(None)) | None => {}
+    }
 }
 
 /// What the sheet reads out right in its bar: the mask's verdict.
@@ -182,5 +268,69 @@ mod tests {
             0,
             "the eye rebaked its density texture while the reader moved the view"
         );
+    }
+
+    /// The mask the reader saves is the mask they open again: the file holds
+    /// its vertices, and opening it draws and tests that outline as a custom
+    /// mask, in place of the mask drawn since.
+    #[test]
+    fn a_mask_saved_to_a_file_opens_as_the_same_mask() {
+        use crate::io::file_exchange::{ScriptedChoice, script_next_choice};
+
+        let mut state = ResultsTestHost::default();
+        let mut data = EyeData::new(1.0e-9, 2);
+        for trace in 0..8 {
+            data.add_trace(EyeTrace::new(
+                vec![0.0, 0.5, 1.0, 1.5],
+                vec![0.0, 1.0, 0.0, f64::from(trace) * 0.1],
+            ));
+        }
+        let eye = &mut state.results.analysis.eye_diagram_state;
+        eye.load_data(data);
+        let mut drawn = eye.settings().clone();
+        drawn.mask = EyeMask {
+            shape: MaskShape::Diamond,
+            width_ui: 0.4,
+            height: Some(0.3),
+            ..EyeMask::default()
+        };
+        eye.adopt_settings(&drawn);
+        let amplitude = eye.mask_frame().amplitude;
+        let outline = drawn.mask.outline(amplitude);
+
+        let folder = std::env::temp_dir().join(format!(
+            "rspice-eye-mask-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&folder).expect("a folder for the mask file");
+        let path = folder.join("diamond.txt");
+        let ctx = egui::Context::default();
+        script_next_choice(ScriptedChoice::Chose(path.clone()));
+        ask_for_mask_file(&ctx, &mut state.results_parts(), MaskFile::Save);
+        take_mask_files(&ctx, &mut state.results_parts());
+        let written = std::fs::read_to_string(&path).expect("the mask file is written");
+        assert_eq!(
+            EyeMask::from_text(&written).expect("a mask file").vertices,
+            outline
+        );
+
+        // The reader draws another mask and turns it off, then opens the file.
+        let mut other = drawn.clone();
+        other.mask = EyeMask::default();
+        other.show_mask = false;
+        state
+            .results
+            .analysis
+            .eye_diagram_state
+            .adopt_settings(&other);
+        script_next_choice(ScriptedChoice::Chose(path));
+        ask_for_mask_file(&ctx, &mut state.results_parts(), MaskFile::Open);
+        take_mask_files(&ctx, &mut state.results_parts());
+        let opened = state.results.analysis.eye_diagram_state.settings();
+        assert_eq!(opened.mask.shape, MaskShape::Custom);
+        assert_eq!(opened.mask.outline(amplitude), outline);
+        assert!(opened.show_mask, "an opened mask is drawn and tested");
+        let _ = std::fs::remove_dir_all(folder);
     }
 }
