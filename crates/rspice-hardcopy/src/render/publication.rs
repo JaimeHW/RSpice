@@ -1079,14 +1079,12 @@ pub enum HardcopyRenderError {
         "schematic content crosses the authored drawing sheet; choose Clip to authored drawing sheet or Extend output to include content"
     )]
     SchematicOutsideContentDecisionRequired,
+    #[error("report block {block} {reason}; publication is blocked instead of flattening evidence")]
+    UnsupportedAuthenticatedReportBlock { block: String, reason: &'static str },
     #[error(
-        "report {0} lacks authenticated renderable content; publication is blocked instead of flattening evidence"
+        "report block {0} names a source that is absent from or differs from the authenticated snapshot"
     )]
-    UnsupportedAuthenticatedReportBlock(&'static str),
-    #[error("report block reference is absent from or differs from the authenticated snapshot")]
-    UnauthenticatedReportReference,
-    #[error("report Markdown contains unsupported or unbalanced authored constructs")]
-    UnsupportedReportMarkdown,
+    UnauthenticatedReportReference(String),
     #[error("embedded report figure digest does not match its authenticated artifact")]
     EmbeddedFigureDigestMismatch,
     #[error("embedded report figure is not a supported bounded PNG: {0}")]

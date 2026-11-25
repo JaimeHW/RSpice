@@ -138,10 +138,21 @@ pub fn resolve_report_source(
             sizing: figure.sizing,
         });
     }
+    let report = SemanticReport {
+        pages: pages.to_vec(),
+        authenticated_references,
+        figures,
+        page_size: source.document.publication_profile().page_size,
+    };
+    // The report spans as many pages as its content flows onto.
+    let layout = super::report_layout::lay_out(&report);
     let page_count =
-        i64::try_from(pages.len()).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
-    let height = REPORT_PAGE_HEIGHT_UM
-        .checked_mul(page_count)
+        i64::try_from(layout.pages.len()).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+    let page_width =
+        i64::try_from(layout.width).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+    let height = i64::try_from(layout.height)
+        .ok()
+        .and_then(|page| page.checked_mul(page_count))
         .and_then(|value| {
             REPORT_PAGE_GAP_UM
                 .checked_mul(page_count.saturating_sub(1))
@@ -160,14 +171,10 @@ pub fn resolve_report_source(
         record.snapshot_digest(),
         HardcopyDocumentKind::Report,
         source.scope,
-        HardcopySemanticDocument::Report(SemanticReport {
-            pages: pages.to_vec(),
-            authenticated_references,
-            figures,
-        }),
+        HardcopySemanticDocument::Report(report),
         SemanticBounds::try_new(
             SemanticPoint::new(0, 0),
-            SemanticPoint::new(REPORT_PAGE_WIDTH_UM, height),
+            SemanticPoint::new(page_width, height),
         )?,
     )
 }

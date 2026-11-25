@@ -39,9 +39,11 @@ use tiff::tags::ResolutionUnit;
 use super::sources::{
     HardcopySemanticDocument, ResolvedHardcopyDocument, SCHEMATIC_SHEET_ORIGIN_X_UNITS,
     SCHEMATIC_SHEET_ORIGIN_Y_UNITS, SCHEMATIC_UNIT_UM, SemanticAggregate, SemanticBounds,
-    SemanticPlot, SemanticPoint, SemanticReport, SemanticReportFigure, SemanticResultSummary,
-    SemanticSchematic, SemanticTable,
+    SemanticPlot, SemanticPoint, SemanticReport, SemanticResultSummary, SemanticSchematic,
+    SemanticTable,
 };
+#[cfg(test)]
+use crate::sources::report_layout::format_table_cell;
 use rspice_design::schematic::{
     component::Component,
     documentation_shape::{DocumentationShape, DocumentationShapeGeometry},
@@ -66,7 +68,9 @@ use rspice_hardcopy_contract::{
     ResolvedOrientation, ScaleRatio, SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
 };
 use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyFace, HardcopyPlanId};
-use rspice_results::report_document::{FigureSizing, ReportBlock, ReportBlockKind, TableCell};
+#[cfg(test)]
+use rspice_results::report_document::TableCell;
+use rspice_results::report_document::{ReportBlock, ReportBlockKind};
 use rspice_vocabulary::product::ContentDigest;
 use rspice_vocabulary::product::ObjectRevision;
 
@@ -765,7 +769,20 @@ pub fn scene_from_resolved(
         }
         HardcopySemanticDocument::Plot(plot) => compiler.plot(plot)?,
         HardcopySemanticDocument::ResultSummary(summary) => compiler.result_summary(summary)?,
-        HardcopySemanticDocument::Report(report) => compiler.report(report)?,
+        HardcopySemanticDocument::Report(report) => {
+            // Each page is a section of the plan, printed on a sheet of its own.
+            let pages = source
+                .hardcopy_sections_for_setup(schematic_output)
+                .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
+            compiler.report(
+                report,
+                Some(ReportPageSections {
+                    source_key: source.source_key(),
+                    display_name: source.authority().display_name(),
+                    pages: &pages,
+                }),
+            )?;
+        }
         HardcopySemanticDocument::Aggregate(aggregate) => compiler.aggregate(aggregate)?,
     }
     let primitives = if let Some(sheet_bounds) = clipped_sheet_bounds {
@@ -782,6 +799,13 @@ pub fn scene_from_resolved(
     };
     scene.validate()?;
     Ok(scene)
+}
+
+/// The plan's sections a report's pages are drawn into, one to a page.
+pub(crate) struct ReportPageSections<'a> {
+    source_key: &'a str,
+    display_name: &'a str,
+    pages: &'a [rspice_hardcopy_contract::HardcopyContentSection],
 }
 
 fn scene_from_clipped_aggregate(
@@ -821,7 +845,7 @@ fn scene_from_clipped_aggregate(
             }
             HardcopySemanticDocument::Plot(plot) => compiler.plot(plot)?,
             HardcopySemanticDocument::ResultSummary(summary) => compiler.result_summary(summary)?,
-            HardcopySemanticDocument::Report(report) => compiler.report(report)?,
+            HardcopySemanticDocument::Report(report) => compiler.report(report, None)?,
             HardcopySemanticDocument::Aggregate(_) => {
                 return Err(conversion_error("nested aggregate hardcopy source"));
             }
@@ -1086,85 +1110,8 @@ fn print_color_rgb(color: PrintColor) -> Rgb8 {
     }
 }
 
-fn parse_supported_inline_markdown(
-    value: &str,
-) -> Result<(String, SceneFont), HardcopyRenderError> {
-    let bold_markers = value.matches("**").count();
-    let code_markers = value.matches('`').count();
-    if !bold_markers.is_multiple_of(2)
-        || !code_markers.is_multiple_of(2)
-        || value.contains("~~")
-        || value.contains("__")
-    {
-        return Err(HardcopyRenderError::UnsupportedReportMarkdown);
-    }
-    let font = if code_markers > 0 {
-        SceneFont::Monospace
-    } else if bold_markers > 0 {
-        SceneFont::SansSemibold
-    } else {
-        SceneFont::Sans
-    };
-    Ok((value.replace("**", "").replace('`', ""), font))
-}
-
 fn conversion_error(message: impl Into<String>) -> HardcopyRenderError {
     HardcopyRenderError::SourceConversion(message.into())
-}
-
-/// One report table cell as the page prints it. A number reads as a sheet's
-/// column reads it, at the default significant digits with every digit kept
-/// and an SI prefix on its unit: 1.500 fF, never "0.000000000000 F"; a
-/// decibel or an angle in degrees to the hundredth. A report leaves the
-/// screen, so it does not follow one reader's digits preference.
-fn format_table_cell(cell: &TableCell) -> String {
-    match cell {
-        TableCell::Empty => String::new(),
-        TableCell::Text(value) => value.clone(),
-        TableCell::Number { value, unit } => rspice_results::number_format::fmt_column_reading(
-            *value,
-            unit.as_deref().unwrap_or_default(),
-            usize::from(rspice_results::display_preferences::DisplayedSignificantDigits::DEFAULT),
-        ),
-        TableCell::Integer(value) => value.to_string(),
-        TableCell::Boolean(value) => value.to_string(),
-    }
-}
-
-fn wrap_text(text: &str, maximum_chars: usize) -> Vec<String> {
-    if text.is_empty() {
-        return vec![String::new()];
-    }
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        if word.chars().count() > maximum_chars {
-            if !current.is_empty() {
-                lines.push(std::mem::take(&mut current));
-            }
-            let mut chunk = String::new();
-            for character in word.chars() {
-                chunk.push(character);
-                if chunk.chars().count() == maximum_chars {
-                    lines.push(std::mem::take(&mut chunk));
-                }
-            }
-            current = chunk;
-            continue;
-        }
-        if !current.is_empty() && current.chars().count() + 1 + word.chars().count() > maximum_chars
-        {
-            lines.push(std::mem::take(&mut current));
-        }
-        if !current.is_empty() {
-            current.push(' ');
-        }
-        current.push_str(word);
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    lines
 }
 
 fn circular_arc_points(

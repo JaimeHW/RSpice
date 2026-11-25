@@ -40,7 +40,8 @@ use rspice_hardcopy_contract::{
 };
 use rspice_results::analysis_payload::AnalysisResultPayload;
 use rspice_results::report_document::{
-    FigureSizing, FrozenReportArtifact, ReportBlockId, ReportPage, ReportReferenceMode,
+    FigureSizing, FrozenReportArtifact, ReportBlockId, ReportPage, ReportPublicationPageSize,
+    ReportReferenceMode,
 };
 use rspice_vocabulary::product::{ContentDigest, ObjectRevision};
 // The visualization document's own axis vocabulary, so the printed page and
@@ -437,6 +438,9 @@ pub struct SemanticReport {
     pub authenticated_references: Vec<SemanticReportReference>,
     /// Validated opaque figures indexed by their authored report block.
     pub figures: Vec<SemanticReportFigure>,
+    /// The page the report is published on, which its text flows down.
+    #[serde(default)]
+    pub page_size: ReportPublicationPageSize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -711,6 +715,9 @@ impl ResolvedHardcopyDocument {
         &self,
         setup: rspice_hardcopy_contract::SchematicHardcopySetup,
     ) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
+        if let HardcopySemanticDocument::Report(report) = &self.semantic_document {
+            return self.report_page_sections(report);
+        }
         let HardcopySemanticDocument::Aggregate(aggregate) = &self.semantic_document else {
             return Ok(Vec::new());
         };
@@ -732,6 +739,81 @@ impl ResolvedHardcopyDocument {
                 .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))
             })
             .collect()
+    }
+
+    /// Each page of a report as a section of its own, so every page prints
+    /// on a sheet of its own, whatever the paper and scale.
+    fn report_page_sections(
+        &self,
+        report: &SemanticReport,
+    ) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
+        let (width, height) = super::report_layout::page_size(report.page_size);
+        let gap = super::REPORT_PAGE_GAP_UM.unsigned_abs();
+        let pitch = height + gap;
+        let pages = (self.content_extent.height().micrometres() + gap) / pitch;
+        (0..pages)
+            .map(|index| {
+                let ordinal =
+                    u32::try_from(index).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
+                let digest = canonical_digest(
+                    b"rspice-hardcopy-report-page-v1",
+                    &(self.authority.content_digest(), index),
+                )?;
+                HardcopyContentSection::try_new(
+                    ordinal,
+                    digest,
+                    Length::ZERO,
+                    Length::from_micrometres(index * pitch),
+                    ContentExtent::try_new(
+                        Length::from_micrometres(width),
+                        Length::from_micrometres(height),
+                    )
+                    .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
+                    index != 0,
+                )
+                .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))
+            })
+            .collect()
+    }
+
+    /// The page a report prints on when nothing is saved for it: the paper
+    /// it is published on, at 1:1 and with no margin of the print's own,
+    /// since the report keeps its own margins, and without the header,
+    /// legend and provenance bands, which a report's pages do not carry.
+    /// `None` for every other source.
+    #[must_use]
+    pub fn report_output_setup(&self) -> Option<rspice_hardcopy_contract::HardcopySetup> {
+        use rspice_hardcopy_contract::{
+            Bleed, DecorationSetup, HardcopySetup, Orientation, PageMargins, PaperSize,
+            PhysicalPageSetup, ScaleMode, StandardPaper, Watermark,
+        };
+        let HardcopySemanticDocument::Report(report) = &self.semantic_document else {
+            return None;
+        };
+        let (paper, orientation) = match report.page_size {
+            ReportPublicationPageSize::A4Portrait => (StandardPaper::A4, Orientation::Portrait),
+            ReportPublicationPageSize::UsLetterPortrait => {
+                (StandardPaper::Letter, Orientation::Portrait)
+            }
+            ReportPublicationPageSize::A3Landscape => (StandardPaper::A3, Orientation::Landscape),
+        };
+        let defaults = HardcopySetup::default();
+        HardcopySetup::try_new_with_schematic(
+            PhysicalPageSetup::try_new(
+                PaperSize::Standard(paper),
+                PageMargins::uniform(Length::ZERO),
+                Bleed::None,
+                orientation,
+            )
+            .ok()?,
+            ScaleMode::EngineeringOneToOne,
+            defaults.tiling(),
+            defaults.render().clone(),
+            DecorationSetup::try_new(false, false, false, Watermark::None).ok()?,
+            defaults.schematic(),
+            defaults.print_mapping().clone(),
+        )
+        .ok()
     }
 
     /// Exact physical media for governed authored-sheet output, in the same

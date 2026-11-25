@@ -1130,16 +1130,18 @@ impl HardcopyDialogState {
     }
 }
 
-/// The setup a source carrying an authored drawing sheet starts from when
-/// nothing is saved for it: the sheet as drawn, on its own paper at 1:1, since
-/// its title block already says what it is. Every other source (a selection, a
-/// symbol, a plot, results or a report) has none and starts from the general
-/// default.
+/// The setup a source with pages of its own starts from when nothing is
+/// saved for it: an authored drawing sheet as drawn, on its own paper at 1:1,
+/// since its title block already says what it is, and a report on the paper
+/// it is published on at 1:1, a page to a sheet. Every other source (a
+/// selection, a symbol, a plot or results) has none and starts from the
+/// general default.
 fn sheet_as_drawn(document: &ResolvedHardcopyDocument) -> Option<HardcopySetup> {
     document
         .authored_sheet_output_media()
         .ok()
         .and_then(|media| HardcopySetup::for_authored_sheets(media).ok())
+        .or_else(|| document.report_output_setup())
 }
 
 fn merge_print_mapping(

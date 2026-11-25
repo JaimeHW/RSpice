@@ -8,6 +8,7 @@ mod mapping;
 mod plots;
 mod prepared;
 mod quick_plot;
+pub(crate) mod report_layout;
 mod reports;
 mod result_documents;
 mod result_summary;

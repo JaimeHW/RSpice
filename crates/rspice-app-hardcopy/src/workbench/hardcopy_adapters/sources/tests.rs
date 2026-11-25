@@ -349,10 +349,9 @@ fn report_source_uses_authenticated_current_revision_snapshot() {
         resolved.authority().content_digest(),
         record.snapshot_digest()
     );
-    assert_eq!(
-        resolved.content_extent().height().micrometres(),
-        REPORT_PAGE_HEIGHT_UM as u64
-    );
+    // One page of the A4 a new report is published on.
+    assert_eq!(resolved.content_extent().width().micrometres(), 210_000);
+    assert_eq!(resolved.content_extent().height().micrometres(), 297_000);
 }
 
 #[test]

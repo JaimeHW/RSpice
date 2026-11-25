@@ -93,7 +93,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             }
             HardcopySemanticDocument::Plot(plot) => self.plot(plot),
             HardcopySemanticDocument::ResultSummary(summary) => self.result_summary(summary),
-            HardcopySemanticDocument::Report(report) => self.report(report),
+            HardcopySemanticDocument::Report(report) => self.report(report, None),
             HardcopySemanticDocument::Aggregate(_) => Err(conversion_error(
                 "nested semantic aggregates are not supported",
             )),
@@ -1611,486 +1611,172 @@ impl<'a> SemanticSceneCompiler<'a> {
         Ok(y + 5_000)
     }
 
-    pub(super) fn report(&mut self, report: &SemanticReport) -> Result<(), HardcopyRenderError> {
-        const PAGE_HEIGHT: u64 = 279_400;
+    pub(super) fn report(
+        &mut self,
+        report: &SemanticReport,
+        sections: Option<ReportPageSections<'_>>,
+    ) -> Result<(), HardcopyRenderError> {
+        use crate::sources::report_layout::{Laid, lay_out};
         const PAGE_GAP: u64 = 5_000;
         let stroke = self.mapped_stroke(
             PrintObjectKind::Layer,
             "layer:report-content",
             StrokeStyle::default(),
         );
-        for (page_index, page) in report.pages.iter().enumerate() {
-            let page_top = page_index as u64 * (PAGE_HEIGHT + PAGE_GAP);
-            let page_bottom = page_top + PAGE_HEIGHT;
+        for block in report
+            .pages
+            .iter()
+            .flat_map(|page| page.sections())
+            .flat_map(|section| section.blocks())
+        {
+            authenticate_report_block(report, block)?;
+        }
+        let layout = lay_out(report);
+        if sections
+            .as_ref()
+            .is_some_and(|sections| sections.pages.len() != layout.pages.len())
+        {
+            return Err(HardcopyRenderError::AggregatePaginationMismatch);
+        }
+        for (page_index, page) in layout.pages.iter().enumerate() {
+            let top = page_index as u64 * (layout.height + PAGE_GAP);
+            let primitive_start = self.primitives.len();
+            let at = |x: u64, y: u64| {
+                ScenePoint::new(
+                    Length::from_micrometres(x),
+                    Length::from_micrometres(top + y),
+                )
+            };
             self.primitives.push(ScenePrimitive::Rect {
                 rect: SceneRect::try_new(
                     Length::from_micrometres(0),
-                    Length::from_micrometres(page_top),
-                    Length::from_micrometres(self.extent.width().micrometres()),
-                    Length::from_micrometres(PAGE_HEIGHT),
+                    Length::from_micrometres(top),
+                    Length::from_micrometres(layout.width),
+                    Length::from_micrometres(layout.height),
                 )?,
                 stroke: Some(stroke),
                 fill: None,
             });
-            let mut y = page_top + 16_000;
-            self.add_text(
-                ScenePoint::new(
-                    Length::from_micrometres(16_000),
-                    Length::from_micrometres(y),
-                ),
-                page.title(),
-                SceneFont::SansSemibold,
-                5_000,
-                stroke.color,
-            )?;
-            y += 9_000;
-            for section in page.sections() {
-                self.ensure_report_room(y, 7_000, page_bottom, page.title())?;
-                self.add_text(
-                    ScenePoint::new(
-                        Length::from_micrometres(16_000),
-                        Length::from_micrometres(y),
-                    ),
-                    section.title(),
-                    SceneFont::SansSemibold,
-                    3_800,
-                    stroke.color,
-                )?;
-                y += 7_000;
-                for block in section.blocks() {
-                    if let Some(reference) = block.kind().reference() {
-                        let authenticated = report
-                            .authenticated_references
-                            .iter()
-                            .find(|candidate| candidate.block_id == block.id())
-                            .ok_or(HardcopyRenderError::UnauthenticatedReportReference)?;
-                        if &authenticated.reference != reference {
-                            return Err(HardcopyRenderError::UnauthenticatedReportReference);
-                        }
-                    }
-                    y = self.report_block(
-                        block,
-                        report
-                            .figures
-                            .iter()
-                            .find(|figure| figure.block_id == block.id()),
+            for item in &page.items {
+                match item {
+                    Laid::Text {
+                        x,
                         y,
-                        page_bottom,
-                        stroke,
-                        page.title(),
-                    )?;
+                        size,
+                        role,
+                        text,
+                    } => {
+                        let font = match role {
+                            rspice_fonts::Role::SansSemibold | rspice_fonts::Role::SansMedium => {
+                                SceneFont::SansSemibold
+                            }
+                            rspice_fonts::Role::Mono | rspice_fonts::Role::MonoMedium => {
+                                SceneFont::Monospace
+                            }
+                            rspice_fonts::Role::Sans => SceneFont::Sans,
+                        };
+                        self.add_text(at(*x, *y), text, font, *size, stroke.color)?;
+                    }
+                    Laid::Rule { x, y, width, heavy } => {
+                        self.primitives.push(ScenePrimitive::Line {
+                            from: at(*x, *y),
+                            to: at(x + width, *y),
+                            stroke: StrokeStyle {
+                                width: Length::from_micrometres(if *heavy { 250 } else { 120 }),
+                                ..stroke
+                            },
+                        });
+                    }
+                    Laid::Figure {
+                        figure,
+                        x,
+                        y,
+                        width,
+                        height,
+                    } => {
+                        let figure = &report.figures[*figure];
+                        self.primitives.push(ScenePrimitive::RasterImage {
+                            rect: SceneRect::try_new(
+                                Length::from_micrometres(*x),
+                                Length::from_micrometres(top + y),
+                                Length::from_micrometres(*width),
+                                Length::from_micrometres(*height),
+                            )?,
+                            png: figure.payload.clone(),
+                            content_digest: figure.artifact_digest,
+                            alternative_text: figure.alternative_text.clone(),
+                        });
+                    }
                 }
+            }
+            if let Some(sections) = &sections {
+                let section = sections.pages[page_index];
+                let (x, y) = section.origin();
+                self.aggregate_sections.push(AggregateSection {
+                    ordinal: section.ordinal(),
+                    source_key: sections.source_key.to_owned(),
+                    display_name: sections.display_name.to_owned(),
+                    content_digest: section.content_digest(),
+                    origin: ScenePoint::new(x, y),
+                    extent: section.extent(),
+                    page_break_before: section.page_break_before(),
+                    primitive_start,
+                    primitive_end: self.primitives.len(),
+                });
             }
         }
         self.add_mapping_legend(PrintObjectKind::Layer, "layer:report-content", stroke)?;
         Ok(())
     }
+}
 
-    fn ensure_report_room(
-        &self,
-        y: u64,
-        required: u64,
-        page_bottom: u64,
-        title: &str,
-    ) -> Result<(), HardcopyRenderError> {
-        if y.saturating_add(required) > page_bottom.saturating_sub(12_000) {
-            Err(conversion_error(format!(
-                "authored report page '{title}' overflows its physical page"
-            )))
-        } else {
-            Ok(())
+/// Refuse a report block print cannot reproduce faithfully, naming it: a
+/// reference that is not the one the snapshot authenticated, or a figure
+/// whose payload is not the one its block describes.
+fn authenticate_report_block(
+    report: &SemanticReport,
+    block: &ReportBlock,
+) -> Result<(), HardcopyRenderError> {
+    let block_id = block.id();
+    if let Some(reference) = block.kind().reference() {
+        let authenticated = report
+            .authenticated_references
+            .iter()
+            .find(|candidate| candidate.block_id == block_id);
+        if authenticated.is_none_or(|authenticated| &authenticated.reference != reference) {
+            return Err(HardcopyRenderError::UnauthenticatedReportReference(
+                block_id.to_string(),
+            ));
         }
     }
-
-    fn report_block(
-        &mut self,
-        block: &ReportBlock,
-        figure: Option<&SemanticReportFigure>,
-        mut y: u64,
-        page_bottom: u64,
-        stroke: StrokeStyle,
-        page_title: &str,
-    ) -> Result<u64, HardcopyRenderError> {
-        let block_id = block.id();
-        let mut lines = Vec::<String>::new();
-        match block.kind() {
-            ReportBlockKind::PlotFigure(value) => {
-                let figure =
-                    figure.ok_or(HardcopyRenderError::UnsupportedAuthenticatedReportBlock(
-                        "unresolved plot figure",
-                    ))?;
-                if figure.media_type != "image/png"
-                    || figure.caption != value.caption
-                    || figure.alternative_text != value.alternative_text
-                    || figure.sizing != value.sizing
-                {
-                    return Err(HardcopyRenderError::UnsupportedAuthenticatedReportBlock(
-                        "mismatched plot figure",
-                    ));
-                }
-                let (pixel_width, pixel_height) = png_dimensions(&figure.payload)?;
-                if pixel_width != figure.width_pixels || pixel_height != figure.height_pixels {
-                    return Err(HardcopyRenderError::InvalidEmbeddedFigure(
-                        "authenticated PNG dimensions changed after source resolution".to_owned(),
-                    ));
-                }
-                self.ensure_report_room(y, 5_500, page_bottom, page_title)?;
-                self.add_text(
-                    ScenePoint::new(
-                        Length::from_micrometres(20_000),
-                        Length::from_micrometres(y),
-                    ),
-                    &value.caption,
-                    SceneFont::SansSemibold,
-                    2_900,
-                    stroke.color,
-                )?;
-                y += 5_500;
-                let maximum_width = self
-                    .extent
-                    .width()
-                    .micrometres()
-                    .checked_sub(40_000)
-                    .ok_or_else(|| conversion_error("report figure page is too narrow"))?;
-                let maximum_height = page_bottom.saturating_sub(18_000).saturating_sub(y);
-                let natural_width = u64::from(pixel_width)
-                    .checked_mul(MICROMETRES_PER_INCH)
-                    .ok_or_else(|| conversion_error("report figure width overflow"))?
-                    .div_ceil(96);
-                let natural_height = u64::from(pixel_height)
-                    .checked_mul(MICROMETRES_PER_INCH)
-                    .ok_or_else(|| conversion_error("report figure height overflow"))?
-                    .div_ceil(96);
-                let scale = match value.sizing {
-                    FigureSizing::Natural => 1.0_f64
-                        .min(maximum_width as f64 / natural_width as f64)
-                        .min(maximum_height as f64 / natural_height as f64),
-                    FigureSizing::FitWidth => (maximum_width as f64 / natural_width as f64)
-                        .min(maximum_height as f64 / natural_height as f64),
-                    FigureSizing::FitPage => (maximum_width as f64 / natural_width as f64)
-                        .min(maximum_height as f64 / natural_height as f64)
-                        .min(1.0),
-                };
-                if !scale.is_finite() || scale <= 0.0 {
-                    return Err(conversion_error(format!(
-                        "authenticated plot figure {block_id} cannot fit its authored page"
-                    )));
-                }
-                let width = (natural_width as f64 * scale).floor() as u64;
-                let height = (natural_height as f64 * scale).floor() as u64;
-                self.ensure_report_room(y, height.saturating_add(7_000), page_bottom, page_title)?;
-                self.primitives.push(ScenePrimitive::RasterImage {
-                    rect: SceneRect::try_new(
-                        Length::from_micrometres(20_000),
-                        Length::from_micrometres(y),
-                        Length::from_micrometres(width),
-                        Length::from_micrometres(height),
-                    )?,
-                    png: figure.payload.clone(),
-                    content_digest: figure.artifact_digest,
-                    alternative_text: value.alternative_text.clone(),
-                });
-                y = y.saturating_add(height).saturating_add(4_000);
-                self.add_text(
-                    ScenePoint::new(
-                        Length::from_micrometres(20_000),
-                        Length::from_micrometres(y),
-                    ),
-                    &value.alternative_text,
-                    SceneFont::Sans,
-                    2_200,
-                    stroke.color,
-                )?;
-                return Ok(y + 5_000);
-            }
-            ReportBlockKind::DataTable(value) => {
-                let table = SemanticTable {
-                    title: value.title.clone(),
-                    columns: value
-                        .columns
-                        .iter()
-                        .map(|column| column.heading.clone())
-                        .collect(),
-                    rows: value
-                        .rows
-                        .iter()
-                        .map(|row| row.iter().map(format_table_cell).collect())
-                        .collect(),
-                };
-                let next = self.semantic_table(&table, y, stroke)?;
-                if next > page_bottom.saturating_sub(12_000) {
-                    return Err(conversion_error(format!(
-                        "report table '{}' overflows authored page '{page_title}'",
-                        value.title
-                    )));
-                }
-                return Ok(next);
-            }
-            ReportBlockKind::Datasheet(value) => {
-                let table = SemanticTable {
-                    title: value.title.clone(),
-                    columns: vec!["Field".to_owned(), "Value".to_owned()],
-                    rows: value
-                        .fields
-                        .iter()
-                        .map(|field| {
-                            vec![
-                                field.label.clone(),
-                                format!(
-                                    "{}{}",
-                                    field.value,
-                                    field
-                                        .unit
-                                        .as_deref()
-                                        .map(|unit| format!(" {unit}"))
-                                        .unwrap_or_default()
-                                ),
-                            ]
-                        })
-                        .collect(),
-                };
-                let next = self.semantic_table(&table, y, stroke)?;
-                if next > page_bottom.saturating_sub(12_000) {
-                    return Err(conversion_error(format!(
-                        "report datasheet '{}' overflows authored page '{page_title}'",
-                        value.title
-                    )));
-                }
-                return Ok(next);
-            }
-            ReportBlockKind::Requirements(value) => {
-                let table = SemanticTable {
-                    title: value.title.clone(),
-                    columns: vec![
-                        "Requirement".to_owned(),
-                        "Statement".to_owned(),
-                        "Disposition".to_owned(),
-                        "Evidence".to_owned(),
-                    ],
-                    rows: value
-                        .entries
-                        .iter()
-                        .map(|entry| {
-                            vec![
-                                entry.requirement_id.clone(),
-                                entry.statement.clone(),
-                                format!("{:?}", entry.disposition),
-                                entry.evidence_label.clone().unwrap_or_default(),
-                            ]
-                        })
-                        .collect(),
-                };
-                let next = self.semantic_table(&table, y, stroke)?;
-                if next > page_bottom.saturating_sub(12_000) {
-                    return Err(conversion_error(format!(
-                        "report requirements '{}' overflow authored page '{page_title}'",
-                        value.title
-                    )));
-                }
-                return Ok(next);
-            }
-            ReportBlockKind::Specifications(value) => {
-                let table = SemanticTable {
-                    title: value.title.clone(),
-                    columns: vec![
-                        "Expression".to_owned(),
-                        "Limit".to_owned(),
-                        "Measured".to_owned(),
-                        "Disposition".to_owned(),
-                    ],
-                    rows: value
-                        .entries
-                        .iter()
-                        .map(|entry| {
-                            vec![
-                                entry.expression.clone(),
-                                entry.limit.clone(),
-                                entry.measured.clone().unwrap_or_else(|| "—".to_owned()),
-                                format!("{:?}", entry.disposition),
-                            ]
-                        })
-                        .collect(),
-                };
-                let next = self.semantic_table(&table, y, stroke)?;
-                if next > page_bottom.saturating_sub(12_000) {
-                    return Err(conversion_error(format!(
-                        "report specifications '{}' overflow authored page '{page_title}'",
-                        value.title
-                    )));
-                }
-                return Ok(next);
-            }
-            ReportBlockKind::Prose(value) => {
-                return self.report_markdown(&value.markdown, y, page_bottom, stroke, page_title);
-            }
-            ReportBlockKind::ReviewNote(value) => {
-                lines.push(format!("Review — {} [{:?}]", value.author, value.status));
-                lines.extend(value.message.lines().map(str::to_owned));
-            }
-            ReportBlockKind::Evidence(_) => {
-                return Err(HardcopyRenderError::UnsupportedAuthenticatedReportBlock(
-                    "evidence",
-                ));
-            }
-        }
-        for line in lines {
-            for wrapped in wrap_text(&line, 112) {
-                self.ensure_report_room(y, 4_200, page_bottom, page_title)?;
-                self.add_text(
-                    ScenePoint::new(
-                        Length::from_micrometres(20_000),
-                        Length::from_micrometres(y),
-                    ),
-                    &wrapped,
-                    SceneFont::Sans,
-                    2_500,
-                    stroke.color,
-                )?;
-                y += 4_200;
-            }
-        }
-        Ok(y + 3_000)
+    let ReportBlockKind::PlotFigure(value) = block.kind() else {
+        return Ok(());
+    };
+    let refuse = |reason| HardcopyRenderError::UnsupportedAuthenticatedReportBlock {
+        block: block_id.to_string(),
+        reason,
+    };
+    let figure = report
+        .figures
+        .iter()
+        .find(|figure| figure.block_id == block_id)
+        .ok_or_else(|| refuse("has no resolved figure"))?;
+    if figure.media_type != "image/png"
+        || figure.caption != value.caption
+        || figure.alternative_text != value.alternative_text
+        || figure.sizing != value.sizing
+    {
+        return Err(refuse(
+            "holds a figure that differs from the one it describes",
+        ));
     }
-
-    fn report_markdown(
-        &mut self,
-        markdown: &str,
-        mut y: u64,
-        page_bottom: u64,
-        stroke: StrokeStyle,
-        page_title: &str,
-    ) -> Result<u64, HardcopyRenderError> {
-        let mut in_code_block = false;
-        let mut paragraph = String::new();
-        let flush_paragraph = |this: &mut Self,
-                               paragraph: &mut String,
-                               y: &mut u64|
-         -> Result<(), HardcopyRenderError> {
-            if paragraph.is_empty() {
-                return Ok(());
-            }
-            let (text, font) = parse_supported_inline_markdown(paragraph)?;
-            for wrapped in wrap_text(&text, 112) {
-                this.ensure_report_room(*y, 4_200, page_bottom, page_title)?;
-                this.add_text(
-                    ScenePoint::new(
-                        Length::from_micrometres(20_000),
-                        Length::from_micrometres(*y),
-                    ),
-                    &wrapped,
-                    font,
-                    2_500,
-                    stroke.color,
-                )?;
-                *y += 4_200;
-            }
-            *y += 1_500;
-            paragraph.clear();
-            Ok(())
-        };
-        for raw in markdown.lines() {
-            let line = raw.trim_end();
-            if line.trim() == "```" {
-                flush_paragraph(self, &mut paragraph, &mut y)?;
-                in_code_block = !in_code_block;
-                continue;
-            }
-            if in_code_block {
-                self.ensure_report_room(y, 4_000, page_bottom, page_title)?;
-                self.add_text(
-                    ScenePoint::new(
-                        Length::from_micrometres(22_000),
-                        Length::from_micrometres(y),
-                    ),
-                    if line.is_empty() { " " } else { line },
-                    SceneFont::Monospace,
-                    2_300,
-                    stroke.color,
-                )?;
-                y += 4_000;
-                continue;
-            }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                flush_paragraph(self, &mut paragraph, &mut y)?;
-                continue;
-            }
-            if trimmed.starts_with('>')
-                || trimmed.starts_with("![")
-                || trimmed.contains("](")
-                || trimmed.starts_with('<')
-                || trimmed.matches('|').count() >= 2
-            {
-                return Err(HardcopyRenderError::UnsupportedReportMarkdown);
-            }
-            let heading =
-                ["#### ", "### ", "## ", "# "]
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, prefix)| {
-                        trimmed
-                            .strip_prefix(prefix)
-                            .map(|text| (text, 3_000 + (3 - index as u64) * 350))
-                    });
-            if let Some((text, size)) = heading {
-                flush_paragraph(self, &mut paragraph, &mut y)?;
-                let (text, _) = parse_supported_inline_markdown(text)?;
-                self.ensure_report_room(y, 5_500, page_bottom, page_title)?;
-                self.add_text(
-                    ScenePoint::new(
-                        Length::from_micrometres(20_000),
-                        Length::from_micrometres(y),
-                    ),
-                    &text,
-                    SceneFont::SansSemibold,
-                    size,
-                    stroke.color,
-                )?;
-                y += 5_500;
-                continue;
-            }
-            let unordered = trimmed
-                .strip_prefix("- ")
-                .or_else(|| trimmed.strip_prefix("* "));
-            let ordered = trimmed
-                .find(". ")
-                .filter(|index| *index > 0 && trimmed[..*index].chars().all(|c| c.is_ascii_digit()))
-                .map(|index| (&trimmed[..index + 1], &trimmed[index + 2..]));
-            if unordered.is_some() || ordered.is_some() {
-                flush_paragraph(self, &mut paragraph, &mut y)?;
-                let (prefix, content) = match (unordered, ordered) {
-                    (Some(content), _) => ("•".to_owned(), content),
-                    (_, Some((number, content))) => (number.to_owned(), content),
-                    _ => unreachable!(),
-                };
-                let (content, font) = parse_supported_inline_markdown(content)?;
-                for wrapped in wrap_text(&format!("{prefix} {content}"), 106) {
-                    self.ensure_report_room(y, 4_200, page_bottom, page_title)?;
-                    self.add_text(
-                        ScenePoint::new(
-                            Length::from_micrometres(24_000),
-                            Length::from_micrometres(y),
-                        ),
-                        &wrapped,
-                        font,
-                        2_500,
-                        stroke.color,
-                    )?;
-                    y += 4_200;
-                }
-                continue;
-            }
-            if !paragraph.is_empty() {
-                paragraph.push(' ');
-            }
-            paragraph.push_str(trimmed);
-        }
-        if in_code_block {
-            return Err(HardcopyRenderError::UnsupportedReportMarkdown);
-        }
-        flush_paragraph(self, &mut paragraph, &mut y)?;
-        Ok(y + 3_000)
+    let (pixel_width, pixel_height) = png_dimensions(&figure.payload)?;
+    if pixel_width != figure.width_pixels || pixel_height != figure.height_pixels {
+        return Err(HardcopyRenderError::InvalidEmbeddedFigure(format!(
+            "report block {block_id}: its PNG dimensions changed after source resolution"
+        )));
     }
+    Ok(())
 }
 
 mod plot_grid;
