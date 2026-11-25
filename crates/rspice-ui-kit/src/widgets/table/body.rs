@@ -59,7 +59,9 @@ pub(super) fn whole_width(ui: &Ui, cell: &Cell) -> f32 {
             0.0
         }
     };
-    let mut words = width(cell.text.clone()) + mark(matches!(cell.ink, Ink::Problem(_)));
+    let mut words = width(cell.text.clone())
+        + mark(matches!(cell.ink, Ink::Problem(_)))
+        + super::prefix_slot_room(ui, &cell.text, &font, cell.prefix_slot);
     if cell.icon.is_some() {
         words += LEAD_ICON_SIDE + LEAD_ICON_GAP;
     }
@@ -405,6 +407,7 @@ impl DataTable<'_> {
                         align: Align::Left,
                         color: t.color.text_dim,
                         problem: *problem,
+                        slot: 0.0,
                     },
                 )
                 .is_some_and(|painted| painted.elided);
@@ -485,6 +488,7 @@ impl DataTable<'_> {
                     align: column.align,
                     color,
                     problem,
+                    slot: super::prefix_slot_room(ui, &cell.text, &font, cell.prefix_slot),
                 },
             );
             // A suffix follows whole words in what they leave of the span;
@@ -511,6 +515,7 @@ impl DataTable<'_> {
                             align: Align::Left,
                             color: t.color.text_faint,
                             problem: None,
+                            slot: 0.0,
                         },
                     )
                 });

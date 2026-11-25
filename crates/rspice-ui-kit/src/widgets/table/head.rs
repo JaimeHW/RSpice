@@ -170,6 +170,7 @@ impl DataTable<'_> {
                     align: column.align,
                     color: t.color.text_dim,
                     problem: None,
+                    slot: 0.0,
                 },
             )
             .map(|painted| painted.landed);

@@ -1089,3 +1089,37 @@ fn an_unsaved_cell_carries_the_dot_after_its_words_and_says_so() {
         "{spoken:?}"
     );
 }
+
+/// A column of readings ends every row's digits at one x: a reading printed
+/// without a prefix keeps its prefix's slot blank, one glyph wide, so
+/// `1.144 V` stands under `604.8 mV` digit for digit. The cell's words stay
+/// the reading as printed.
+#[test]
+fn a_quantity_column_ends_its_digits_at_one_x() {
+    let ctx = context();
+    let columns = vec![Column::name("Signal", 120.0), Column::number("A", 120.0)];
+    let readings = ["604.8 mV", "1.144 V", "\u{2212}3.00 dB", "0.5000"];
+    let (_, geometry, _) = frame(&ctx, WIDTH, Vec::new(), |ui| {
+        DataTable::new("readings", &columns, readings.len()).show(ui, |row| {
+            vec![
+                Cell::text(format!("Row {row}")),
+                Cell::quantity(readings[row]),
+            ]
+        })
+    });
+    let rights = geometry.all("table.right.readings.1");
+    assert_eq!(rights.len(), readings.len(), "{rights:?}");
+    let font = crate::theme::mono(crate::tokens::FS_0, crate::theme::FontWeight::Regular);
+    let advance = ctx.fonts_mut(|fonts| fonts.glyph_width(&font, 'm'));
+    let edge = rights[0].right();
+    // The bare unit's reading ends one prefix glyph short of the prefixed
+    // one, so the digits of both end at `edge` less the width of " mV".
+    assert!(
+        (edge - advance - rights[1].right()).abs() < 0.01,
+        "{rights:?}"
+    );
+    // A unit that never takes a prefix, and a bare number, have no slot.
+    assert!((rights[2].right() - edge).abs() < 0.01, "{rights:?}");
+    assert!((rights[3].right() - edge).abs() < 0.01, "{rights:?}");
+    assert_eq!(Cell::quantity("1.144 V").text, "1.144 V");
+}

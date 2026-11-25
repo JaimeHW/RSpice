@@ -356,6 +356,8 @@ pub struct Cell {
     unsaved: bool,
     /// A fill behind the words, for a cell whose colour states a value.
     wash: Option<egui::Color32>,
+    /// The words are a reading whose unit's prefix takes a fixed slot.
+    prefix_slot: bool,
 }
 
 /// Whether a cell's row opens and closes in a tree.
@@ -388,6 +390,7 @@ impl Cell {
             twist: Twist::None,
             unsaved: false,
             wash: None,
+            prefix_slot: false,
         }
     }
 
@@ -399,6 +402,17 @@ impl Cell {
     /// A number in mono.
     pub fn number(text: impl Into<String>) -> Self {
         Self::with(text, true, Ink::Plain)
+    }
+
+    /// A reading with its unit in mono (`604.8 mV`), its unit's prefix in a
+    /// fixed slot: a reading printed without a prefix leaves the slot blank,
+    /// so in a right-aligned column `1.144 V` ends its digits where
+    /// `604.8 mV` ends its own. The words are the reading as printed; the
+    /// slot is room, not a character.
+    pub fn quantity(text: impl Into<String>) -> Self {
+        let mut cell = Self::with(text, true, Ink::Plain);
+        cell.prefix_slot = true;
+        cell
     }
 
     /// Source text in mono, set on its column's edge as words are: a line
@@ -2021,6 +2035,18 @@ struct Words<'a> {
     align: Align,
     color: egui::Color32,
     problem: Option<Problem>,
+    /// Room kept after the words on the right edge: a blank prefix slot.
+    slot: f32,
+}
+
+/// The room a blank prefix slot keeps after a reading set in `font`: one
+/// prefix glyph's advance, or none when `prefix_slot` is off or the reading
+/// fills its slot ([`Cell::quantity`]).
+fn prefix_slot_room(ui: &Ui, text: &str, font: &egui::FontId, prefix_slot: bool) -> f32 {
+    if !prefix_slot || !rspice_results::number_format::leaves_prefix_slot_blank(text) {
+        return 0.0;
+    }
+    ui.fonts_mut(|fonts| fonts.glyph_width(font, 'm'))
 }
 
 /// Where a cell's words landed, and whether they were cut short to fit.
@@ -2045,11 +2071,13 @@ fn paint_words(
         align,
         color,
         problem,
+        slot,
     } = words;
     if text.is_empty() {
         return None;
     }
     let mark_room = if problem.is_some() { MARK_ADVANCE } else { 0.0 };
+    let span = egui::Rangef::new(span.min, (span.max - slot).max(span.min));
     let shown = elide_at_words(ui, text, &font, (span.span() - mark_room).max(0.0));
     let elided = shown != text;
     let galley = ui.painter().layout_no_wrap(shown, font, color);
