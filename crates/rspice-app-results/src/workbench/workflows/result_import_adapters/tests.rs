@@ -1176,3 +1176,216 @@ fn an_ltspice_stepped_rawfile_imports_one_analysis_per_run_named_by_its_log() {
         ]
     );
 }
+
+/// An HSPICE ASCII waveform file: the header's counts and version, then from byte 256 the
+/// column types and names, wrapped at 80 columns as HSPICE writes it, then `values`.
+fn hspice_ascii(columns: &[(u32, &str)], sweep: Option<&str>, values: &str) -> Vec<u8> {
+    let mut header = format!(
+        "{:04}{:04}{:04}0000{:<8}{:<64}",
+        columns.len(),
+        0,
+        usize::from(sweep.is_some()),
+        "9601",
+        "* swept rc"
+    );
+    header.push_str(&" ".repeat(256 - header.len()));
+    for (kind, _) in columns {
+        header.push_str(&format!("{kind:<8}"));
+    }
+    for name in columns.iter().map(|(_, name)| *name).chain(sweep) {
+        header.push_str(&format!("{name:<16}"));
+    }
+    header.push_str("$&%#");
+    let mut bytes = Vec::new();
+    for line in header.as_bytes().chunks(80) {
+        bytes.extend_from_slice(line);
+        bytes.push(b'\n');
+    }
+    bytes.extend_from_slice(values.as_bytes());
+    bytes
+}
+
+fn step_values(
+    member: Option<&rspice_results::provenance::AnalysisResultFamilyMember>,
+) -> Vec<(String, f64)> {
+    let Some(rspice_results::provenance::AnalysisResultFamilyMember::StepPoint {
+        coordinate, ..
+    }) = member
+    else {
+        panic!("{member:?} is no run of a sweep");
+    };
+    coordinate
+        .iter()
+        .map(|point| (point.name.clone(), point.value))
+        .collect()
+}
+
+/// A swept HSPICE transient imports one analysis per sweep value, as one family.
+#[test]
+fn an_hspice_swept_transient_imports_one_analysis_per_sweep_value() {
+    let values = "0.25000E+020.00000E+000.00000E+000.10000E-080.50000E+000.10000E+31\n\
+                  0.85000E+020.00000E+000.00000E+000.10000E-080.40000E+000.10000E+31\n";
+    let bytes = hspice_ascii(&[(1, "TIME"), (1, "v(out")], Some("temp"), values);
+    let parsed = parse_result_dataset("rc.tr0", &bytes).expect("HSPICE transient");
+    assert_eq!(parsed.source_format, ResultImportFormat::Hspice);
+    assert_eq!(parsed.analysis_type, AnalysisType::Transient);
+    assert_eq!(parsed.waveforms[0].data.name, "v(out)");
+    assert_eq!(
+        parsed.waveforms[0].y.read_whole().unwrap().as_ref(),
+        &[0.0, 0.5]
+    );
+    let plots = parsed.plots.as_deref().expect("two runs");
+    assert_eq!(
+        step_values(plots.reviewed_member.as_ref()),
+        [("temp".to_owned(), 25.0)]
+    );
+    assert_eq!(plots.further.len(), 1);
+    assert_eq!(
+        step_values(plots.further[0].family_member.as_ref()),
+        [("temp".to_owned(), 85.0)]
+    );
+
+    let error = parse_result_dataset("rc.tr0", &bytes[..bytes.len() - 12]).expect_err("cut");
+    assert_eq!(
+        error,
+        "hspice import: the file ends inside a table, before the value that closes it"
+    );
+}
+
+/// A `.measure` table imports as a scalar result: one value per measurement and row.
+#[test]
+fn an_hspice_measurement_table_imports_as_a_scalar_result() {
+    let table = "$DATA1 SOURCE='HSPICE' VERSION='P-2019.06-SP1-1 win64' PARAM_COUNT=0\n\
+                 .TITLE '**********carry ripple adder***************'\n \
+                 delay_cout       delay_s8         power_avg        temper          \n \
+                 alter#          \n  \
+                 2.367e-10        4.291e-10       -1.548e-05         25.0000       \n\
+                 1               \n";
+    let parsed = parse_result_dataset("ca3.mt0", table.as_bytes()).expect("measurements");
+    assert_eq!(parsed.source_format, ResultImportFormat::HspiceMeasure);
+    assert_eq!(parsed.coordinate_name, "point");
+    assert_eq!(parsed.sample_count, 1);
+    let values: Vec<_> = parsed
+        .waveforms
+        .iter()
+        .map(|waveform| {
+            (
+                waveform.data.name.as_str(),
+                waveform.y.read_whole().unwrap()[0],
+            )
+        })
+        .collect();
+    assert_eq!(
+        values,
+        [
+            ("delay_cout", 2.367e-10),
+            ("delay_s8", 4.291e-10),
+            ("power_avg", -1.548e-05),
+            ("temper", 25.0),
+            ("alter#", 1.0),
+        ]
+    );
+}
+
+/// A stepped `.qraw` imports one analysis per run, named by its parameter columns.
+#[test]
+fn a_qspice_stepped_qraw_imports_one_analysis_per_run_named_by_its_parameters() {
+    let source = "Title: * step\nPlotname: Transient Analysis\nFlags: real stepped\n\
+                  No. Variables: 3\nNo. Points: 4                    \n\
+                  Command: QSPICE64, Build Sep 24 2023 18:58:57\n.param temp=27\nVariables:\n\
+                  \t0\tTime\ttime\n\t1\tV(out)\tvoltage\n\t2\tVIN\tparameter\nValues:\n\
+                  0\t\t0.0\n\t0.0\n\t1.0\n1\t\t1.0e-3\n\t0.5\n\t1.0\n\
+                  2\t\t0.0\n\t0.0\n\t10.0\n3\t\t1.0e-3\n\t5.0\n\t10.0\n";
+    let parsed = parse_result_dataset("TRAN - STEP.qraw", source.as_bytes()).expect("QSPICE");
+    assert_eq!(parsed.source_format, ResultImportFormat::QspiceRaw);
+    let names: Vec<_> = parsed
+        .waveforms
+        .iter()
+        .map(|waveform| waveform.data.name.as_str())
+        .collect();
+    assert_eq!(names, ["V(out)"]);
+    let plots = parsed.plots.as_deref().expect("two runs");
+    assert_eq!(
+        step_values(plots.reviewed_member.as_ref()),
+        [("VIN".to_owned(), 1.0)]
+    );
+    assert_eq!(
+        step_values(plots.further[0].family_member.as_ref()),
+        [("VIN".to_owned(), 10.0)]
+    );
+}
+
+/// A log that names fewer runs than the rawfile holds cannot name them; the review says so.
+#[test]
+fn a_log_that_disagrees_with_the_rawfile_says_the_runs_could_not_be_named() {
+    let log: Vec<u8> = "LTspice 17.2.4 for MacOS\n.step r=1000\n.step r=2000\nTotal elapsed time: 0.005 seconds.\n"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let parsed = parse_spice_raw(
+        &ltspice_fixture("rc_step.raw"),
+        Some(&log),
+        ResultImportFormat::SpiceRaw,
+    )
+    .expect("the runs import, numbered");
+    assert_eq!(
+        parsed.notes,
+        [
+            "The log beside the rawfile names 2 runs but the rawfile holds 3, so the runs' step \
+          values could not be named and the runs are numbered instead."
+        ]
+    );
+}
+
+/// The browser reads the one file the reader picks, so a stepped rawfile arrives without its
+/// log: the review says its runs are numbered, and the log the reader then chooses names them.
+#[test]
+fn a_stepped_rawfile_read_without_its_log_names_its_runs_from_the_log_chosen_after() {
+    use crate::workbench::documents::result_document::test_host::ResultsTestHost;
+
+    let mut state = ResultsTestHost::default();
+    state.platform.project_lifecycle.authority.open_session();
+    stage_imported_result_dataset(
+        &mut state.results_parts(),
+        "rc_step.raw",
+        &ltspice_fixture("rc_step.raw"),
+    )
+    .unwrap();
+    assert_eq!(state.results.result_import.notes, [UNNAMED_RUNS_NOTE]);
+    assert_eq!(unnamed_result_import_runs(&state.results.result_import), 3);
+
+    let two_runs: Vec<u8> = "LTspice 17.2.4\n.step r=1000\n.step r=2000\n"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    assert_eq!(
+        name_result_import_runs(&mut state.results.result_import, &two_runs),
+        Err("The log names 2 runs but the rawfile holds 3, so it cannot name them.".to_owned())
+    );
+
+    name_result_import_runs(
+        &mut state.results.result_import,
+        &ltspice_fixture("rc_step.log"),
+    )
+    .unwrap();
+    assert!(state.results.result_import.notes.is_empty());
+    commit_result_import_draft(&mut state.results_parts()).unwrap();
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("the import is shown");
+    let labels: Vec<_> = run
+        .analyses
+        .iter()
+        .map(|analysis| analysis.label.as_str())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "Imported \u{b7} Transient Analysis \u{b7} r = 1000",
+            "Imported \u{b7} Transient Analysis \u{b7} r = 2000",
+            "Imported \u{b7} Transient Analysis \u{b7} r = 4000",
+        ]
+    );
+}

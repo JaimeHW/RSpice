@@ -22,6 +22,7 @@ use rspice_formats::result_import::identify_result_import_format;
 use rspice_formats::spice_raw::streamed_import::{
     RawImportPolicy, RawImported, imported_analysis_type,
 };
+use rspice_results::provenance::AnalysisResultFamilyMember;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{io::Read as _, path::Path};
@@ -56,6 +57,67 @@ pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
         "npz",
         "mat",
         "raw",
+        "qraw",
+        "tr0",
+        "tr1",
+        "tr2",
+        "tr3",
+        "tr4",
+        "tr5",
+        "tr6",
+        "tr7",
+        "tr8",
+        "tr9",
+        "ac0",
+        "ac1",
+        "ac2",
+        "ac3",
+        "ac4",
+        "ac5",
+        "ac6",
+        "ac7",
+        "ac8",
+        "ac9",
+        "sw0",
+        "sw1",
+        "sw2",
+        "sw3",
+        "sw4",
+        "sw5",
+        "sw6",
+        "sw7",
+        "sw8",
+        "sw9",
+        "mt0",
+        "mt1",
+        "mt2",
+        "mt3",
+        "mt4",
+        "mt5",
+        "mt6",
+        "mt7",
+        "mt8",
+        "mt9",
+        "ma0",
+        "ma1",
+        "ma2",
+        "ma3",
+        "ma4",
+        "ma5",
+        "ma6",
+        "ma7",
+        "ma8",
+        "ma9",
+        "ms0",
+        "ms1",
+        "ms2",
+        "ms3",
+        "ms4",
+        "ms5",
+        "ms6",
+        "ms7",
+        "ms8",
+        "ms9",
         "psfascii",
         "vcd",
         "fst",
@@ -513,6 +575,112 @@ fn stage_imported_result_dataset_beside(
     }
 }
 
+/// What the review says of a stepped rawfile's runs when no log named them.
+const UNNAMED_RUNS_NOTE: &str = "No log names the runs of this .step sweep, so they are \
+     numbered. Choose the log LTspice wrote beside the rawfile to name each run by its values.";
+
+/// The runs of a stepped rawfile the draft numbers because no log named them.
+fn unnamed_result_import_runs(draft: &ResultImportDialogState) -> usize {
+    let Some(plots) = draft.plots.as_deref() else {
+        return 0;
+    };
+    std::iter::once(plots.reviewed_member.as_ref())
+        .chain(plots.further.iter().map(|plot| plot.family_member.as_ref()))
+        .filter(|member| {
+            matches!(
+                member,
+                Some(AnalysisResultFamilyMember::StepPoint { coordinate, .. })
+                    if coordinate.is_empty()
+            )
+        })
+        .count()
+}
+
+/// Name the draft's runs from the log LTspice wrote beside the rawfile: each run takes the
+/// values its `.step` line in the log assigns, and its title says them. A log that names a
+/// different number of runs names none, and says why.
+pub(crate) fn name_result_import_runs(
+    draft: &mut ResultImportDialogState,
+    log: &[u8],
+) -> Result<(), String> {
+    let runs = unnamed_result_import_runs(draft);
+    let Some(plots) = draft.plots.as_deref().filter(|_| runs > 0) else {
+        return Err("The import holds no numbered runs for a log to name.".to_owned());
+    };
+    let logged = rspice_core::io::ltspice_raw::ltspice_log_step_values(log);
+    if logged.len() != runs {
+        return Err(format!(
+            "The log names {} {} but the rawfile holds {runs}, so it cannot name them.",
+            logged.len(),
+            if logged.len() == 1 { "run" } else { "runs" }
+        ));
+    }
+    let mut plots = plots.clone();
+    let name = |title: &mut String, member: &mut Option<AnalysisResultFamilyMember>| {
+        let Some(AnalysisResultFamilyMember::StepPoint { index, coordinate }) = member.as_mut()
+        else {
+            return;
+        };
+        let Some(values) = logged.get(*index) else {
+            return;
+        };
+        let numbered = AnalysisResultFamilyMember::StepPoint {
+            index: *index,
+            coordinate: Vec::new(),
+        };
+        let base = title
+            .strip_suffix(&format!(" \u{00b7} {}", numbered.label()))
+            .unwrap_or(title)
+            .to_owned();
+        *coordinate = values
+            .iter()
+            .map(
+                |(name, value)| rspice_results::provenance::AnalysisResultStepCoordinate {
+                    name: name.clone(),
+                    value: *value,
+                },
+            )
+            .collect();
+        if let Some(named) = member.as_ref() {
+            *title = named.titled(&base);
+        }
+    };
+    name(&mut plots.reviewed, &mut plots.reviewed_member);
+    for plot in &mut plots.further {
+        name(&mut plot.name, &mut plot.family_member);
+    }
+    draft.plots = Some(Arc::new(plots));
+    draft.notes.retain(|note| note != UNNAMED_RUNS_NOTE);
+    draft.validation_error = None;
+    Ok(())
+}
+
+/// Ask for the log that names the draft's runs and name them from it. The desktop reads the
+/// file at once; the browser's picker answers later, and the dialog applies the log on the
+/// frame it arrives.
+fn choose_result_import_log(draft: &mut ResultImportDialogState) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("LTspice log", &["log"])
+            .set_title("Choose the log of the stepped run")
+            .pick_file()
+        else {
+            return;
+        };
+        let named = std::fs::read(&path)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))
+            .and_then(|log| name_result_import_runs(draft, &log));
+        if let Err(error) = named {
+            draft.validation_error = Some(error);
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    if let Err(error) = start_browser_log_pick() {
+        draft.validation_error = Some(error);
+    }
+}
+
 /// The dialog, open on the review of a staged source.
 fn open_review_draft(state: &mut ResultsParts<'_>, staged: StagedResultImport) {
     let StagedResultImport {
@@ -957,6 +1125,9 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
     let mut go_back = false;
     let mut advance = false;
     let mut commit = false;
+    let mut choose_log = false;
+    #[cfg(target_arch = "wasm32")]
+    apply_browser_result_import_log(&mut draft);
     let tokens = Tokens::get(ctx);
     let (max_window_size, body_height) = result_import_dialog_geometry(ctx.content_rect().size());
     let max_window_width = max_window_size.x;
@@ -993,9 +1164,13 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
                     ui.separator();
 
                     match draft.stage {
-                        ResultImportStage::Detect => result_import_detect_page(ui, &draft),
+                        ResultImportStage::Detect => {
+                            choose_log = result_import_detect_page(ui, &draft);
+                        }
                         ResultImportStage::Map => result_import_map_page(ui, &mut draft),
-                        ResultImportStage::Validate => result_import_validate_page(ui, &draft),
+                        ResultImportStage::Validate => {
+                            choose_log = result_import_validate_page(ui, &draft);
+                        }
                     }
 
                     ui.add_space(8.0);
@@ -1049,6 +1224,9 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
         draft.validation_error = parsed_result_from_draft(&draft).err();
     }
 
+    if choose_log {
+        choose_result_import_log(&mut draft);
+    }
     *state.result_import = draft;
     if let Some(Err(error)) = commit.then(|| start_result_import_commit(state)) {
         state.result_import.open = true;
@@ -1206,7 +1384,7 @@ fn result_import_stage_header(ui: &mut egui::Ui, active: ResultImportStage) {
     });
 }
 
-fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
+fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
     ui.heading("Detected source");
     egui::Grid::new("rspice.result-import.detected")
         .num_columns(2)
@@ -1218,10 +1396,10 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
                 result_import_summary_row(
                     ui,
                     "Delimiter",
-                    if draft.delimiter == b'\t' {
-                        "Tab"
-                    } else {
-                        "Comma"
+                    match draft.delimiter {
+                        b'\t' => "Tab",
+                        b';' => "Semicolon",
+                        _ => "Comma",
                     },
                 );
             }
@@ -1241,9 +1419,25 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
             result_import_plot_rows(ui, draft);
         });
     ui.add_space(12.0);
+    let choose_log = result_import_notes(ui, draft);
     ui.label(
         "No run or analysis has been created. Continue to confirm the engineering domain, coordinate, and included signals.",
     );
+    choose_log
+}
+
+/// What the reader should know of how the source was read, and, when a stepped rawfile's runs
+/// are numbered for want of a log, the button that asks for it. True when it was pressed.
+fn result_import_notes(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
+    for note in &draft.notes {
+        ui.colored_label(Tokens::get(ui.ctx()).color.warn, note);
+    }
+    let choose_log =
+        unnamed_result_import_runs(draft) > 0 && ui.button("Choose log\u{2026}").clicked();
+    if !draft.notes.is_empty() {
+        ui.add_space(8.0);
+    }
+    choose_log
 }
 
 fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState) {
@@ -1341,7 +1535,7 @@ fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState
     draft.validation_error = parsed_result_from_draft(draft).err();
 }
 
-fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
+fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
     ui.heading("Validate import");
     let selected = draft
         .selected_signals
@@ -1367,12 +1561,7 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
             result_import_summary_row(ui, "Saved as", "Read-only · imported, not from a run");
         });
     ui.add_space(12.0);
-    for note in &draft.notes {
-        ui.colored_label(Tokens::get(ui.ctx()).color.warn, note);
-    }
-    if !draft.notes.is_empty() {
-        ui.add_space(8.0);
-    }
+    let choose_log = result_import_notes(ui, draft);
     match parsed_result_from_draft(draft) {
         Ok(_) => {
             let message = match draft.plots.as_deref().filter(|plots| !plots.further.is_empty()) {
@@ -1391,10 +1580,9 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
     }
     ui.add_space(10.0);
     result_import_preview(ui, draft);
+    choose_log
 }
 
-/// The rows that say which analysis of a multi-analysis source is reviewed
-/// and what else the import brings in beside it.
 fn result_import_plot_rows(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
     let Some(plots) = draft.plots.as_deref() else {
         return;
@@ -1548,6 +1736,9 @@ fn parse_result_dataset_beside(
         }
         ResultImportFormat::MatlabV73 => adapters::parse_matlab_v73(bytes, format),
         ResultImportFormat::SpiceRaw => adapters::parse_spice_raw(bytes, companion_log, format),
+        ResultImportFormat::QspiceRaw => adapters::parse_qspice_raw(bytes, format),
+        ResultImportFormat::Hspice => adapters::parse_hspice(bytes, format),
+        ResultImportFormat::HspiceMeasure => adapters::parse_hspice_measure(bytes, format),
         ResultImportFormat::PsfAscii => adapters::parse_psf_ascii(bytes, format),
         ResultImportFormat::Vcd => adapters::parse_vcd(bytes, format),
         ResultImportFormat::Fst => adapters::parse_fst(bytes, format),
@@ -1710,6 +1901,57 @@ fn start_browser_result_dataset_import() -> Result<(), String> {
         },
     );
     Ok(())
+}
+
+/// The log the browser's picker delivered for the draft's runs, until the dialog applies it.
+#[cfg(target_arch = "wasm32")]
+type BrowserLogCompletion = (
+    crate::workbench::browser::file_import::TextImportToken,
+    Result<Option<crate::workbench::browser::file_import::PickedTextFile>, String>,
+);
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static BROWSER_RESULT_IMPORT_LOG: std::cell::RefCell<Option<BrowserLogCompletion>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn start_browser_log_pick() -> Result<(), String> {
+    use crate::workbench::browser::file_import;
+    let token =
+        file_import::try_begin_text_import(file_import::BrowserTextImportKind::ResultDataset)?;
+    file_import::pick_text_file("LTspice log", &["log"], move |result| {
+        if file_import::text_import_is_current(token) {
+            BROWSER_RESULT_IMPORT_LOG.with(|slot| *slot.borrow_mut() = Some((token, result)));
+        }
+    });
+    Ok(())
+}
+
+/// Name the draft's runs from the log the browser's picker delivered, if it has.
+#[cfg(target_arch = "wasm32")]
+fn apply_browser_result_import_log(draft: &mut ResultImportDialogState) {
+    let Some((token, result)) = BROWSER_RESULT_IMPORT_LOG.with(|slot| slot.borrow_mut().take())
+    else {
+        return;
+    };
+    if !crate::workbench::browser::file_import::finish_text_import(token) {
+        return;
+    }
+    let named = match result {
+        Ok(Some(file)) => name_result_import_runs(
+            draft,
+            file.original_bytes
+                .as_deref()
+                .unwrap_or(file.contents.as_bytes()),
+        ),
+        Ok(None) => Ok(()),
+        Err(error) => Err(error),
+    };
+    if let Err(error) = named {
+        draft.validation_error = Some(error);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1972,6 +2214,9 @@ mod tests {
                 "matlab-v5",
                 "matlab-v7.3",
                 "spice-raw",
+                "qspice-raw",
+                "hspice",
+                "hspice-measure",
                 "psf-ascii",
                 "vcd",
                 "fst",
@@ -1998,6 +2243,13 @@ mod tests {
             "npz",
             "mat",
             "raw",
+            "qraw",
+            "tr0",
+            "ac1",
+            "sw9",
+            "mt0",
+            "ma0",
+            "ms0",
             "psfascii",
             "vcd",
             "fst",

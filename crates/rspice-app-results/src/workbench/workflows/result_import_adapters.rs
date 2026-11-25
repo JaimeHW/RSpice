@@ -295,12 +295,105 @@ pub(super) fn parse_spice_raw(
     format: ResultImportFormat,
 ) -> Result<ParsedResultDataset, String> {
     let _source = super::ReadingSource::of(bytes.len());
+    let decoded =
+        rspice_formats::spice_raw::decode_spice_raw_plots_with_log(bytes, log, raw_limits())
+            .map_err(|error| adapter_error(format, error))?;
+    let runs = decoded.iter().filter(|plot| plot.step.is_some()).count();
+    let mut parsed = assemble_plots(format, decoded)?;
+    if runs > 0 {
+        match log {
+            Some(log) => {
+                let named = rspice_core::io::ltspice_raw::ltspice_log_step_values(log).len();
+                if named != runs {
+                    parsed.notes.push(format!(
+                        "The log beside the rawfile names {named} {} but the rawfile holds \
+                         {runs}, so the runs' step values could not be named and the runs are \
+                         numbered instead.",
+                        if named == 1 { "run" } else { "runs" }
+                    ));
+                }
+            }
+            None => parsed.notes.push(UNNAMED_RUNS_NOTE.to_owned()),
+        }
+    }
+    Ok(parsed)
+}
+
+fn raw_limits() -> rspice_core::ResourceLimits {
     let mut limits = rspice_core::ResourceLimits::default();
     limits.max_external_data_bytes = usize::MAX;
     limits.max_external_data_values = source_capacity();
     limits.max_result_values = source_capacity();
-    let decoded = rspice_formats::spice_raw::decode_spice_raw_plots_with_log(bytes, log, limits)
+    limits
+}
+
+// -------------------------------------------------------------------------
+// QSPICE .qraw
+
+pub(super) fn parse_qspice_raw(
+    bytes: &[u8],
+    format: ResultImportFormat,
+) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
+    let decoded = rspice_formats::spice_raw::qspice::decode_qspice_raw_plots(bytes, raw_limits())
         .map_err(|error| adapter_error(format, error))?;
+    assemble_plots(format, decoded)
+}
+
+// -------------------------------------------------------------------------
+// HSPICE
+
+pub(super) fn parse_hspice(
+    bytes: &[u8],
+    format: ResultImportFormat,
+) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
+    let decoded = rspice_formats::hspice::decode_hspice(bytes)
+        .map_err(|error| adapter_error(format, error))?;
+    let swept = decoded.tables.len() > 1 || decoded.tables[0].sweep.is_some();
+    let plots = decoded
+        .tables
+        .into_iter()
+        .enumerate()
+        .map(|(index, table)| rspice_formats::spice_raw::DecodedRawPlot {
+            plot_name: match table.dataset.domain {
+                rspice_formats::WaveformDomain::Transient => "Transient Analysis",
+                rspice_formats::WaveformDomain::Ac => "AC Analysis",
+                rspice_formats::WaveformDomain::DcSweep => "DC Sweep",
+            }
+            .to_owned(),
+            scalar: false,
+            dataset: table.dataset,
+            events: None,
+            step: swept.then(|| rspice_formats::spice_raw::RawStep {
+                index,
+                coordinate: table.sweep.into_iter().collect(),
+            }),
+        })
+        .collect();
+    assemble_plots(format, plots)
+}
+
+/// A measurement table, one value per measurement and row: a scalar result over its rows, as
+/// a rawfile's operating point is.
+pub(super) fn parse_hspice_measure(
+    bytes: &[u8],
+    format: ResultImportFormat,
+) -> Result<ParsedResultDataset, String> {
+    let _source = super::ReadingSource::of(bytes.len());
+    let decoded = rspice_formats::hspice::decode_hspice_measure(bytes)
+        .map_err(|error| adapter_error(format, error))?;
+    finish_numeric_dataset(format, decoded.dataset)
+}
+
+/// The plots a simulator's file holds, as one import: the reader reviews the first one drawn
+/// over a coordinate (an operating point is a scalar result, not the waveform the file was
+/// written for) and the rest come in beside it. Each run of a stepped or swept plot is its own
+/// analysis, titled by its run, and the runs of the file draw as one family.
+fn assemble_plots(
+    format: ResultImportFormat,
+    decoded: Vec<rspice_formats::spice_raw::DecodedRawPlot>,
+) -> Result<ParsedResultDataset, String> {
     // A rawfile holds one plot per analysis. The reader reviews the first one
     // drawn over a coordinate (an operating point is a scalar result, not the
     // waveform the file was written for) and the rest come in beside it.
@@ -377,7 +470,7 @@ pub(super) fn parse_spice_raw(
         }
     }
     let (reviewed_name, reviewed_member, mut parsed) =
-        reviewed_parsed.ok_or_else(|| adapter_error(format, "rawfile contains no variables"))?;
+        reviewed_parsed.ok_or_else(|| adapter_error(format, "the file holds no variables"))?;
     if several {
         parsed.plots = Some(Arc::new(ResultImportPlots {
             reviewed: reviewed_name,

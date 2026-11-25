@@ -9,6 +9,7 @@ pub mod digital;
 pub mod fst;
 #[cfg(feature = "hdf5")]
 pub mod hdf5;
+pub mod hspice;
 pub mod matlab;
 #[cfg(feature = "monte-carlo-checkpoint")]
 pub mod monte_carlo_checkpoint;

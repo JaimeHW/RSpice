@@ -102,6 +102,22 @@ pub fn identify_result_import_format(
             ResultImportFormat::MatlabV5
         }),
         Some("raw") => Some(ResultImportFormat::SpiceRaw),
+        Some("qraw") => Some(ResultImportFormat::QspiceRaw),
+        // HSPICE numbers its outputs by `.alter`: `deck.tr0`, `deck.tr1` and on.
+        Some(extension)
+            if ["tr", "ac", "sw"]
+                .iter()
+                .any(|kind| numbered(extension, kind)) =>
+        {
+            Some(ResultImportFormat::Hspice)
+        }
+        Some(extension)
+            if ["mt", "ma", "ms"]
+                .iter()
+                .any(|kind| numbered(extension, kind)) =>
+        {
+            Some(ResultImportFormat::HspiceMeasure)
+        }
         Some("psfascii") => Some(ResultImportFormat::PsfAscii),
         Some("vcd") => Some(ResultImportFormat::Vcd),
         Some("fst") => Some(ResultImportFormat::Fst),
@@ -113,6 +129,8 @@ pub fn identify_result_import_format(
         && !matches!(
             (extension_format, signature_format),
             (ResultImportFormat::MatlabV73, ResultImportFormat::Hdf5)
+                // QSPICE writes its ASCII `.qraw` with a rawfile's header.
+                | (ResultImportFormat::QspiceRaw, ResultImportFormat::SpiceRaw)
         )
     {
         return Err(ResultFormatError::Ambiguous {
@@ -173,6 +191,13 @@ fn strong_result_format_signature(bytes: &[u8]) -> Option<ResultImportFormat> {
             None
         }
     }
+}
+
+/// `extension` is `kind` followed by a number, as `tr0` or `mt12`.
+fn numbered(extension: &str, kind: &str) -> bool {
+    extension.strip_prefix(kind).is_some_and(|number| {
+        !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+    })
 }
 
 fn text_looks_touchstone_v2(bytes: &[u8]) -> bool {

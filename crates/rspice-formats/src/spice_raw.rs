@@ -4,6 +4,7 @@
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal};
 use rspice_core::io::RawParseError;
 
+pub mod qspice;
 #[cfg(feature = "result-waveform")]
 pub mod result;
 pub mod stream;

@@ -39,6 +39,12 @@ pub enum ResultImportFormat {
     MatlabV73,
     #[serde(rename = "spice-raw")]
     SpiceRaw,
+    #[serde(rename = "qspice-raw")]
+    QspiceRaw,
+    #[serde(rename = "hspice")]
+    Hspice,
+    #[serde(rename = "hspice-measure")]
+    HspiceMeasure,
     #[serde(rename = "psf-ascii")]
     PsfAscii,
     #[serde(rename = "vcd")]
@@ -48,7 +54,7 @@ pub enum ResultImportFormat {
 }
 
 impl ResultImportFormat {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 21] = [
         Self::RSpiceResultBundle,
         Self::RSpiceDatasetBundle,
         Self::CsvRfc4180,
@@ -64,6 +70,9 @@ impl ResultImportFormat {
         Self::MatlabV5,
         Self::MatlabV73,
         Self::SpiceRaw,
+        Self::QspiceRaw,
+        Self::Hspice,
+        Self::HspiceMeasure,
         Self::PsfAscii,
         Self::Vcd,
         Self::Fst,
@@ -86,6 +95,9 @@ impl ResultImportFormat {
             Self::MatlabV5 => "matlab-v5",
             Self::MatlabV73 => "matlab-v7.3",
             Self::SpiceRaw => "spice-raw",
+            Self::QspiceRaw => "qspice-raw",
+            Self::Hspice => "hspice",
+            Self::HspiceMeasure => "hspice-measure",
             Self::PsfAscii => "psf-ascii",
             Self::Vcd => "vcd",
             Self::Fst => "fst",
