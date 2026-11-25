@@ -1608,7 +1608,10 @@ impl<'a> SemanticSceneCompiler<'a> {
                             fill: None,
                         });
                         let (x, anchor) = if cell.right {
-                            (cell.x + cell.width.saturating_sub(pad), TextAnchor::End)
+                            (
+                                cell.x + cell.width.saturating_sub(pad + cell.slot),
+                                TextAnchor::End,
+                            )
                         } else {
                             (cell.x + pad, TextAnchor::Start)
                         };

@@ -7,6 +7,7 @@ use super::super::report_layout::set_width;
 use super::super::{PLOT_HEIGHT_UM, PLOT_WIDTH_UM, REPORT_PAGE_GAP_UM};
 use crate::sources::{SemanticResultSummary, SemanticTable};
 use rspice_fonts::Role;
+use rspice_results::number_format::leaves_prefix_slot_blank;
 
 /// A summary page is the landscape page a plot prints on: a summary prints
 /// on the same paper, so it is laid out to fill it.
@@ -33,6 +34,9 @@ pub(crate) struct LaidCell {
     pub text: String,
     /// Set against the right of its box, as the sheet sets a quantity.
     pub right: bool,
+    /// Room kept blank after the words, as the sheet keeps a blank prefix
+    /// slot, so `1.000 V` ends its digits where `707.1 mV` does.
+    pub slot: u64,
 }
 
 /// One thing a summary page shows, at its height down the stacked pages.
@@ -125,6 +129,18 @@ impl Flow {
     fn table(&mut self, table: &SemanticTable) {
         let columns = table.columns.len().max(1);
         let available = SUMMARY_PAGE_WIDTH_UM - 2 * SUMMARY_MARGIN_UM;
+        let right = (0..columns)
+            .map(|column| reads_as_quantity(table, column))
+            .collect::<Vec<_>>();
+        // One prefix glyph's room after a reading that prints no prefix in a
+        // quantity column, as the sheet keeps it.
+        let slot = |column: usize, text: &str, size: u64| {
+            if right[column] && leaves_prefix_slot_blank(text) {
+                set_width(Role::Mono, "m", size)
+            } else {
+                0
+            }
+        };
         let natural = (0..columns)
             .map(|column| {
                 let header = table.columns.get(column).map_or(0, |heading| {
@@ -134,7 +150,7 @@ impl Flow {
                     .rows
                     .iter()
                     .filter_map(|row| row.get(column))
-                    .map(|cell| set_width(Role::Mono, cell, CELL_UM))
+                    .map(|cell| set_width(Role::Mono, cell, CELL_UM) + slot(column, cell, CELL_UM))
                     .max()
                     .unwrap_or(0);
                 header.max(cells) + 2 * PAD_UM
@@ -161,19 +177,23 @@ impl Flow {
             scaled(CELL_UM),
             scaled(PAD_UM),
         );
-        let right = (0..columns)
-            .map(|column| reads_as_quantity(table, column))
-            .collect::<Vec<_>>();
-        let lay = |texts: &[String]| {
+        // A header names its column; only a value keeps a prefix slot.
+        let lay = |texts: &[String], header: bool| {
             let mut x = SUMMARY_MARGIN_UM;
             widths
                 .iter()
                 .enumerate()
                 .map(|(column, width)| {
+                    let text = texts.get(column).cloned().unwrap_or_default();
                     let cell = LaidCell {
                         x,
                         width: *width,
-                        text: texts.get(column).cloned().unwrap_or_default(),
+                        slot: if header {
+                            0
+                        } else {
+                            slot(column, &text, cell_size)
+                        },
+                        text,
                         right: right[column],
                     };
                     x += width;
@@ -181,7 +201,7 @@ impl Flow {
                 })
                 .collect::<Vec<_>>()
         };
-        let header = lay(&table.columns);
+        let header = lay(&table.columns, true);
         // A table's title, its header and its first row stand together.
         let title = if table.title.is_empty() {
             0
@@ -220,7 +240,7 @@ impl Flow {
                 size: cell_size,
                 pad,
                 header: false,
-                cells: lay(cells),
+                cells: lay(cells, false),
             });
             self.y += row;
         }
@@ -335,5 +355,39 @@ mod tests {
         };
         assert!(!reads_as_quantity(&table, 0));
         assert!(reads_as_quantity(&table, 1));
+    }
+
+    /// A reading that prints no prefix ends its digits where a prefixed one
+    /// does, as on the sheet: `1.000 V` keeps a prefix's room after it.
+    #[test]
+    fn a_reading_without_a_prefix_keeps_its_slot() {
+        let mut summary = summary(0);
+        summary.tables[0].rows = vec![
+            vec!["0".to_owned(), "1.000 ns".to_owned(), "1.000 V".to_owned()],
+            vec!["1".to_owned(), "2.000 ns".to_owned(), "707.1 mV".to_owned()],
+        ];
+        let rows = lay_out_summary(&summary)
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                LaidSummary::Row {
+                    header, size, cells, ..
+                } => Some((header, size, cells)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let [(true, _, head), (false, size, volt), (false, _, millivolt)] = &rows[..] else {
+            panic!("{rows:?}");
+        };
+        assert!(head.iter().all(|cell| cell.slot == 0), "{head:?}");
+        let digits_end = |cell: &LaidCell| {
+            let unit = cell.text.rsplit_once(' ').unwrap().1;
+            cell.x + cell.width - cell.slot - set_width(Role::Mono, &format!(" {unit}"), *size)
+        };
+        assert!(volt[2].slot > 0);
+        assert_eq!(millivolt[2].slot, 0);
+        // Each width is rounded up to the micrometre on its own.
+        let (volt, millivolt) = (digits_end(&volt[2]), digits_end(&millivolt[2]));
+        assert!(volt.abs_diff(millivolt) <= 1, "{volt} {millivolt}");
     }
 }
