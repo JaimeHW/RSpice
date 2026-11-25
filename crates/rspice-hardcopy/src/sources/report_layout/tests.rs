@@ -441,8 +441,8 @@ fn a_table_with_room_sets_each_cell_on_one_line() {
             "Slow, 125 °C",
             "Fast, −40 °C",
             "Phase margin",
-            "38.7 dB",
-            "1.9 %",
+            "38.70 dB",
+            "1.900 %",
         ] {
             assert!(printed.contains(&cell), "{cell} is broken: {printed:?}");
         }
