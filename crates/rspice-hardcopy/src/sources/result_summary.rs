@@ -1,6 +1,8 @@
 //! Exact hardcopy tables resolved from validated retained analysis evidence.
 
 use super::*;
+
+pub(crate) mod layout;
 use rspice_results::{
     analysis_payload::AnalysisResultPayload, analysis_result::AnalysisResult,
     family_metadata::AnalysisResultFamilyMetadata, waveform::RetainedWaveform,

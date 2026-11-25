@@ -757,7 +757,21 @@ impl ResolvedHardcopyDocument {
         setup: rspice_hardcopy_contract::SchematicHardcopySetup,
     ) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
         if let HardcopySemanticDocument::Report(report) = &self.semantic_document {
-            return self.report_page_sections(report);
+            let (width, height) = super::report_layout::page_size(report.page_size);
+            return self.page_sections(width, height, b"rspice-hardcopy-report-page-v1");
+        }
+        // A summary that runs on to further pages prints each on a sheet of
+        // its own, as a report does.
+        if let HardcopySemanticDocument::ResultSummary(_) = &self.semantic_document {
+            use super::result_summary_layout::{SUMMARY_PAGE_HEIGHT_UM, SUMMARY_PAGE_WIDTH_UM};
+            if self.content_extent.height().micrometres() <= SUMMARY_PAGE_HEIGHT_UM {
+                return Ok(Vec::new());
+            }
+            return self.page_sections(
+                SUMMARY_PAGE_WIDTH_UM,
+                SUMMARY_PAGE_HEIGHT_UM,
+                b"rspice-hardcopy-summary-page-v1",
+            );
         }
         let HardcopySemanticDocument::Aggregate(aggregate) = &self.semantic_document else {
             return Ok(Vec::new());
@@ -782,13 +796,15 @@ impl ResolvedHardcopyDocument {
             .collect()
     }
 
-    /// Each page of a report as a section of its own, so every page prints
-    /// on a sheet of its own, whatever the paper and scale.
-    fn report_page_sections(
+    /// Each page `width` by `height` of a paged source as a section of its
+    /// own, so every page prints on a sheet of its own, whatever the paper
+    /// and scale.
+    fn page_sections(
         &self,
-        report: &SemanticReport,
+        width: u64,
+        height: u64,
+        domain: &[u8],
     ) -> Result<Vec<HardcopyContentSection>, HardcopySourceError> {
-        let (width, height) = super::report_layout::page_size(report.page_size);
         let gap = super::REPORT_PAGE_GAP_UM.unsigned_abs();
         let pitch = height + gap;
         let pages = (self.content_extent.height().micrometres() + gap) / pitch;
@@ -796,10 +812,7 @@ impl ResolvedHardcopyDocument {
             .map(|index| {
                 let ordinal =
                     u32::try_from(index).map_err(|_| HardcopySourceError::CoordinateOverflow)?;
-                let digest = canonical_digest(
-                    b"rspice-hardcopy-report-page-v1",
-                    &(self.authority.content_digest(), index),
-                )?;
+                let digest = canonical_digest(domain, &(self.authority.content_digest(), index))?;
                 HardcopyContentSection::try_new(
                     ordinal,
                     digest,

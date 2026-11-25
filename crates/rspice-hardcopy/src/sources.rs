@@ -52,6 +52,7 @@ pub use quick_plot::{
 pub(crate) use report_figure::report_figure_plot;
 pub use reports::{ReportHardcopySource, resolve_report_source};
 pub use result_documents::{resolve_results_quick_view_stack, results_stack_identity};
+pub(crate) use result_summary::layout as result_summary_layout;
 pub use result_summary::semantic_result_summary;
 pub use result_view::{
     QuickFftSettings, QuickHistogramSettings, QuickSmithSettings, ResultsQuickViewPresentation,

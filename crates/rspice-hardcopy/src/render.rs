@@ -40,7 +40,6 @@ use super::sources::{
     HardcopySemanticDocument, ResolvedHardcopyDocument, SCHEMATIC_SHEET_ORIGIN_X_UNITS,
     SCHEMATIC_SHEET_ORIGIN_Y_UNITS, SCHEMATIC_UNIT_UM, SemanticAggregate, SemanticBounds,
     SemanticPlot, SemanticPoint, SemanticReport, SemanticResultSummary, SemanticSchematic,
-    SemanticTable,
 };
 #[cfg(test)]
 use crate::sources::report_layout::format_table_cell;

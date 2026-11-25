@@ -181,6 +181,19 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
     )?;
     let bounds = match &semantic_document {
         HardcopySemanticDocument::Plot(plot) => drawn_bounds(plot)?,
+        // A summary takes as many pages as its tables run on to.
+        HardcopySemanticDocument::ResultSummary(summary) => {
+            use super::result_summary_layout::{SUMMARY_PAGE_WIDTH_UM, lay_out_summary};
+            let height = lay_out_summary(summary).height();
+            SemanticBounds::try_new(
+                SemanticPoint::new(0, 0),
+                SemanticPoint::new(
+                    i64::try_from(SUMMARY_PAGE_WIDTH_UM)
+                        .map_err(|_| HardcopySourceError::CoordinateOverflow)?,
+                    i64::try_from(height).map_err(|_| HardcopySourceError::CoordinateOverflow)?,
+                ),
+            )?
+        }
         _ => SemanticBounds::try_new(
             SemanticPoint::new(0, 0),
             SemanticPoint::new(REPORT_PAGE_WIDTH_UM, REPORT_PAGE_HEIGHT_UM),

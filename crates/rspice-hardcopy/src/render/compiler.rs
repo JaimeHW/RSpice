@@ -1537,106 +1537,77 @@ impl<'a> SemanticSceneCompiler<'a> {
         &mut self,
         summary: &SemanticResultSummary,
     ) -> Result<(), HardcopyRenderError> {
+        use crate::sources::result_summary_layout::{
+            LaidSummary, SUMMARY_MARGIN_UM, SUMMARY_TITLE_UM, TABLE_TITLE_UM, lay_out_summary,
+        };
         let stable_id = format!(
             "layer:result-summary:{}",
             summary.viewer.label().to_ascii_lowercase()
         );
+        // A table has no traces, so its page carries no key.
         let stroke = self.mapped_stroke(PrintObjectKind::Layer, &stable_id, StrokeStyle::default());
-        let mut y = 12_000_u64;
-        self.add_text(
-            ScenePoint::new(
-                Length::from_micrometres(12_000),
-                Length::from_micrometres(y),
-            ),
-            &summary.title,
-            SceneFont::SansSemibold,
-            4_500,
-            stroke.color,
-        )?;
-        y += 9_000;
-        for table in &summary.tables {
-            y = self.semantic_table(table, y, stroke)?;
-        }
-        self.add_mapping_legend(PrintObjectKind::Layer, &stable_id, stroke)?;
-        Ok(())
-    }
-
-    fn semantic_table(
-        &mut self,
-        table: &SemanticTable,
-        mut y: u64,
-        stroke: StrokeStyle,
-    ) -> Result<u64, HardcopyRenderError> {
-        let left = 12_000_u64;
-        let right = self.extent.width().micrometres().saturating_sub(12_000);
-        let columns = table.columns.len().max(1) as u64;
-        let column_width = right.saturating_sub(left) / columns;
-        self.add_text(
-            ScenePoint::new(Length::from_micrometres(left), Length::from_micrometres(y)),
-            &table.title,
-            SceneFont::SansSemibold,
-            3_200,
-            stroke.color,
-        )?;
-        y += 5_000;
-        for (column, heading) in table.columns.iter().enumerate() {
-            self.primitives.push(ScenePrimitive::Rect {
-                rect: SceneRect::try_new(
-                    Length::from_micrometres(left + column as u64 * column_width),
-                    Length::from_micrometres(y),
-                    Length::from_micrometres(column_width),
-                    Length::from_micrometres(4_500),
-                )?,
-                stroke: Some(stroke),
-                fill: None,
-            });
-            self.add_text(
-                ScenePoint::new(
-                    Length::from_micrometres(left + column as u64 * column_width + 800),
-                    Length::from_micrometres(y + 3_000),
-                ),
-                heading,
-                SceneFont::SansSemibold,
-                2_300,
-                stroke.color,
-            )?;
-        }
-        y += 4_500;
-        for row in &table.rows {
-            if y + 4_500 > self.extent.height().micrometres().saturating_sub(8_000) {
-                return Err(conversion_error(format!(
-                    "table '{}' does not fit its authenticated result page",
-                    table.title
-                )));
-            }
-            for (column, value) in row.iter().enumerate() {
-                if column >= columns as usize {
-                    break;
-                }
-                self.primitives.push(ScenePrimitive::Rect {
-                    rect: SceneRect::try_new(
-                        Length::from_micrometres(left + column as u64 * column_width),
-                        Length::from_micrometres(y),
-                        Length::from_micrometres(column_width),
-                        Length::from_micrometres(4_500),
-                    )?,
-                    stroke: Some(stroke),
-                    fill: None,
-                });
-                self.add_text(
-                    ScenePoint::new(
-                        Length::from_micrometres(left + column as u64 * column_width + 800),
-                        Length::from_micrometres(y + 3_000),
-                    ),
-                    value,
-                    SceneFont::Monospace,
-                    2_100,
+        let at = |x: u64, y: u64| {
+            ScenePoint::new(Length::from_micrometres(x), Length::from_micrometres(y))
+        };
+        for item in lay_out_summary(summary).items {
+            match item {
+                LaidSummary::Title { y, text } => self.add_text(
+                    at(SUMMARY_MARGIN_UM, y),
+                    &text,
+                    SceneFont::SansSemibold,
+                    SUMMARY_TITLE_UM,
                     stroke.color,
-                )?;
+                )?,
+                LaidSummary::TableTitle { y, text } => self.add_text(
+                    at(SUMMARY_MARGIN_UM, y),
+                    &text,
+                    SceneFont::SansSemibold,
+                    TABLE_TITLE_UM,
+                    stroke.color,
+                )?,
+                LaidSummary::Row {
+                    y,
+                    height,
+                    size,
+                    pad,
+                    header,
+                    cells,
+                } => {
+                    let font = if header {
+                        SceneFont::SansSemibold
+                    } else {
+                        SceneFont::Monospace
+                    };
+                    let baseline = y + height * 2 / 3;
+                    for cell in cells {
+                        self.primitives.push(ScenePrimitive::Rect {
+                            rect: SceneRect::try_new(
+                                Length::from_micrometres(cell.x),
+                                Length::from_micrometres(y),
+                                Length::from_micrometres(cell.width),
+                                Length::from_micrometres(height),
+                            )?,
+                            stroke: Some(stroke),
+                            fill: None,
+                        });
+                        let (x, anchor) = if cell.right {
+                            (cell.x + cell.width.saturating_sub(pad), TextAnchor::End)
+                        } else {
+                            (cell.x + pad, TextAnchor::Start)
+                        };
+                        self.add_text_placed(
+                            at(x, baseline),
+                            &cell.text,
+                            font,
+                            size,
+                            stroke.color,
+                            (anchor, SceneTextRotation::Upright),
+                        )?;
+                    }
+                }
             }
-            y += 4_500;
         }
-        Ok(y + 5_000)
+        Ok(())
     }
 
     pub(super) fn report(
