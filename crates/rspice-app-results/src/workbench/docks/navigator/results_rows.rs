@@ -194,7 +194,7 @@ pub fn retained_result_artifacts(
                     ResultArtifactKind::Scalar,
                     1,
                     "V",
-                    Some(crate::ui::plot::fmt_si_significant(value, "V", 4)),
+                    Some(crate::ui::plot::fmt_column_reading(value, "V", 4)),
                     ResultViewer::NoiseContrib,
                 );
             }
@@ -582,9 +582,18 @@ pub fn retained_result_artifacts(
             ResultArtifactKind::Scalar,
             1,
             "",
-            measurement
-                .value
-                .map(|value| crate::ui::plot::fmt_si_significant(value, "", 4)),
+            // The value in the unit the measurement implies, or bare with its
+            // prefix where that is not known.
+            measurement.value.map(|value| {
+                rspice_results::number_format::fmt_measured(
+                    value,
+                    measurement
+                        .units
+                        .as_ref()
+                        .and_then(|units| units.value.symbol()),
+                    4,
+                )
+            }),
             ResultViewer::Table,
         );
     }

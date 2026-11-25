@@ -533,6 +533,51 @@ fn a_measurement_of_a_run_without_curves_is_not_offered_the_table() {
     );
 }
 
+/// A measurement's row names the unit its measurement implies, at four
+/// significant digits with every digit kept: a delay reads `6.917 ns` and
+/// `8.300 ns`, an angle `45.00°`. One whose unit is not known stays bare and
+/// keeps its prefix, `6.917n`, never `6.917e-9`.
+#[test]
+fn a_measurement_row_names_its_unit() {
+    use super::super::results_rows::retained_result_artifacts;
+    use rspice_core::analysis::{MeasurementUnit, MeasurementUnits};
+
+    let measured = |name: &str, value: f64, unit: Option<&str>| {
+        let mut result = rspice_core::MeasureResult::success(name, value);
+        result.units = unit.map(|symbol| MeasurementUnits {
+            value: MeasurementUnit::known(symbol).expect("a unit"),
+            raw_value: MeasurementUnit::known(symbol).expect("a unit"),
+            axis: MeasurementUnit::known("s").expect("a unit"),
+        });
+        result
+    };
+    let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    analysis.measurements = vec![
+        measured("TDELAY", 6.917e-9, Some("s")),
+        measured("TRISE", 8.3e-9, Some("s")),
+        measured("PHASE", 45.0, Some("deg")),
+        measured("PARAMETER", 6.917e-9, None),
+    ];
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(analysis);
+    let run = host.model.simulation.active_run().expect("a run");
+    let artifacts = retained_result_artifacts(
+        &run.analyses[0],
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+    );
+    let value = |name: &str| {
+        artifacts
+            .iter()
+            .find(|artifact| artifact.name == name)
+            .and_then(|artifact| artifact.value.clone())
+            .unwrap_or_else(|| panic!("{name} has a value"))
+    };
+    assert_eq!(value(".MEAS TDELAY"), "6.917 ns");
+    assert_eq!(value(".MEAS TRISE"), "8.300 ns");
+    assert_eq!(value(".MEAS PHASE"), "45.00\u{b0}");
+    assert_eq!(value(".MEAS PARAMETER"), "6.917n");
+}
+
 /// Ticking the first signal brings the band of batch actions in under the
 /// rows: no row moves under the pointer, so a second click where the first
 /// landed does not untick what it ticked.

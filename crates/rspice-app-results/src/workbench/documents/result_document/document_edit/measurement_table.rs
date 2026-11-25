@@ -172,7 +172,7 @@ fn read_page(state: ResultsReads<'_>) -> Page {
                 .map(|run| {
                     match super::measurement_reading::read_kept(state, document, measurement, run) {
                         Ok(read) => {
-                            Reading::Value(rspice_results::number_format::fmt_si_significant(
+                            Reading::Value(rspice_results::number_format::fmt_column_reading(
                                 read.value, &read.unit, digits,
                             ))
                         }
@@ -222,9 +222,8 @@ fn read_page(state: ResultsReads<'_>) -> Page {
                         let unit = measured
                             .units
                             .as_ref()
-                            .and_then(|units| units.value.symbol())
-                            .unwrap_or_default();
-                        Reading::Value(rspice_results::number_format::fmt_si_significant(
+                            .and_then(|units| units.value.symbol());
+                        Reading::Value(rspice_results::number_format::fmt_measured(
                             value, unit, digits,
                         ))
                     }
@@ -549,7 +548,7 @@ fn table(ui: &mut Ui, page: &Page) -> Option<Asked> {
                 ],
             };
             cells.extend(row.readings.iter().map(|reading| match reading {
-                Reading::Value(value) => Cell::number(value),
+                Reading::Value(value) => Cell::quantity(value),
                 Reading::Failed(why) => Cell::absent().hint(why),
                 Reading::Absent => Cell::absent().hint("This run did not measure it"),
             }));
@@ -852,10 +851,14 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(rows[0].0, "max(V(out))");
         assert_eq!(rows[0].2, "view");
-        assert_eq!(rows[0].1, ["2 V"], "{rows:?}");
+        assert_eq!(rows[0].1, ["2.000 V"], "{rows:?}");
         assert_eq!(rows[1].0, "vmax");
         assert_eq!(rows[1].2, "netlist");
-        assert_eq!(rows[1].1, ["2 V"], "the netlist's result reads in its unit");
+        assert_eq!(
+            rows[1].1,
+            ["2.000 V"],
+            "the netlist's result reads in its unit"
+        );
 
         // The plan runs again, higher, with the first run drawn behind it.
         state
@@ -869,8 +872,12 @@ mod tests {
         state.quick_frame();
         let (runs, rows) = page_rows(state.results_reads());
         assert_eq!(runs.len(), 2, "{runs:?}");
-        assert_eq!(rows[0].1, ["3 V", "2 V"], "a value per run shown: {rows:?}");
-        assert_eq!(rows[1].1, ["3 V", "2 V"], "{rows:?}");
+        assert_eq!(
+            rows[0].1,
+            ["3.000 V", "2.000 V"],
+            "a value per run shown: {rows:?}"
+        );
+        assert_eq!(rows[1].1, ["3.000 V", "2.000 V"], "{rows:?}");
 
         // A measurement whose signal the run lacks says why.
         let measurement = state.working_view().expect("the view").measurements()[0].id;
@@ -940,7 +947,7 @@ mod tests {
         let unzoomed = readings(&state);
         assert_eq!(
             unzoomed[..2],
-            [["2 V"], ["2 V"]],
+            [["2.000 V"], ["2.000 V"]],
             "unzoomed, the strip shows it all"
         );
         assert!(
@@ -963,7 +970,7 @@ mod tests {
         session.cursor_strip = Some(0);
         assert_eq!(
             readings(&state),
-            [["2 V"], ["1 V"], ["1.5 V"]],
+            [["2.000 V"], ["1.000 V"], ["1.500 V"]],
             "the whole record, the zoomed half, and A to B"
         );
 
