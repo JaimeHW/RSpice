@@ -138,9 +138,10 @@ pub(in crate::workbench) fn plot_probed_difference(
         // run that saves the net draws it.
         (Ok(_), Some(waiting)) => state.prompt(waiting),
         (Ok(added), None) => {
-            // A probe asks to see the signal, as a single net's probe does.
-            if state.workbench.supports_results_split() {
-                state.workbench.show_results_split();
+            // A probe asks to see the signal, as a single net's probe does:
+            // the dock opens on its plot.
+            if state.workbench.plots_in_dock() {
+                state.workbench.show_plot_page();
             }
             state.prompt(if added {
                 format!("{expression} added to the plot.")
