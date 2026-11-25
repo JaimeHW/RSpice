@@ -1382,10 +1382,16 @@ impl<'a> SemanticSceneCompiler<'a> {
             }
             self.add_mapping_legend(PrintObjectKind::Trace, &stable_id, stroke)?;
             let mapped_id = self.mapping_stable_id(&stable_id);
+            // A series drawn in several lines, as an eye's folds are, is
+            // named once.
             if !self.mapping.entries().iter().any(|entry| {
                 entry.object().kind() == PrintObjectKind::Trace
                     && entry.object().stable_id() == mapped_id
-            }) {
+            }) && !self
+                .legend
+                .iter()
+                .any(|entry| entry.label == trace.label && entry.stroke == stroke)
+            {
                 self.legend
                     .push(LegendEntry::try_new(&trace.label, stroke)?);
             }

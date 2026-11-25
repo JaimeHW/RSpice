@@ -856,7 +856,7 @@ fn quick_eye_plot<W: AsRef<RetainedWaveform>>(
                 waveform.name,
                 bit_period.to_bits()
             ),
-            label: format!("Eye trace {}", index + 1),
+            label: waveform.name.clone(),
             unit: printed_unit(waveform, active.analysis.analysis_type),
             points: trace
                 .time
@@ -866,14 +866,20 @@ fn quick_eye_plot<W: AsRef<RetainedWaveform>>(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(
+    // The folds are one acquisition, drawn in one colour and named once,
+    // over the unit intervals the sheet rules the eye in.
+    let mut plot = quick_plot_from_series(
         ResultViewer::Eye,
         "Results",
         0,
         series,
         None,
-        &QuickAbscissa::new("Time", "s", AxisScale::Linear),
-    )
+        &QuickAbscissa::new("Time", "UI", AxisScale::Linear),
+    )?;
+    for trace in &mut plot.traces {
+        trace.palette_slot = Some(0);
+    }
+    Ok(plot)
 }
 
 fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
