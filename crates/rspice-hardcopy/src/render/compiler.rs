@@ -1319,10 +1319,12 @@ impl<'a> SemanticSceneCompiler<'a> {
             let stroke = self.mapped_stroke(
                 PrintObjectKind::Trace,
                 &stable_id,
+                // Solid in its series colour, as the sheet draws it; a page
+                // without colour draws the series' own line instead.
                 StrokeStyle::try_new(
                     SemanticColor::Trace(index as u16),
                     Length::from_micrometres(300),
-                    auto_trace_pattern(index as u16),
+                    StrokePattern::Solid,
                     Some(index as u16),
                 )?,
             );

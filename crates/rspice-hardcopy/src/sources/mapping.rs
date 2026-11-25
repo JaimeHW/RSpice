@@ -10,6 +10,31 @@ use rspice_design_model::design_management::{
 pub(crate) const WIRE_PRINT_INK: [u8; 3] = [0x4E, 0x34, 0x00];
 pub(crate) const SYMBOL_PRINT_INK: [u8; 3] = [0x2C, 0x31, 0x35];
 
+/// The line the `index`th trace prints in black: eight a reader tells apart
+/// at a glance, so a page of eight traces never draws two alike.
+fn series_redundancy(index: usize) -> PrintRedundancy {
+    let um = Length::from_micrometres;
+    let dashed = |dash, gap| PrintRedundancy::DashedLine {
+        width: um(300),
+        dash: um(dash),
+        gap: um(gap),
+    };
+    let dotted = |spacing| PrintRedundancy::DottedLeader {
+        width: um(300),
+        spacing: um(spacing),
+    };
+    match index % 8 {
+        0 => PrintRedundancy::SolidLine { width: um(300) },
+        1 => dashed(2_000, 1_000),
+        2 => dotted(1_250),
+        3 => dashed(5_000, 1_200),
+        4 => dashed(700, 700),
+        5 => dotted(2_600),
+        6 => dashed(1_200, 2_600),
+        _ => PrintRedundancy::SolidLine { width: um(700) },
+    }
+}
+
 pub(super) fn default_print_mapping(
     document: &HardcopySemanticDocument,
 ) -> Result<PrintMappingTable, HardcopySourceError> {
@@ -164,20 +189,7 @@ pub(super) fn default_print_mapping(
                 "gray · solid",
             ];
             for (index, trace) in plot.traces.iter().enumerate() {
-                let redundancy = match index % 3 {
-                    0 => PrintRedundancy::SolidLine {
-                        width: Length::from_micrometres(300),
-                    },
-                    1 => PrintRedundancy::DashedLine {
-                        width: Length::from_micrometres(300),
-                        dash: Length::from_micrometres(2_000),
-                        gap: Length::from_micrometres(1_000),
-                    },
-                    _ => PrintRedundancy::DottedLeader {
-                        width: Length::from_micrometres(300),
-                        spacing: Length::from_micrometres(1_250),
-                    },
-                };
+                let redundancy = series_redundancy(index);
                 entries.push(mapping_entry(
                     PrintObjectKind::Trace,
                     format!("trace:{}", trace.trace_id),

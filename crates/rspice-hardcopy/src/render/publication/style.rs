@@ -149,35 +149,48 @@ pub(super) fn resolve_stroke(
     style: StrokeStyle,
 ) -> ResolvedStroke {
     let mapping = plan.setup().render().color_mapping();
-    let pattern = if mapping == ColorMapping::GrayscaleWithDashMarkerRedundancy
-        && style.pattern == StrokePattern::Solid
-    {
-        style
-            .series_index
-            .map(auto_trace_pattern)
-            .unwrap_or(StrokePattern::Solid)
-    } else {
-        style.pattern
-    };
+    let width_um = transform.length(style.width).max(80.0);
+    // A series drawn solid, as the sheet draws it, keeps its colour to tell
+    // it apart; a page without colour tells it apart by its line instead.
+    let series = matches!(
+        mapping,
+        ColorMapping::GrayscaleWithDashMarkerRedundancy | ColorMapping::Monochrome
+    )
+    .then_some(style.series_index)
+    .flatten()
+    .filter(|_| style.pattern == StrokePattern::Solid && style.exact_dash.is_none());
+    let (pattern, series_dash) = series.map_or((style.pattern, None), series_line);
     ResolvedStroke {
         color: resolve_color(plan, style.color),
-        width_um: transform.length(style.width).max(80.0),
+        width_um,
         pattern,
-        exact_dash_um: style
-            .exact_dash
-            .map(|(dash, gap)| (transform.length(dash), transform.length(gap))),
+        exact_dash_um: series_dash
+            .map(|(dash, gap)| (dash * width_um, gap * width_um))
+            .or_else(|| {
+                style
+                    .exact_dash
+                    .map(|(dash, gap)| (transform.length(dash), transform.length(gap)))
+            }),
         exact_dot_spacing_um: style
             .exact_dot_spacing
             .map(|spacing| transform.length(spacing)),
     }
 }
 
-pub(in crate::render) fn auto_trace_pattern(index: u16) -> StrokePattern {
-    match index % 4 {
-        0 => StrokePattern::Solid,
-        1 => StrokePattern::Dashed,
-        2 => StrokePattern::Dotted,
-        _ => StrokePattern::DashDot,
+/// The line the `index`th series of a page without colour is drawn in, and
+/// the on and off lengths of its dash in line widths where the pattern alone
+/// does not say: eight lines a reader tells apart at a glance, so eight
+/// traces never share one.
+pub(in crate::render) fn series_line(index: u16) -> (StrokePattern, Option<(f64, f64)>) {
+    match index % 8 {
+        0 => (StrokePattern::Solid, None),
+        1 => (StrokePattern::Dashed, None),
+        2 => (StrokePattern::Dotted, None),
+        3 => (StrokePattern::DashDot, None),
+        4 => (StrokePattern::Dashed, Some((14.0, 4.0))),
+        5 => (StrokePattern::Dashed, Some((2.5, 2.5))),
+        6 => (StrokePattern::Dotted, Some((1.0, 6.0))),
+        _ => (StrokePattern::Dashed, Some((10.0, 8.0))),
     }
 }
 
