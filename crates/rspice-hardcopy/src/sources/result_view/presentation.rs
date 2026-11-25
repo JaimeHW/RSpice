@@ -100,6 +100,16 @@ impl QuickSheetReading {
         }
         Ok(())
     }
+
+    /// The figures read off `analysis`, or none where they were read off
+    /// another.
+    pub(super) fn figures_of(&self, analysis: u64) -> &[(String, String)] {
+        if self.analysis_id.is_none_or(|id| id == analysis) {
+            &self.figures
+        } else {
+            &[]
+        }
+    }
 }
 
 /// Histogram controls in source coordinates.

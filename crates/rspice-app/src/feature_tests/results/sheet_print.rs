@@ -105,3 +105,42 @@ fn a_printed_network_matrix_is_the_matrix_the_sheet_shows() {
         table.rows
     );
 }
+
+/// A printed Bode, Nyquist or spectrum carries the figures its card shows,
+/// in the card's words, on one line under the plot.
+#[test]
+fn a_printed_plot_carries_the_figures_its_card_shows() {
+    for viewer in [ResultViewer::Bode, ResultViewer::Nyquist, ResultViewer::Fft] {
+        let mut app = app_showing(viewer);
+        app.state.results.results.session.viewer = viewer;
+        draw_sheet_and_tessellate(&mut app, viewer);
+        let figures = app.state.results_reads().sheet_print().figures;
+        assert!(!figures.is_empty(), "the {viewer:?} card shows no figures");
+        let resolved = printed(&app.state);
+        let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+            panic!("{viewer:?} prints as a plot")
+        };
+        let row = plot
+            .captions
+            .iter()
+            .find(|caption| caption.text.starts_with(&figures[0].0))
+            .unwrap_or_else(|| panic!("{viewer:?} printed no figures: {:?}", plot.captions));
+        for (name, reading) in &figures {
+            assert!(
+                row.text.contains(name.as_str()) && row.text.contains(reading.as_str()),
+                "{viewer:?}: {name} {reading} is not in {:?}",
+                row.text
+            );
+        }
+        let foot = plot
+            .frames
+            .iter()
+            .map(|frame| frame.maximum.y_um)
+            .max()
+            .unwrap_or(0);
+        assert!(
+            row.position.y_um > foot,
+            "{viewer:?} figures stand on the plot"
+        );
+    }
+}

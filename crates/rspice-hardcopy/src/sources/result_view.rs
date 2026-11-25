@@ -99,6 +99,7 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         return Err(HardcopySourceError::UnsupportedScope(scope));
     }
     let viewer = presentation.viewer;
+    let figures = presentation.sheet.figures_of(active.analysis.id);
     let semantic_document = match viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => {
             HardcopySemanticDocument::Plot(quick_waveform_plot(
@@ -111,12 +112,18 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
             active,
             &presentation.overlay.for_analysis(active.analysis.id),
         )?),
-        ResultViewer::Bode => HardcopySemanticDocument::Plot(quick_bode_plot(
-            active,
-            &presentation.overlay.for_analysis(active.analysis.id),
-            presentation.bode_signal.as_deref(),
-        )?),
-        ResultViewer::Fft => HardcopySemanticDocument::Plot(quick_fft_plot(presentation, active)?),
+        ResultViewer::Bode => HardcopySemanticDocument::Plot(with_fact_row(
+            quick_bode_plot(
+                active,
+                &presentation.overlay.for_analysis(active.analysis.id),
+                presentation.bode_signal.as_deref(),
+            )?,
+            figures,
+        )),
+        ResultViewer::Fft => HardcopySemanticDocument::Plot(with_fact_row(
+            quick_fft_plot(presentation, active)?,
+            figures,
+        )),
         ResultViewer::HarmonicBalance => {
             HardcopySemanticDocument::Plot(quick_harmonic_balance_plot(active)?)
         }
@@ -125,10 +132,13 @@ pub fn resolve_results_quick_view_parts<W: AsRef<RetainedWaveform>>(
         ResultViewer::Hist => {
             HardcopySemanticDocument::Plot(quick_histogram_plot(presentation, active)?)
         }
-        ResultViewer::Nyquist => HardcopySemanticDocument::Plot(quick_nyquist_plot(
-            active,
-            &presentation.overlay.for_analysis(active.analysis.id),
-        )?),
+        ResultViewer::Nyquist => HardcopySemanticDocument::Plot(with_fact_row(
+            quick_nyquist_plot(
+                active,
+                &presentation.overlay.for_analysis(active.analysis.id),
+            )?,
+            figures,
+        )),
         ResultViewer::Smith => {
             HardcopySemanticDocument::Plot(quick_smith_plot(active, &presentation.smith)?)
         }
@@ -233,6 +243,53 @@ fn sheet_summary<W: AsRef<RetainedWaveform>>(
         title: analysis.label.clone(),
         tables: sheet.tables.clone(),
         payload: None,
+    })
+}
+
+/// How far under a plot's lowest frame the line of its card's figures
+/// stands: clear of the abscissa's values, above the key.
+const FACT_ROW_DROP_UM: i64 = 7_000;
+
+/// The plot with the figures its sheet's card shows set on one line under
+/// it, in the card's words. A plot whose card shows none is unchanged.
+fn with_fact_row(mut plot: SemanticPlot, figures: &[(String, String)]) -> SemanticPlot {
+    let Some(text) = fact_row(figures) else {
+        return plot;
+    };
+    // A plane has no frames; its square fills the plot area.
+    let foot = plot
+        .frames
+        .iter()
+        .map(|frame| frame.maximum.y_um)
+        .max()
+        .unwrap_or(PLOT_HEIGHT_UM - PLOT_INSET_UM);
+    plot.captions.push(SemanticPlotCaption::new(
+        text,
+        SemanticPoint::new(PLOT_INSET_UM, foot + FACT_ROW_DROP_UM),
+    ));
+    plot
+}
+
+/// The figures as one line: each name with its reading, and a name the card
+/// gives twice running read once, with both its readings.
+fn fact_row(figures: &[(String, String)]) -> Option<String> {
+    let mut facts: Vec<(&str, Vec<&str>)> = Vec::new();
+    for (name, reading) in figures {
+        match facts.last_mut() {
+            Some((last, readings)) if *last == name => {
+                if !readings.contains(&reading.as_str()) {
+                    readings.push(reading);
+                }
+            }
+            _ => facts.push((name, vec![reading])),
+        }
+    }
+    (!facts.is_empty()).then(|| {
+        facts
+            .iter()
+            .map(|(name, readings)| format!("{name} {}", readings.join(", ")))
+            .collect::<Vec<_>>()
+            .join(" \u{b7} ")
     })
 }
 

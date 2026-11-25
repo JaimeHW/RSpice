@@ -94,6 +94,25 @@ fn locus(state: &mut ResultsParts<'_>) -> Locus {
         return Locus::Absent;
     };
     let version = state.model.simulation.view.data_version;
+    let locus = read_locus(state.results_reads(), source);
+    if let Locus::Ready(derived) = &locus
+        && !state
+            .results
+            .nyquist
+            .get(&source)
+            .is_some_and(|held| held.version == version)
+    {
+        let nyquist = &mut state.results.nyquist;
+        nyquist.retain(|_, held| held.version == version);
+        nyquist.insert(source, derived.clone());
+    }
+    locus
+}
+
+/// The locus of `source` and the numbers read off it: the memo's while it
+/// holds this generation's, else read afresh.
+fn read_locus(state: ResultsReads<'_>, source: LoopGainSource) -> Locus {
+    let version = state.model.simulation.view.data_version;
     if let Some(cached) = state.results.nyquist.get(&source)
         && cached.version == version
     {
@@ -141,9 +160,6 @@ fn locus(state: &mut ResultsParts<'_>) -> Locus {
         drawn: Arc::new(drawn),
         locus: Arc::new(locus),
     };
-    let nyquist = &mut state.results.nyquist;
-    nyquist.retain(|_, held| held.version == version);
-    nyquist.insert(source, derived.clone());
     Locus::Ready(derived)
 }
 
@@ -238,6 +254,31 @@ pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
         .session
         .plot_view_mut(super::ResultViewer::Nyquist, 0) = view;
     true
+}
+
+/// The loop's margins and crossovers as the card shows them, for a printed
+/// Nyquist page; none while the run shows no loop gain.
+pub(super) fn printed_figures(state: ResultsReads<'_>) -> rspice_results_ui::table::SheetPrint {
+    use rspice_results_ui::table::SheetPrint;
+    let Some(source) = loop_gain_source(state) else {
+        return SheetPrint::default();
+    };
+    let Locus::Ready(derived) = read_locus(state, source) else {
+        return SheetPrint::default();
+    };
+    SheetPrint::figures(
+        state
+            .model
+            .simulation
+            .active_run()
+            .and_then(|run| run.analyses.get(source.analysis))
+            .map(|analysis| analysis.id),
+        view::card_figures(
+            &derived.stability,
+            &state.model.preferences.quantity_presentation_policy(),
+            significant_digits(state),
+        ),
+    )
 }
 
 /// The stability numbers of the shown run's loop gain, in the inspector.

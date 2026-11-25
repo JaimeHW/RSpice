@@ -108,6 +108,18 @@ enum NoMargins {
 }
 
 fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
+    let memo = state.results.bode;
+    let model = resolve_model(state.results_reads(), memo)?;
+    state.results.bode = Some(model.margins);
+    Ok(model)
+}
+
+/// The response the card measures, its margins read off the curves unless
+/// `memo` already holds them for the same response and samples.
+fn resolve_model(
+    state: ResultsReads<'_>,
+    memo: Option<BodeDerived>,
+) -> Result<BodeModel, NoMargins> {
     let simulation = &state.model.simulation;
     if simulation.active_analysis().is_some_and(|a| {
         matches!(
@@ -139,7 +151,7 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
     // meant the memo saved nothing, the conversion and every crossing search
     // having happened by the time its key was known.
     let candidates = bode_responses(analysis.analysis_type, &analysis.waveforms);
-    let measured = super::sheet_settings::measured_signal(state.results_reads())
+    let measured = super::sheet_settings::measured_signal(state)
         .filter(|signal| candidates.iter().any(|candidate| candidate == signal));
     let analysis_type = analysis.analysis_type;
     let prefer = |waveform: &RetainedTrace| match &measured {
@@ -165,7 +177,7 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
     // magnitude waveform) — the crossings and folds are O(points) and both
     // panels read them every frame.
     let version = simulation.view.data_version;
-    let margins = match state.results.bode {
+    let margins = match memo {
         Some(d)
             if d.version == version
                 && d.analysis_index == shape.analysis_index
@@ -189,7 +201,6 @@ fn build_model(state: &mut ResultsParts<'_>) -> Result<BodeModel, NoMargins> {
                 mag_index: shape.mag_index,
                 metrics,
             };
-            state.results.bode = Some(d);
             d
         }
     };
@@ -302,6 +313,35 @@ fn edge_jitter(
             .as_ref()
             .and_then(|conversion| cycle_jitter(&frequency, &density, conversion.carrier_hz)),
     }
+}
+
+/// The figures the response card shows, for a printed Bode page; none
+/// where the sheet shows no response card.
+pub(super) fn printed_figures(state: ResultsReads<'_>) -> rspice_results_ui::table::SheetPrint {
+    use rspice_results_ui::table::SheetPrint;
+    let simulation = &state.model.simulation;
+    if simulation
+        .active_analysis()
+        .is_some_and(|analysis| analysis.analysis_type.is_raw_frequency_curve())
+    {
+        return SheetPrint::default();
+    }
+    let Ok(model) = resolve_model(state, state.results.bode) else {
+        return SheetPrint::default();
+    };
+    SheetPrint::figures(
+        simulation
+            .active_run()
+            .and_then(|run| run.analyses.get(model.margins.analysis_index))
+            .map(|analysis| analysis.id),
+        inspector::card_figures(
+            &model.signal,
+            model.margins.metrics,
+            model.loop_gain,
+            &state.model.preferences.quantity_presentation_policy(),
+            significant_digits(state),
+        ),
+    )
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {

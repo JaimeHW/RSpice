@@ -417,3 +417,33 @@ fn a_table_sheet_prints_the_tables_it_showed() {
         ));
     }
 }
+
+/// The figures a card shows print on one line, and a name the card gives
+/// twice running reads once, with both its readings.
+#[test]
+fn a_cards_figures_print_on_one_line() {
+    let figures = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(name, reading)| ((*name).to_owned(), (*reading).to_owned()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        fact_row(&figures(&[
+            ("Fundamental", "1.000 kHz"),
+            ("THD", "0.1230 %"),
+            ("THD", "\u{2212}58.20 dB"),
+        ]))
+        .as_deref(),
+        Some("Fundamental 1.000 kHz \u{b7} THD 0.1230 %, \u{2212}58.20 dB")
+    );
+    assert_eq!(
+        fact_row(&figures(&[
+            ("THD", "No harmonics"),
+            ("THD", "No harmonics")
+        ]))
+        .as_deref(),
+        Some("THD No harmonics")
+    );
+    assert_eq!(fact_row(&[]), None);
+}

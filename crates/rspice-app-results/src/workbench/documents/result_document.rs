@@ -878,6 +878,9 @@ impl ResultsReads<'_> {
         match self.results.session.viewer {
             ResultViewer::Table => table::printed(self),
             ResultViewer::NetworkMatrix => network_matrix::printed(self),
+            ResultViewer::Bode => bode::printed_figures(self),
+            ResultViewer::Nyquist => nyquist::printed_figures(self),
+            ResultViewer::Fft => fft::printed_figures(self),
             _ => rspice_results_ui::table::SheetPrint::default(),
         }
     }

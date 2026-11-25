@@ -445,6 +445,41 @@ pub fn show(
     Some(response)
 }
 
+/// The loop's margins and the crossovers they are read at, as the card
+/// rows them. The gain margin is a factor here; both cards print it in
+/// decibels.
+fn margin_rows(
+    s: &NyquistStability,
+    quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
+) -> [(&'static str, String, bool); 4] {
+    crate::bode::margins::rows(
+        s.phase_margin.map(|margin| crate::bode::margins::Margin {
+            value: margin.value,
+            hertz: margin.frequency,
+        }),
+        s.gain_margin.map(|margin| crate::bode::margins::Margin {
+            value: 20.0 * margin.value.log10(),
+            hertz: margin.frequency,
+        }),
+        quantity_policy,
+        significant_digits,
+    )
+}
+
+/// The figures a printed Nyquist chart carries under its plot: the loop's
+/// margins and crossovers, worded and formatted as the card shows them.
+pub fn card_figures(
+    stability: &NyquistStability,
+    quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
+) -> Vec<(&'static str, String)> {
+    margin_rows(stability, quantity_policy, significant_digits)
+        .into_iter()
+        .map(|(label, value, _)| (label, value))
+        .collect()
+}
+
 /// Stability readout.
 pub fn right_panel(
     ui: &mut Ui,
@@ -473,19 +508,7 @@ pub fn right_panel(
             false,
         ),
     ];
-    // The gain margin is a factor here; both cards print it in decibels.
-    rows.extend(crate::bode::margins::rows(
-        s.phase_margin.map(|margin| crate::bode::margins::Margin {
-            value: margin.value,
-            hertz: margin.frequency,
-        }),
-        s.gain_margin.map(|margin| crate::bode::margins::Margin {
-            value: 20.0 * margin.value.log10(),
-            hertz: margin.frequency,
-        }),
-        quantity_policy,
-        significant_digits,
-    ));
+    rows.extend(margin_rows(&s, quantity_policy, significant_digits));
     crate::presentation::stat_table(ui, &rows);
 
     // The fold, before the criterion. This sheet is the one that carries the

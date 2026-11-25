@@ -169,6 +169,32 @@ pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     true
 }
 
+/// The fundamental and its THD as the card shows them, for a printed
+/// spectrum; none before the spectrum has been analysed.
+pub(super) fn printed_figures(state: ResultsReads<'_>) -> rspice_results_ui::table::SheetPrint {
+    use rspice_results_ui::table::SheetPrint;
+    let Some(analysis) = state.analysis.fft_state.analysis.as_ref() else {
+        return SheetPrint::default();
+    };
+    SheetPrint::figures(
+        state
+            .model
+            .simulation
+            .active_analysis()
+            .map(|analysis| analysis.id),
+        view::card_figures(
+            analysis,
+            &state.model.preferences.quantity_presentation_policy(),
+            usize::from(
+                state
+                    .presentation_policy()
+                    .displayed_significant_digits()
+                    .get(),
+            ),
+        ),
+    )
+}
+
 pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let presentation = state.results_reads().presentation_policy();
     view::right_panel(

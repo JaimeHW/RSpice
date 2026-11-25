@@ -512,6 +512,61 @@ fn spectral_peaks(fft: &FftState) -> Vec<(f64, f64)> {
     peaks
 }
 
+/// A figure the harmonics are needed for, or why it is withheld in a few
+/// words.
+fn short_figure(
+    figure: Option<f64>,
+    unit: &str,
+    absent: &Option<(String, String)>,
+    digits: usize,
+) -> String {
+    match (figure, absent) {
+        (Some(value), _) => fmt_column_reading(value, unit, digits),
+        (None, Some((reason, _))) => reason.clone(),
+        (None, None) => "—".to_owned(),
+    }
+}
+
+/// The fundamental's frequency as the card reads it.
+fn fundamental_reading(
+    analysis: &crate::fft::data::SpectrumAnalysis,
+    quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
+) -> String {
+    analysis
+        .fundamental_frequency
+        .map_or("—".to_owned(), |hertz| {
+            frequency_readout(quantity_policy, hertz, digits)
+        })
+}
+
+/// The THD in percent and in decibels as the card reads them.
+fn thd_readings(analysis: &crate::fft::data::SpectrumAnalysis, digits: usize) -> [String; 2] {
+    let absent = absent_thd(analysis.harmonic_coverage);
+    [
+        short_figure(analysis.thd_percent, "%", &absent, digits),
+        short_figure(analysis.thd_db, "dB", &absent, digits),
+    ]
+}
+
+/// The figures a printed spectrum carries under its plot: the fundamental
+/// and its THD, worded and formatted as the card shows them.
+pub fn card_figures(
+    analysis: &crate::fft::data::SpectrumAnalysis,
+    quantity_policy: &QuantityPresentationPolicy,
+    digits: usize,
+) -> Vec<(&'static str, String)> {
+    let [percent, decibels] = thd_readings(analysis, digits);
+    vec![
+        (
+            "Fundamental",
+            fundamental_reading(analysis, quantity_policy, digits),
+        ),
+        ("THD", percent),
+        ("THD", decibels),
+    ]
+}
+
 /// The figures, the harmonic table and the peak table, at the reader's
 /// `significant_digits`.
 pub fn right_panel(
@@ -541,11 +596,7 @@ pub fn right_panel(
     };
     let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| fmt_column_reading(v, "dB", digits));
     let absent = absent_thd(analysis.harmonic_coverage);
-    let short = |figure: Option<f64>, unit: &str| match (figure, &absent) {
-        (Some(value), _) => fmt_column_reading(value, unit, digits),
-        (None, Some((reason, _))) => reason.clone(),
-        (None, None) => "—".to_owned(),
-    };
+    let short = |figure: Option<f64>, unit: &str| short_figure(figure, unit, &absent, digits);
 
     let amplitude = analysis.fundamental_db.map_or("—".to_owned(), |value| {
         fmt_column_reading(value, level_unit, digits)
@@ -564,7 +615,11 @@ pub fn right_panel(
     let rows = [
         ("Record", record_length(model.fft_size), false),
         ("Resolution BW", f(model.resolution_bandwidth), false),
-        ("Fundamental", f(analysis.fundamental_frequency), false),
+        (
+            "Fundamental",
+            fundamental_reading(analysis, quantity_policy, digits),
+            false,
+        ),
         ("Signal", amplitude, false),
         ("DC", dc, false),
     ];
@@ -573,12 +628,10 @@ pub fn right_panel(
     // names on hover the harmonics under the floor it leaves out.
     let thd = ui
         .scope(|ui| {
+            let [percent, decibels] = thd_readings(analysis, digits);
             crate::presentation::stat_table(
                 ui,
-                &[
-                    ("THD", short(analysis.thd_percent, "%"), true),
-                    ("THD", short(analysis.thd_db, "dB"), false),
-                ],
+                &[("THD", percent, true), ("THD", decibels, false)],
             );
         })
         .response;

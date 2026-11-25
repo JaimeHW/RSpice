@@ -410,6 +410,27 @@ fn response_rows(
     ]
 }
 
+/// The figures the response card shows, worded and formatted as it shows
+/// them, without the line naming the response: what a printed figure of
+/// the response carries under its plot, where its key names the response.
+pub fn card_figures(
+    signal: &str,
+    metrics: AcBodeMetrics,
+    loop_gain: bool,
+    quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
+) -> Vec<(&'static str, String)> {
+    let rows = if loop_gain {
+        stability_rows(signal, metrics, quantity_policy, significant_digits)
+    } else {
+        response_rows(signal, metrics, quantity_policy, significant_digits)
+    };
+    rows.into_iter()
+        .skip(1)
+        .map(|(label, value, _)| (label, value))
+        .collect()
+}
+
 /// Render the summary of the selected, validated ordinary-noise spectrum,
 /// its readouts at the reader's `significant_digits`.
 pub fn noise_spectrum_right_panel(
