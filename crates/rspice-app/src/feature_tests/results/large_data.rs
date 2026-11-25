@@ -1,8 +1,8 @@
 //! Whole application frames over large data, timed: a transient of five million samples in
-//! memory, and a project of two hundred retained runs, each in Results and on Design with the
-//! dock's Plot page in front. Each case reports its frames' median and 99th percentile, gesture
-//! by gesture, the time until what a gesture draws or measures off the frame is in, the
-//! process's peak working set and the stored columns it read whole.
+//! memory and in the results store, and a project of two hundred retained runs, each in Results
+//! and on Design with the dock's Plot page in front. Each case reports its frames' median and
+//! 99th percentile, gesture by gesture, the time until what a gesture draws or measures off the
+//! frame is in, the process's peak working set and the stored columns it read whole.
 //!
 //! Run by hand, each case alone, so the peak working set is the case's own, for instance
 //! `cargo test -p rspice-app --lib large_data::five_million_samples_in_results -- --ignored
@@ -204,18 +204,38 @@ fn shown(app: &RSpiceApp) -> (AnalysisPresentationKey, f64, f64) {
 #[test]
 #[ignore = "times whole frames over five million samples; run by hand"]
 fn five_million_samples_in_results() {
-    five_million_samples(Place::Results);
+    five_million_samples(Place::Results, Held::Memory);
 }
 
 #[test]
 #[ignore = "times whole frames over five million samples; run by hand"]
 fn five_million_samples_on_the_plot_page() {
-    five_million_samples(Place::PlotPage);
+    five_million_samples(Place::PlotPage, Held::Memory);
 }
 
-/// A transient of five million samples in memory, four signals of 1.25 million rows, shown in
-/// `place`: opened, panned, zoomed, its cursor dragged, and a measurement added.
-fn five_million_samples(place: Place) {
+#[test]
+#[ignore = "times whole frames over five million samples; run by hand"]
+fn five_million_stored_samples_in_results() {
+    five_million_samples(Place::Results, Held::Store);
+}
+
+#[test]
+#[ignore = "times whole frames over five million samples; run by hand"]
+fn five_million_stored_samples_on_the_plot_page() {
+    five_million_samples(Place::PlotPage, Held::Store);
+}
+
+/// Where a run's samples are held: in memory, as a run the store refused keeps them, or in the
+/// results store, as a desktop run keeps them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Held {
+    Memory,
+    Store,
+}
+
+/// A transient of five million samples, four signals of 1.25 million rows, `held` where it says
+/// and shown in `place`: opened, panned, zoomed, its cursor dragged, and a measurement added.
+fn five_million_samples(place: Place, held: Held) {
     const ROWS: usize = 1_250_000;
     const SIGNALS: usize = 4;
     let x: Vec<f64> = (0..ROWS).map(|row| row as f64 * 1.0e-9).collect();
@@ -227,10 +247,14 @@ fn five_million_samples(place: Place) {
         })
         .collect();
     drop(x);
+    let mut analysis =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(waveforms);
+    if held == Held::Store {
+        rspice_app_state::state::run_store::store_analysis(&mut analysis.data)
+            .expect("the store keeps the samples");
+    }
     let mut run = SimulationRun::new(1);
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(waveforms),
-    );
+    run.add_analysis(analysis);
     // What the open frame's walks of the whole record cost on their own.
     let started = Instant::now();
     let _ = run.dataset_content_digest();
@@ -300,7 +324,14 @@ fn five_million_samples(place: Place) {
         timings.frame("idle", took);
     }
     timings.report(
-        &format!("five million samples in memory, {}", place.label()),
+        &format!(
+            "five million samples {}, {}",
+            match held {
+                Held::Memory => "in memory",
+                Held::Store => "in the results store",
+            },
+            place.label()
+        ),
         &columns.since(),
     );
 }
