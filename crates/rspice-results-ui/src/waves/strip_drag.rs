@@ -307,11 +307,23 @@ pub(crate) fn strip_menu(ui: &mut Ui, model: &StripModel, index: usize) -> Optio
         strip_layout::split_all_strips(model),
         &mut chosen,
     );
+    // A swept signal's members are one curve to a strip, so a strip per
+    // signal is a strip per family: every member on it, the hidden ones
+    // kept hidden there. Where the strips draw families, that is its name.
+    let per_signal = if model
+        .traces
+        .iter()
+        .any(|trace| trace.family_style.is_some())
+    {
+        "Family"
+    } else {
+        "Trace"
+    };
     rspice_ui_kit::widgets::menu_button(ui, "Strip by", |ui| {
         entry(ui, "Unit", strip_layout::strip_by_unit(model), &mut chosen);
         entry(
             ui,
-            "Trace",
+            per_signal,
             strip_layout::strip_by_trace(model),
             &mut chosen,
         );
