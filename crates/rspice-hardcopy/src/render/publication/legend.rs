@@ -39,8 +39,6 @@ pub(super) struct LegendSlot<'a> {
 }
 
 pub(super) struct LegendLayout<'a> {
-    /// The band's top edge on the page.
-    pub(super) top_um: u64,
     pub(super) slots: Vec<LegendSlot<'a>>,
 }
 
@@ -206,7 +204,7 @@ pub(super) fn legend_layout<'a>(
             }
         })
         .collect();
-    Ok(Some(LegendLayout { top_um, slots }))
+    Ok(Some(LegendLayout { slots }))
 }
 
 /// Column widths: each its natural width while they fit `available`;
