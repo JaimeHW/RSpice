@@ -430,14 +430,7 @@ fn assemble_plots(
                     .coordinate
                     .into_iter()
                     .map(|(name, value)| {
-                        // The file names a swept parameter and a swept
-                        // source alike, so only the temperature states
-                        // its unit.
-                        let unit = if name.eq_ignore_ascii_case("temp") {
-                            "°C".to_owned()
-                        } else {
-                            String::new()
-                        };
+                        let unit = imported_step_unit(&name);
                         rspice_results::provenance::AnalysisResultStepCoordinate {
                             name,
                             value,
@@ -545,6 +538,16 @@ pub(super) use digital::{parse_fst, parse_vcd};
 
 #[cfg(test)]
 use digital::preflight_fst_for_test as preflight_fst;
+
+/// The unit an imported `.step` coordinate is measured in. A file names a swept
+/// parameter and a swept source alike, so only the temperature states its unit.
+pub(crate) fn imported_step_unit(name: &str) -> String {
+    if name.eq_ignore_ascii_case("temp") {
+        "°C".to_owned()
+    } else {
+        String::new()
+    }
+}
 
 #[cfg(test)]
 #[path = "result_import_adapters/tests.rs"]

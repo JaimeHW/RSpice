@@ -1383,9 +1383,9 @@ fn a_stepped_rawfile_read_without_its_log_names_its_runs_from_the_log_chosen_aft
     assert_eq!(
         labels,
         [
-            "Imported \u{b7} Transient Analysis \u{b7} r = 1000",
-            "Imported \u{b7} Transient Analysis \u{b7} r = 2000",
-            "Imported \u{b7} Transient Analysis \u{b7} r = 4000",
+            "Imported \u{b7} Transient Analysis \u{b7} r=1k",
+            "Imported \u{b7} Transient Analysis \u{b7} r=2k",
+            "Imported \u{b7} Transient Analysis \u{b7} r=4k",
         ]
     );
 }

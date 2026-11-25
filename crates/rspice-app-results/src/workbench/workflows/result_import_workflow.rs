@@ -638,6 +638,7 @@ pub(crate) fn name_result_import_runs(
                 |(name, value)| rspice_results::provenance::AnalysisResultStepCoordinate {
                     name: name.clone(),
                     value: *value,
+                    unit: adapters::imported_step_unit(name),
                 },
             )
             .collect();
