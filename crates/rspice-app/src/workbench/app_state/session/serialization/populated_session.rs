@@ -314,6 +314,7 @@ fn populate_workbench(
     workbench.inspector_width = 287.0;
     workbench.inspector_width_custom = true;
     workbench.console_height = 244.0;
+    workbench.plot_height = Some(333.0);
     workbench.console_page = ConsolePage::Problems;
     state.design.show_component_shelf();
     workbench
