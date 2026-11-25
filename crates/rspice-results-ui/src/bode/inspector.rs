@@ -8,7 +8,7 @@ use rspice_results::engine_evidence::{
 };
 use rspice_results::waveform::HeldColumn;
 use rspice_ui_kit::panels::{panel_inset, section_header};
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -376,7 +376,7 @@ fn stability_rows(
         low,
         or_dash(
             m.adc_db
-                .map(|decibels| fmt_si_significant(decibels, "dB", significant_digits)),
+                .map(|decibels| fmt_column_reading(decibels, "dB", significant_digits)),
         ),
         false,
     ));
@@ -401,7 +401,7 @@ fn response_rows(
             low,
             or_dash(
                 m.adc_db
-                    .map(|decibels| fmt_si_significant(decibels, "dB", significant_digits)),
+                    .map(|decibels| fmt_column_reading(decibels, "dB", significant_digits)),
             ),
             true,
         ),
@@ -431,7 +431,7 @@ pub fn noise_spectrum_right_panel(
     });
     let figure = |value: Option<f64>, unit: &str| {
         (
-            or_dash(value.map(|value| fmt_si_significant(value, unit, significant_digits))),
+            or_dash(value.map(|value| fmt_column_reading(value, unit, significant_digits))),
             value.is_some(),
         )
     };
@@ -540,9 +540,9 @@ mod tests {
             rows,
             [
                 ("Loop gain", "Loop Gain"),
-                ("Phase margin", "27.14 °"),
+                ("Phase margin", "27.14\u{b0}"),
                 ("Gain crossover", "1.233 kHz"),
-                ("Gain margin", "6.021 dB"),
+                ("Gain margin", "6.02 dB"),
                 ("Phase crossover", "1.732 kHz"),
                 ("A_dc", "12.04 dB"),
             ]
@@ -573,8 +573,16 @@ mod tests {
         };
         assert_eq!(
             values(4)[1..],
-            ["61.23 °", "1.235 MHz", "12.35 dB", "4.568 MHz", "62.35 dB"]
+            [
+                "61.23\u{b0}",
+                "1.235 MHz",
+                "12.35 dB",
+                "4.568 MHz",
+                "62.35 dB"
+            ]
         );
-        assert_eq!(values(6)[1..3], ["61.2346 °", "1.23457 MHz"]);
+        // A degree reads to the hundredth at any digits; a frequency keeps
+        // the reader's.
+        assert_eq!(values(6)[1..3], ["61.23\u{b0}", "1.23457 MHz"]);
     }
 }

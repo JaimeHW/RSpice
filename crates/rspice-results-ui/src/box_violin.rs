@@ -12,7 +12,7 @@
 use egui::Ui;
 
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_column_reading};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::{Button, SegmentedWidth, chip, segmented, select};
 
@@ -100,7 +100,7 @@ impl Column {
     /// normalized ordinate is a count of standard deviations or a percentage,
     /// which the formatter never prefixes: 0.4266 σ, not 426.6 mσ.
     fn format(&self, value: f64, significant_digits: usize) -> String {
-        fmt_si_significant(value, &self.unit, significant_digits)
+        fmt_column_reading(value, &self.unit, significant_digits)
     }
 
     fn yield_percent(&self) -> Option<f64> {
@@ -968,7 +968,7 @@ fn statistics_rows(
         .count();
     let yield_row = column.yield_percent().map_or_else(
         || "No requirement bounds this column".to_owned(),
-        |percent| fmt_si_significant(percent, "%", significant_digits),
+        |percent| fmt_column_reading(percent, "%", significant_digits),
     );
     // The yield's 95 % Wilson interval: how far the figure can be trusted
     // at this many trials.
@@ -978,8 +978,8 @@ fn statistics_rows(
         .map(|(low, high)| {
             format!(
                 "{} to {}",
-                fmt_si_significant(low, "", significant_digits),
-                fmt_si_significant(high, "%", significant_digits)
+                fmt_column_reading(low, "", significant_digits),
+                fmt_column_reading(high, "%", significant_digits)
             )
         });
     let capability = column.capability;
@@ -1042,7 +1042,7 @@ fn statistics_rows(
             "Cpk",
             capability.map_or_else(
                 || "Not defined for this requirement".to_owned(),
-                |value| rspice_ui_kit::plot::fmt_si_significant(value, "", 3),
+                |value| rspice_ui_kit::plot::fmt_column_reading(value, "", significant_digits),
             ),
             false,
         ),
@@ -1252,7 +1252,7 @@ mod tests {
         assert!(
             statistics_rows(&normalized, &plan, 4)
                 .iter()
-                .any(|row| row.0 == "Cpk" && row.1 == "0.25")
+                .any(|row| row.0 == "Cpk" && row.1 == "0.2500")
         );
     }
     #[test]
@@ -1413,7 +1413,7 @@ mod tests {
 
     /// The column's statistics read at the reader's digits.
     #[test]
-    fn the_statistics_follow_the_digits_preference() {
+    fn a_statistic_in_decibels_reads_to_the_hundredth_at_any_digits() {
         let (analysis, specs, mut sheet) = fixture(101);
         sheet.grouping = BoxGrouping::OneMeasurement;
         sheet.measurement = Some("gain_dc".to_owned());
@@ -1430,8 +1430,7 @@ mod tests {
                 .map(|row| row.1)
                 .expect("a median row")
         };
-        let (short, long) = (median(3), median(9));
-        assert_ne!(short, long);
-        assert!(short.len() < long.len(), "{short} against {long}");
+        assert_eq!(median(3), "39.98 dB");
+        assert_eq!(median(9), "39.98 dB");
     }
 }

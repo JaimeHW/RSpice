@@ -130,7 +130,7 @@ pub fn outputs(ui: &mut Ui, eye: &EyeDiagramState, significant_digits: usize) {
 }
 
 fn significant(value: f64, digits: usize) -> String {
-    rspice_ui_kit::plot::fmt_si_significant(value, "", digits)
+    rspice_ui_kit::plot::fmt_column_reading(value, "", digits)
         .trim()
         .to_owned()
 }
@@ -193,7 +193,7 @@ fn clock_controls(
     if let EyeTimebase::Explicit { unit_interval } = settings.fold.timebase
         && settings.fold.clock.is_none()
     {
-        let shown = rspice_ui_kit::plot::fmt_si_significant(unit_interval, "s", significant_digits);
+        let shown = rspice_ui_kit::plot::fmt_column_reading(unit_interval, "s", significant_digits);
         if let Some(text) = text_field(ui, "rspice.eye.rate", &shown, "2.5G · 400p")
             && let Ok(unit_interval) = parse_eye_timebase(&text)
         {

@@ -11,7 +11,7 @@ use crate::presentation::{PlotView, frequency_readout, with_table_state};
 use crate::waves::ReadoutPolicy;
 use rspice_results::fft::settings::SpectrumScale;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, sample_at};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey};
@@ -384,7 +384,7 @@ pub fn show(
             x: f0,
             y: level0,
             color: c.accent,
-            label: format!("f₀ {}", fmt_si_significant(level0, level_unit, digits)),
+            label: format!("f₀ {}", fmt_column_reading(level0, level_unit, digits)),
             drop_line: false,
             label_dy: 0.0,
             shape: plot::MarkerShape::Point,
@@ -396,7 +396,7 @@ pub fn show(
             x: f,
             y: level,
             color: c.traces[2],
-            label: format!("HD{order} {}", fmt_si_significant(dbc, "dBc", digits)),
+            label: format!("HD{order} {}", fmt_column_reading(dbc, "dBc", digits)),
             drop_line: false,
             // Stagger alternating tags so neighbours never collide.
             label_dy: if i % 2 == 0 { -14.0 } else { 26.0 },
@@ -412,7 +412,7 @@ pub fn show(
             ),
             (
                 "level".to_owned(),
-                fmt_si_significant(
+                fmt_column_reading(
                     presentation.cursor_sample(&model.frequency, &model.level, x),
                     level_unit,
                     digits,
@@ -422,7 +422,7 @@ pub fn show(
         if fft.phase {
             rows.push((
                 "phase".to_owned(),
-                fmt_si_significant(sample_at(&model.frequency, &model.phase, x), "°", digits),
+                fmt_column_reading(sample_at(&model.frequency, &model.phase, x), "°", digits),
             ));
         }
         rows
@@ -539,22 +539,22 @@ pub fn right_panel(
             frequency_readout(quantity_policy, v, digits)
         })
     };
-    let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| fmt_si_significant(v, "dB", digits));
+    let db = |v: Option<f64>| v.map_or("—".to_owned(), |v| fmt_column_reading(v, "dB", digits));
     let absent = absent_thd(analysis.harmonic_coverage);
     let short = |figure: Option<f64>, unit: &str| match (figure, &absent) {
-        (Some(value), _) => fmt_si_significant(value, unit, digits),
+        (Some(value), _) => fmt_column_reading(value, unit, digits),
         (None, Some((reason, _))) => reason.clone(),
         (None, None) => "—".to_owned(),
     };
 
     let amplitude = analysis.fundamental_db.map_or("—".to_owned(), |value| {
-        fmt_si_significant(value, level_unit, digits)
+        fmt_column_reading(value, level_unit, digits)
     });
     let dc = fft.source_cache.as_ref().map_or("—".to_owned(), |source| {
-        fmt_si_significant(source.dc_level, quantity, digits)
+        fmt_column_reading(source.dc_level, quantity, digits)
     });
     let noise_floor = match (analysis.noise_floor_db, analysis.fundamental_db) {
-        (Some(noise), Some(fundamental)) => fmt_si_significant(noise - fundamental, "dBc", digits),
+        (Some(noise), Some(fundamental)) => fmt_column_reading(noise - fundamental, "dBc", digits),
         _ => "—".to_owned(),
     };
 
@@ -619,7 +619,7 @@ pub fn right_panel(
             (
                 "ENOB",
                 analysis.enob_bits().map_or("—".to_owned(), |bits| {
-                    fmt_si_significant(bits, "bit", digits)
+                    fmt_column_reading(bits, "bit", digits)
                 }),
                 false,
             ),

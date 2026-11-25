@@ -224,13 +224,11 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
     );
 }
 
-/// The digit preference is a ceiling, and a value reads the same in a
-/// readout and in a table cell: zeros only where a rounding resolved them.
+/// A value reads the same in a readout and in a table cell, each at the
+/// reader's digits with its zeros kept, so readings stacked in a column end
+/// at one decimal place (`1.500 V` above `1.144 V`).
 ///
-/// The defect: the strip legend, the cursor columns and the measurement rows
-/// all read `1.500000 V` at the default preference — seven digits claimed for
-/// a number that has two — and the Table viewer spelled the same value a
-/// second way.
+/// The Table viewer once spelled the same value a second way.
 #[test]
 fn a_readout_and_a_table_cell_spell_a_value_alike() {
     let mut state = ResultsTestHost::default();
@@ -248,16 +246,16 @@ fn a_readout_and_a_table_cell_spell_a_value_alike() {
         &Tokens::default(),
     );
     let model = &models[0];
-    let digits = 7;
+    let digits = 4;
 
     assert_eq!(
         model.format_trace_value(&model.traces[0], 1.5, digits, quantity_policy),
-        "1.5 V",
+        "1.500 V",
         "the legend chip, the cursor columns and the measurement rows"
     );
     assert_eq!(
         model.format_x(1.0e-3, digits, quantity_policy),
-        "1 ms",
+        "1.000 ms",
         "and the X column beside them"
     );
     assert_eq!(
@@ -268,19 +266,19 @@ fn a_readout_and_a_table_cell_spell_a_value_alike() {
             digits,
             quantity_policy
         ),
-        "1 ms  (1 kHz)",
-        "and the separation cell, which carried two padded numbers at once"
+        "1.000 ms  (1.000 kHz)",
+        "and the separation cell"
     );
     assert_eq!(
         model
             .format_sample(0, 1, digits, quantity_policy)
             .as_deref(),
-        Some("1.5 V"),
+        Some("1.500 V"),
         "and a table cell"
     );
     assert_eq!(
         model.format_x_at(1, digits, quantity_policy),
-        "1 s",
+        "1.000 s",
         "and the table's own X column"
     );
 }
@@ -341,8 +339,8 @@ fn a_reading_finer_than_its_trace_resolves_reads_zero() {
     );
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].a, "0 V", "the zero crossing reads zero");
-    assert_eq!(rows[1].a, "354 µA");
-    assert_eq!(rows[1].b, "354 µA");
+    assert_eq!(rows[1].a, "354.0 µA");
+    assert_eq!(rows[1].b, "354.0 µA");
     assert_eq!(rows[1].delta, "0 A", "equal readings differ by nothing");
     assert_eq!(rows[1].slope, "0 A/s", "and have no slope");
 

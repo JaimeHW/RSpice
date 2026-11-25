@@ -13,7 +13,7 @@ use rspice_results::result_presentation::{
     AnalysisPresentationKey, CrossingLevel, FeatureSize, MarkerKind, MarkerOffset,
     WaveformPresentationKey,
 };
-use rspice_ui_kit::plot::{SampleInterpolation, fmt_si_significant};
+use rspice_ui_kit::plot::{SampleInterpolation, fmt_column_reading, fmt_si_significant};
 use rspice_ui_kit::widgets::{CommandForm, DialogChoice, FormRows};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
@@ -414,7 +414,7 @@ fn stands_text(
     presentation: ReadoutPolicy,
 ) -> String {
     let Some(model) = strip else {
-        return fmt_si_significant(marker.x, "", digits);
+        return fmt_column_reading(marker.x, "", digits);
     };
     let found = match kind {
         MarkerKind::Offset(offset) => marker

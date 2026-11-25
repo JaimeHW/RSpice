@@ -124,7 +124,7 @@ pub fn measurement_panel(
                             } else {
                                 name
                             },
-                            Cell::number(row.value),
+                            Cell::quantity(row.value),
                         ]
                     });
                 if let Some(index) = response.activate {
@@ -352,7 +352,7 @@ impl Measurements {
             // In the unit Frequency display chooses.
             Reading::Frequency => {
                 let (scale, offset, unit) = wording.quantity_policy.frequency_axis_transform();
-                rspice_ui_kit::plot::fmt_si_significant(
+                rspice_ui_kit::plot::fmt_column_reading(
                     period.recip() * scale + offset,
                     unit,
                     digits,

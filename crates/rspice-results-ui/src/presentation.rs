@@ -55,28 +55,7 @@ pub fn xy_screen_pos(
     )
 }
 
-/// `value` to `decimals` places with a true minus sign and no negative
-/// zero, so every row of a column stands at one precision and its decimal
-/// points align: a decibel to its hundredth, a share to its tenth of a
-/// percent.
-#[must_use]
-pub fn fixed_places(value: f64, decimals: usize) -> String {
-    let text = format!("{value:.decimals$}");
-    let unsigned = text.trim_start_matches('-');
-    if unsigned
-        .chars()
-        .all(|character| matches!(character, '0' | '.'))
-    {
-        return unsigned.to_owned();
-    }
-    text.replace('-', "\u{2212}")
-}
-
-/// A decibel figure's places: to the hundredth of a decibel.
-pub const DECIBEL_PLACES: usize = 2;
-
-/// A share's places: to the tenth of a percent.
-pub const SHARE_PLACES: usize = 1;
+pub use rspice_results::number_format::{DECIBEL_PLACES, SHARE_PLACES, fixed_places};
 
 /// The least widths of a details table's columns, laid in `room`: each
 /// column as wide as its head, with room for a sort mark, and its widest
@@ -407,11 +386,20 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
         // name's column gives way to it rather than the value wrapping, down
         // to the name's own width. Only a value wider still wraps; a name
         // squeezed to nothing would stand one letter to a line.
+        // A reading printed without a prefix keeps its prefix's slot blank,
+        // so the values' digits end at one x down the list: `1.144 V` under
+        // `604.8 mV`.
+        let slot = if rspice_results::number_format::leaves_prefix_slot_blank(value) {
+            ui.fonts_mut(|fonts| fonts.glyph_width(&value_font, 'm'))
+        } else {
+            0.0
+        };
         let natural = ui
             .painter()
             .layout_no_wrap(value.clone(), value_font.clone(), c.text)
             .size()
-            .x;
+            .x
+            + slot;
         let name_font = theme::sans(tokens::FS_1, FontWeight::Regular);
         let name_natural = ui
             .painter()
@@ -427,9 +415,9 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
             if *highlight { c.text } else { c.text_dim },
             name_width,
         );
-        let value_galley = ui
-            .painter()
-            .layout(value.clone(), value_font, c.text, value_width);
+        let value_galley =
+            ui.painter()
+                .layout(value.clone(), value_font, c.text, value_width - slot);
         let row_height = PANEL_ROW_H.max(name_galley.size().y.max(value_galley.size().y) + 8.0);
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
@@ -452,7 +440,10 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
         // The value is text the reader can select and copy, as a readout
         // is read off to be used elsewhere; the name beside it is painted.
         let value_at = egui::Rect::from_min_size(
-            egui::pos2(value_rect.right() - value_galley.size().x, value_rect.top()),
+            egui::pos2(
+                value_rect.right() - slot - value_galley.size().x,
+                value_rect.top(),
+            ),
             value_galley.size(),
         )
         .intersect(value_rect);
@@ -475,29 +466,42 @@ fn stat_column_widths(width: f32, inset: f32) -> (f32, f32) {
 }
 
 /// A frequency readout at `significant_digits`, in the unit Units ▸
-/// Frequency display chose. The stored value is hertz either way.
+/// Frequency display chose, with every digit, as a readout list prints it.
+/// The stored value is hertz either way.
 pub fn frequency_readout(
     quantity_policy: &QuantityPresentationPolicy,
     hertz: f64,
     significant_digits: usize,
 ) -> String {
     let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
-    rspice_ui_kit::plot::fmt_si_significant(hertz * scale + offset, unit, significant_digits)
+    rspice_ui_kit::plot::fmt_column_reading(hertz * scale + offset, unit, significant_digits)
 }
 
-/// An angle readout at `significant_digits`, in the unit Units ▸ Angle
-/// display chose. The stored value is radians either way.
-/// A complex value as `a + jb`, each part in `unit` at `significant_digits`
-/// with a true minus sign.
+/// A complex value as `a + bj`, both parts under one unit and one prefix:
+/// `1.200 + 3.400j V`.
 pub fn complex_readout(real: f64, imaginary: f64, unit: &str, significant_digits: usize) -> String {
+    rspice_ui_kit::plot::fmt_complex(real, imaginary, unit, significant_digits)
+}
+
+/// A complex value as its magnitude at `significant_digits` and its angle
+/// in the unit Angle display chose: `1.200 V ∠ 45.00°`.
+pub fn polar_readout(
+    quantity_policy: &QuantityPresentationPolicy,
+    magnitude: f64,
+    unit: &str,
+    radians: f64,
+    significant_digits: usize,
+) -> String {
     format!(
-        "{} {} j{}",
-        rspice_ui_kit::plot::fmt_si_significant(real, unit, significant_digits),
-        if imaginary >= 0.0 { "+" } else { "\u{2212}" },
-        rspice_ui_kit::plot::fmt_si_significant(imaginary.abs(), unit, significant_digits)
+        "{} \u{2220} {}",
+        rspice_ui_kit::plot::fmt_column_reading(magnitude, unit, significant_digits),
+        angle_readout(quantity_policy, radians, significant_digits)
     )
 }
 
+/// An angle readout in the unit Angle display chose: degrees to the
+/// hundredth (`45.00°`), radians at `significant_digits`. The stored value
+/// is radians either way.
 pub fn angle_readout(
     quantity_policy: &QuantityPresentationPolicy,
     radians: f64,
@@ -505,11 +509,13 @@ pub fn angle_readout(
 ) -> String {
     use rspice_vocabulary::quantity::AngleDisplay;
     match quantity_policy.angle_display {
-        AngleDisplay::Degrees => {
-            rspice_ui_kit::plot::fmt_si_significant(radians.to_degrees(), "°", significant_digits)
-        }
+        AngleDisplay::Degrees => rspice_ui_kit::plot::fmt_column_reading(
+            radians.to_degrees(),
+            "\u{b0}",
+            significant_digits,
+        ),
         AngleDisplay::Radians => {
-            rspice_ui_kit::plot::fmt_si_significant(radians, "rad", significant_digits)
+            rspice_ui_kit::plot::fmt_column_reading(radians, "rad", significant_digits)
         }
     }
 }

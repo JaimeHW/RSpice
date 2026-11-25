@@ -12,8 +12,8 @@ use rspice_results::phase_noise::{
     timing_density_from_phase_noise,
 };
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::fmt_si_significant;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale};
+use rspice_ui_kit::plot::{fmt_column_reading, fmt_si_significant};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::Button;
 use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable, SortKey};
@@ -456,7 +456,7 @@ fn decibels(level: f64) -> String {
 /// A number for a table cell whose column head carries the unit: the
 /// prefix the unit takes, and no unit.
 pub(crate) fn plain(value: f64, unit: &str, digits: usize) -> String {
-    let text = fmt_si_significant(value, unit, digits);
+    let text = fmt_column_reading(value, unit, digits);
     text.strip_suffix(unit)
         .map_or_else(|| text.clone(), |number| number.trim_end().to_owned())
 }
@@ -703,7 +703,7 @@ fn spot_rows(
         .iter()
         .map(|&spot| {
             let mut cells = vec![
-                Cell::number(frequency_readout(quantities, spot, digits))
+                Cell::quantity(frequency_readout(quantities, spot, digits))
                     .sort_by(SortKey::Number(spot)),
             ];
             cells.extend(traces.iter().map(|trace| {

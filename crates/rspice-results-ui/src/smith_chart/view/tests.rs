@@ -6,16 +6,16 @@ use rspice_ui_kit::raster::{self, Canvas};
 use std::sync::Arc;
 
 /// An impedance reads at the chosen significant digits, not at two
-/// decimals whatever the preference says.
+/// decimals whatever the preference says, both parts under one unit.
 #[test]
 fn an_impedance_reads_at_the_chosen_significant_digits() {
     assert_eq!(
         impedance_readout(50.123_456, -12.345_678, 4),
-        "50.12 Ω − j12.35 Ω"
+        "50.12 \u{2212} 12.35j Ω"
     );
     assert_eq!(
         impedance_readout(50.123_456, 12.345_678, 6),
-        "50.1235 Ω + j12.3457 Ω"
+        "50.1235 + 12.3457j Ω"
     );
 }
 
@@ -57,9 +57,10 @@ fn the_marker_reads_frequency_gamma_impedance_admittance_and_vswr() {
         &policy,
         4,
     );
-    assert_eq!(rows[3].1, "75 Ω + j0 Ω");
-    assert_eq!(rows[4].1, "13.33 mS + j0 S");
-    assert_eq!(rows[5].1, "1.5 : 1");
+    assert_eq!(rows[1].1, "0.2000 \u{2220} 0.00\u{b0}");
+    assert_eq!(rows[3].1, "75.00 + 0.00j Ω");
+    assert_eq!(rows[4].1, "13.33 + 0.00j mS");
+    assert_eq!(rows[5].1, "1.500 : 1");
 }
 
 /// A trace's columns, owned for a test.

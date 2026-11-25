@@ -6,7 +6,7 @@ use rspice_results::engine_evidence::{
     QpnoiseValue, QpxfQuantity,
 };
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::widgets::measurement_table;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
@@ -27,7 +27,7 @@ fn unavailable_reason(why: QpnoiseUnavailable) -> &'static str {
 
 fn value(v: QpnoiseValue, unit: &str, digits: usize) -> String {
     match v {
-        QpnoiseValue::Finite(v) => fmt_si_significant(v, unit, digits),
+        QpnoiseValue::Finite(v) => fmt_column_reading(v, unit, digits),
         QpnoiseValue::Unavailable(why) => format!("Unavailable: {}", unavailable_reason(why)),
     }
 }

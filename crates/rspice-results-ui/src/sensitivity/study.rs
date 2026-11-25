@@ -932,7 +932,7 @@ mod tests {
         let basis = basis_label(&evidence, &policy);
         assert!(basis.contains("AC sweep"), "{basis}");
         assert!(basis.contains("3 points"), "{basis}");
-        assert_eq!(read_at_label(&evidence, 0, &policy), "10 Hz");
+        assert_eq!(read_at_label(&evidence, 0, &policy), "10.00 Hz");
         // The band and the point follow Frequency display.
         let radians = QuantityPresentationPolicy {
             frequency_display: rspice_vocabulary::quantity::FrequencyDisplay::RadiansPerSecond,
@@ -1008,7 +1008,7 @@ mod tests {
             .find(|row| row.contains("PARAM:GAIN"))
             .unwrap_or_else(|| panic!("no PARAM:GAIN row among {rows:?}"));
         assert!(
-            gain.ends_with("normalized sensitivity 0.25, raw sensitivity 0.25"),
+            gain.ends_with("normalized sensitivity 0.2500000, raw sensitivity 0.2500000"),
             "{gain}"
         );
     }

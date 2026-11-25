@@ -8,7 +8,7 @@ use crate::session::{MarkerView, ResultViewerState};
 use rspice_results::feature_search;
 use rspice_results::result_presentation::{CrossingLevel, MarkerKind, WaveformPresentationKey};
 use rspice_ui_kit::plot::SampleInterpolation;
-use rspice_ui_kit::plot::{XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{XScale, fmt_column_reading};
 use rspice_vocabulary::quantity::{FrequencyDisplay, QuantityPresentationPolicy};
 
 #[cfg(test)]
@@ -149,12 +149,12 @@ pub fn x_separation(
     significant_digits: usize,
     quantity_policy: QuantityPresentationPolicy,
 ) -> String {
-    // A separation is read, not tabulated: "1 ms  (1 kHz)", never
-    // "1.000000 ms  (1.000000 kHz)" — two padded numbers in one cell.
+    // The separation reads at the reader's digits like the A and B beside
+    // it: "1.000 ms  (1.000 kHz)" at four digits.
     let dx = b - a;
     match model.x_scale {
         XScale::Linear if model.x_unit == "s" => {
-            let span = fmt_si_significant(dx, "s", significant_digits);
+            let span = fmt_column_reading(dx, "s", significant_digits);
             if dx == 0.0 {
                 span
             } else {
@@ -165,7 +165,7 @@ pub fn x_separation(
             }
         }
         XScale::Log10 => frequency_text(dx, significant_digits, quantity_policy),
-        _ => fmt_si_significant(dx, &model.x_unit, significant_digits),
+        _ => fmt_column_reading(dx, &model.x_unit, significant_digits),
     }
 }
 
@@ -181,7 +181,7 @@ pub fn x_delta(
     let dx = b - a;
     match model.x_scale {
         XScale::Log10 => frequency_text(dx, significant_digits, quantity_policy),
-        XScale::Linear => fmt_si_significant(dx, &model.x_unit, significant_digits),
+        XScale::Linear => fmt_column_reading(dx, &model.x_unit, significant_digits),
     }
 }
 
@@ -202,8 +202,8 @@ pub fn x_reciprocal(
     let inverse = 1.0 / span;
     Some(match model.x_unit.as_str() {
         "s" => frequency_text(inverse, significant_digits, quantity_policy),
-        "Hz" => fmt_si_significant(inverse, "s", significant_digits),
-        unit => fmt_si_significant(inverse, &format!("/{unit}"), significant_digits),
+        "Hz" => fmt_column_reading(inverse, "s", significant_digits),
+        unit => fmt_column_reading(inverse, &format!("/{unit}"), significant_digits),
     })
 }
 
@@ -216,9 +216,9 @@ fn frequency_text(
     quantity_policy: QuantityPresentationPolicy,
 ) -> String {
     match quantity_policy.frequency_display {
-        FrequencyDisplay::HertzEngineering => fmt_si_significant(hertz, "Hz", significant_digits),
+        FrequencyDisplay::HertzEngineering => fmt_column_reading(hertz, "Hz", significant_digits),
         FrequencyDisplay::RadiansPerSecond => {
-            fmt_si_significant(hertz * std::f64::consts::TAU, "rad/s", significant_digits)
+            fmt_column_reading(hertz * std::f64::consts::TAU, "rad/s", significant_digits)
         }
     }
 }
@@ -227,5 +227,5 @@ fn frequency_text(
 /// one (`2 MV/s`, `15 mA/V`), plain digits on one that carries its own scale
 /// (`-20 dB/dec`, `45 °/kHz`).
 pub fn slope_text(slope: f64, y_unit: &str, x_unit: &str, significant_digits: usize) -> String {
-    fmt_si_significant(slope, &format!("{y_unit}/{x_unit}"), significant_digits)
+    fmt_column_reading(slope, &format!("{y_unit}/{x_unit}"), significant_digits)
 }

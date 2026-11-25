@@ -508,7 +508,7 @@ pub fn lane_readout_rows(
         let format = |value: Option<f64>| {
             value.map_or_else(
                 || READOUT_ABSENT.to_owned(),
-                |value| rspice_ui_kit::plot::fmt_si_significant(value, unit, significant_digits),
+                |value| rspice_ui_kit::plot::fmt_column_reading(value, unit, significant_digits),
             )
         };
         let (a, b) = (value(cursors.a), value(cursors.b));

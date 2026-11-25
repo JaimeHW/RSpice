@@ -225,9 +225,10 @@ fn a_stored_selected_trace_is_measured_without_a_frame_reading_its_columns() {
         (0, 0),
         "a frame read a stored column whole"
     );
-    // The ramp runs from 0 to 10 V over 10 ms: its average is 5 V.
-    assert_eq!(rows.get("Average").map(String::as_str), Some("5 V"));
-    assert_eq!(rows.get("Maximum").map(String::as_str), Some("10 V"));
+    // The ramp runs from 0 to 10 V over 10 ms: its average is 5 V, read at
+    // the reader's four digits.
+    assert_eq!(rows.get("Average").map(String::as_str), Some("5.000 V"));
+    assert_eq!(rows.get("Maximum").map(String::as_str), Some("10.00 V"));
     // Each pass reads the column a block at a time; this column is one block long.
     let passes = || {
         columns

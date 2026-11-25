@@ -1553,7 +1553,7 @@ fn pane_expressions(
                     cursor_interpolation(presentation.cursor_interpolation()),
                 )
             });
-            rspice_ui_kit::plot::fmt_si_significant(
+            rspice_ui_kit::plot::fmt_column_reading(
                 value,
                 pane.axis_unit(),
                 usize::from(presentation.displayed_significant_digits().get()),

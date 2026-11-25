@@ -11,7 +11,7 @@ use rspice_results::result_presentation::{
 use rspice_results::visualization_document::{MAX_STRIP_AXES, SignalForm, Strip, StripMember};
 use rspice_results::waveform::SharedWaveformValues;
 use rspice_ui_kit::plot::sample::SweepShape;
-use rspice_ui_kit::plot::{XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{XScale, fmt_column_reading};
 use std::sync::Arc;
 
 mod axes;
@@ -570,9 +570,9 @@ impl StripModel {
             // The digit preference counts significant digits, in whichever
             // unit Frequency display chose.
             let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
-            return fmt_si_significant(x * scale + offset, unit, significant_digits);
+            return fmt_column_reading(x * scale + offset, unit, significant_digits);
         }
-        fmt_si_significant(
+        fmt_column_reading(
             x,
             if self.x_unit.is_empty() {
                 ""
@@ -597,7 +597,7 @@ impl StripModel {
             // a value is named by the unit its own signal is measured in —
             // the same unit that decided which pane draws it.
             TraceKind::Value | TraceKind::Real | TraceKind::Imaginary | TraceKind::GroupDelay => {
-                fmt_si_significant(value, self.trace_unit(trace), significant_digits)
+                fmt_column_reading(value, self.trace_unit(trace), significant_digits)
             }
             TraceKind::MagnitudeDb => {
                 let unit = if self.trace_unit(trace) == "dBc" {
@@ -605,13 +605,13 @@ impl StripModel {
                 } else {
                     "dB"
                 };
-                fmt_si_significant(value, unit, significant_digits)
+                fmt_column_reading(value, unit, significant_digits)
             }
             TraceKind::PhaseDeg => {
                 phase_sample(value.to_radians(), significant_digits, quantity_policy)
             }
             TraceKind::NoiseDensity => {
-                fmt_si_significant(value, NOISE_DENSITY_UNIT, significant_digits)
+                fmt_column_reading(value, NOISE_DENSITY_UNIT, significant_digits)
             }
         }
     }
@@ -1203,8 +1203,8 @@ fn phase_sample(
 ) -> String {
     use rspice_vocabulary::quantity::AngleDisplay;
     match quantity_policy.angle_display {
-        AngleDisplay::Degrees => fmt_si_significant(radians.to_degrees(), "°", significant_digits),
-        AngleDisplay::Radians => fmt_si_significant(radians, "rad", significant_digits),
+        AngleDisplay::Degrees => fmt_column_reading(radians.to_degrees(), "°", significant_digits),
+        AngleDisplay::Radians => fmt_column_reading(radians, "rad", significant_digits),
     }
 }
 

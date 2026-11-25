@@ -4,7 +4,7 @@ use egui::Ui;
 use num_complex::Complex64;
 use rspice_results::{network_matrix::impedance_from_gamma, waveform::HeldColumn};
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_column_reading};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
@@ -13,7 +13,7 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use super::circles::{ChartCircle, CircleKind, CirclePlane, TwoPortFigures, parse_decibels};
 use super::grid::{self, GRID_VALUES, SmithGrid};
 use super::state::{ResponseReading, SmithSheetState};
-use crate::presentation::{PlotView, angle_readout, complex_readout, frequency_readout, well_hint};
+use crate::presentation::{PlotView, complex_readout, frequency_readout, well_hint};
 use crate::strip::{self, LegendChip};
 
 /// One trace the sheet lists, with its cached Γ-plane coordinate columns.
@@ -679,18 +679,14 @@ fn sample_rows(
         ),
         (
             "Γ".to_owned(),
-            format!(
-                "{} ∠ {}",
-                fmt_si_significant(mag, "", digits),
-                angle_readout(quantity_policy, phase, digits)
-            ),
+            crate::presentation::polar_readout(quantity_policy, mag, "", phase, digits),
         ),
     ];
     let Some(reference) = trace.reference_impedance_ohm else {
         rows.push(("Readout".to_owned(), "complex coefficient only".to_owned()));
         return rows;
     };
-    rows.push(("Z₀".to_owned(), fmt_si_significant(reference, "Ω", digits)));
+    rows.push(("Z₀".to_owned(), fmt_column_reading(reference, "Ω", digits)));
     if grid.draws_impedance() {
         rows.push((
             "Z".to_owned(),
@@ -713,12 +709,12 @@ fn sample_rows(
     rows
 }
 
-/// A VSWR as a ratio, "1.5 : 1", the same on the hover card and the panel.
+/// A VSWR as a ratio, "1.500 : 1", the same on the hover card and the panel.
 fn vswr_text(magnitude: f64, digits: usize) -> String {
     if magnitude < 1.0 {
         format!(
             "{} : 1",
-            fmt_si_significant((1.0 + magnitude) / (1.0 - magnitude), "", digits)
+            fmt_column_reading((1.0 + magnitude) / (1.0 - magnitude), "", digits)
         )
     } else {
         "∞".to_owned()
@@ -1061,7 +1057,7 @@ pub fn right_panel(
         rows.push(("Z₀", format!("{reference} Ω"), false));
     }
     if let Some(value) = maximum_gamma {
-        rows.push(("|Γ| max", fmt_si_significant(value, "", digits), true));
+        rows.push(("|Γ| max", fmt_column_reading(value, "", digits), true));
         if trace.reference_impedance_ohm.is_some() {
             rows.push(("Max VSWR", vswr_text(value, digits), false));
         }
@@ -1143,13 +1139,13 @@ fn two_port_rows(
         ),
         (
             "K",
-            fmt_si_significant(device.rollett_k(), "", digits),
+            fmt_column_reading(device.rollett_k(), "", digits),
             false,
         ),
-        ("μ", fmt_si_significant(device.mu_load(), "", digits), false),
+        ("μ", fmt_column_reading(device.mu_load(), "", digits), false),
         (
             "μ′",
-            fmt_si_significant(device.mu_source(), "", digits),
+            fmt_column_reading(device.mu_source(), "", digits),
             false,
         ),
         (
@@ -1168,24 +1164,22 @@ fn two_port_rows(
     if let Some(noise) = figures.noise {
         rows.push((
             "NFmin",
-            fmt_si_significant(10.0 * noise.minimum_noise_factor.log10(), "dB", digits),
+            fmt_column_reading(10.0 * noise.minimum_noise_factor.log10(), "dB", digits),
             false,
         ));
         rows.push((
             "Rn",
-            fmt_si_significant(noise.noise_resistance_ohm, "Ω", digits),
+            fmt_column_reading(noise.noise_resistance_ohm, "Ω", digits),
             false,
         ));
         rows.push((
             "Γopt",
-            format!(
-                "{} ∠ {}",
-                fmt_si_significant(noise.optimum_source_reflection.norm(), "", digits),
-                angle_readout(
-                    quantity_policy,
-                    noise.optimum_source_reflection.arg(),
-                    digits
-                )
+            crate::presentation::polar_readout(
+                quantity_policy,
+                noise.optimum_source_reflection.norm(),
+                "",
+                noise.optimum_source_reflection.arg(),
+                digits,
             ),
             false,
         ));
@@ -1201,16 +1195,18 @@ fn two_port_rows(
         };
         circle_rows.push((
             centre,
-            format!(
-                "{} ∠ {}",
-                fmt_si_significant(circle.circle.center.norm(), "", digits),
-                angle_readout(quantity_policy, circle.circle.center.arg(), digits),
+            crate::presentation::polar_readout(
+                quantity_policy,
+                circle.circle.center.norm(),
+                "",
+                circle.circle.center.arg(),
+                digits,
             ),
             false,
         ));
         circle_rows.push((
             radius,
-            fmt_si_significant(circle.circle.radius, "", digits),
+            fmt_column_reading(circle.circle.radius, "", digits),
             false,
         ));
         circle_rows.push((

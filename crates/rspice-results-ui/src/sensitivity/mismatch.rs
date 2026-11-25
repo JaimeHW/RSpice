@@ -141,11 +141,11 @@ fn exact_value(value: f64, digits: usize) -> String {
 /// The same figure in the output's own unit — a sigma is millivolts, not a
 /// bare number.
 fn quantity(value: f64, unit: &str, digits: usize) -> String {
-    rspice_ui_kit::plot::fmt_si_significant(value, unit, digits)
+    rspice_ui_kit::plot::fmt_column_reading(value, unit, digits)
 }
 
 fn percent(share: f64, digits: usize) -> String {
-    rspice_ui_kit::plot::fmt_si_significant(share * 100.0, "%", digits)
+    rspice_ui_kit::plot::fmt_column_reading(share * 100.0, "%", digits)
 }
 
 pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>) {
@@ -744,7 +744,7 @@ mod tests {
             .unlisted_share()
             .expect("a trimmed list has a remainder");
         assert!((remainder - 0.2).abs() < 1.0e-12, "{remainder}");
-        assert_eq!(percent(remainder, 4), "20 %");
+        assert_eq!(percent(remainder, 4), "20.00 %");
     }
     #[test]
     fn a_negative_share_is_drawn_as_a_reduction_not_as_an_error() {
@@ -762,6 +762,6 @@ mod tests {
         let cumulative = plan.cumulative();
         assert!(cumulative[0] > 1.0, "{cumulative:?}");
         assert!((cumulative[1] - 1.0).abs() < 1.0e-12, "{cumulative:?}");
-        assert_eq!(percent(-0.2, 4), "\u{2212}20 %");
+        assert_eq!(percent(-0.2, 4), "\u{2212}20.00 %");
     }
 }

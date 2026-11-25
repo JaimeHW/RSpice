@@ -9,7 +9,7 @@
 //! row on one line of the inspector at any digits.
 
 use rspice_results::bode::AcBodeMetrics;
-use rspice_ui_kit::plot::{self, fmt_si_significant};
+use rspice_ui_kit::plot::{self, fmt_column_reading};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use crate::presentation::{angle_readout, frequency_readout};
@@ -53,7 +53,7 @@ pub fn rows(
         (
             "Gain margin",
             gain_decibels.map_or_else(dash, |margin| {
-                fmt_si_significant(margin.value, "dB", significant_digits)
+                fmt_column_reading(margin.value, "dB", significant_digits)
             }),
             true,
         ),
@@ -93,7 +93,7 @@ pub fn gain_marks(
             color,
             format!(
                 "GM {}",
-                fmt_si_significant(decibels, "dB", significant_digits)
+                fmt_column_reading(decibels, "dB", significant_digits)
             ),
         )],
         references: Vec::new(),
@@ -155,9 +155,9 @@ mod tests {
         assert_eq!(
             values(Some(phase), Some(gain), 4),
             [
-                "Phase margin: 27.14 °",
+                "Phase margin: 27.14\u{b0}",
                 "Gain crossover: 1.233 kHz",
-                "Gain margin: 6.021 dB",
+                "Gain margin: 6.02 dB",
                 "Phase crossover: 1.732 kHz",
             ]
         );
@@ -170,8 +170,8 @@ mod tests {
             [
                 "Phase margin: \u{2014}",
                 "Gain crossover: \u{2014}",
-                "Gain margin: \u{2212}3.5 dB",
-                "Phase crossover: 2 MHz",
+                "Gain margin: \u{2212}3.50 dB",
+                "Phase crossover: 2.00 MHz",
             ]
         );
     }
@@ -200,7 +200,7 @@ mod tests {
         };
         assert_eq!(
             (mark.x, mark.y, mark.label.as_str()),
-            (1_732.05, 0.0, "GM 6.021 dB")
+            (1_732.05, 0.0, "GM 6.02 dB")
         );
 
         let phase = phase_marks(&metrics, color, &policy, 4);

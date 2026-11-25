@@ -4,7 +4,7 @@ use egui::Ui;
 use rspice_results::noise::NoiseSummary;
 pub use rspice_results::visualization_document::PinnedContributor;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::widgets::measurement_table;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
@@ -60,7 +60,7 @@ pub fn right_panel(
             section_header(ui, "Sampling", None);
             let mut rows = vec![(
                 "Output slew",
-                fmt_si_significant(sampling.output.slew_volts_per_second, "V/s", digits),
+                fmt_column_reading(sampling.output.slew_volts_per_second, "V/s", digits),
             )];
             if let Some(reference) = &sampling.reference {
                 rows.push((

@@ -16,7 +16,7 @@ use rspice_results::harmonic_spectrum::settings::{
     CoefficientQuantity, CoefficientScale, CoefficientSettings,
 };
 use rspice_results::visualization_document::{SignalForm, Strip, StripAxis, StripMember};
-use rspice_ui_kit::plot::{self, Axis, DrawMode, PlotSpec, Trace, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, DrawMode, PlotSpec, Trace, XScale, fmt_column_reading};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
@@ -338,11 +338,11 @@ fn show_strip(
     }
     let readout = |x: f64| -> Vec<(String, String)> {
         if form == SignalForm::Value {
-            let mut rows = vec![("t".to_owned(), fmt_si_significant(x, "s", digits))];
+            let mut rows = vec![("t".to_owned(), fmt_column_reading(x, "s", digits))];
             for curve in &curves {
                 rows.push((
                     curve.trace.name.clone(),
-                    fmt_si_significant(
+                    fmt_column_reading(
                         presentation.cursor_sample(&curve.x, &curve.y, x),
                         unit,
                         digits,
@@ -363,7 +363,7 @@ fn show_strip(
             let level = super::nearest_line(&curve.x, x).map_or(f64::NAN, |index| curve.y[index]);
             rows.push((
                 curve.trace.name.clone(),
-                fmt_si_significant(level, unit, digits),
+                fmt_column_reading(level, unit, digits),
             ));
         }
         rows

@@ -16,7 +16,9 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::panels::{
     panel_body, panel_inset, property_row_control_columns, property_row_height,
 };
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_significant, padded_fit};
+use rspice_ui_kit::plot::{
+    self, Axis, PlotSpec, XScale, fmt_column_reading, fmt_si_significant, padded_fit,
+};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::source_revision::SourceRevision;
@@ -180,19 +182,27 @@ const DISPLAY_CHOICES: [&str; 5] = [
     "Normal quantile",
 ];
 
-/// A value of the binned quantity at the reader's digits, in its unit.
+/// A value of the binned quantity at the reader's digits, in its unit,
+/// zeros kept, as a readout row states it.
 fn quantity(value: f64, unit: &str, digits: usize) -> String {
+    fmt_column_reading(value, unit, digits)
+}
+
+/// A value of the binned quantity as a label or a limit field states it:
+/// at most the reader's digits, the zeros that only pad it dropped, so a
+/// limit reads as it was typed.
+fn said(value: f64, unit: &str, digits: usize) -> String {
     fmt_si_significant(value, unit, digits)
 }
 
 /// A dimensionless statistic at the reader's digits, never prefixed.
 fn plain(value: f64, digits: usize) -> String {
-    fmt_si_significant(value, "", digits)
+    fmt_column_reading(value, "", digits)
 }
 
 /// A percentage at the reader's digits.
 fn percent(value: f64, digits: usize) -> String {
-    fmt_si_significant(value, "%", digits)
+    fmt_column_reading(value, "%", digits)
 }
 
 /// The yield figure, over the trials the population holds.
@@ -552,7 +562,7 @@ fn show_bars(
                     x: limit,
                     y: y1 * 0.72,
                     color: c.err,
-                    label: format!("{name} {}", quantity(limit, unit, digits)),
+                    label: format!("{name} {}", said(limit, unit, digits)),
                     drop_line: true,
                     label_dy: 0.0,
                     shape: plot::MarkerShape::Point,
@@ -571,7 +581,7 @@ fn show_bars(
             label: format!(
                 "all {} samples at {}",
                 histogram.total_count,
-                quantity(value, unit, digits)
+                said(value, unit, digits)
             ),
             drop_line: false,
             label_dy: 0.0,
@@ -712,7 +722,7 @@ fn show_bars(
                 if mode == HistogramDisplayMode::Count {
                     format!("{value:.0}")
                 } else {
-                    fmt_si_significant(value, &ordinate_unit, digits)
+                    fmt_column_reading(value, &ordinate_unit, digits)
                 },
             ),
         ]
@@ -801,7 +811,7 @@ fn show_probability(
         });
 
     let subtitle = match probability.correlation {
-        Some(r) => format!("{} samples \u{b7} r {}", samples.len(), plain(r, digits)),
+        Some(r) => format!("{} samples \u{b7} r {}", samples.len(), said(r, "", digits)),
         None => format!("{} samples", samples.len()),
     };
     let mut legend = vec![LegendChip {
@@ -853,7 +863,7 @@ fn show_probability(
                 spec.limit_lines.push(plot::LimitLine {
                     y: limit,
                     color: c.err,
-                    label: format!("{name} {}", quantity(limit, unit, digits)),
+                    label: format!("{name} {}", said(limit, unit, digits)),
                 });
             }
         }
@@ -954,7 +964,7 @@ fn limit_field(
     let id = ui.id().with(("rspice.results.hist.limit", label));
     let mut changed = false;
     property_field(ui, label, |ui| {
-        let shown = limit.map_or_else(String::new, |value| quantity(value, unit, digits));
+        let shown = limit.map_or_else(String::new, |value| said(value, unit, digits));
         let mut text = ui
             .data(|data| data.get_temp::<String>(id))
             .unwrap_or_else(|| shown.clone());
@@ -1223,8 +1233,8 @@ mod tests {
             "the window is narrower than the value's own resolution: {axis:?}"
         );
         assert_ne!(
-            fmt_si_significant(axis.x0, "", 4),
-            fmt_si_significant(axis.x1, "", 4),
+            fmt_column_reading(axis.x0, "", 4),
+            fmt_column_reading(axis.x1, "", 4),
             "both ends of the axis print the same number"
         );
     }
@@ -1244,7 +1254,7 @@ mod tests {
             excluded: 0,
         };
         // Wilson at 97 of 100: 91.548 % to 98.975 %.
-        assert_eq!(yield_label(count, 4), "97 %");
+        assert_eq!(yield_label(count, 4), "97.00 %");
         assert_eq!(
             interval_label(count, 4).as_deref(),
             Some("91.55 to 98.97 %")

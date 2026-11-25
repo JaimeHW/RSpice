@@ -15,7 +15,7 @@ use rspice_results::{
     },
 };
 use rspice_ui_kit::icons::Icon;
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::{fmt_column_reading, fmt_si_significant};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable};
@@ -101,19 +101,19 @@ pub fn formatted(
     let phase = || {
         let radians = imaginary.atan2(real);
         match angle_display {
-            AngleDisplay::Degrees => fmt_si_significant(radians.to_degrees(), "°", digits),
-            AngleDisplay::Radians => fmt_si_significant(radians, "rad", digits),
+            AngleDisplay::Degrees => fmt_column_reading(radians.to_degrees(), "°", digits),
+            AngleDisplay::Radians => fmt_column_reading(radians, "rad", digits),
         }
     };
     match representation {
         1 => format!(
             "{} ∠ {}",
-            fmt_si_significant(real.hypot(imaginary), unit, digits),
+            fmt_column_reading(real.hypot(imaginary), unit, digits),
             phase()
         ),
         2 => format!(
             "{} ∠ {}",
-            fmt_si_significant(magnitude_db(real, imaginary), &decibels, digits),
+            fmt_column_reading(magnitude_db(real, imaginary), &decibels, digits),
             phase()
         ),
         _ => crate::presentation::complex_readout(real, imaginary, unit, digits),
@@ -534,12 +534,12 @@ fn frequency_stepper(
     }
     let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
     let readout = move |sample: usize| match grid {
-        Some(grid) => fmt_si_significant(grid[sample.min(last)], "Hz", significant_digits),
+        Some(grid) => fmt_column_reading(grid[sample.min(last)], "Hz", significant_digits),
         None => "Frequency pending".to_owned(),
     };
     // The widest frequency the reader's digits can print, so the readout
     // holds one width as it steps and nothing after it moves.
-    let widest = fmt_si_significant(8.888_888_888_888_89e8, "MHz", significant_digits);
+    let widest = fmt_column_reading(8.888_888_888_888_89e8, "MHz", significant_digits);
     let width = text_width(ui, &widest, &mono).max(text_width(ui, &readout(0), &mono))
         + 2.0 * ui.spacing().button_padding.x;
     ui.scope(|ui| {
@@ -629,7 +629,7 @@ fn heat_legend(ui: &mut Ui, floor: f64, palette: &rspice_ui_kit::palette::Palett
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.label(
-                egui::RichText::new(fmt_si_significant(floor, "dB", 4))
+                egui::RichText::new(fmt_column_reading(floor, "dB", 4))
                     .font(mono.clone())
                     .color(dim),
             );
@@ -684,7 +684,7 @@ pub fn show(
         format!(
             "{} · {}",
             channel_label(index, ports, mixed),
-            fmt_si_significant(
+            fmt_column_reading(
                 channel_reference(index, matrix.references(), mixed),
                 "Ω",
                 significant_digits
@@ -808,7 +808,7 @@ pub fn show(
                     } else {
                         ""
                     };
-                    let mut cell = Cell::number(text).hint(format!(
+                    let mut cell = Cell::quantity(text).hint(format!(
                         "{}\nReal: {real:.17e} {unit}\nImaginary: {imaginary:.17e} {unit}\nFrequency: {frequency:.17e} Hz{opens}",
                         name(row, column)
                     ));
@@ -956,15 +956,15 @@ mod tests {
     fn a_coefficient_with_a_unit_reads_in_it() {
         assert_eq!(
             formatted(50.0, -25.0, "Ω", 0, AngleDisplay::Degrees, 4),
-            "50 Ω \u{2212} j25 Ω"
+            "50.00 \u{2212} 25.00j Ω"
         );
         assert_eq!(
             formatted(0.0, 0.02, "S", 1, AngleDisplay::Degrees, 4),
-            "20 mS ∠ 90 °"
+            "20.00 mS ∠ 90.00\u{b0}"
         );
         assert_eq!(
             formatted(100.0, 0.0, "Ω", 2, AngleDisplay::Degrees, 4),
-            "40 dBΩ ∠ 0 °"
+            "40.00 dBΩ ∠ 0.00\u{b0}"
         );
     }
 }

@@ -56,7 +56,7 @@ impl CalcResult {
             "unavailable".to_owned()
         } else {
             format!(
-                "{} {} j{}",
+                "{} {} {}j",
                 fmt_si_significant(value.re, "", READOUT_DIGITS),
                 if value.im.is_sign_negative() {
                     "−"

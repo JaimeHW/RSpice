@@ -1596,10 +1596,10 @@ pub fn show_plot<'a>(
             });
             rows.push((
                 expr.label.clone(),
-                // The hover readout is a readout: the expression's value in
-                // the unit of the axis that draws it, not the reader's digit
-                // preference spelled out in zeros, nor a prefix with no unit.
-                rspice_ui_kit::plot::fmt_si_significant(value, unit, significant_digits),
+                // The hover readout is a readout list: the expression's value
+                // in the unit of the axis that draws it, at every one of the
+                // reader's digits, as the traces' rows above it read.
+                rspice_ui_kit::plot::fmt_column_reading(value, unit, significant_digits),
             ));
         }
         rows

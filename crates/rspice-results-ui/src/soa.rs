@@ -18,7 +18,8 @@ use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, LineHeights, SortKe
 use rspice_ui_kit::{
     panels::section_header,
     plot::{
-        self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_signed, fmt_si_significant,
+        self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_column_reading,
+        fmt_si_significant, fmt_signed_reading,
     },
     tokens::Tokens,
 };
@@ -37,17 +38,28 @@ pub struct SoaNumbers {
 }
 
 impl SoaNumbers {
-    /// A stress, limit, temperature or instant.
+    /// A stress, limit, temperature or instant as a table cell or a
+    /// readout row states it: the reader's digits, zeros kept.
     fn value(self, value: f64, unit: &str) -> String {
+        self.read(value, unit, fmt_column_reading)
+    }
+
+    /// A stress, limit, temperature or instant as a sentence or a label
+    /// states it: the zeros that only pad it dropped.
+    fn said(self, value: f64, unit: &str) -> String {
+        self.read(value, unit, fmt_si_significant)
+    }
+
+    fn read(self, value: f64, unit: &str, format: fn(f64, &str, usize) -> String) -> String {
         if unit == "K" {
             let (scale, offset, shown) = self.quantity_policy.celsius_display_transform();
-            return fmt_si_significant(
+            return format(
                 (value - 273.15) * scale + offset,
                 shown,
                 self.significant_digits,
             );
         }
-        fmt_si_significant(value, unit, self.significant_digits)
+        format(value, unit, self.significant_digits)
     }
 
     /// A difference of two values, such as a margin: a temperature
@@ -55,9 +67,9 @@ impl SoaNumbers {
     fn difference(self, value: f64, unit: &str) -> String {
         if unit == "K" {
             let (scale, _, shown) = self.quantity_policy.celsius_display_transform();
-            return fmt_si_significant(value * scale, shown, self.significant_digits);
+            return fmt_column_reading(value * scale, shown, self.significant_digits);
         }
-        fmt_si_significant(value, unit, self.significant_digits)
+        fmt_column_reading(value, unit, self.significant_digits)
     }
 }
 
@@ -195,7 +207,7 @@ impl SoaWorstInterval {
 
     /// The sentence a copied row carries.
     fn full(self, numbers: SoaNumbers) -> String {
-        let instant = |seconds| numbers.value(seconds, "s");
+        let instant = |seconds| numbers.said(seconds, "s");
         match self {
             Self::Passed { .. } => "Not applicable (rule passed)".to_owned(),
             Self::NotRetained { .. } => {
@@ -676,11 +688,11 @@ pub fn show(
                     vec![
                         Cell::text(&evaluation.device_id),
                         Cell::text(parameter_label(evaluation.parameter)),
-                        Cell::number(numbers.value(evaluation.worst_actual_value, unit))
+                        Cell::quantity(numbers.value(evaluation.worst_actual_value, unit))
                             .sort_by(SortKey::Number(evaluation.worst_actual_value)),
-                        Cell::number(numbers.value(evaluation.limit_value, unit))
+                        Cell::quantity(numbers.value(evaluation.limit_value, unit))
                             .sort_by(SortKey::Number(evaluation.limit_value)),
-                        Cell::number(numbers.difference(margin, unit))
+                        Cell::quantity(numbers.difference(margin, unit))
                             .sort_by(SortKey::Number(margin)),
                         Cell::number(facts.worst_interval.compact(numbers)),
                         Cell::text(evaluation.verdict.label())
@@ -795,7 +807,7 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
     let margin_percent = if evaluation.limit_value.abs() > 0.0 {
         format!(
             " ({})",
-            fmt_si_signed(
+            fmt_signed_reading(
                 100.0 * margin / evaluation.limit_value.abs(),
                 "%",
                 numbers.significant_digits
@@ -1180,9 +1192,9 @@ fn stress_trace_card(
         "{} · {} · worst {} at {} · limit {} · {} exact samples",
         evaluation.device_id,
         parameter_label(evaluation.parameter),
-        numbers.value(evaluation.worst_actual_value, unit),
-        numbers.value(evaluation.worst_time_s, "s"),
-        numbers.value(evaluation.limit_value, unit),
+        numbers.said(evaluation.worst_actual_value, unit),
+        numbers.said(evaluation.worst_time_s, "s"),
+        numbers.said(evaluation.limit_value, unit),
         waveform.x.len()
     );
     let header = StripHeader::new("Stress", &subtitle, &[])
@@ -1218,9 +1230,9 @@ fn stress_trace_card(
             );
             let detail = format!(
                 "Exact retained stress samples; limit at the worst point is {}. Worst point {} at {}. A varying limit uses its retained trace at each time.",
-                numbers.value(evaluation.limit_value, unit),
-                numbers.value(evaluation.worst_actual_value, unit),
-                numbers.value(evaluation.worst_time_s, "s")
+                numbers.said(evaluation.limit_value, unit),
+                numbers.said(evaluation.worst_actual_value, unit),
+                numbers.said(evaluation.worst_time_s, "s")
             );
             let mut spec = PlotSpec::new(
                 Axis::linear(x_min, x_max, "s").with_label("Time"),
@@ -1247,7 +1259,7 @@ fn stress_trace_card(
                 spec.limit_lines.push(LimitLine {
                     y: evaluation.limit_value,
                     color: t.color.err,
-                    label: format!("LIMIT {}", numbers.value(evaluation.limit_value, unit)),
+                    label: format!("LIMIT {}", numbers.said(evaluation.limit_value, unit)),
                 });
             }
             spec.markers.push(Marker::point(
@@ -2070,10 +2082,10 @@ mod tests {
             quantity_policy: QuantityPresentationPolicy::default(),
         };
         assert_eq!(interval.full(numbers), "Warning band: 2 ps to 3 ps");
-        assert_eq!(interval.compact(numbers), "2 ps \u{2026} 3 ps");
+        assert_eq!(interval.compact(numbers), "2.000 ps \u{2026} 3.000 ps");
         assert_eq!(
             SoaWorstInterval::Passed { worst_s: 1e-6 }.compact(numbers),
-            "at 1 \u{b5}s"
+            "at 1.000 \u{b5}s"
         );
         assert_eq!(threshold_text(None), "Disabled");
         assert_eq!(threshold_text(Some(1.5)), "150% of limit");
@@ -2088,15 +2100,16 @@ mod tests {
             quantity_policy: units.presentation_policy(),
         };
         assert_eq!(celsius.value(-0.012_345_678_9, "A"), "\u{2212}12.35 mA");
-        assert_eq!(celsius.value(398.15, "K"), "125 °C");
-        assert_eq!(celsius.difference(10.0, "K"), "10 °C");
+        assert_eq!(celsius.value(398.15, "K"), "125.0 °C");
+        assert_eq!(celsius.said(398.15, "K"), "125 °C");
+        assert_eq!(celsius.difference(10.0, "K"), "10.00 °C");
         units.set_temperature_display(TemperatureDisplay::Fahrenheit);
         let fahrenheit = SoaNumbers {
             significant_digits: 4,
             quantity_policy: units.presentation_policy(),
         };
-        assert_eq!(fahrenheit.value(398.15, "K"), "257 °F");
-        assert_eq!(fahrenheit.difference(10.0, "K"), "18 °F");
+        assert_eq!(fahrenheit.value(398.15, "K"), "257.0 °F");
+        assert_eq!(fahrenheit.difference(10.0, "K"), "18.00 °F");
     }
 
     #[test]

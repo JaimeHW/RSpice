@@ -11,7 +11,7 @@ use rspice_results::pole_zero::{
 };
 use rspice_ui_kit::{
     panels::section_header,
-    plot::{self, Axis, PlotSpec, XScale, fmt_si_significant},
+    plot::{self, Axis, PlotSpec, XScale, fmt_column_reading},
     tokens::Tokens,
     widgets::{
         SegmentedWidth, segmented,
@@ -257,7 +257,7 @@ fn root_cells(
             f64::INFINITY
         };
         cells.push(
-            Cell::number(fmt_si_significant(zeta, "", digits)).sort_by(SortKey::Number(zeta)),
+            Cell::number(fmt_column_reading(zeta, "", digits)).sort_by(SortKey::Number(zeta)),
         );
         cells.push(Cell::number(q_cell(q, digits)).sort_by(SortKey::Number(q)));
     }
@@ -271,9 +271,9 @@ fn q_text(q: f64, digits: usize) -> String {
     if q.is_infinite() {
         "∞ · imaginary-axis pole".to_owned()
     } else if q < 0.0 {
-        format!("{} · RHP", fmt_si_significant(q, "", digits))
+        format!("{} · RHP", fmt_column_reading(q, "", digits))
     } else {
-        fmt_si_significant(q, "", digits)
+        fmt_column_reading(q, "", digits)
     }
 }
 
@@ -288,11 +288,11 @@ fn root_card_rows(
     let mut rows = vec![
         (
             "σ".to_owned(),
-            fmt_si_significant(root.real, "rad/s", digits),
+            fmt_column_reading(root.real, "rad/s", digits),
         ),
         (
             "jω".to_owned(),
-            fmt_si_significant(root.imag, "rad/s", digits),
+            fmt_column_reading(root.imag, "rad/s", digits),
         ),
         (
             "f₀".to_owned(),
@@ -630,7 +630,7 @@ pub fn right_panel(
         if !root.is_real() {
             summary_rows.push((
                 "Dominant ζ",
-                fmt_si_significant(root.damping_ratio(), "", digits),
+                fmt_column_reading(root.damping_ratio(), "", digits),
                 false,
             ));
         }
@@ -639,7 +639,7 @@ pub fn right_panel(
         summary_rows.push(("Worst Q", q_text(q, digits), false));
     }
     if let Some(gain) = data.gain {
-        summary_rows.push(("Gain", fmt_si_significant(gain, "", digits), false));
+        summary_rows.push(("Gain", fmt_column_reading(gain, "", digits), false));
     }
     crate::presentation::stat_table(ui, &summary_rows);
 }
@@ -697,7 +697,14 @@ mod tests {
         let pair = ComplexRoot::pole(-0.1 * natural, natural * 0.99f64.sqrt());
         assert_eq!(
             row_text("p1", &pair),
-            ["p1", "\u{2212}628.3", "6.252 k", "1 k", "0.1", "5"]
+            [
+                "p1",
+                "\u{2212}628.3",
+                "6.252 k",
+                "1.000 k",
+                "0.1000",
+                "5.000"
+            ]
         );
         assert_eq!(
             root_columns("Hz").each_ref().map(Column::head),
@@ -765,14 +772,14 @@ mod tests {
             [
                 "σ 628.3 rad/s",
                 "jω 6.252 krad/s",
-                "f₀ 1 kHz",
-                "Q \u{2212}5 · RHP"
+                "f₀ 1.000 kHz",
+                "Q \u{2212}5.000 · RHP"
             ]
         );
         let decaying = ComplexRoot::pole(zeta * natural, root.imag);
         let rows = root_card_rows(&decaying, &policy, 4);
         assert_eq!(rows[0].1, "\u{2212}628.3 rad/s");
-        assert_eq!(rows[3].1, "5");
+        assert_eq!(rows[3].1, "5.000");
     }
 
     /// The dominant pole reads at the reader's significant digits whether it

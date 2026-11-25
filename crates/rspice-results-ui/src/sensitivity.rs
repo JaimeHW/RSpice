@@ -279,7 +279,7 @@ fn chart_scale(max_magnitude: f64, significant_digits: usize) -> String {
 
 /// A unit-less value: plain digits, never a prefix.
 fn unitless(value: f64, significant_digits: usize) -> String {
-    rspice_ui_kit::plot::fmt_si_significant(value, "", significant_digits)
+    rspice_ui_kit::plot::fmt_column_reading(value, "", significant_digits)
 }
 
 /// The Value column, wide enough for any value at `significant_digits`: a
@@ -790,16 +790,17 @@ mod tests {
     }
 
     /// A chart value reads in engineering notation at the reader's digits,
-    /// signed, its prefix on the number; the scale reads the same way.
+    /// zeros kept, signed, its prefix on the number; the scale reads the
+    /// same way.
     #[test]
     fn chart_values_read_in_engineering_notation_at_the_readers_digits() {
-        assert_eq!(chart_value(3.0.into(), 7), "+3");
+        assert_eq!(chart_value(3.0.into(), 4), "+3.000");
         assert_eq!(
             chart_value((-1.234_567_89e-3).into(), 7),
             "\u{2212}0.001234568"
         );
         assert_eq!(chart_value(2.718_281_828e4.into(), 3), "+27200");
-        assert_eq!(chart_scale(0.012_5, 7), "±0.0125");
+        assert_eq!(chart_scale(0.012_5, 4), "±0.01250");
     }
 
     /// A panel value reads in engineering notation with its prefix on the
@@ -812,8 +813,8 @@ mod tests {
             exact_value(1.234_567_890_123_456_7e-9, 6),
             "1.23457e\u{2212}9"
         );
-        assert_eq!(exact_value(-2.5e3, 6), "\u{2212}2500");
-        assert_eq!(exact_value(0.75, 6), "0.75");
+        assert_eq!(exact_value(-2.5e3, 6), "\u{2212}2500.00");
+        assert_eq!(exact_value(0.75, 6), "0.750000");
         assert_eq!(
             exact_basis_label(SensitivityResultMode::Ac {
                 frequency_hz: 2.5e6,

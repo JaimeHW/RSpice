@@ -402,12 +402,12 @@ fn a_delta_marker_between_two_traces_reads_dx_dy_and_slope() {
         ]
     );
     // 1.25 ms to 3.75 ms: V(in) reads 1.125 V, V(out) 2.25 V.
-    assert_eq!(table.x_cells[2..], ["2.5 ms", "1/\u{394}x 400 Hz"]);
+    assert_eq!(table.x_cells[2..], ["2.500 ms", "1/\u{394}x 400.0 Hz"]);
     let band = &table.bands[0];
     assert_eq!(band.title, "Markers");
     assert_eq!(
         band.rows[0].cells,
-        ["1.125 V", "2.25 V", "1.125 V", "450 V/s"]
+        ["1.125 V", "2.250 V", "1.125 V", "450.0 V/s"]
     );
 }
 
@@ -573,7 +573,7 @@ fn a_typed_cursor_value_lands_on_that_x() {
     let page_top = FRAME.y - 240.0;
     let (_, cell) = placed_texts(&shapes)
         .into_iter()
-        .find(|(text, rect)| text == "1 ms" && rect.top() > page_top)
+        .find(|(text, rect)| text == "1.000 ms" && rect.top() > page_top)
         .expect("A's X in the table");
     let at = cell.center();
     whole_frame(

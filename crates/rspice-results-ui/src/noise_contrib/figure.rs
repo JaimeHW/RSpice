@@ -3,7 +3,7 @@
 use egui::Ui;
 use rspice_results::noise::NoiseFigureEvidence;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::widgets::measurement_table;
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, digits: usize
         ("Source resistor", figure.source_resistor.clone()),
         (
             "Effective resistance",
-            fmt_si_significant(figure.source_resistance_ohm, "Ω", digits),
+            fmt_column_reading(figure.source_resistance_ohm, "Ω", digits),
         ),
     ];
     if (figure.source_temperature_kelvin - STANDARD_REFERENCE_KELVIN).abs() > f64::EPSILON

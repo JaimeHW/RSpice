@@ -10,7 +10,9 @@
 use egui::Ui;
 
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{
+    self, Axis, InteractionMode, PlotSpec, XScale, fmt_column_reading, fmt_si_significant,
+};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey, Tone};
@@ -778,11 +780,11 @@ fn paint_hover_card(
         &[
             (
                 "x".to_owned(),
-                fmt_si_significant(x, x_unit, significant_digits),
+                fmt_column_reading(x, x_unit, significant_digits),
             ),
             (
                 "y".to_owned(),
-                fmt_si_significant(y, y_unit, significant_digits),
+                fmt_column_reading(y, y_unit, significant_digits),
             ),
             ("status".to_owned(), status.to_owned()),
         ],
@@ -859,7 +861,7 @@ pub fn right_panel(
 /// spelling, prefix and all, with the unit left to the column's head
 /// (`311.7 µ` under `offset (V)`).
 fn cell_text(value: f64, unit: &str, significant_digits: usize) -> String {
-    let text = fmt_si_significant(value, unit, significant_digits);
+    let text = fmt_column_reading(value, unit, significant_digits);
     match text.strip_suffix(unit) {
         Some(number) if !unit.is_empty() => number.trim_end().to_owned(),
         _ => text,
@@ -1073,7 +1075,7 @@ fn register_rows(
             "Mean X",
             population::mean(&xs).map_or_else(
                 || "\u{2014}".to_owned(),
-                |mean| fmt_si_significant(mean, &x_column.unit, significant_digits),
+                |mean| fmt_column_reading(mean, &x_column.unit, significant_digits),
             ),
             false,
         ),
@@ -1081,7 +1083,7 @@ fn register_rows(
             "Mean Y",
             population::mean(&ys).map_or_else(
                 || "\u{2014}".to_owned(),
-                |mean| fmt_si_significant(mean, &y_column.unit, significant_digits),
+                |mean| fmt_column_reading(mean, &y_column.unit, significant_digits),
             ),
             false,
         ),

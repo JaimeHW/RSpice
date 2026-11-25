@@ -14,7 +14,7 @@ use rspice_results::harmonic_spectrum::lines::CoefficientLine;
 use rspice_results::harmonic_spectrum::settings::{CoefficientQuantity, CoefficientSettings};
 use rspice_results::waveform::HeldColumn;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, DrawMode, PlotSpec, Trace, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, DrawMode, PlotSpec, Trace, XScale, fmt_column_reading};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::sync::Arc;
 
@@ -330,7 +330,7 @@ fn show_recorded(
             } else {
                 presentation.cursor_sample(&trace.frequency, &trace.magnitude, frequency)
             };
-            rows.push((trace.name.clone(), fmt_si_significant(level, "", digits)));
+            rows.push((trace.name.clone(), fmt_column_reading(level, "", digits)));
         }
         rows
     };

@@ -848,7 +848,7 @@ fn reading_cell(text: &str) -> Cell {
     if text == READOUT_ABSENT {
         Cell::absent()
     } else {
-        Cell::number(text)
+        Cell::quantity(text)
     }
 }
 
@@ -926,7 +926,7 @@ fn paint_table(
     let mut x_row = vec![Cell::empty(), Cell::text(&table.x_label)];
     for (column, x) in table.x_cells.iter().enumerate() {
         x_row.push(match table.columns.get(column).map(|reading| &reading.x) {
-            Some(Ok(_)) => Cell::number(x)
+            Some(Ok(_)) => Cell::quantity(x)
                 .editable()
                 .hint("Click to type where it stands; right-click for its menu"),
             Some(Err(why)) => Cell::text(why),
@@ -1254,7 +1254,7 @@ fn horizontal_sections(
             || pane.unit.clone(),
             |model| model.pane_axis_unit(&pane.unit),
         );
-        let format = |value: f64| rspice_ui_kit::plot::fmt_si_significant(value, &unit, digits);
+        let format = |value: f64| rspice_ui_kit::plot::fmt_column_reading(value, &unit, digits);
         let levels: Vec<(usize, f64)> = cursors
             .iter()
             .enumerate()

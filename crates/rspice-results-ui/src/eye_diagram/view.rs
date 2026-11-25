@@ -15,7 +15,8 @@ use crate::fft::view::columns::{Fitting, fitted};
 use crate::presentation::{DECIBEL_PLACES, PlotView, fixed_places};
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{
-    self, Axis, DrawMode, LimitLine, PlotSpec, Trace, XScale, fmt_si_significant,
+    self, Axis, DrawMode, LimitLine, PlotSpec, Trace, XScale, fmt_column_reading,
+    fmt_si_significant,
 };
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::table::{Align, Cell, DataTable};
@@ -657,7 +658,7 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str, significant
             (
                 "Clearance".to_owned(),
                 or_unmeasured(mask.clearance, |value| {
-                    fmt_si_significant(value * 100.0, "%", significant_digits)
+                    fmt_column_reading(value * 100.0, "%", significant_digits)
                 }),
             ),
         ];
@@ -687,7 +688,7 @@ fn metrics_table(ui: &mut Ui, id: &str, rows: &[(String, String)]) {
     DataTable::new(id, &columns, rows.len()).show(ui, |index| {
         vec![
             Cell::text(rows[index].0.clone()),
-            Cell::number(rows[index].1.clone()),
+            Cell::quantity(rows[index].1.clone()),
         ]
     });
 }
@@ -696,7 +697,7 @@ fn metrics_table(ui: &mut Ui, id: &str, rows: &[(String, String)]) {
 /// the levels and their spread, the opening, the edges, S/N, Q and the error
 /// rate it implies, and the jitter, measured and separated by the fit.
 fn metric_rows(m: &EyeMeasurements, rate: f64, significant_digits: usize) -> Vec<(String, String)> {
-    let value = |value: f64, unit: &str| fmt_si_significant(value, unit, significant_digits);
+    let value = |value: f64, unit: &str| fmt_column_reading(value, unit, significant_digits);
     let mut rows = vec![(
         "Unit interval".to_owned(),
         format!(
@@ -827,7 +828,8 @@ mod tests {
         assert_eq!(ber_label(2e-3), "2e-3");
     }
 
-    /// The opening and the edges keep the digits the reader asked for.
+    /// The opening and the edges keep the digits the reader asked for,
+    /// zeros included.
     #[test]
     fn the_eye_figures_read_at_significant_digits() {
         let measurements = super::super::EyeMeasurements {
@@ -842,8 +844,8 @@ mod tests {
                 .map(|row| row.1.clone())
                 .expect("the row is listed")
         };
-        assert_eq!(row(&rows, "Eye height"), "1.49 V");
-        assert_eq!(row(&rows, "Rise 20–80"), "9.6 ps");
+        assert_eq!(row(&rows, "Eye height"), "1.490 V");
+        assert_eq!(row(&rows, "Rise 20–80"), "9.600 ps");
         assert_eq!(
             row(&metric_rows(&measurements, 1e-12, 3), "Eye height"),
             "1.49 V",

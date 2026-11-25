@@ -637,7 +637,11 @@ fn finished(
             name: name.clone(),
             compared_rows: signal.compared_rows,
             failed_rows: signal.failed_rows,
-            maximum_error: fmt_si_significant(signal.maximum_absolute_error, unit, digits),
+            maximum_error: rspice_results::number_format::fmt_column_reading(
+                signal.maximum_absolute_error,
+                unit,
+                digits,
+            ),
             verdict: Verdict::of(
                 signal.failed_rows,
                 signal.maximum_absolute_error,

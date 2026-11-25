@@ -791,7 +791,7 @@ pub fn show_samples(
             Cell::number(format!("{flag}{sample}")).sort_by(SortKey::Number(sample as f64)),
             {
                 let x =
-                    Cell::number(model.format_x_at(sample, significant_digits, quantity_policy));
+                    Cell::quantity(model.format_x_at(sample, significant_digits, quantity_policy));
                 match grid.get(sample) {
                     Some(&x_value) => x.sort_by(SortKey::Number(x_value)),
                     None => x,
@@ -804,7 +804,7 @@ pub fn show_samples(
             let cell = match model.format_sample(trace, sample, significant_digits, quantity_policy)
             {
                 Some(text) => {
-                    let cell = Cell::number(text);
+                    let cell = Cell::quantity(text);
                     match model.sample_value(trace, sample) {
                         Some(value) => cell.sort_by(SortKey::Number(value)),
                         None => cell,

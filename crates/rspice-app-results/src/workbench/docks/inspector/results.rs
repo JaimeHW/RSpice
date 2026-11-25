@@ -24,7 +24,7 @@ use super::super::super::design_system::{
 };
 use super::super::super::state::Workspace;
 use super::{result_authority, run_details};
-use rspice_results::number_format::fmt_si_significant;
+use rspice_results::number_format::fmt_column_reading;
 use rspice_schematic_editor::view::cross_probe::probed_device;
 
 pub(in crate::workbench) fn results(
@@ -203,7 +203,7 @@ fn selected_result_trace(
             .displayed_significant_digits()
             .get(),
     );
-    let measured = |value: f64| fmt_si_significant(value, &unit, digits);
+    let measured = |value: f64| fmt_column_reading(value, &unit, digits);
 
     section_header(ui, "Selected trace", None);
     property_row(ui, "Name", &waveform_name);

@@ -407,7 +407,7 @@ impl ListedSignals {
                     waveform.and_then(|waveform| waveform.y.samples(..).find(|v| v.is_finite()))
                 })
                 .flatten()
-                .map(|value| crate::ui::plot::fmt_si_significant(value, unit, 4)),
+                .map(|value| crate::ui::plot::fmt_column_reading(value, unit, 4)),
         }
     }
 }

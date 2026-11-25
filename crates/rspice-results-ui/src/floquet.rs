@@ -10,7 +10,7 @@ use rspice_results::floquet::{
     FloquetOrbitKindEvidence, FloquetStabilityVerdictEvidence, PstbStabilityClassificationEvidence,
 };
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_column_reading};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable, SortKey, Tone};
 use rspice_vocabulary::quantity::{AngleDisplay, QuantityPresentationPolicy};
@@ -377,7 +377,7 @@ pub fn show(
         let mut rows = vec![
             (
                 "|μ|".to_owned(),
-                fmt_si_significant(mode.magnitude(), "", digits),
+                fmt_column_reading(mode.magnitude(), "", digits),
             ),
             (
                 "∠μ".to_owned(),
@@ -579,7 +579,7 @@ pub fn right_panel(ui: &mut Ui, data: Option<&FloquetData>, digits: usize) {
         ),
         (
             "Boundary |μ|",
-            fmt_si_significant(1.0 + data.band, "", digits),
+            fmt_column_reading(1.0 + data.band, "", digits),
             false,
         ),
         (
@@ -593,7 +593,7 @@ pub fn right_panel(ui: &mut Ui, data: Option<&FloquetData>, digits: usize) {
         ),
         (
             "Period",
-            fmt_si_significant(data.period_s, "s", digits),
+            fmt_column_reading(data.period_s, "s", digits),
             false,
         ),
     ];

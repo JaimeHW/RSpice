@@ -561,7 +561,7 @@ fn dragging_a_cursor_point_moves_a_in_time_and_moving_a_moves_the_point() {
     assert!(
         painted
             .iter()
-            .any(|text| text.starts_with("A \u{b7} t 125 ")
+            .any(|text| text.starts_with("A \u{b7} t 125.0 ")
                 && text.ends_with("s \u{b7} V(a) 707 mV \u{b7} 966 mV")),
         "{painted:?}"
     );
@@ -607,7 +607,8 @@ fn a_lissajous_figure_carries_arrows_the_way_time_runs() {
 }
 
 /// Cursor A at a quarter period stands where sin(ωt) = 1: its tag reads the
-/// instant, V(a) = 1 V and V(b) = sin(π/2 + π/3) = 500 mV, the closed form.
+/// instant, V(a) = 1 V and V(b) = sin(π/2 + π/3) = 500 mV, the closed form,
+/// each to the axis' millivolt and the instant at the reader's four digits.
 #[test]
 fn a_cursor_on_the_figure_reads_the_instant_and_both_coordinates() {
     let mut state = lissajous_host();
@@ -621,8 +622,8 @@ fn a_cursor_on_the_figure_reads_the_instant_and_both_coordinates() {
     assert!(
         painted
             .iter()
-            .any(|text| text.starts_with("A \u{b7} t 250 ")
-                && text.ends_with("s \u{b7} V(a) 1 V \u{b7} 500 mV")),
+            .any(|text| text.starts_with("A \u{b7} t 250.0 ")
+                && text.ends_with("s \u{b7} V(a) 1.000 V \u{b7} 500 mV")),
         "{painted:?}"
     );
     // At half a period sin(ωt) is 1.2e-16 V, which the ±1.08 V axis
@@ -631,7 +632,7 @@ fn a_cursor_on_the_figure_reads_the_instant_and_both_coordinates() {
     assert!(
         painted
             .iter()
-            .any(|text| text.starts_with("B \u{b7} t 500 ")
+            .any(|text| text.starts_with("B \u{b7} t 500.0 ")
                 && text.ends_with("s \u{b7} V(a) 0 V \u{b7} \u{2212}866 mV")),
         "{painted:?}"
     );

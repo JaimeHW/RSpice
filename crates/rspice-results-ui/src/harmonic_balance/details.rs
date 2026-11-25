@@ -12,7 +12,7 @@ use rspice_results::harmonic_spectrum::lines::{
 };
 use rspice_results::harmonic_spectrum::settings::{CoefficientQuantity, CoefficientSettings};
 use rspice_ui_kit::panels::{section_header, section_header_action};
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
@@ -267,10 +267,10 @@ fn distortion(
             Ok(ratio) => crate::presentation::stat_table(
                 ui,
                 &[
-                    ("THD", fmt_si_significant(100.0 * ratio, "%", digits), false),
+                    ("THD", fmt_column_reading(100.0 * ratio, "%", digits), false),
                     (
                         "THD",
-                        fmt_si_significant(20.0 * ratio.log10(), "dB", digits),
+                        fmt_column_reading(20.0 * ratio.log10(), "dB", digits),
                         false,
                     ),
                 ],
@@ -321,7 +321,7 @@ fn intermodulation(
         for product in &im.products {
             rows.push((
                 format!("IM{} {}", product.order, product.name),
-                fmt_si_significant(product.dbc, "dBc", digits),
+                fmt_column_reading(product.dbc, "dBc", digits),
                 false,
             ));
         }
@@ -332,7 +332,7 @@ fn intermodulation(
                 "dBm",
                 format!(
                     "OIP3 into {}",
-                    fmt_si_significant(settings.reference_ohms, "Ω", digits)
+                    fmt_column_reading(settings.reference_ohms, "Ω", digits)
                 ),
             )
         };
@@ -341,7 +341,7 @@ fn intermodulation(
             im.output_third_order_intercept(quantity, settings)
                 .map_or_else(
                     || "— no third-order product kept".to_owned(),
-                    |intercept| fmt_si_significant(intercept, unit, digits),
+                    |intercept| fmt_column_reading(intercept, unit, digits),
                 ),
             false,
         ));

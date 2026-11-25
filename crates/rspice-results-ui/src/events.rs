@@ -19,7 +19,7 @@ use rspice_results::{
 };
 use rspice_ui_kit::{
     panels::section_header,
-    plot::fmt_si_significant,
+    plot::{fmt_column_reading, fmt_si_significant},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{
@@ -46,8 +46,15 @@ pub struct EventNumbers {
 }
 
 impl EventNumbers {
-    /// `value` in `unit` at the reader's significant digits.
+    /// `value` in `unit` at the reader's significant digits, zeros kept, as
+    /// a table cell or a readout row states it.
     fn shown(self, value: f64, unit: &str) -> String {
+        fmt_column_reading(value, unit, self.significant_digits)
+    }
+
+    /// `value` in `unit` as a sentence states it: at most the reader's
+    /// digits, the zeros that only pad it dropped.
+    fn said(self, value: f64, unit: &str) -> String {
         fmt_si_significant(value, unit, self.significant_digits)
     }
 
@@ -285,7 +292,7 @@ impl EventFilter {
 
     /// The window as the sheet's title states it, when one is set.
     fn window_words(&self, numbers: EventNumbers) -> Option<String> {
-        let at = |time: f64| numbers.shown(time, "s");
+        let at = |time: f64| numbers.said(time, "s");
         match (self.from, self.to) {
             (None, None) => None,
             (Some(from), None) => Some(format!("from {}", at(from))),
@@ -422,7 +429,7 @@ fn event_cells(
             .twist(expanded.contains(row.trace_name()))
             .hint("Show or hide the member rows this word is reassembled from");
     }
-    let mut value = Cell::number(numbers.value(row.value()));
+    let mut value = Cell::quantity(numbers.value(row.value()));
     match row.value() {
         // A word is as wide as the bus: the whole word, and a real
         // value's every digit, are one hover away.
@@ -438,7 +445,7 @@ fn event_cells(
     let ordinal = row.event_ordinal() as f64;
     vec![
         Cell::number(format!("#{:04}", row.event_ordinal())).sort_by(SortKey::Number(ordinal)),
-        Cell::number(numbers.shown(row.time_s(), "s"))
+        Cell::quantity(numbers.shown(row.time_s(), "s"))
             .hint(numbers.exact(row.time_s(), "s"))
             .sort_by(SortKey::Number(row.time_s())),
         signal,
@@ -564,8 +571,8 @@ fn show_current_impulses(
         ui,
         &format!(
             "Retained interval: {} to {}",
-            numbers.shown(history.start_time_s, "s"),
-            numbers.shown(history.stop_time_s, "s")
+            numbers.said(history.start_time_s, "s"),
+            numbers.said(history.stop_time_s, "s")
         ),
     )
     .on_hover_text(format!(
@@ -654,11 +661,11 @@ fn show_current_impulse_tables(
         .show(ui, |row| {
             let (point, name) = point(row);
             vec![
-                Cell::number(numbers.shown(point.time, "s"))
+                Cell::quantity(numbers.shown(point.time, "s"))
                     .hint(numbers.exact(point.time, "s"))
                     .sort_by(SortKey::Number(point.time)),
                 Cell::text(name),
-                Cell::number(numbers.shown(point.charge_coulombs, "C"))
+                Cell::quantity(numbers.shown(point.charge_coulombs, "C"))
                     .hint(numbers.exact(point.charge_coulombs, "C"))
                     .sort_by(SortKey::Number(point.charge_coulombs)),
             ]
@@ -933,7 +940,7 @@ fn show_messages<W: AsRef<RetainedWaveform>>(
                 }
             };
             vec![
-                Cell::number(numbers.shown(message.time, "s"))
+                Cell::quantity(numbers.shown(message.time, "s"))
                     .hint(numbers.exact(message.time, "s"))
                     .sort_by(SortKey::Number(message.time)),
                 Cell::text(message.severity).toned(severity_tone(message.severity)),

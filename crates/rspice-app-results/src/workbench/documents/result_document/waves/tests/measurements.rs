@@ -264,8 +264,8 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
             state.model.preferences.quantity_presentation_policy(),
             &rspice_results_ui::waves::as_returned,
         );
-        // 0.1 V over 0.5 ps, with its SI prefix and no padding zeros.
-        assert_eq!(rows[0].slope, "200 GV/s");
+        // 0.1 V over 0.5 ps, with its SI prefix, at the reader's four digits.
+        assert_eq!(rows[0].slope, "200.0 GV/s");
     }
     let coincident = readout_rows(
         &models[0],

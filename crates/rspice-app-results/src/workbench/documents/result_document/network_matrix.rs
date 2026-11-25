@@ -505,30 +505,31 @@ pub(crate) mod tests {
         }
         use crate::quantity::AngleDisplay;
         assert!(formatted(0.0, 0.0, "", 2, AngleDisplay::Degrees, 7).contains("phase undefined"));
-        // The phase reads in the unit Angle display chose, at the reader's
-        // digits, and a negative part with a true minus.
+        // The phase reads in the unit Angle display chose, degrees to the
+        // hundredth against their number and radians at the reader's four
+        // digits; a negative part with a true minus.
         assert_eq!(
-            formatted(0.0, 1.0, "", 1, AngleDisplay::Degrees, 7),
-            "1 ∠ 90 °"
+            formatted(0.0, 1.0, "", 1, AngleDisplay::Degrees, 4),
+            "1.000 ∠ 90.00\u{b0}"
         );
         assert_eq!(
-            formatted(0.0, 1.0, "", 1, AngleDisplay::Radians, 7),
-            "1 ∠ 1.570796 rad"
+            formatted(0.0, 1.0, "", 1, AngleDisplay::Radians, 4),
+            "1.000 ∠ 1.571 rad"
         );
         assert_eq!(
-            formatted(0.5, -0.25, "", 0, AngleDisplay::Degrees, 7),
-            "0.5 \u{2212} j0.25"
+            formatted(0.5, -0.25, "", 0, AngleDisplay::Degrees, 4),
+            "0.5000 \u{2212} 0.2500j"
         );
         assert_eq!(
             formatted(0.1, 0.0, "", 2, AngleDisplay::Degrees, 4),
-            "\u{2212}20 dB ∠ 0 °"
+            "\u{2212}20.00 dB ∠ 0.00\u{b0}"
         );
         assert!((magnitude_db(1e308, 1e308) - (6160.0 + 10.0 * 2.0_f64.log10())).abs() < 1e-10);
     }
 
     fn cell_text_rect(shape: &egui::Shape) -> Option<egui::Rect> {
         match shape {
-            egui::Shape::Text(text) if text.galley.text().starts_with("0.25 ") => {
+            egui::Shape::Text(text) if text.galley.text().starts_with("0.2500 ") => {
                 Some(shape.visual_bounding_rect())
             }
             egui::Shape::Vec(shapes) => shapes.iter().find_map(cell_text_rect),
@@ -759,12 +760,13 @@ pub(crate) mod tests {
             };
         let chain = frame(&mut app, view_form::NetworkForm::Abcd);
         assert_eq!(app.results.results.network_matrix.controls.sample, 1);
-        // A = D = 1, B = Zs(2 MHz) = 100 + j200 Ω, C = 0.
+        // A = D = 1, B = Zs(2 MHz) = 100 + j200 Ω, C = 0, each part at the
+        // reader's four digits and the unit named once.
         assert!(
-            chain.iter().any(|text| text == "100 Ω + j200 Ω"),
+            chain.iter().any(|text| text == "100.0 + 200.0j Ω"),
             "{chain:?}"
         );
-        assert!(chain.iter().any(|text| text == "2 MHz"), "{chain:?}");
+        assert!(chain.iter().any(|text| text == "2.000 MHz"), "{chain:?}");
         let impedance = frame(&mut app, view_form::NetworkForm::Z);
         assert!(
             impedance

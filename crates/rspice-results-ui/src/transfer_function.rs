@@ -14,7 +14,7 @@ use rspice_results::transfer_function::{
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::widgets::table::{Cell, Column, DataTable};
 
 /// Borrowed retained values selected and validated by the host.
@@ -111,14 +111,14 @@ fn scalar_cell(
     significant_digits: usize,
 ) -> Cell {
     match value {
-        Some(value) => Cell::number(scalar_text(value, unit, significant_digits)),
+        Some(value) => Cell::quantity(scalar_text(value, unit, significant_digits)),
         None => Cell::absent().hint(NOT_REQUESTED),
     }
 }
 
 fn nominal_cell(value: Option<f64>, unit: &str, significant_digits: usize) -> Cell {
     match value {
-        Some(value) => Cell::number(fmt_si_significant(value, unit, significant_digits)),
+        Some(value) => Cell::quantity(fmt_column_reading(value, unit, significant_digits)),
         None => Cell::absent(),
     }
 }
@@ -140,8 +140,8 @@ fn scalar_text(
     };
     match value {
         TransferFunctionScalarEvidence::Finite(value) => match unit {
-            "1" | "V/V" | "A/A" => with_unit(fmt_si_significant(value, "", significant_digits)),
-            _ => fmt_si_significant(value, unit, significant_digits),
+            "1" | "V/V" | "A/A" => with_unit(fmt_column_reading(value, "", significant_digits)),
+            _ => fmt_column_reading(value, unit, significant_digits),
         },
         TransferFunctionScalarEvidence::PositiveInfinity => with_unit("+∞".to_owned()),
         TransferFunctionScalarEvidence::NegativeInfinity => with_unit("−∞".to_owned()),
@@ -237,9 +237,9 @@ mod tests {
             .collect()
     }
 
-    /// Every output reads at the reader's digits with its unit and the
-    /// signal it is read at: resistances in ohms with their prefix, a
-    /// voltage gain as a plain ratio, an open input as infinite ohms.
+    /// Every output reads at the reader's digits, zeros kept, with its unit
+    /// and the signal it is read at: resistances in ohms with their prefix,
+    /// a voltage gain as a plain ratio, an open input as infinite ohms.
     #[test]
     fn each_output_reads_with_its_unit_and_its_signal() {
         let rows = output_rows(&view(TransferFunctionNormalizationEvidence::None), 4);
@@ -247,7 +247,7 @@ mod tests {
             texts(&rows),
             [
                 ["Transfer gain", "−9.999 V/V", "V(out) / VIN"],
-                ["Input resistance", "1 kΩ", "VIN"],
+                ["Input resistance", "1.000 kΩ", "VIN"],
                 ["Output resistance", "+∞ Ω", "V(out)"],
             ]
         );
@@ -262,8 +262,8 @@ mod tests {
             4,
         );
         assert_eq!(texts(&rows)[0], ["Relative gain", "−9.999", "V(out) / VIN"]);
-        assert_eq!(texts(&rows)[3], ["Nominal input", "2 V", "VIN"]);
-        assert_eq!(texts(&rows)[4], ["Nominal output", "500 mV", "V(out)"]);
+        assert_eq!(texts(&rows)[3], ["Nominal input", "2.000 V", "VIN"]);
+        assert_eq!(texts(&rows)[4], ["Nominal output", "500.0 mV", "V(out)"]);
     }
 
     /// An output the run was not asked for reads as a dash, not as zero.
@@ -278,9 +278,9 @@ mod tests {
     /// does not, and an infinity keeps its sign and unit.
     #[test]
     fn a_scalar_takes_a_prefix_only_where_its_unit_does() {
-        assert_eq!(scalar_text(Finite(0.5), "V/V", 4), "0.5 V/V");
-        assert_eq!(scalar_text(Finite(0.002), "A/V", 4), "2 mA/V");
-        assert_eq!(scalar_text(Finite(1.25e4), "V/A", 4), "12.5 kV/A");
+        assert_eq!(scalar_text(Finite(0.5), "V/V", 4), "0.5000 V/V");
+        assert_eq!(scalar_text(Finite(0.002), "A/V", 4), "2.000 mA/V");
+        assert_eq!(scalar_text(Finite(1.25e4), "V/A", 4), "12.50 kV/A");
         assert_eq!(scalar_text(NegativeInfinity, "V/A", 4), "−∞ V/A");
         assert_eq!(scalar_text(PositiveInfinity, "1", 4), "+∞");
     }

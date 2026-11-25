@@ -492,17 +492,17 @@ fn the_header_pins_at_the_top_and_the_next_section_pushes_it_off() {
 #[test]
 fn values_share_one_mantissa_edge_and_one_unit_edge() {
     for (value, unit, mantissa, suffix) in [
-        (5.0, "V", "5", "V"),
+        (5.0, "V", "5.00000", "V"),
         (0.751_626_9, "V", "751.627", "mV"),
         (0.0, "A", "0", "A"),
         (-41.7321e-3, "A", "−41.7321", "mA"),
         (999.9996e-3, "V", "1.00000", "V"),
-        (2.0e6, "Hz", "2", "MHz"),
+        (2.0e6, "Hz", "2.00000", "MHz"),
         (123.456, "", "123.456", ""),
         (1234.56, "", "1234.56", ""),
-        (27.0, CELSIUS, "27", CELSIUS),
-        (0.5, CELSIUS, "0.5", CELSIUS),
-        (-273.15, CELSIUS, "\u{2212}273.15", CELSIUS),
+        (27.0, CELSIUS, "27.0000", CELSIUS),
+        (0.5, CELSIUS, "0.500000", CELSIUS),
+        (-273.15, CELSIUS, "\u{2212}273.150", CELSIUS),
     ] {
         assert_eq!(
             value_parts(value, unit, 6),
@@ -542,7 +542,8 @@ fn the_digits_preference_sets_the_sheet_values() {
 }
 
 /// A column is one quantity: its head names the unit, and each cell is a
-/// bare SI value, the prefix after the mantissa; a change keeps its sign.
+/// bare SI value at the reader's digits, zeros kept, the prefix after the
+/// mantissa; a change keeps its sign.
 #[test]
 fn a_column_head_names_the_unit_and_its_cells_are_bare_si() {
     let dc = DcOpResult {
@@ -566,7 +567,7 @@ fn a_column_head_names_the_unit_and_its_cells_are_bare_si() {
     };
     assert_eq!(
         number(RowSource::Scalar(&dc.node_voltages[0]).cell(voltage, 4)),
-        ("\u{2212}100".to_owned(), "m".to_owned())
+        ("\u{2212}100.0".to_owned(), "m".to_owned())
     );
     let devices = plan
         .sections
@@ -577,7 +578,7 @@ fn a_column_head_names_the_unit_and_its_cells_are_bare_si() {
     assert_eq!(heads, ["id (A)", "power (W)"]);
     assert_eq!(
         number(RowSource::Device(&report.entries[0]).cell(&devices.columns[0], 4)),
-        ("41.7".to_owned(), "\u{b5}".to_owned())
+        ("41.70".to_owned(), "\u{b5}".to_owned())
     );
 
     let baseline = OpBaseline::new(Some(&dc), Some(&report));
@@ -595,7 +596,7 @@ fn a_column_head_names_the_unit_and_its_cells_are_bare_si() {
             OpRowKind::Node,
             voltage
         )),
-        ("+50".to_owned(), "m".to_owned())
+        ("+50.0000".to_owned(), "m".to_owned())
     );
 }
 

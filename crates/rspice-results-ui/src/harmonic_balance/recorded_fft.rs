@@ -4,7 +4,7 @@ use rspice_results::{
     analysis_payload::AnalysisResultPayload, analysis_result::AnalysisResult,
     fft::spectrum::FftSpectrumEvidence,
 };
-use rspice_ui_kit::plot::{Axis, fmt_si_significant};
+use rspice_ui_kit::plot::{Axis, fmt_column_reading, fmt_si_significant};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use crate::presentation::frequency_readout;
@@ -84,8 +84,8 @@ pub(super) fn inspector_rows(
             "Record",
             format!(
                 "{} … {}",
-                fmt_si_significant(spectrum.start_time_s, "s", digits),
-                fmt_si_significant(spectrum.stop_time_s, "s", digits)
+                fmt_column_reading(spectrum.start_time_s, "s", digits),
+                fmt_column_reading(spectrum.stop_time_s, "s", digits)
             ),
             false,
         ),
@@ -112,32 +112,32 @@ pub(super) fn inspector_rows(
         // THD in percent and in dB, as the spectrum sheet reads it.
         rows.push((
             "THD",
-            fmt_si_significant(100.0 * metrics.thd_ratio, "%", digits),
+            fmt_column_reading(100.0 * metrics.thd_ratio, "%", digits),
             false,
         ));
         rows.push((
             "THD",
-            fmt_si_significant(metrics.thd_db, "dB", digits),
+            fmt_column_reading(metrics.thd_db, "dB", digits),
             false,
         ));
         rows.push((
             "SNDR",
-            fmt_si_significant(metrics.sndr_db, "dB", digits),
+            fmt_column_reading(metrics.sndr_db, "dB", digits),
             false,
         ));
         rows.push((
             "SNR",
-            fmt_si_significant(metrics.snr_db, "dB", digits),
+            fmt_column_reading(metrics.snr_db, "dB", digits),
             false,
         ));
         rows.push((
             "SFDR",
-            fmt_si_significant(metrics.sfdr_db, "dB", digits),
+            fmt_column_reading(metrics.sfdr_db, "dB", digits),
             false,
         ));
         rows.push((
             "ENOB",
-            fmt_si_significant(metrics.enob_bits, "bits", digits),
+            fmt_column_reading(metrics.enob_bits, "bits", digits),
             true,
         ));
     }
@@ -266,7 +266,7 @@ mod tests {
         // The fundamental is a frequency, not a bin index.
         assert!(
             rows.iter()
-                .any(|(label, value, _)| *label == "Fundamental" && value == "1 kHz"),
+                .any(|(label, value, _)| *label == "Fundamental" && value == "1.000 kHz"),
             "{rows:?}"
         );
     }
@@ -290,8 +290,8 @@ mod tests {
         );
     }
 
-    /// The figures of merit read at the reader's significant digits, and a
-    /// level never takes an SI prefix.
+    /// The figures of merit read at the reader's significant digits, zeros
+    /// kept, and a level in decibels to the hundredth, never prefixed.
     #[test]
     fn the_figures_of_merit_read_at_the_chosen_significant_digits() {
         let mut spectrum =
@@ -323,12 +323,12 @@ mod tests {
                 .map(|(_, value, _)| value)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(thd(4), ["0.1 %", "−60.12 dB"]);
-        assert_eq!(thd(6), ["0.1 %", "−60.1235 dB"]);
-        assert_eq!(value(4, "SNDR"), "0.5 dB");
-        assert_eq!(value(4, "SFDR"), "70 dB");
+        assert_eq!(thd(4), ["0.1000 %", "−60.12 dB"]);
+        assert_eq!(thd(6), ["0.100000 %", "−60.12 dB"]);
+        assert_eq!(value(4, "SNDR"), "0.50 dB");
+        assert_eq!(value(4, "SFDR"), "70.00 dB");
         assert_eq!(value(3, "ENOB"), "9.88 bits");
-        assert_eq!(value(6, "Fundamental"), "1 kHz");
+        assert_eq!(value(6, "Fundamental"), "1.00000 kHz");
     }
 
     /// Exact sampling is the normal case, so it says nothing; interpolation

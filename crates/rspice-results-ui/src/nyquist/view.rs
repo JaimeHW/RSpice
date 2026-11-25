@@ -2,7 +2,7 @@
 
 use egui::Ui;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_significant};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_column_reading};
 use rspice_ui_kit::tokens::Tokens;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
@@ -278,7 +278,7 @@ pub fn show(
                     c.warn,
                     format!(
                         "GM {}",
-                        fmt_si_significant(20.0 * margin.value.log10(), "dB", significant_digits)
+                        fmt_column_reading(20.0 * margin.value.log10(), "dB", significant_digits)
                     ),
                 ));
             }
@@ -327,7 +327,7 @@ pub fn show(
             if let Some(d) = s.min_distance {
                 rows.push((
                     "min |1+L|".to_owned(),
-                    fmt_si_significant(d, "", significant_digits),
+                    fmt_column_reading(d, "", significant_digits),
                 ));
             }
         }
@@ -416,18 +416,20 @@ pub fn show(
             ),
             (
                 "Re".to_owned(),
-                fmt_si_significant(re[i], "", significant_digits),
+                fmt_column_reading(re[i], "", significant_digits),
             ),
             (
                 "Im".to_owned(),
-                fmt_si_significant(im[i], "", significant_digits),
+                fmt_column_reading(im[i], "", significant_digits),
             ),
             (
                 "|L| ∠".to_owned(),
-                format!(
-                    "{} ∠ {}",
-                    fmt_si_significant(magnitude, "", significant_digits),
-                    angle_readout(quantity_policy, phase_radians, significant_digits)
+                crate::presentation::polar_readout(
+                    quantity_policy,
+                    magnitude,
+                    "",
+                    phase_radians,
+                    significant_digits,
                 ),
             ),
         ];
@@ -466,7 +468,7 @@ pub fn right_panel(
             "Min distance to −1",
             s.min_distance.map_or_else(
                 || "—".to_owned(),
-                |v| fmt_si_significant(v, "", significant_digits),
+                |v| fmt_column_reading(v, "", significant_digits),
             ),
             false,
         ),

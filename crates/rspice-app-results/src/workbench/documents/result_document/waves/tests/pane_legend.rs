@@ -410,7 +410,8 @@ fn a_pane_whose_traces_hold_no_value_is_its_header_alone() {
 /// At an event's instant a staircase reads the value after the event, as
 /// its lane does and as its curve is drawn from there on: with cursor A on
 /// the second sampling edge, where the code steps from 0 to 128, the
-/// `analog(D(code))` entry reads 128, beside the lane's 128.
+/// `analog(D(code))` entry reads 128.0 at the reader's four digits, beside
+/// the lane's 128.
 #[test]
 fn an_event_instant_reads_the_value_after_the_event() {
     const STAIRCASE: &str = "analog(D(code))";
@@ -447,7 +448,7 @@ fn an_event_instant_reads_the_value_after_the_event() {
     };
     let entry = row(STAIRCASE, true);
     assert!(
-        reads(&entry, "128") && !reads(&entry, "0"),
+        reads(&entry, "128.0") && !reads(&entry, "0"),
         "the entry reads after the event: {entry:?}"
     );
     let lane = row("code", false);

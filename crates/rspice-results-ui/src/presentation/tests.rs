@@ -1,8 +1,10 @@
 use super::*;
 
-/// Angles read at the chosen digits in the unit Angle display chose.
+/// Angles read in the unit Angle display chose: degrees to the hundredth,
+/// against the number, at any digits preference; radians at the reader's
+/// significant digits.
 #[test]
-fn angle_readouts_follow_the_angle_display_at_significant_digits() {
+fn angle_readouts_follow_the_angle_display() {
     use rspice_vocabulary::quantity::AngleDisplay;
     let degrees = QuantityPresentationPolicy {
         angle_display: AngleDisplay::Degrees,
@@ -10,17 +12,45 @@ fn angle_readouts_follow_the_angle_display_at_significant_digits() {
     };
     assert_eq!(
         angle_readout(&degrees, 45.678_f64.to_radians(), 4),
-        "45.68 °"
+        "45.68\u{b0}"
     );
     assert_eq!(
         angle_readout(&degrees, 45.678_f64.to_radians(), 3),
-        "45.7 °"
+        "45.68\u{b0}"
+    );
+    assert_eq!(
+        angle_readout(&degrees, 45.0_f64.to_radians(), 4),
+        "45.00\u{b0}"
+    );
+    assert_eq!(
+        angle_readout(&degrees, (-0.001_f64).to_radians(), 4),
+        "0.00\u{b0}"
     );
     let radians = QuantityPresentationPolicy {
         angle_display: AngleDisplay::Radians,
         ..QuantityPresentationPolicy::default()
     };
     assert_eq!(angle_readout(&radians, 1.234_567, 4), "1.235 rad");
+    assert_eq!(angle_readout(&radians, 0.5, 4), "0.5000 rad");
+}
+
+/// A complex readout names its unit once; a polar one is its magnitude at
+/// the reader's digits and its angle to the hundredth of a degree.
+#[test]
+fn complex_and_polar_readouts_name_one_unit() {
+    let degrees = QuantityPresentationPolicy {
+        angle_display: rspice_vocabulary::quantity::AngleDisplay::Degrees,
+        ..QuantityPresentationPolicy::default()
+    };
+    assert_eq!(complex_readout(1.2, 3.4, "V", 4), "1.200 + 3.400j V");
+    assert_eq!(
+        polar_readout(&degrees, 1.2, "V", 45.0_f64.to_radians(), 4),
+        "1.200 V \u{2220} 45.00\u{b0}"
+    );
+    assert_eq!(
+        polar_readout(&degrees, 0.374, "", (-112.385_f64).to_radians(), 4),
+        "0.3740 \u{2220} \u{2212}112.39\u{b0}"
+    );
 }
 
 #[test]

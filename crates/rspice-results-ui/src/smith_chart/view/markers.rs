@@ -5,7 +5,7 @@
 use std::f64::consts::{PI, TAU};
 
 use num_complex::Complex64;
-use rspice_ui_kit::plot::fmt_si_significant;
+use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use super::{admittance_from_gamma, impedance_from_gamma};
@@ -18,7 +18,7 @@ pub(super) fn match_rows(gamma: Complex64, digits: usize) -> Vec<(String, String
     let magnitude = gamma.norm();
     let decibels = |value: f64| {
         if value.is_finite() {
-            fmt_si_significant(value, "dB", digits)
+            fmt_column_reading(value, "dB", digits)
         } else {
             "∞".to_owned()
         }
@@ -78,7 +78,7 @@ pub(super) fn element_rows(
     let with = |resistance: String, joint: &str, element: Option<(f64, &str)>| match element {
         Some((value, unit)) => format!(
             "{resistance} {joint} {}",
-            fmt_si_significant(value, unit, digits)
+            fmt_column_reading(value, unit, digits)
         ),
         None => resistance,
     };
@@ -87,7 +87,7 @@ pub(super) fn element_rows(
         rows.push((
             "Series".to_owned(),
             with(
-                fmt_si_significant(resistance, "Ω", digits),
+                fmt_column_reading(resistance, "Ω", digits),
                 "+",
                 series_element(reactance, frequency),
             ),
@@ -95,7 +95,7 @@ pub(super) fn element_rows(
     }
     if let Some((conductance, susceptance)) = admittance_from_gamma(gamma.re, gamma.im, reference) {
         let resistance = if conductance > 0.0 {
-            fmt_si_significant(1.0 / conductance, "Ω", digits)
+            fmt_column_reading(1.0 / conductance, "Ω", digits)
         } else {
             "∞ Ω".to_owned()
         };
@@ -131,7 +131,7 @@ pub(super) fn delta_rows(
         (
             "Δ|Γ|".to_owned(),
             if ratio.is_finite() {
-                fmt_si_significant(ratio, "dB", digits)
+                fmt_column_reading(ratio, "dB", digits)
             } else {
                 "—".to_owned()
             },
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(unit, "H");
         close(henries, 5.0e-9);
         let rows = element_rows(inductive, 50.0, GIGAHERTZ, 4);
-        assert_eq!(row(&rows, "Series"), "25 Ω + 5 nH");
+        assert_eq!(row(&rows, "Series"), "25.00 Ω + 5.000 nH");
 
         let capacitive = gamma_of(Complex64::new(50.0, -1.0 / (omega * 2.0e-12)), 50.0);
         let (_, reactance) = impedance_from_gamma(capacitive.re, capacitive.im, 50.0).unwrap();
@@ -190,7 +190,7 @@ mod tests {
         close(farads, 2.0e-12);
         assert_eq!(
             row(&element_rows(capacitive, 50.0, GIGAHERTZ, 4), "Series"),
-            "50 Ω + 2 pF"
+            "50.00 Ω + 2.000 pF"
         );
     }
 
@@ -209,7 +209,7 @@ mod tests {
         close(farads, 1.0e-12);
         assert_eq!(
             row(&element_rows(capacitive, 50.0, GIGAHERTZ, 4), "Shunt"),
-            "100 Ω ∥ 1 pF"
+            "100.0 Ω ∥ 1.000 pF"
         );
         let inductive = parallel(1.0 / 200.0, -1.0 / (omega * 10.0e-9));
         let (_, susceptance) = admittance_from_gamma(inductive.re, inductive.im, 50.0).unwrap();
@@ -218,13 +218,14 @@ mod tests {
         close(henries, 10.0e-9);
     }
 
-    /// |Γ| = 1/3 is a 9.542 dB return loss and a 0.5115 dB mismatch loss; a
-    /// match has an infinite return loss and a short an infinite mismatch.
+    /// |Γ| = 1/3 is a 9.54 dB return loss and a 0.51 dB mismatch loss, each
+    /// to the hundredth of a decibel; a match has an infinite return loss and
+    /// a short an infinite mismatch.
     #[test]
     fn the_match_reads_return_and_mismatch_loss() {
         let rows = match_rows(Complex64::from_polar(1.0 / 3.0, 1.0), 4);
-        assert_eq!(row(&rows, "RL"), "9.542 dB");
-        assert_eq!(row(&rows, "Mismatch"), "0.5115 dB");
+        assert_eq!(row(&rows, "RL"), "9.54 dB");
+        assert_eq!(row(&rows, "Mismatch"), "0.51 dB");
         assert_eq!(row(&match_rows(Complex64::new(0.0, 0.0), 4), "RL"), "∞");
         assert_eq!(
             row(&match_rows(Complex64::new(-1.0, 0.0), 4), "Mismatch"),
@@ -242,7 +243,7 @@ mod tests {
             1.5 * GIGAHERTZ,
         );
         let rows = delta_rows(second, first, &QuantityPresentationPolicy::default(), 4);
-        assert!(row(&rows, "Δ|Γ|").contains("6.021 dB"), "{rows:?}");
+        assert!(row(&rows, "Δ|Γ|").contains("6.02 dB"), "{rows:?}");
         assert!(row(&rows, "Δf").contains("500"), "{rows:?}");
         assert!(row(&rows, "Δ∠Γ").starts_with("20"), "{rows:?}");
     }

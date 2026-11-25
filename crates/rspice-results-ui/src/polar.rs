@@ -23,7 +23,7 @@ use rspice_results::waveform::RetainedTrace;
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<RetainedTrace>;
 use crate::presentation::{angle_readout, frequency_readout};
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{fmt_si_signed, fmt_si_significant};
+use rspice_ui_kit::plot::{fmt_column_reading, fmt_si_significant, fmt_signed_reading};
 use rspice_ui_kit::theme::{self, FontWeight, paint_focus_ring};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
@@ -1058,7 +1058,7 @@ fn sample_card_rows(
         ),
         (
             "|\u{b7}|".to_owned(),
-            fmt_si_significant(magnitude, &locus.unit, significant_digits),
+            fmt_column_reading(magnitude, &locus.unit, significant_digits),
         ),
         (
             // Not "∠": that sign is in none of the bundled faces.
@@ -1208,36 +1208,42 @@ fn register_rows(
     let dash = || "\u{2014}".to_owned();
     let at = |sample: Option<usize>, read: &dyn Fn(usize) -> String| sample.map_or_else(dash, read);
     let frequency = |index: usize| frequency_readout(policy, locus.x[index], digits);
-    let magnitude = |index: usize| fmt_si_significant(locus.magnitude(index), &locus.unit, digits);
+    let magnitude = |index: usize| fmt_column_reading(locus.magnitude(index), &locus.unit, digits);
     let decibels = |index: usize| {
         let value = locus.magnitude(index);
         if value > 0.0 {
-            fmt_si_significant(20.0 * value.log10(), "", digits)
+            crate::presentation::fixed_places(
+                20.0 * value.log10(),
+                crate::presentation::DECIBEL_PLACES,
+            )
         } else {
             "\u{2212}\u{221e}".to_owned()
         }
     };
     let phase =
         |index: usize| angle_readout(policy, locus.imag[index].atan2(locus.real[index]), digits);
-    let real = |index: usize| fmt_si_significant(locus.real[index], "", digits);
-    let imaginary = |index: usize| fmt_si_significant(locus.imag[index], "", digits);
+    let real = |index: usize| fmt_column_reading(locus.real[index], "", digits);
+    let imaginary = |index: usize| fmt_column_reading(locus.imag[index], "", digits);
 
     let pair = samples.a.zip(samples.b);
     let decades = pair.map_or_else(dash, |(a, b)| {
         let (from, to) = (locus.x[a], locus.x[b]);
         if from > 0.0 && to > 0.0 {
-            fmt_si_signed((to / from).log10(), "dec", digits)
+            fmt_signed_reading((to / from).log10(), "dec", digits)
         } else {
             dash()
         }
     });
     let magnitude_delta = pair.map_or_else(dash, |(a, b)| {
-        fmt_si_significant(locus.magnitude(b) - locus.magnitude(a), &locus.unit, digits)
+        fmt_column_reading(locus.magnitude(b) - locus.magnitude(a), &locus.unit, digits)
     });
     let decibel_delta = pair.map_or_else(dash, |(a, b)| {
         let (first, second) = (locus.magnitude(a), locus.magnitude(b));
         if first > 0.0 && second > 0.0 {
-            fmt_si_signed(20.0 * (second / first).log10(), "", digits)
+            rspice_ui_kit::plot::format::signed_fixed_places(
+                20.0 * (second / first).log10(),
+                crate::presentation::DECIBEL_PLACES,
+            )
         } else {
             dash()
         }
@@ -1247,7 +1253,7 @@ fn register_rows(
     });
     let group_delay = pair.map_or_else(dash, |(a, b)| {
         group_delay_seconds(locus, a, b)
-            .map_or_else(dash, |value| fmt_si_significant(value, "s", digits))
+            .map_or_else(dash, |value| fmt_column_reading(value, "s", digits))
     });
 
     vec![
@@ -1280,7 +1286,7 @@ fn register_rows(
             at(samples.a, &real),
             at(samples.b, &real),
             pair.map_or_else(dash, |(a, b)| {
-                fmt_si_significant(locus.real[b] - locus.real[a], "", digits)
+                fmt_column_reading(locus.real[b] - locus.real[a], "", digits)
             }),
         ),
         (
@@ -1288,7 +1294,7 @@ fn register_rows(
             at(samples.a, &imaginary),
             at(samples.b, &imaginary),
             pair.map_or_else(dash, |(a, b)| {
-                fmt_si_significant(locus.imag[b] - locus.imag[a], "", digits)
+                fmt_column_reading(locus.imag[b] - locus.imag[a], "", digits)
             }),
         ),
         ("Group delay", dash(), dash(), group_delay),
@@ -1673,7 +1679,7 @@ mod tests {
         );
         assert!(rows.iter().all(|row| row.2 == "\u{2014}"));
         assert!(rows.iter().all(|row| row.3 == "\u{2014}"));
-        assert_eq!(rows[2].1, "0", "a unit-magnitude sample is 0 dB");
+        assert_eq!(rows[2].1, "0.00", "a unit-magnitude sample is 0 dB");
     }
 
     /// The Δ frequency column is stated in decades, which is what a swept
@@ -1691,7 +1697,7 @@ mod tests {
             &policy,
             4,
         );
-        let expected = fmt_si_signed((locus.x[2] / locus.x[0]).log10(), "dec", 4);
+        let expected = fmt_signed_reading((locus.x[2] / locus.x[0]).log10(), "dec", 4);
         assert_eq!(rows[0].3, expected);
     }
 

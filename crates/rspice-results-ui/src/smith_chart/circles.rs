@@ -179,7 +179,7 @@ impl TwoPortFigures {
     pub fn maximum_gain_text(&self, significant_digits: usize) -> Option<(&'static str, String)> {
         let maximum = self.scattering.maximum_gain()?;
         let decibels = 10.0 * maximum.linear().log10();
-        let text = rspice_ui_kit::plot::fmt_si_significant(decibels, "dB", significant_digits);
+        let text = rspice_ui_kit::plot::fmt_column_reading(decibels, "dB", significant_digits);
         Some(match maximum {
             MaximumGain::Available(_) => ("MAG", text),
             MaximumGain::Stable(_) => ("MSG", text),

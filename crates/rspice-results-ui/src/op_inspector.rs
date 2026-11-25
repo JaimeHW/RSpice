@@ -21,7 +21,7 @@ use rspice_results::operating_point::{
 };
 use rspice_ui_kit::{
     panels::{WorkbenchIcon, section_block_gap, section_header},
-    plot::{fmt_si_signed, fmt_si_significant},
+    plot::{fmt_column_reading, fmt_si_significant, fmt_signed_reading},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Button, PROBLEM_MARK_SIDE, Problem, measurement_table, paint_problem_mark},
@@ -881,7 +881,7 @@ impl OpPlan {
                     }
                 } else if changed {
                     let (mantissa, unit) =
-                        column.bare(split_value(fmt_si_signed(value - base, &unit, digits)));
+                        column.bare(split_value(fmt_signed_reading(value - base, &unit, digits)));
                     CellValue::Number {
                         mantissa,
                         unit,
@@ -1193,7 +1193,7 @@ pub fn summary_panel(
         section_header(ui, "Power", None);
         let mut rows = vec![(
             "Dissipated",
-            fmt_si_significant(dissipated, "W", significant_digits),
+            fmt_column_reading(dissipated, "W", significant_digits),
             true,
         )];
         if let Some((name, power)) = &summary.largest {
@@ -1201,7 +1201,7 @@ pub fn summary_panel(
                 "Largest",
                 format!(
                     "{name} \u{b7} {}",
-                    fmt_si_significant(*power, "W", significant_digits)
+                    fmt_column_reading(*power, "W", significant_digits)
                 ),
                 false,
             ));
@@ -1402,7 +1402,7 @@ impl<'a> RowSource<'a> {
 /// A finite value as a mantissa to `significant_digits` and the prefix and
 /// unit that belong after it.
 fn value_parts(value: f64, unit: &str, significant_digits: usize) -> (String, String) {
-    split_value(fmt_si_significant(value, unit, significant_digits))
+    split_value(fmt_column_reading(value, unit, significant_digits))
 }
 
 /// A printed value as its mantissa and the prefix and unit after it.
