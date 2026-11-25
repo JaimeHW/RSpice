@@ -665,11 +665,13 @@ fn quick_fft_plot<W: AsRef<RetainedWaveform>>(
         presentation.fft_selected_source.as_deref(),
         "FFT source waveform",
     )?;
-    let (time, values) = whole_pair(waveform)?;
-    let input = rspice_results::fft::pipeline::prepare_fft_input_with_options(
+    // Read as the spectrum sheet reads it: the record validated a block at
+    // a time and only the rows of the time window held, so a long stored
+    // transient prints rather than being read whole.
+    let input = rspice_results::fft::pipeline::prepare_fft_input_from_columns(
         &waveform.name,
-        &time,
-        &values,
+        &waveform.x,
+        &waveform.y,
         presentation.fft_input_options(),
     )
     .map_err(|error| {
@@ -971,8 +973,8 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
 /// A source's two columns, each borrowed or read.
 type ColumnPair<'a> = (std::borrow::Cow<'a, [f64]>, std::borrow::Cow<'a, [f64]>);
 
-/// Both columns of a spectrum's or an eye's source: the transform folds every sample of the
-/// record, so it reads them whole, and a record past the whole-read budget is refused.
+/// Both columns of an eye's source: the eye folds every sample of the record, as the eye
+/// sheet does, so it reads them whole, and a record past the whole-read budget is refused.
 fn whole_pair(waveform: &RetainedWaveform) -> Result<ColumnPair<'_>, HardcopySourceError> {
     let refused = |failure: rspice_results::waveform::ColumnReadFailure| {
         HardcopySourceError::InvalidVisualizationSource(format!(
