@@ -2978,8 +2978,9 @@ fn gray_percent_is_black_ink_coverage_not_reflected_channel_value() {
     );
 }
 
-/// A report table prints a number as the sheets do: the value, not twelve
-/// fixed decimals of its SI base unit.
+/// A report table prints a number as the sheets' columns do: the value at
+/// four significant digits with every digit kept, not twelve fixed decimals
+/// of its SI base unit; a decibel to the hundredth.
 #[test]
 fn a_report_table_number_reads_with_its_prefix() {
     let cell = |value: f64, unit: Option<&str>| {
@@ -2988,7 +2989,8 @@ fn a_report_table_number_reads_with_its_prefix() {
             unit: unit.map(str::to_owned),
         })
     };
-    assert_eq!(cell(1.5e-15, Some("F")), "1.5 fF");
+    assert_eq!(cell(1.5e-15, Some("F")), "1.500 fF");
     assert_eq!(cell(1.234_567e9, Some("Hz")), "1.235 GHz");
-    assert_eq!(cell(-0.25, None), "\u{2212}0.25");
+    assert_eq!(cell(-0.25, None), "\u{2212}0.2500");
+    assert_eq!(cell(-3.0002, Some("dB")), "\u{2212}3.00 dB");
 }
