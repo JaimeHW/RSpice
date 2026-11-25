@@ -816,3 +816,53 @@ fn a_lone_close_is_the_neutral_button_and_enter_still_closes() {
         assert_eq!(choice, DialogChoice::Primary, "{primary}");
     }
 }
+
+/// A table in a dialog's body takes the keyboard when a row is clicked: the
+/// arrows then move its selection and Enter opens the row, rather than the
+/// dialog taking the focus back or Enter for its own button.
+#[test]
+fn a_clicked_table_in_a_dialog_takes_the_arrows_and_enter() {
+    use crate::widgets::table::{Cell, Column, DataTable, RowKey, TableResponse, TableState};
+
+    let ctx = Context::default();
+    crate::Theme::default().apply(&ctx);
+    ctx.all_styles_mut(|style| style.animation_time = 0.0);
+    let columns = [Column::name("Name", 120.0)];
+    let keys: Vec<RowKey> = (0..4).map(|row| RowKey::from(format!("r{row}"))).collect();
+    let mut state = TableState::default();
+    let frame = |events: Vec<egui::Event>, state: &mut TableState| {
+        let mut table = TableResponse::default();
+        let mut choice = DialogChoice::None;
+        let (_, geometry) = crate::probe::pass(&ctx, raw_input(events), |ui| {
+            choice = Dialog::new(TEST_TITLE, "Close").show(ui.ctx(), |ui| {
+                table = DataTable::new("dialog-table", &columns, keys.len())
+                    .state(state)
+                    .keys(&keys)
+                    .show(ui, |row| vec![Cell::text(format!("Row {row}"))]);
+            });
+        });
+        (table, choice, geometry)
+    };
+    let _ = frame(Vec::new(), &mut state);
+    let (_, _, geometry) = frame(Vec::new(), &mut state);
+    let row = geometry.one("table.line.1").expect("the row is laid out").center();
+    let press = |pressed| egui::Event::PointerButton {
+        pos: row,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let _ = frame(
+        vec![egui::Event::PointerMoved(row), press(true), press(false)],
+        &mut state,
+    );
+    assert_eq!(state.selected_row(), Some(1), "the click selects the row");
+
+    let _ = frame(Vec::new(), &mut state);
+    let (table, ..) = frame(vec![key_event(Key::ArrowDown, Modifiers::NONE)], &mut state);
+    assert!(table.focused, "the clicked table keeps the keyboard");
+    assert_eq!(state.selected_row(), Some(2), "Down moves the selection");
+    let (table, choice, _) = frame(vec![key_event(Key::Enter, Modifiers::NONE)], &mut state);
+    assert_eq!(table.activate, Some(2), "Enter opens the selected row");
+    assert_eq!(choice, DialogChoice::None, "Enter is the table's, not the Close's");
+}

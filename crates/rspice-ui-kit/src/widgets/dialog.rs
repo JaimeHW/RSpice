@@ -1593,6 +1593,11 @@ impl<'a> Dialog<'a> {
                 choice = DialogChoice::Cancelled;
             } else if self.primary_enabled
                 && self.primary_on_enter
+                // Asked only when Enter is down: reading the focused control's
+                // response on a frame the pointer pressed elsewhere surrenders
+                // its focus, so a table clicked in the body lost the keyboard
+                // the moment it took it.
+                && ctx.input(|input| input.key_pressed(Key::Enter))
                 && !focused_control_owns_enter(ctx, focus_id)
                 && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
             {
