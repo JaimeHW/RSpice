@@ -1079,7 +1079,10 @@ mod tests {
             own: vec![ObstacleOwner::Instance(7)],
             ..badge(2, "R7", &candidates)
         };
-        assert_eq!(layout_badges(&[mine.clone()], &[own], 4.0, VIEW).len(), 1);
+        assert_eq!(
+            layout_badges(std::slice::from_ref(&mine), &[own], 4.0, VIEW).len(),
+            1
+        );
         let on_it = BadgeLayoutInput {
             candidates: vec![rect(-10.0, -10.0)],
             ..mine
