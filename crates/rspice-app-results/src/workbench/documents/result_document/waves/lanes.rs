@@ -57,7 +57,9 @@ pub(super) fn show_lanes(
         &specs,
         lanes::BusReader::Lanes,
     );
-    let rows = lanes::lane_rows(&history, &specs, &user);
+    let mut rows = lanes::lane_rows(&history, &specs, &user);
+    // A fitted strip draws the lanes it has room for, from the top.
+    rows.truncate(frame.rows.unwrap_or(usize::MAX));
     let selected = lanes::selected_rows(&layout, &specs);
     let owns_cursors = session.cursor_strip == Some(model.analysis_index);
     let cursors = if owns_cursors {

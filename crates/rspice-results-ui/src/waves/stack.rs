@@ -167,6 +167,9 @@ pub struct EventLaneFrame {
     /// The gutter's name column; its value column is the rest of the margin.
     pub name_width: f32,
     pub right_margin: f32,
+    /// How many of the lanes, from the top, a fitted strip has room for;
+    /// `None` draws every one, in a band that scrolls through them.
+    pub rows: Option<usize>,
 }
 
 /// The shares of the strip the name column keeps between until the reader
@@ -1459,8 +1462,15 @@ fn show_strip_plot(
     let count = panes.len();
     let gutter = strip_gutter(ui, host, model);
     let marker_height = event_marker_band(ui, host, model, (x_domain, gutter));
-    let lane_height = marker_height
-        + event_lane_band(ui, host, model, (x_domain, gutter), count, wanted_lanes, &t);
+    let (lanes_height, unseen_lanes) = event_lane_band(
+        ui,
+        host,
+        model,
+        (x_domain, gutter),
+        (count, wanted_lanes, options.fitted.is_some()),
+        &t,
+    );
+    let lane_height = marker_height + lanes_height;
     let least = WAVE_PANE_HEADER_HEIGHT + LEAST_PLOT_HEIGHT;
     // A fitted strip draws the panes that fit at the least a pane reads at,
     // and counts the others on a line above its ruler.
@@ -1485,13 +1495,13 @@ fn show_strip_plot(
             available.height() - lane_height - WAVE_SHARED_X_HEIGHT,
             &needs,
             active,
-            unseen_xy,
+            unseen_xy + unseen_lanes,
         )
     } else {
         vec![true; count]
     };
     let unseen = shown.iter().filter(|shown| !**shown).count() + unseen_xy;
-    let overflow_height = if unseen > 0 {
+    let overflow_height = if unseen + unseen_lanes > 0 {
         FITTED_OVERFLOW_HEIGHT
     } else {
         0.0
@@ -1625,8 +1635,8 @@ fn show_strip_plot(
     if rects.len() == count {
         super::strip_drag::drops(ui, host, model, &rects);
     }
-    if unseen > 0 {
-        fitted_overflow(ui, host, model, (unseen, gutter), &t);
+    if unseen + unseen_lanes > 0 {
+        fitted_overflow(ui, host, model, (unseen, unseen_lanes, gutter), &t);
     }
     let shared_x_height = if expanded_count == 0 {
         WAVE_SHARED_X_HEIGHT.min((available.height() - lane_height - overflow_height).max(0.0))
@@ -1644,7 +1654,8 @@ const FITTED_OVERFLOW_HEIGHT: f32 = rspice_ui_kit::widgets::notice::OFFER_HEIGHT
 /// stack: every one while all fit with `unseen` other strips counted, else
 /// as many as leave room for the line that counts the rest. The active pane
 /// is taken first, so it is never the one counted, then the others in the
-/// stack's order; one is drawn however little room there is.
+/// stack's order. A dock too short for one pane draws none: a pane cut below
+/// the least it reads at reads as a fault.
 fn fitted_panes(room: f32, needs: &[f32], active: Option<usize>, unseen: usize) -> Vec<bool> {
     let total: f32 = needs.iter().sum();
     if unseen == 0 && total <= room {
@@ -1657,7 +1668,7 @@ fn fitted_panes(room: f32, needs: &[f32], active: Option<usize>, unseen: usize) 
         .into_iter()
         .chain((0..needs.len()).filter(|ordinal| Some(*ordinal) != active));
     for ordinal in order {
-        if used > 0.0 && used + needs[ordinal] > room {
+        if used + needs[ordinal] > room {
             break;
         }
         used += needs[ordinal];
@@ -1667,13 +1678,13 @@ fn fitted_panes(room: f32, needs: &[f32], active: Option<usize>, unseen: usize) 
 }
 
 /// The line a fitted strip draws above its ruler when it has no room for
-/// every pane: how many it does not draw, and the link that opens Results on
-/// the analysis, where every pane stands.
+/// every pane or lane: how many of each it does not draw, and the link that
+/// opens Results on the analysis, where every one stands.
 fn fitted_overflow(
     ui: &mut Ui,
     host: &mut impl StackHost,
     model: &StripModel,
-    (unseen, gutter): (usize, Gutter),
+    (unseen, unseen_lanes, gutter): (usize, usize, Gutter),
     t: &Tokens,
 ) {
     let height = FITTED_OVERFLOW_HEIGHT.min(ui.available_height().max(0.0));
@@ -1686,11 +1697,19 @@ fn fitted_overflow(
         rect.top(),
         egui::Stroke::new(1.0, t.color.canvas_grid),
     );
-    let count = if unseen == 1 {
-        "+1 pane".to_owned()
-    } else {
-        format!("+{unseen} panes")
+    let counted = |count: usize, one: &str| match count {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        _ => Some(format!("{count} {one}s")),
     };
+    let count = format!(
+        "+{}",
+        [counted(unseen, "pane"), counted(unseen_lanes, "lane")]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     let mut line = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(egui::Rect::from_min_max(
@@ -2082,6 +2101,7 @@ fn event_frame(
         left_margin: gutter.width(),
         name_width: gutter.name,
         right_margin: gutter.right_margin(),
+        rows: None,
     }
 }
 
@@ -2111,18 +2131,18 @@ fn event_marker_band(
 }
 
 /// Draw the strip's logic and bus lanes above its panes, on their time axis,
-/// and return the height they took, seam included.
+/// and return the height they took, seam included, and how many of them a
+/// fitted strip had no room for.
 fn event_lane_band(
     ui: &mut Ui,
     host: &mut impl StackHost,
     model: &StripModel,
     domain: ((f64, f64), Gutter),
-    pane_count: usize,
-    wanted: f32,
+    (pane_count, wanted, fitted): (usize, f32, bool),
     t: &Tokens,
-) -> f32 {
+) -> (f32, usize) {
     if wanted <= 0.0 {
-        return 0.0;
+        return (0.0, 0);
     }
     let available = ui.available_rect_before_wrap().height().max(0.0);
     let cap = if pane_count == 0 {
@@ -2130,33 +2150,62 @@ fn event_lane_band(
     } else {
         available * EVENT_LANE_SHARE
     };
-    let height = wanted.min(cap);
+    // A fitted strip draws the lanes that fit whole, from the top, and
+    // counts the others with its panes; a stack's band scrolls through them.
+    let (height, rows, unseen) = if fitted {
+        let specs =
+            super::lanes::lane_specs(model, host.session().event_lanes.get(&model.analysis_key));
+        let room = if wanted <= cap || pane_count > 0 {
+            cap
+        } else {
+            cap - FITTED_OVERFLOW_HEIGHT
+        };
+        let (mut used, mut rows) = (0.0, 0);
+        for spec in &specs {
+            if used + spec.height() > room {
+                break;
+            }
+            used += spec.height();
+            rows += 1;
+        }
+        (used, Some(rows), specs.len() - rows)
+    } else {
+        (wanted.min(cap), None, 0)
+    };
     if height <= 0.0 {
-        return 0.0;
+        return (0.0, unseen);
     }
-    let frame = event_frame(host, model, domain);
+    let frame = EventLaneFrame {
+        rows,
+        ..event_frame(host, model, domain)
+    };
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), height),
         egui::Layout::top_down(egui::Align::Min),
         |ui| {
             ui.set_height(height);
-            // A scroll area is at least 64 points tall unless told otherwise,
-            // which would push the panes below the strip for one or two lanes.
-            egui::ScrollArea::vertical()
-                .id_salt(("event-lanes", model.analysis_index))
-                .max_height(height)
-                .min_scrolled_height(height)
-                .auto_shrink([false, false])
-                .show(ui, |ui| host.show_event_lanes(ui, model, frame));
+            if rows.is_some() {
+                host.show_event_lanes(ui, model, frame);
+            } else {
+                // A scroll area is at least 64 points tall unless told
+                // otherwise, which would push the panes below the strip for
+                // one or two lanes.
+                egui::ScrollArea::vertical()
+                    .id_salt(("event-lanes", model.analysis_index))
+                    .max_height(height)
+                    .min_scrolled_height(height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| host.show_event_lanes(ui, model, frame));
+            }
         },
     );
     if pane_count == 0 {
-        return height;
+        return (height, unseen);
     }
     let (seam, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
     ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
-    height + 1.0
+    (height + 1.0, unseen)
 }
 
 fn show_unit_pane(

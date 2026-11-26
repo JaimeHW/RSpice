@@ -669,3 +669,56 @@ pub(super) fn well(ui: &mut Ui) {
     ui.painter()
         .rect_filled(well, 0.0, Tokens::get(ui.ctx()).color.canvas_bg);
 }
+
+/// On the dock's Plot page the lanes do not scroll: a dock too short for
+/// them all draws the ones that fit whole and counts the rest on the line
+/// above its ruler, and a tall one draws every lane and counts none.
+#[test]
+fn a_fitted_strip_counts_the_lanes_it_has_no_room_for() {
+    let (mut state, _) = sar_strip(BusRadix::Hex, true);
+    let ctx = theme_context();
+    ctx.enable_accesskit();
+    let mut names = |height: f32| -> Vec<String> {
+        let mut names = Vec::new();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(FRAME.x, height),
+                )),
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                well(ui);
+                show_compact(ui, &mut state.results_parts(), None);
+            });
+            names = output
+                .platform_output
+                .accesskit_update
+                .map(|update| {
+                    update
+                        .nodes
+                        .iter()
+                        .filter_map(|(_, node)| node.label().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        names
+    };
+    let counted = |names: &[String]| {
+        names
+            .iter()
+            .find(|name| name.starts_with("Open in Results: +"))
+            .cloned()
+    };
+    // SAMP and EOC fit in half of the strip; the expanded code bus does not.
+    let short = names(240.0);
+    assert_eq!(
+        counted(&short).as_deref(),
+        Some("Open in Results: +1 lane"),
+        "{short:?}"
+    );
+    let tall = names(FRAME.y * 2.0);
+    assert_eq!(counted(&tall), None, "every lane fits: {tall:?}");
+}
