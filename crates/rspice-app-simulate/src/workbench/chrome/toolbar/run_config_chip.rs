@@ -147,30 +147,22 @@ pub(in crate::workbench) fn reference_label(
     )
 }
 
-/// The processes a reference can name, fast to slow: each one a model
-/// library of the project declares, as the run looks a process up, and the
-/// current one, which stays offered whatever the libraries say. Empty where
-/// no library defines a corner, so there is nothing to choose among.
+/// The processes a reference can name, fast to slow: each one the run binds
+/// its models at, and the current one, which stays offered whatever the run
+/// makes of it. Empty where the process is no choice: no source the run
+/// reads binds by it, a library's corners or a PDK's process contracts, and
+/// the run binds at the current one.
 ///
-/// A corner whose name is none of the five is not offered: the reference
-/// names one of them.
+/// What the run binds is read through the decision the run's own binding
+/// takes, so the row never offers a process the run refuses.
 fn library_processes(model: &Model, current: ProcessCorner) -> Vec<ProcessCorner> {
-    let catalog = model.model_library_manager.catalog();
-    let declared = |process: ProcessCorner| {
-        catalog
-            .libraries()
-            .any(|library| library.declares_process(process.short_name()))
-    };
-    let defines = catalog
-        .libraries()
-        .any(|library| !library.corners.is_empty())
-        || PROCESSES.into_iter().any(declared);
-    if !defines {
+    let choice = model.technology_inputs().reference_process_choice();
+    if !choice.selects() && choice.binds(current) {
         return Vec::new();
     }
     PROCESSES
         .into_iter()
-        .filter(|process| *process == current || declared(*process))
+        .filter(|process| *process == current || choice.binds(*process))
         .collect()
 }
 

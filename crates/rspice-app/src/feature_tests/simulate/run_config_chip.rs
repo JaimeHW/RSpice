@@ -9,6 +9,9 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::veriloga_flow_tests::User;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
+use rspice_app_simulate::workbench::surfaces::simulate::page_models::{
+    ModelBindingAction, apply_model_binding_action,
+};
 use rspice_app_state::product::{AnalysisInstanceId, ProcessCorner};
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::workbench::workspace::Workspace;
@@ -182,25 +185,39 @@ fn without_libraries(app: &mut RSpiceApp) {
     }
 }
 
-/// A library that defines the typical and slow corners, and one whose name is
-/// none of the five a reference can name.
-fn corner_library() -> rspice_model_library::ModelLibrary {
-    let corner = |name: &str| {
-        (
-            name.to_owned(),
-            rspice_model_library::ProcessCorner {
-                name: name.to_owned(),
-                ..Default::default()
-            },
+/// A library whose `.lib` sections are the typical and slow corners and one
+/// whose name is none of the five a reference can name, bound to the active
+/// plan as the Models page binds it: at the section it pins, typical.
+fn bind_corner_library(app: &mut RSpiceApp) {
+    let name = app
+        .state
+        .model
+        .model_library_manager
+        .load_library_bytes(
+            "foundry-corners.lib",
+            b".lib tt\n.model nch NMOS (LEVEL=1 KP=1e-3)\n.endl tt\n\
+              .lib ss\n.model nch NMOS (LEVEL=1 KP=8e-4)\n.endl ss\n\
+              .lib hot_typical\n.model nch NMOS (LEVEL=1 KP=9e-4)\n.endl hot_typical\n"
+                .to_vec(),
+            None,
         )
-    };
-    rspice_model_library::ModelLibrary {
-        name: "foundry corners".to_owned(),
-        corners: [corner("tt"), corner("ss"), corner("hot_typical")]
-            .into_iter()
-            .collect(),
-        ..Default::default()
-    }
+        .expect("a sectioned library imports");
+    apply_model_binding_action(
+        &mut crate::workbench::features::cx(app),
+        ModelBindingAction::Attach(name),
+    );
+}
+
+/// The active plan's first library left to the reference process, as the
+/// Models page's Automatic choice leaves it.
+fn follow_the_reference(app: &mut RSpiceApp) {
+    apply_model_binding_action(
+        &mut crate::workbench::features::cx(app),
+        ModelBindingAction::SetCorner {
+            index: 0,
+            corner: None,
+        },
+    );
 }
 
 /// The chip's whole purpose is the plan manager. Navigating to Simulation
@@ -396,10 +413,12 @@ fn a_temperature_typed_in_the_popover_is_the_one_the_next_run_uses() {
     assert!(chip(&user).0.contains("85 \u{b0}C;"), "{}", chip(&user).0);
 }
 
-/// The process shows only where a model library defines corners, and then
-/// offers the ones it defines that a reference can name.
+/// The process shows only where it changes what the run binds: over a
+/// library the plan leaves to the reference process, and then it offers the
+/// corners that library defines that a reference can name. A library pinned
+/// to a section binds that section at every process.
 #[test]
-fn the_process_shows_only_over_a_library_that_defines_corners() {
+fn the_process_shows_only_where_it_changes_what_the_run_binds() {
     let mut app = RSpiceApp::test_instance();
     without_libraries(&mut app);
     let mut user = User::new(app);
@@ -424,11 +443,17 @@ fn the_process_shows_only_over_a_library_that_defines_corners() {
     }
     press_chip(&mut user);
 
-    user.app
-        .state
-        .model
-        .model_library_manager
-        .add_library(corner_library());
+    bind_corner_library(&mut user.app);
+    user.settle();
+    assert!(
+        chip(&user)
+            .0
+            .contains(&format!(", plan {plan}, 27 \u{b0}C;")),
+        "{}",
+        chip(&user).0
+    );
+
+    follow_the_reference(&mut user.app);
     user.settle();
     assert!(
         chip(&user)
@@ -449,6 +474,41 @@ fn the_process_shows_only_over_a_library_that_defines_corners() {
     let reference = user.app.state.model.sim_setup.reference_pvt;
     assert_eq!(reference.process, ProcessCorner::SS);
     assert_eq!(reference.temperature_celsius, 27.0);
+}
+
+/// A PDK whose model sources are contracted by process makes the process a
+/// choice with no library corner anywhere: the run binds the PDK's sources
+/// for the process the reference names.
+#[test]
+fn a_pdk_that_binds_by_process_shows_the_process_without_library_corners() {
+    let mut app = RSpiceApp::test_instance();
+    without_libraries(&mut app);
+    app.state.model.provision_test_project_technology_contract();
+    assert!(
+        app.state
+            .model
+            .model_library_manager
+            .catalog()
+            .libraries()
+            .all(|library| library.corners.is_empty())
+    );
+    let mut user = User::new(app);
+
+    assert!(
+        chip(&user).0.contains(", TT \u{b7} 27 \u{b0}C;"),
+        "{}",
+        chip(&user).0
+    );
+    press_chip(&mut user);
+    for process in ["FF", "FS", "TT", "SF", "SS"] {
+        assert!(in_popover(&user, process).is_some(), "{process}");
+    }
+    let fast = in_popover(&user, "FF").expect("FF");
+    click_at(&mut user, fast);
+    assert_eq!(
+        user.app.state.model.sim_setup.reference_pvt.process,
+        ProcessCorner::FF
+    );
 }
 
 /// A temperature the reference refuses, or words that are none, leave the

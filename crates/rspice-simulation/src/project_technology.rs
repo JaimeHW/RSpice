@@ -42,21 +42,12 @@ impl ProjectTechnologyInputs<'_> {
         &self,
     ) -> Result<crate::model_sources::SealedModelExecutionSources, String> {
         self.validate_project_technology_contract()?;
-        let project_binding = self
-            .project
-            .technology_binding()
-            .expect("validated project technology has an exact binding");
-        let pdk_pin = project_binding
-            .pdk_package()
+        let (package_binding, archive_digest) = self
+            .pinned_pdk()
             .expect("validated project technology has an exact PDK package");
-        let package_binding = rspice_model_library::pdk::contracts::PdkTechnologyBinding {
-            package_id: pdk_pin.package_id().to_owned(),
-            revision: pdk_pin.revision().to_owned(),
-            manifest_digest: pdk_pin.manifest_digest(),
-        };
         let sealed_pdk = self
             .registry
-            .seal_model_sources_for_binding(&package_binding, pdk_pin.archive_digest())
+            .seal_model_sources_for_binding(&package_binding, archive_digest)
             .map_err(|error| {
                 format!("The PDK's model files cannot be kept with the run: {error}")
             })?;
@@ -66,5 +57,64 @@ impl ProjectTechnologyInputs<'_> {
             &self.sim_setup.model_bindings,
         )?
         .with_pdk_model_sources(sealed_pdk)
+    }
+
+    /// What the reference process decides in this project's run, read from
+    /// the sources the run binds: the plan's model libraries, each with the
+    /// corner its binding selects, and, under a project technology, the
+    /// processes the pinned PDK contracts model sources for.
+    ///
+    /// A binding to a library the catalog no longer holds, or a pin no
+    /// trusted package answers, is left out: the run refuses either before it
+    /// binds a process.
+    #[must_use]
+    pub fn reference_process_choice(&self) -> crate::model_sources::ReferenceProcessChoice {
+        let libraries = self
+            .sim_setup
+            .model_bindings
+            .iter()
+            .filter_map(|binding| {
+                let library = self.models.get_library(&binding.library_name)?;
+                Some((library, binding.selected_corner.as_deref()))
+            })
+            .collect::<Vec<_>>();
+        let pdk = self
+            .project_technology_in_effect()
+            .then(|| self.pinned_pdk())
+            .flatten()
+            .and_then(|(binding, archive_digest)| {
+                self.registry.validated_packages().iter().find(|package| {
+                    package.archive_digest() == archive_digest && package.binding() == binding
+                })
+            })
+            .map(|package| {
+                package
+                    .manifest()
+                    .model_sources
+                    .iter()
+                    .filter(|contract| !contract.sources.is_empty())
+                    .map(|contract| contract.process)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        crate::model_sources::ReferenceProcessChoice::of(&libraries, &pdk)
+    }
+
+    /// The PDK package the project pins, and the archive it pins it to.
+    fn pinned_pdk(
+        &self,
+    ) -> Option<(
+        rspice_model_library::pdk::contracts::PdkTechnologyBinding,
+        rspice_vocabulary::product::ContentDigest,
+    )> {
+        let pin = self.project.technology_binding()?.pdk_package()?;
+        Some((
+            rspice_model_library::pdk::contracts::PdkTechnologyBinding {
+                package_id: pin.package_id().to_owned(),
+                revision: pin.revision().to_owned(),
+                manifest_digest: pin.manifest_digest(),
+            },
+            pin.archive_digest(),
+        ))
     }
 }

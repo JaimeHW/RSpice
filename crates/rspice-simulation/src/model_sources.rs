@@ -8,6 +8,10 @@ pub use catalog_sealing::{
     seal_catalog_execution_sources, seal_plan_execution_sources, verify_plan_external_model_sources,
 };
 
+mod process_binding;
+pub use process_binding::ReferenceProcessChoice;
+use process_binding::{ProcessRefusal, library_corners, pdk_model_process, seals};
+
 mod project_provenance;
 pub use project_provenance::prepared_project_model_sources;
 pub(crate) use project_provenance::prepared_project_model_sources_of;
@@ -108,18 +112,6 @@ struct MaterializedCornerSection {
 struct MaterializedSelection {
     bindings: Vec<MaterializedPlanBinding>,
     veriloga: Vec<rspice_core::netlist::VerilogAInclude>,
-}
-
-const fn pdk_model_process(
-    process: CornerProcess,
-) -> rspice_model_library::pdk::contracts::PdkModelProcess {
-    match process {
-        CornerProcess::TT => rspice_model_library::pdk::contracts::PdkModelProcess::Tt,
-        CornerProcess::SS => rspice_model_library::pdk::contracts::PdkModelProcess::Ss,
-        CornerProcess::FF => rspice_model_library::pdk::contracts::PdkModelProcess::Ff,
-        CornerProcess::SF => rspice_model_library::pdk::contracts::PdkModelProcess::Sf,
-        CornerProcess::FS => rspice_model_library::pdk::contracts::PdkModelProcess::Fs,
-    }
 }
 
 impl SealedModelExecutionSources {
@@ -482,47 +474,25 @@ impl SealedModelExecutionSources {
         processes: &[CornerProcess],
         honor_nominal_selection: bool,
     ) -> Result<MaterializedSelection, String> {
-        if self.libraries.is_empty() && self.pdk_process_bindings.is_empty() {
-            if let Some(process) = processes
-                .iter()
-                .find(|process| **process != CornerProcess::TT)
-            {
-                return Err(format!(
-                    "{} requires a PDK model library with an explicit process section",
-                    process.short_name()
-                ));
-            }
-            return Ok(MaterializedSelection {
-                bindings: Vec::new(),
-                veriloga: Vec::new(),
-            });
-        }
-
+        let pdk_processes = self
+            .pdk_process_bindings
+            .iter()
+            .map(|binding| binding.process)
+            .collect::<Vec<_>>();
         let mut bindings = Vec::new();
         let mut veriloga = Vec::new();
         for process in processes {
-            for library in &self.libraries {
-                let keyword = process.short_name();
-                let requested_corner = honor_nominal_selection
-                    .then_some(library.selected_corner.as_deref())
-                    .flatten()
-                    .unwrap_or(keyword);
-                let corner = library
-                    .corners
+            let corners = library_corners(
+                self.libraries
                     .iter()
-                    .find(|corner| corner.name.eq_ignore_ascii_case(requested_corner))
-                    .cloned();
-                if corner.is_none()
-                    && (library.selected_corner.is_some()
-                        || *process != CornerProcess::TT
-                        || !library.corners.is_empty())
-                {
-                    return Err(format!(
-                        "Model library '{}' does not define selected corner '{}' for the {} reference process",
-                        library.name, requested_corner, keyword
-                    ));
-                }
-                match corner.as_ref() {
+                    .map(|library| (&library.corners, library.selected_corner.as_deref())),
+                &pdk_processes,
+                *process,
+                honor_nominal_selection,
+            )
+            .map_err(|refusal| self.process_refusal(refusal, *process))?;
+            for (library, corner) in self.libraries.iter().zip(corners) {
+                match corner {
                     Some(corner) => {
                         let (sections, section_veriloga) =
                             self.materialize_library_corner(library, corner)?;
@@ -584,19 +554,7 @@ impl SealedModelExecutionSources {
                 let selected = self
                     .pdk_process_bindings
                     .iter()
-                    .filter(|binding| binding.process == pdk_process)
-                    .collect::<Vec<_>>();
-                if selected.is_empty() {
-                    let package = self
-                        .pdk_identity
-                        .as_ref()
-                        .map(|(binding, _)| format!("{} {}", binding.package_id, binding.revision))
-                        .unwrap_or_else(|| "PDK".to_owned());
-                    return Err(format!(
-                        "{package} does not supply an explicit {} model-source contract",
-                        process.short_name()
-                    ));
-                }
+                    .filter(|binding| binding.process == pdk_process);
                 for source in selected {
                     let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
                         &source.root_path,
@@ -643,6 +601,29 @@ impl SealedModelExecutionSources {
             }
         }
         Ok(MaterializedSelection { bindings, veriloga })
+    }
+
+    /// Why this snapshot binds no models for `process`, said as a run's
+    /// refusal.
+    fn process_refusal(&self, refusal: ProcessRefusal<'_>, process: CornerProcess) -> String {
+        let keyword = process.short_name();
+        match refusal {
+            ProcessRefusal::NoProcessSource => {
+                format!("{keyword} requires a PDK model library with an explicit process section")
+            }
+            ProcessRefusal::MissingCorner { library, corner } => format!(
+                "Model library '{}' does not define selected corner '{corner}' for the {keyword} reference process",
+                self.libraries[library].name
+            ),
+            ProcessRefusal::NoPdkContract => {
+                let package = self
+                    .pdk_identity
+                    .as_ref()
+                    .map(|(binding, _)| format!("{} {}", binding.package_id, binding.revision))
+                    .unwrap_or_else(|| "PDK".to_owned());
+                format!("{package} does not supply an explicit {keyword} model-source contract")
+            }
+        }
     }
 
     fn materialize_library_corner(
@@ -1016,7 +997,7 @@ where
         let mut corners = library
             .corners
             .values()
-            .filter(|corner| corner.file_path.is_some() || !corner.section_bindings.is_empty())
+            .filter(|corner| seals(corner))
             .cloned()
             .collect::<Vec<_>>();
         corners.sort_by_key(|corner| corner.name.to_ascii_lowercase());
