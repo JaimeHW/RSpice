@@ -101,7 +101,9 @@ pub(crate) fn result_quantity_ticked(
 
 /// Show `key`'s signal alone on its analysis' plot, as a plain Probe-tool
 /// click does: every other curve the plot draws of the analysis comes off,
-/// its expressions are hidden, and the signal goes on.
+/// its expressions are hidden, the strips they were arranged on are
+/// forgotten, and the signal goes on. A signal added back later joins the
+/// strip of its unit, not a strip it was once moved to.
 pub fn plot_alone(state: &mut ResultsParts<'_>, key: &SourceWaveformPresentationKey) {
     let analysis = key.analysis();
     let mut others: Vec<ResultBrowserSelectionKey> = last_strip_models(state)
@@ -126,6 +128,7 @@ pub fn plot_alone(state: &mut ResultsParts<'_>, key: &SourceWaveformPresentation
         .unwrap_or_default();
     others.dedup();
     set_result_quantities_ticked(state, others.iter(), false);
+    state.results.session.strip_layouts.remove(&analysis);
     state
         .results
         .reconcile_expression_projection(&state.model.simulation);

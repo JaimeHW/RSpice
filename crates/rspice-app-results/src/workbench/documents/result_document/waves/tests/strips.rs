@@ -163,3 +163,39 @@ fn a_maximized_strip_is_kept_by_the_view_across_a_restart() {
     reopened.quick_frame();
     assert!(!maximized(&reopened), "giving the others back is kept");
 }
+
+/// A plain probe click starts the plot afresh: a signal a Command-click once
+/// gave a strip of its own, added back with Shift, joins the strip of its
+/// unit instead of returning to a strip nothing else is on.
+#[test]
+fn a_plain_probe_forgets_the_strips_a_command_click_made() {
+    use crate::workbench::documents::result_document::{
+        plot_alone, plot_on_own_strip, set_result_quantity_ticked,
+    };
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    use rspice_results_ui::selection::ResultBrowserSelectionKey;
+
+    let plan = crate::product::SimulationPlanId::new();
+    let analysis = crate::product::AnalysisInstanceId::new();
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs = vec![planned_run(1, plan, analysis)].into();
+    assert!(state.model.simulation.select_run(0));
+    state.quick_frame();
+    let key = models(&mut state)[0].analysis_key;
+    let rail = SourceWaveformPresentationKey::new(key, "V(rail)");
+    let ripple = SourceWaveformPresentationKey::new(key, "V(ripple)");
+
+    plot_on_own_strip(&mut state.results_parts(), ripple.clone());
+    state.quick_frame();
+    assert_eq!(strips_drawn(&mut state), [["V(rail)"], ["V(ripple)"]]);
+
+    plot_alone(&mut state.results_parts(), &rail);
+    state.quick_frame();
+    set_result_quantity_ticked(
+        &mut state.results_parts(),
+        &ResultBrowserSelectionKey::Waveform(ripple),
+        true,
+    );
+    state.quick_frame();
+    assert_eq!(strips_drawn(&mut state), [["V(rail)", "V(ripple)"]]);
+}
