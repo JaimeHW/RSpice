@@ -248,3 +248,48 @@ fn persistent_renderer_contract_never_substitutes_a_broader_catalog_mode() {
     assert!(!renderer_supports_analysis("viewer-bode", &invalid_noise));
     assert!(!renderer_supports_analysis("viewer-phase-noise", &noise));
 }
+
+// -----------------------------------------------------------------
+// event lanes
+// -----------------------------------------------------------------
+
+/// A net ticked after the lanes were drawn has no row yet. The document
+/// lists it after the rows, or the view, which plots history-only nets as
+/// the document lists them, takes it off before it is ever drawn.
+#[test]
+fn a_net_ticked_after_the_lanes_were_drawn_stays_on_the_plot() {
+    use crate::results::visualization_document::{DocumentEdit, EventLaneRef};
+    use rspice_results_ui::waves::lanes::{EventLaneLayout, LaneKey};
+
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        crate::workbench::documents::result_document::test_fixtures::events_analysis(),
+    );
+    let run = host.model.simulation.active_run().expect("a run");
+    let analysis = &run.analyses[0];
+    let names = lanes::EventNames::of(analysis, None).expect("an event history");
+    let source = crate::workbench::documents::result_document::create_document::source_reference(
+        run,
+        analysis,
+        digest(0x52),
+    )
+    .expect("a source");
+    let document = VisualizationDocument::new("Waves", vec![source]).expect("a document");
+    let pane = document.panes()[0].id;
+    let drawn = EventLaneLayout {
+        order: vec![LaneKey::Signal("D(clk)".to_owned())],
+        ..EventLaneLayout::default()
+    };
+    let edits = lanes::lane_edits(&document, pane, &names, &drawn, &["D(clk)", "D(addr[0])"]);
+    let order = edits
+        .iter()
+        .find_map(|edit| match edit {
+            DocumentEdit::SetEventLaneOrder(order) => Some(&order.lanes),
+            _ => None,
+        })
+        .expect("the lanes' order is written");
+    let net = |name: &str| EventLaneRef::Net {
+        name: name.to_owned(),
+    };
+    assert_eq!(order, &vec![net("D(clk)"), net("D(addr[0])")]);
+}

@@ -359,6 +359,10 @@ pub(in crate::workbench::documents::result_document) fn lane_edits(
             name: gone.name.clone(),
         });
     }
+    let grouped: HashSet<String> = desired
+        .iter()
+        .flat_map(|bus| bus.nets.iter().cloned())
+        .collect();
     for wanted in desired {
         if !held.iter().any(|held| **held == wanted) {
             edits.push(DocumentEdit::DefineUserBus(wanted));
@@ -380,6 +384,35 @@ pub(in crate::workbench::documents::result_document) fn lane_edits(
             LaneKey::Bus(name) => Some(EventLaneRef::Bus { name: name.clone() }),
         })
         .collect();
+    // A net ticked since the lanes were last drawn has no row yet. It is
+    // listed after the rows, so the document keeps it on the plot until the
+    // stack draws it where it falls; left out, the view would take it off
+    // again before it was ever drawn.
+    let in_rows: HashSet<&str> = order
+        .iter()
+        .flat_map(|lane| -> Vec<&str> {
+            match lane {
+                EventLaneRef::Net { name } => vec![name.as_str()],
+                EventLaneRef::Bus { name } => names
+                    .buses
+                    .iter()
+                    .filter(|(label, _)| label == name)
+                    .flat_map(|(_, members)| members.iter().map(String::as_str))
+                    .collect(),
+                EventLaneRef::Trace { .. } => Vec::new(),
+            }
+        })
+        .collect();
+    let unlisted: Vec<EventLaneRef> = plotted
+        .iter()
+        .filter(|name| {
+            name.starts_with("D(") && !in_rows.contains(**name) && !grouped.contains(**name)
+        })
+        .map(|name| EventLaneRef::Net {
+            name: (*name).to_owned(),
+        })
+        .collect();
+    order.extend(unlisted);
     // A plotted real net is a step trace, in no row, and is listed after
     // the rows so the document still knows it is on the pane.
     order.extend(
