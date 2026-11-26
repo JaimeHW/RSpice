@@ -224,11 +224,13 @@ impl Gutter {
 
 fn strip_gutter(ui: &Ui, host: &impl StackHost, model: &StripModel) -> Gutter {
     let (name, value) = gutter_columns(ui, host, model);
-    let fit = super::axes::fit_axes(
-        ui.available_width(),
-        (name, value),
-        super::axes::remembered_room(ui.ctx(), model.analysis_key),
-    );
+    let room = super::axes::remembered_room(ui.ctx(), model.analysis_key);
+    // Every strip of the analysis keeps the room the widest labels among
+    // them need, so a strip whose labels run long ("+20.769066 mW") starts
+    // its plot on the same rule as the others, and the cursors and the
+    // time axis under them line up.
+    let value = value.max(room.label_margin - name);
+    let fit = super::axes::fit_axes(ui.available_width(), (name, value), room);
     Gutter {
         name,
         axes: fit.left,
@@ -2290,9 +2292,15 @@ fn show_unit_pane(
         (response.plot_rect, gutter, y_labels_width),
         &t,
     );
-    if !secondary.is_empty() {
-        super::axes::note_room(ui.ctx(), model.analysis_key, axes_response.room);
-    }
+    let room = super::axes::AxisRoom {
+        label_margin: response.label_margin,
+        ..if secondary.is_empty() {
+            super::axes::AxisRoom::default()
+        } else {
+            axes_response.room
+        }
+    };
+    super::axes::note_room(ui.ctx(), model.analysis_key, room);
     let secondary_views = axes_response.ranges;
     if let Some(hover) = &drawn.hover {
         host.session_mut().plot_pointer = Some(crate::session::PlotPointer {

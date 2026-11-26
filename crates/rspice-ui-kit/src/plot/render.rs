@@ -102,6 +102,10 @@ pub struct PlotResponse {
     pub x_label_rect: Option<Rect>,
     /// Where the Y axis' caption was drawn, for a caller that explains it.
     pub y_caption: Option<Rect>,
+    /// The left margin the plot's own Y labels and caption need (see
+    /// [`label_margin`]), whatever the margin it was given: what a stack of
+    /// plots measures to give all of them one margin.
+    pub label_margin: f32,
 }
 
 /// A row of the hover readout: (label, value).
@@ -1014,12 +1018,19 @@ fn unit_on_tick(spec: &PlotSpec<'_>) -> bool {
     spec.frame && spec.y.offset_anchor.is_none() && !spec.y.unit.is_empty()
 }
 
-/// The left gutter the plot draws with: the spec's, widened to its widest Y
-/// label (the top one with its unit on it) or its column's caption, so a
-/// long unit ("dBV rms") never clips or drops a label.
+/// The left gutter the plot draws with: the spec's, widened to what its
+/// labels need (see [`label_margin`]), so a long unit ("dBV rms") never
+/// clips or drops a label.
 fn left_margin(ui: &Ui, spec: &PlotSpec<'_>) -> f32 {
+    spec.left_margin.max(label_margin(ui, spec))
+}
+
+/// The left margin a framed plot's labels need: its widest Y label (the top
+/// one with its unit on it) or its column's caption, and the gap to the
+/// plot. Nothing for a plot without a frame.
+pub fn label_margin(ui: &Ui, spec: &PlotSpec<'_>) -> f32 {
     if !spec.frame {
-        return spec.left_margin;
+        return 0.0;
     }
     let font = theme::mono(Y_TICK_FONT_SIZE, FontWeight::Regular);
     let width = |text: String| {
@@ -1052,7 +1063,7 @@ fn left_margin(ui: &Ui, spec: &PlotSpec<'_>) -> f32 {
                 .map(width),
         )
         .fold(0.0, f32::max);
-    spec.left_margin.max(widest + Y_LABEL_GAP + GUTTER_EDGE)
+    widest + Y_LABEL_GAP + GUTTER_EDGE
 }
 
 fn inner_rect(rect: Rect, spec: &PlotSpec<'_>, left: f32) -> Rect {
@@ -1203,8 +1214,9 @@ pub fn show(
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::GraphicsDocument);
     });
+    let labels = label_margin(ui, spec);
     let plot_rect = on_whole_rows(
-        inner_rect(rect, spec, left_margin(ui, spec)),
+        inner_rect(rect, spec, spec.left_margin.max(labels)),
         ui.pixels_per_point(),
     );
 
@@ -1220,6 +1232,7 @@ pub fn show(
         units: (data_space_unit(&spec.x), data_space_unit(&spec.y)),
         x_label_rect: None,
         y_caption: None,
+        label_margin: labels,
     };
     if plot_rect.width() < 24.0 || plot_rect.height() < 24.0 {
         theme::paint_focus_ring(ui, &out.response, rect);

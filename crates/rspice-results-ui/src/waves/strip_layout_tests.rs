@@ -521,6 +521,7 @@ fn a_strip_too_narrow_for_its_axes_leaves_the_outer_ones_out_and_draws_none_coll
     let room = AxisRoom {
         primary: 30.0,
         columns: [44.0, 40.0, 48.0],
+        ..AxisRoom::default()
     };
     let wide = fit_axes(1600.0, (0.0, 64.0), room);
     assert_eq!((wide.kept, wide.measured), (3, 3));

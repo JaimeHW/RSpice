@@ -68,6 +68,9 @@ pub(crate) struct AxisRoom {
     /// The width of each added axis' column, by its place in the strip's
     /// list after the first; 0 for none.
     pub columns: [f32; ADDED_AXES],
+    /// The left margin the first axis' labels and caption need beside the
+    /// plot, as the plot measured it.
+    pub label_margin: f32,
 }
 
 impl AxisRoom {
@@ -81,6 +84,7 @@ impl AxisRoom {
         Self {
             primary: self.primary.max(other.primary),
             columns,
+            label_margin: self.label_margin.max(other.label_margin),
         }
     }
 
@@ -88,6 +92,7 @@ impl AxisRoom {
     pub(crate) fn outgrown_by(self, other: Self) -> bool {
         const SLACK: f32 = 0.5;
         other.primary > self.primary + SLACK
+            || other.label_margin > self.label_margin + SLACK
             || self
                 .columns
                 .iter()
