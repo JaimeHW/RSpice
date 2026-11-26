@@ -181,7 +181,9 @@ pub fn show(
 /// steps aside so the strip can be clicked, and one line says what the click
 /// will do and how to come back without one. The line sits at the foot of
 /// the strip, over its time axis, where a status line would read; at the
-/// head it would cover the legend entries a click can also take.
+/// head it would cover the legend entries a click can also take. It is one
+/// compact row, so it stands within the ruler under the strip and leaves
+/// every trace above it to be clicked.
 fn picking_prompt(ctx: &Context, draft: &mut MeasurementDraft, index: usize) {
     let label = draft
         .function
@@ -194,13 +196,13 @@ fn picking_prompt(ctx: &Context, draft: &mut MeasurementDraft, index: usize) {
     egui::Area::new(Id::new("rspice.add-measurement.picking"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::CENTER_BOTTOM)
-        .fixed_pos(egui::pos2(over.center().x, over.bottom() - 12.0))
+        .fixed_pos(egui::pos2(over.center().x, over.bottom() - 6.0))
         .show(ctx, |ui| {
             egui::Frame::new()
                 .fill(t.color.bg_elevated)
                 .stroke(egui::Stroke::new(1.0, t.color.border_strong))
                 .corner_radius(t.radius)
-                .inner_margin(egui::Margin::symmetric(12, 6))
+                .inner_margin(egui::Margin::symmetric(12, 3))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 12.0;
@@ -213,6 +215,7 @@ fn picking_prompt(ctx: &Context, draft: &mut MeasurementDraft, index: usize) {
                                 .color(t.color.text),
                         );
                         back |= rspice_ui_kit::widgets::Button::new("Back to form")
+                            .compact()
                             .show(ui)
                             .on_hover_text("Esc")
                             .clicked();
