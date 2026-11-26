@@ -1280,26 +1280,39 @@ fn unique_probe_output_name(outputs: &[SavedOutput], preferred: &str) -> String 
     unreachable!("one more generated name than existing outputs must be available")
 }
 
-/// The active analysis's trace of `probe_name`, when the last run holds it.
+/// The last run's trace of `probe_name`: the active analysis's when it holds
+/// the signal, else that of the first other analysis of the run that does,
+/// so a net only another analysis kept is still shown (the dock's Plot page
+/// follows the trace to its analysis).
 fn materialized_probe_trace(
     model: &Model,
     probe_name: &str,
 ) -> Option<rspice_results_ui::selection::SelectedResultTrace> {
     let run = model.simulation.active_run()?;
-    let analysis = model.simulation.active_analysis()?;
-    let analysis_index = run
-        .analyses
-        .iter()
-        .position(|candidate| std::ptr::eq(candidate, analysis))?;
-    let waveform_index = analysis.waveforms.iter().position(|waveform| {
-        normalized_probe_expression(&waveform.name) == normalized_probe_expression(probe_name)
-            || waveform.name.eq_ignore_ascii_case(probe_name)
-    })?;
-    rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
-        run,
-        analysis_index,
-        waveform_index,
-    )
+    let active = model.simulation.active_analysis().and_then(|analysis| {
+        run.analyses
+            .iter()
+            .position(|candidate| std::ptr::eq(candidate, analysis))
+    });
+    let wanted = normalized_probe_expression(probe_name);
+    active
+        .into_iter()
+        .chain((0..run.analyses.len()).filter(|index| Some(*index) != active))
+        .find_map(|analysis_index| {
+            let waveform_index =
+                run.analyses[analysis_index]
+                    .waveforms
+                    .iter()
+                    .position(|waveform| {
+                        normalized_probe_expression(&waveform.name) == wanted
+                            || waveform.name.eq_ignore_ascii_case(probe_name)
+                    })?;
+            rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
+                run,
+                analysis_index,
+                waveform_index,
+            )
+        })
 }
 
 /// Ask the results workspace to plot the last run's trace of `spelling`, as

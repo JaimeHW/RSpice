@@ -64,6 +64,59 @@ fn a_probe_of_a_signal_the_run_holds_asks_the_results_to_plot_it() {
     }
 }
 
+/// A probe of a net the active analysis did not keep shows another
+/// analysis's trace of it, the run's first that holds it; one the active
+/// analysis holds is shown from there.
+#[test]
+fn a_probe_finds_a_signal_only_another_analysis_of_the_run_kept() {
+    let mut state = DesignTestHost::default();
+    let wave = |name: &str| RetainedTrace::new(name, vec![0.0, 1.0], vec![0.0, 1.0], "#ffffff");
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![wave("V(IN)")]),
+    );
+    run.add_analysis(
+        crate::state::AnalysisResult::new(2, crate::state::AnalysisType::Transient, "TRAN2")
+            .with_waveforms(vec![wave("V(IN)"), wave("V(OUT)")]),
+    );
+    state.model.simulation.retained.runs.insert(0, run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    let run = &state.model.simulation.retained.runs[0];
+    let expected = [
+        (
+            "V(IN)",
+            rspice_results_ui::selection::SelectedResultTrace::from_run_indices(run, 0, 0),
+        ),
+        (
+            "V(OUT)",
+            rspice_results_ui::selection::SelectedResultTrace::from_run_indices(run, 1, 1),
+        ),
+    ];
+
+    for (signal, trace) in expected {
+        assert_eq!(
+            request_probe_signal(
+                &mut canvas_parts(&mut state),
+                &OccurrenceProbeSpelling::verbatim(signal),
+                ProbePlot::Show
+            ),
+            ProbeSignalOutcome::PlotRequested
+        );
+        let probed = state
+            .workbench
+            .outbox
+            .peek::<PlotProbedTrace>()
+            .map(|probed| probed.trace.clone());
+        assert_eq!(
+            probed, trace,
+            "{signal} is shown from the analysis that holds it"
+        );
+        state.workbench.outbox = Default::default();
+    }
+}
+
 /// The inspector's Plot button asks for its trace to be put on the plot or
 /// taken off; the results workspace knows which. A trace the run holds needs
 /// no saved output.
