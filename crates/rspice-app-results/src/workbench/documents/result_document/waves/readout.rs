@@ -272,11 +272,9 @@ pub fn cursors_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         if outcome.add.is_some() {
             ui.ctx().request_repaint();
         }
-        let actions = if tables.is_empty() {
-            None
-        } else {
-            dock::cursors_page(ui, session, source, &tables)
-        };
+        // Horizontal cursors read with no table of their own, so the page
+        // draws whenever it has anything to read, not only a table.
+        let actions = dock::cursors_page(ui, session, source, &tables);
         Some((actions, outcome.copied, placed))
     });
     let Some((actions, copied, placed)) = shown else {

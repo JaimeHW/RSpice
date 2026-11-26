@@ -953,6 +953,36 @@ fn two_horizontal_cursors_are_placed_moved_and_read_per_pane() {
     assert!(painted.iter().any(|text| text.starts_with("H2 ")));
 }
 
+/// Horizontal cursors with no A/B pair and no marker are read on the
+/// Cursors page too, so the rows that remove them are there to right-click.
+#[test]
+fn the_cursors_page_reads_horizontal_cursors_on_their_own() {
+    let mut state = host_on(damped_run());
+    let ctx = theme_context();
+    whole_frame(&ctx, &mut state.results_parts(), Vec::new());
+    let pane = WavePanePresentationKey {
+        analysis: strip(&mut state)[0].analysis_key,
+        unit: "V".to_owned(),
+    };
+    let session = &mut state.results.results.session;
+    session.set_horizontal_cursor(pane.clone(), 0, 0.5);
+    session.set_horizontal_cursor(pane, 1, -0.25);
+
+    let painted = texts(&whole_frame(&ctx, &mut state.results_parts(), Vec::new()));
+    assert!(
+        !painted.iter().any(|text| text.starts_with("No cursors")),
+        "the page reads the cursors: {painted:?}"
+    );
+    assert_eq!(
+        painted
+            .iter()
+            .filter(|text| text.contains("\u{0394}Y"))
+            .count(),
+        2,
+        "the dock reads ΔY beside the plot's: {painted:?}"
+    );
+}
+
 /// On a real run — the ngspice corpus' ECL Schmitt trigger — every next
 /// crossing the cursor steps to is the calculator's `cross()` for the same
 /// level and count.
