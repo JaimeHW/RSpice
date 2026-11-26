@@ -1709,6 +1709,9 @@ pub fn show(
                 continue;
             };
             if x < spec.x.min || x > spec.x.max {
+                if spec.cursor_tabs == super::CursorTabs::Never {
+                    continue;
+                }
                 let before = x < spec.x.min;
                 let beside = chevrons
                     .iter()
@@ -1730,15 +1733,18 @@ pub fn show(
             let px = mx(x);
             let hair = hairline(1.0, painter.pixels_per_point());
             painter.vline(px, plot_rect.y_range(), Stroke::new(hair, color));
-            let flag = Rect::from_min_size(pos2(px - 7.0, plot_rect.top() - 1.0), vec2(14.0, 13.0));
-            painter.rect_filled(flag, 1.0, color);
-            painter.text(
-                flag.center(),
-                Align2::CENTER_CENTER,
-                id.letter(),
-                flag_font.clone(),
-                c.canvas_bg,
-            );
+            if spec.cursor_tabs == super::CursorTabs::Always {
+                let flag =
+                    Rect::from_min_size(pos2(px - 7.0, plot_rect.top() - 1.0), vec2(14.0, 13.0));
+                painter.rect_filled(flag, 1.0, color);
+                painter.text(
+                    flag.center(),
+                    Align2::CENTER_CENTER,
+                    id.letter(),
+                    flag_font.clone(),
+                    c.canvas_bg,
+                );
+            }
             cursor_lines.push((id, px));
         }
     }

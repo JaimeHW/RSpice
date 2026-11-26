@@ -663,6 +663,8 @@ pub struct PlotSpec<'a> {
     pub horizontal_cursors: [Option<f64>; 2],
     /// Whether primary click/drag places or moves a horizontal cursor.
     pub horizontal_cursor_interactive: bool,
+    /// What names an A/B cursor on the plot's own canvas.
+    pub cursor_tabs: CursorTabs,
     /// Shaded vertical bands, drawn under everything.
     pub bands: Vec<Band>,
     /// Custom content drawn after the grid, under the traces.
@@ -695,6 +697,19 @@ pub struct PlotSpec<'a> {
     pub significant_digits: usize,
 }
 
+/// What names an A/B cursor on a plot's own canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorTabs {
+    /// A lettered tab on the plot's top edge where the cursor stands, or a
+    /// chevron on the edge it left by: a plot standing on its own.
+    Always,
+    /// Only the chevron of a cursor out of view: the top pane of a stack,
+    /// whose ruler names the cursors in view in their value boxes.
+    OutOfView,
+    /// The plain line: a pane under the top one of a stack.
+    Never,
+}
+
 impl<'a> PlotSpec<'a> {
     /// A plot with the given axes and defaults for everything else.
     pub fn new(x: Axis, x_scale: XScale, y: Axis) -> Self {
@@ -715,6 +730,7 @@ impl<'a> PlotSpec<'a> {
             y_ink: None,
             horizontal_cursors: [None; 2],
             horizontal_cursor_interactive: false,
+            cursor_tabs: CursorTabs::Always,
             bands: Vec::new(),
             underlay: None,
             left_margin: PLOT_GUTTER,

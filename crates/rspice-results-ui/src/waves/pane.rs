@@ -717,6 +717,10 @@ pub struct PanePlot<'a> {
     pub horizontal_cursors: [Option<f64>; 2],
     pub horizontal_cursor_interactive: bool,
     pub cursors: Option<CursorPair>,
+    /// What names the cursors on this pane: the chevron of one out of view
+    /// on a strip's top pane, nothing on the panes under it. The ruler's
+    /// boxes name the cursors in view.
+    pub cursor_tabs: plot::CursorTabs,
     pub specification_limits: Vec<plot::LimitLine>,
     pub markers: Vec<plot::Marker>,
     /// The levels a loop's margins are read against on this pane, drawn as
@@ -1092,6 +1096,7 @@ pub fn show_plot<'a>(
     spec.y_ink = input.y_ink;
     spec.horizontal_cursors = input.horizontal_cursors;
     spec.horizontal_cursor_interactive = input.horizontal_cursor_interactive;
+    spec.cursor_tabs = input.cursor_tabs;
     spec.markers = input.markers;
     // A marker on a curve of an added axis stands where the curve is drawn:
     // its value read on that axis, put on the first axis' scale.

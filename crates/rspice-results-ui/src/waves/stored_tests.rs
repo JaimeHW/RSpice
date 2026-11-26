@@ -201,6 +201,7 @@ fn a_stored_trace_is_read_once_and_kept_however_many_frames_draw_it() {
                                 trace_width: 1.8,
                                 horizontal_cursors: [None, None],
                                 horizontal_cursor_interactive: false,
+                                cursor_tabs: rspice_ui_kit::plot::CursorTabs::OutOfView,
                                 cursors: Some(plot::CursorPair {
                                     a: Some(x0 + (x1 - x0) * 0.25),
                                     b: Some(x0 + (x1 - x0) * (0.5 + 0.1 * f64::from(frame))),
@@ -396,6 +397,7 @@ fn a_stored_run_builds_fits_draws_and_reads_its_cursors_without_reading_a_column
                         trace_width: 1.8,
                         horizontal_cursors: [None, None],
                         horizontal_cursor_interactive: false,
+                        cursor_tabs: rspice_ui_kit::plot::CursorTabs::OutOfView,
                         cursors: Some(plot::CursorPair {
                             a: Some(x[ROWS / 4] + 0.3e-9),
                             b: Some(x[ROWS / 2] * (1.0 + 0.1 * f64::from(frame))),

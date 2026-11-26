@@ -1180,26 +1180,27 @@ fn painted_in(shapes: &[ClippedShape], color: egui::Color32) -> Vec<egui::Rect> 
     out
 }
 
-/// The shared ruler's band and its overview track: the smallest panel fill
-/// holding the overview's "Full" name, and the canvas fill inside it.
+/// The shared ruler's band and its overview track: the lowest canvas fill a
+/// lane tall and a plot wide, and the smallest panel fill holding it.
 fn ruler_band(shapes: &[ClippedShape], tokens: &Tokens) -> (egui::Rect, egui::Rect) {
-    let name = placed_texts(shapes)
-        .into_iter()
-        .find(|(text, _)| text == "Full")
-        .expect("the ruler names its overview")
-        .1;
+    let track = overview_track(shapes, tokens.color.canvas_bg);
     let area = |rect: &egui::Rect| rect.area();
     let band = painted_in(shapes, tokens.color.bg_panel)
         .into_iter()
-        .filter(|rect| rect.contains_rect(name))
+        .filter(|rect| rect.contains_rect(track))
         .min_by(|a, b| area(a).total_cmp(&area(b)))
         .expect("the ruler paints its band");
-    let track = painted_in(shapes, tokens.color.canvas_bg)
-        .into_iter()
-        .filter(|rect| band.contains_rect(*rect) && rect.width() > 100.0)
-        .min_by(|a, b| area(a).total_cmp(&area(b)))
-        .expect("the ruler paints its overview track");
     (band, track)
+}
+
+/// The overview track: the lowest fill in `canvas` a lane tall (fourteen
+/// points) and wider than any control, which only the overview paints.
+pub(super) fn overview_track(shapes: &[ClippedShape], canvas: egui::Color32) -> egui::Rect {
+    painted_in(shapes, canvas)
+        .into_iter()
+        .filter(|rect| (12.0..=16.0).contains(&rect.height()) && rect.width() > 100.0)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the ruler paints its overview track")
 }
 
 /// The marks spanning the overview track's height in `ink`: the thumb's

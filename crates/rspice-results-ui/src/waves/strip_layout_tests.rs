@@ -381,6 +381,7 @@ fn every_curve_a_strip_draws_reads_out_on_hover() {
                 trace_width: 1.8,
                 horizontal_cursors: [None, None],
                 horizontal_cursor_interactive: false,
+                cursor_tabs: rspice_ui_kit::plot::CursorTabs::OutOfView,
                 cursors: None,
                 specification_limits: Vec::new(),
                 markers: Vec::new(),

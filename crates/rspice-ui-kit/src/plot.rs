@@ -55,10 +55,11 @@ pub use render::{
 pub use render::{TraceLook, TraceMarkerShape, paint_min_max_band, paint_trace_swatch};
 pub use scale::{LabelColumn, MAX_AXIS_TICKS, XScale, anchor_label, even_labels, linear_ticks};
 pub use spec::{
-    Axis, Band, Curves, DrawMode, FIT_HEADROOM, LimitLine, Marker, MarkerShape, OwnedCurves,
-    PLOT_GUTTER, PlotMapper, PlotSpec, RefLine, StoredSamples, Trace, TraceAxis, padded_fit,
-    trace_cache_key,
+    Axis, Band, CursorTabs, Curves, DrawMode, FIT_HEADROOM, LimitLine, Marker, MarkerShape,
+    OwnedCurves, PLOT_GUTTER, PlotMapper, PlotSpec, RefLine, StoredSamples, Trace, TraceAxis,
+    padded_fit, trace_cache_key,
 };
 pub use x_row::{
-    X_AXIS_ROW_HEIGHT, X_CAPTION_GAP, XAxisRow, paint_x_axis_band, paint_x_axis_row, x_axis_caption,
+    X_AXIS_ROW_HEIGHT, X_CAPTION_GAP, XAxisRow, paint_x_axis_band, paint_x_axis_row,
+    x_axis_caption, x_axis_value_spans,
 };

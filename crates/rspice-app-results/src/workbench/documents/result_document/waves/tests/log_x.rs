@@ -306,14 +306,11 @@ fn a_saved_view_draws_its_own_x_scale_and_hands_the_quick_view_its_choice_back()
 /// edge into the gutter.
 #[test]
 fn a_log_time_overview_starts_at_the_first_positive_sample() {
-    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Pos2>, full: &mut Option<f32>) {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Pos2>) {
         match shape {
-            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out, full)),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
             egui::Shape::Path(path) => out.extend(path.points.iter().copied()),
             egui::Shape::LineSegment { points, .. } => out.extend(points.iter().copied()),
-            egui::Shape::Text(text) if text.galley.text() == "Full" => {
-                *full = Some(text.visual_bounding_rect().center().y);
-            }
             _ => {}
         }
     }
@@ -327,16 +324,19 @@ fn a_log_time_overview_starts_at_the_first_positive_sample() {
         .x_scales
         .insert(analysis, XScale::Log10);
     let ctx = super::lanes::theme_context();
-    let (mut points, mut full) = (Vec::new(), None);
+    let mut shapes = Vec::new();
     for _ in 0..2 {
-        points.clear();
-        for clipped in super::lanes::frame(&ctx, &mut state, Vec::new()) {
-            walk(&clipped.shape, &mut points, &mut full);
-        }
+        shapes = super::lanes::frame(&ctx, &mut state, Vec::new());
     }
-    // The overview's row is the one its FULL label names. A pane clips its
-    // own curve, so only the overview's row is checked.
-    let row = full.expect("the overview labels its row");
+    let mut points = Vec::new();
+    for clipped in &shapes {
+        walk(&clipped.shape, &mut points);
+    }
+    // The overview's row is its track's. A pane clips its own curve, so only
+    // the overview's row is checked.
+    let row = super::cursors::overview_track(&shapes, Tokens::get(&ctx).color.canvas_bg)
+        .center()
+        .y;
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, super::lanes::FRAME);
     let in_row: Vec<_> = points
         .iter()

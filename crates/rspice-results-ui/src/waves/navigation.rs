@@ -15,32 +15,35 @@ pub use jump::{
     place_stepping_cursor, prepare_jump, stepping_from,
 };
 
-/// The ruler ends just under its overview lane, by the gap its cursor carets
-/// keep above it. It used to run eight points on, an empty band of canvas
-/// between the lane and whatever is drawn below the panes.
-pub const WAVE_SHARED_X_HEIGHT: f32 =
-    SHARED_X_LANE_TOP + SHARED_X_LANE_HEIGHT + SHARED_X_LANE_BOTTOM_GAP;
+/// The ruler ends under its overview lane by the room the lane keeps above
+/// it, so the lane stands centred in the band below the tick row rather than
+/// against the strip's bottom edge.
+pub const WAVE_SHARED_X_HEIGHT: f32 = SHARED_X_LANE_TOP + SHARED_X_LANE_HEIGHT + SHARED_X_LANE_GAP;
 
-/// The shared-X strip's three bands, offset from the strip's top edge.
+/// The shared-X strip's two bands, offset from the strip's top edge.
 ///
-/// They are ordered by what each one describes. Tick labels and the A/B
-/// flags both read the panes' zoomed viewport, so they sit directly against
-/// the panes; the full-range overview lane is the outermost band, and
-/// nothing viewport-scaled is ever drawn across it.
-const SHARED_X_FLAG_TOP: f32 = plot::X_AXIS_ROW_HEIGHT;
+/// They are ordered by what each one describes. The tick row reads the
+/// panes' zoomed viewport, so it sits directly against the panes, and the
+/// A/B boxes stand in it, in the place of the tick values they cover, as a
+/// marker's value does on an instrument's axis. A row of their own sat empty
+/// whenever no cursor was placed. The full-range overview lane is the
+/// outermost band, with equal room above and below it, and nothing
+/// viewport-scaled is ever drawn across it.
 const SHARED_X_FLAG_HEIGHT: f32 = 13.0;
-const SHARED_X_LANE_TOP: f32 = 35.0;
+/// A box hangs from its cursor's line, a lead under the ruler's top edge.
+const SHARED_X_FLAG_TOP: f32 = RULER_LEAD;
+/// The room above and below the overview lane.
+const SHARED_X_LANE_GAP: f32 = 5.0;
+const SHARED_X_LANE_TOP: f32 = plot::X_AXIS_ROW_HEIGHT + SHARED_X_LANE_GAP;
 const SHARED_X_LANE_HEIGHT: f32 = 14.0;
-const SHARED_X_LANE_BOTTOM_GAP: f32 =
-    SHARED_X_LANE_TOP - SHARED_X_FLAG_TOP - SHARED_X_FLAG_HEIGHT - RULER_CARET;
 
 /// Points the overview lane's mini-trace is drawn from, whatever the run
 /// retained. The lane is fourteen pixels tall and a plot wide, so a denser
 /// curve would not reach the reader as anything but the same grey band.
 const SHARED_X_OVERVIEW_POINTS: usize = 160;
-/// The height of a ruler with no overview track: its row of ticks and its
-/// row of cursor boxes, with the caption in the gutter beside them.
-pub const WAVE_RULER_HEIGHT_WITHOUT_OVERVIEW: f32 = SHARED_X_LANE_TOP;
+/// The height of a ruler with no overview track: its row of ticks, which
+/// holds the cursor boxes too, as tall as every plot's abscissa row.
+pub const WAVE_RULER_HEIGHT_WITHOUT_OVERVIEW: f32 = plot::X_AXIS_ROW_HEIGHT;
 
 pub fn model_x_axis(
     model: &StripModel,
@@ -65,9 +68,9 @@ pub fn model_x_axis(
 /// gap between two boxes.
 const RULER_FLAG_PAD: f32 = 4.0;
 
-/// How far a cursor's one-pixel caret hangs under its ruler box, short of
-/// the overview track below.
-const RULER_CARET: f32 = 2.0;
+/// How far a cursor's line runs on from the pane above it, across the
+/// ruler's top edge, to reach its box.
+const RULER_LEAD: f32 = 2.0;
 
 /// The height of a cursor's notch on the overview track's top edge.
 const RULER_NOTCH: f32 = 3.0;
@@ -86,13 +89,13 @@ struct RulerFlag {
 }
 
 /// The left edges of the cursors' ruler boxes, each `(cursor x, width)`:
-/// centred under its cursor inside `span`, and two that would touch pushed
-/// apart by halves, an edge holding the one against it while the other takes
-/// the rest.
-fn ruler_flag_lefts(flags: &[(f32, f32)], span: egui::Rangef) -> Vec<f32> {
+/// each where [`ruler_flag_left`] stands it clear of the row's `values`, and
+/// two that would touch pushed apart by halves, an edge holding the one
+/// against it while the other takes the rest.
+fn ruler_flag_lefts(flags: &[(f32, f32)], span: egui::Rangef, values: &[egui::Rangef]) -> Vec<f32> {
     let mut lefts: Vec<f32> = flags
         .iter()
-        .map(|&(px, width)| (px - width * 0.5).clamp(span.min, (span.max - width).max(span.min)))
+        .map(|&(px, width)| ruler_flag_left(px, width, span, values))
         .collect();
     if let [(first_px, _), (second_px, _)] = flags {
         let (first, second) = if first_px <= second_px {
@@ -117,6 +120,39 @@ fn ruler_flag_lefts(flags: &[(f32, f32)], span: egui::Rangef) -> Vec<f32> {
         }
     }
     lefts
+}
+
+/// Where a box `width` wide under a cursor at `px` stands in `span`: centred
+/// under it, or slid along the row the least that keeps it a pad off every
+/// tick value in `values` while its cursor still meets its top edge clear of
+/// a corner, so the line still runs into the box. A cursor standing on a
+/// value no slide clears keeps its box centred, and that value gives way.
+fn ruler_flag_left(px: f32, width: f32, span: egui::Rangef, values: &[egui::Rangef]) -> f32 {
+    let last = (span.max - width).max(span.min);
+    let centred = (px - width * 0.5).clamp(span.min, last);
+    let reach = egui::Rangef::new(
+        (px + RULER_FLAG_PAD - width).max(span.min),
+        (px - RULER_FLAG_PAD).min(last),
+    );
+    if reach.min > reach.max {
+        return centred;
+    }
+    // The lefts at which the box would come within a pad of a value.
+    let blocked: Vec<(f32, f32)> = values
+        .iter()
+        .map(|value| {
+            (
+                value.min - RULER_FLAG_PAD - width,
+                value.max + RULER_FLAG_PAD,
+            )
+        })
+        .collect();
+    let clear = |left: f32| blocked.iter().all(|&(from, to)| left <= from || left >= to);
+    std::iter::once(centred.clamp(reach.min, reach.max))
+        .chain(blocked.iter().flat_map(|&(from, to)| [from, to]))
+        .filter(|left| reach.contains(*left) && clear(*left))
+        .min_by(|a, b| (a - centred).abs().total_cmp(&(b - centred).abs()))
+        .unwrap_or(centred)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,9 +347,9 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     let flag_bottom = flag_top + SHARED_X_FLAG_HEIGHT;
     // The lane spans exactly the panes' plot area, so the overview sits
     // under the traces it mirrors and its viewport window maps 1:1 to what
-    // the panes show. Both rows name themselves into the panes' own left
-    // gutter, which states the thing two stacked X scales otherwise hide:
-    // the ticks are the zoomed viewport, the bar below is the full sweep.
+    // the panes show: its thumb says what the ticks above it cover. The
+    // gutter beside it is the panes' own left gutter, left empty as theirs is
+    // under the Y labels.
     //
     // A ruler with no record to scroll has an empty track, which every
     // overview gesture and the track's drawing pass over.
@@ -470,10 +506,18 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
         (fraction.is_finite() && (-0.001..=1.001).contains(&fraction))
             .then(|| plot_left + (plot_right - plot_left) * fraction.clamp(0.0, 1.0) as f32)
     };
-    // Each cursor's foot on the ruler is its X value in its own colour, as
-    // EZwave's cursor bar and Verdi's ruler read the cursor time: the pane's
-    // top flag already names the letter. Laid out before the tick row, so a
-    // tick value over a box gives way to it.
+    // Each cursor's foot on the ruler is its letter and X value in its own
+    // colour, as EZwave's cursor bar and Verdi's ruler read the cursor time.
+    // The box is the one place a stack names its cursors: the panes above
+    // draw plain lines. A box shares the tick row, so it slides off the
+    // values there, and a value it cannot clear gives way.
+    let values = plot::x_axis_value_spans(
+        &painter,
+        &axis,
+        scale,
+        egui::Rangef::new(plot_left, plot_right),
+        &t,
+    );
     let flags = cursor_values.map_or_else(Vec::new, |cursors| {
         let placed: Vec<(SharedXDrag, &str, f32, String, egui::Color32)> = [
             (SharedXDrag::CursorA, "A", cursors.a, c.canvas_cursor_a),
@@ -487,34 +531,20 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
         })
         .collect();
         let flag_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
-        let lay_out = |tagged: bool| {
-            let galleys: Vec<_> = placed
-                .iter()
-                .map(|(_, letter, _, text, _)| {
-                    let text = if tagged {
-                        format!("{letter} {text}")
-                    } else {
-                        text.clone()
-                    };
-                    painter.layout_no_wrap(text, flag_font.clone(), c.canvas_bg)
-                })
-                .collect();
-            let spans: Vec<(f32, f32)> = placed
-                .iter()
-                .zip(&galleys)
-                .map(|((_, _, px, _, _), galley)| (*px, galley.size().x + 2.0 * RULER_FLAG_PAD))
-                .collect();
-            let lefts = ruler_flag_lefts(&spans, egui::Rangef::new(plot_left, plot_right));
-            let under_its_cursor = spans
-                .iter()
-                .zip(&lefts)
-                .all(|((px, width), left)| (*left..=*left + *width).contains(px));
-            (galleys, spans, lefts, under_its_cursor)
-        };
-        // The letter rides along only while each box still stands under its
-        // own cursor; two cursors close together drop it to make room.
-        let tagged = lay_out(true);
-        let (galleys, spans, lefts, _) = if tagged.3 { tagged } else { lay_out(false) };
+        // The letter always rides along: two boxes pushed apart by cursors
+        // close together are told apart by it, each still taking its line.
+        let galleys: Vec<_> = placed
+            .iter()
+            .map(|(_, letter, _, text, _)| {
+                painter.layout_no_wrap(format!("{letter} {text}"), flag_font.clone(), c.canvas_bg)
+            })
+            .collect();
+        let spans: Vec<(f32, f32)> = placed
+            .iter()
+            .zip(&galleys)
+            .map(|((_, _, px, _, _), galley)| (*px, galley.size().x + 2.0 * RULER_FLAG_PAD))
+            .collect();
+        let lefts = ruler_flag_lefts(&spans, egui::Rangef::new(plot_left, plot_right), &values);
         placed
             .iter()
             .zip(galleys)
@@ -554,35 +584,30 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
         },
         &t,
     ));
-    let ruler_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    if has_overview {
-        painter.text(
-            egui::pos2(plot_left - plot::X_CAPTION_GAP, track.center().y),
-            egui::Align2::RIGHT_CENTER,
-            "Full",
-            ruler_font,
-            c.text_faint,
-        );
-    }
 
     // The same fills and ink as the plot's own cursor flags, so one cursor
     // is one colour everywhere and its value reads off the fill whichever
-    // interface theme frames the canvas. The box is all the ruler draws of
-    // a cursor: a line rising from it would read as a cursor on whatever
-    // axis the pane above it draws.
+    // interface theme frames the canvas. The box hangs from the cursor's own
+    // line: the pane directly above draws it down to the ruler, and the
+    // ruler carries it on, at the cursor's exact X, into the box's top edge,
+    // so the value reads as that line's. A box slid along the row, or pushed
+    // aside by its neighbour, still takes the line where the cursor stands.
+    // The lead starts a pixel above the ruler, over the rule on its top edge
+    // wherever that rule's pixel row lands, so the line never breaks there.
+    let lead = ui
+        .painter()
+        .with_clip_rect(rect.with_min_y(rect.top() - 1.0).intersect(ui.clip_rect()));
     for flag in &flags {
+        lead.vline(
+            flag.px,
+            egui::Rangef::new(rect.top() - 1.0, flag.rect.top()),
+            egui::Stroke::new(1.0, flag.color),
+        );
         painter.rect_filled(flag.rect, 2.0, flag.color);
         painter.galley(
             flag.rect.center() - flag.galley.size() * 0.5,
             flag.galley.clone(),
             c.canvas_bg,
-        );
-        // A one-pixel caret under the box stands at the cursor's exact X, so
-        // a box its neighbour pushed aside still points at its cursor.
-        painter.vline(
-            flag.px,
-            egui::Rangef::new(flag.rect.bottom(), flag.rect.bottom() + RULER_CARET),
-            egui::Stroke::new(1.0, flag.color),
         );
     }
     // The overview's notches say where a cursor stands in the whole record,

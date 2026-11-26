@@ -1455,6 +1455,13 @@ fn show_strip_plot(
         }
     }
     let mut rects = Vec::with_capacity(count);
+    // The ruler's boxes name the cursors; the panes draw their lines plain,
+    // one cursor read as one line down the strip. Only the top open pane
+    // marks a cursor scrolled out of view, by a chevron on the edge it left by.
+    let top_open = collapsed
+        .iter()
+        .position(|collapsed| !collapsed)
+        .unwrap_or(0);
     for (ordinal, pane) in panes.iter().enumerate() {
         if ordinal > 0 {
             if collapsed[ordinal - 1] || collapsed[ordinal] {
@@ -1488,7 +1495,19 @@ fn show_strip_plot(
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
                 ui.set_height(pane_height);
-                show_unit_pane(ui, host, pane, &pane_exprs, frame, edits);
+                show_unit_pane(
+                    ui,
+                    host,
+                    pane,
+                    &pane_exprs,
+                    frame,
+                    edits,
+                    if ordinal == top_open {
+                        plot::CursorTabs::OutOfView
+                    } else {
+                        plot::CursorTabs::Never
+                    },
+                );
             },
         );
         rects.push(drawn.response.rect);
@@ -1953,6 +1972,7 @@ fn show_unit_pane(
     exprs: &[ResolvedExpr],
     frame: StripFrame<'_>,
     edits: &mut ExpressionEdits,
+    cursor_tabs: plot::CursorTabs,
 ) {
     let StripFrame {
         model,
@@ -2241,6 +2261,7 @@ fn show_unit_pane(
         horizontal_cursors: host.session().pane_horizontal_cursors(&pane_key),
         horizontal_cursor_interactive: host.session().horizontal_cursor_placement_enabled(),
         cursors,
+        cursor_tabs,
         specification_limits,
         markers,
         references: margins.references,
