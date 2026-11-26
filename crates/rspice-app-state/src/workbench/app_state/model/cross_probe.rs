@@ -10,7 +10,7 @@ use rspice_schematic_editor::view::cross_probe::{self, LocateSignalError};
 use rspice_simulation::netlist_gen::SheetNetGeometry;
 
 use super::Model;
-use crate::state::{Point, SheetId};
+use crate::state::{CellViewRef, KeptCrossProbe, Point, SheetId};
 
 /// What a result signal was shown as on the drawing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +226,39 @@ impl Model {
             &self.workspace.content.occurrence_path(),
             self.schematic.topology_version(),
         )
+    }
+
+    /// The topology revision `reference` is drawn at now: the drawing in
+    /// front's own, or the buffer the workspace keeps of it.
+    fn drawn_topology(&self, reference: &CellViewRef) -> Option<u64> {
+        if *reference == self.workspace.content.active_view {
+            return Some(self.schematic.topology_version());
+        }
+        let key = reference.key();
+        self.workspace
+            .content
+            .schematic_buffers
+            .iter()
+            .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))
+            .map(|(_, schematic)| schematic.topology_version())
+    }
+
+    /// The cross-probe map as a session keeps it, while it is current for
+    /// the drawings the session keeps beside it.
+    pub fn kept_cross_probe(&self) -> Option<KeptCrossProbe> {
+        self.simulation
+            .source
+            .cross_probe
+            .kept(|reference| self.drawn_topology(reference))
+    }
+
+    /// Put back the map a session kept, once the drawings it was kept with
+    /// are restored: the shown run's signals find their wires again without
+    /// another run.
+    pub fn restore_cross_probe(&mut self, kept: KeptCrossProbe) {
+        let mut map = std::mem::take(&mut self.simulation.source.cross_probe);
+        map.restore(kept, |reference| self.drawn_topology(reference));
+        self.simulation.source.cross_probe = map;
     }
 
     /// The net geometry the active sheet draws, in its own coordinates, while

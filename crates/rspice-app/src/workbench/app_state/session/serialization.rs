@@ -215,12 +215,16 @@ impl AppState {
         {
             simulation_results = ProjectSimulationResults::default();
         }
+        // The probe map of the shown run is kept beside the drawings it was
+        // read off, while it is current for them, so a restart colours the
+        // plotted signals' wires without running again.
+        let cross_probe = self.model.kept_cross_probe();
         let field_count = match (shell, simulation_results.is_empty()) {
             (true, true) => 10,
             (true, false) => 11,
             (false, true) => 3,
             (false, false) => 4,
-        };
+        } + usize::from(cross_probe.is_some());
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         let mut committed_workspace;
         let in_place = self.model.symbol_in_place_layout.as_ref();
@@ -249,6 +253,9 @@ impl AppState {
         state.serialize_field("project_workspace", workspace)?;
         state.serialize_field("library_manager", &self.model.library_manager)?;
         state.serialize_field("execution_context", &execution_context)?;
+        if let Some(cross_probe) = &cross_probe {
+            state.serialize_field("cross_probe", cross_probe)?;
+        }
         if shell {
             self.serialize_shell(&mut state)?;
         }
@@ -319,6 +326,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             license_key: Option<String>,
             #[serde(default)]
             simulation_results: Box<ProjectSimulationResults>,
+            #[serde(default)]
+            cross_probe: Option<Box<rspice_app_state::state::KeptCrossProbe>>,
             // A context that decodes but does not restore is reported below,
             // and the rest of the session is kept.
             execution_context: Box<ProjectExecutionContext>,
@@ -470,6 +479,9 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .model
             .workspace
             .save_active_schematic(&state.model.schematic);
+        if let Some(kept) = de.cross_probe {
+            state.model.restore_cross_probe(*kept);
+        }
         // The primary window's own place in Results goes back on screen.
         let primary = state.workbench.window_session.primary();
         if let Some(view) = state
@@ -842,6 +854,65 @@ mod tests {
             "sessions written before the field always had a project open"
         );
         older.assert_project_open_fact();
+    }
+
+    /// The probe map of the shown run comes back with the drawing it was
+    /// read off, so a restart colours the plotted signals' wires without
+    /// running again. A map the drawing has outgrown is not kept.
+    #[test]
+    fn a_session_keeps_the_probe_map_of_the_drawing_it_saves() {
+        use rspice_app_state::state::Point;
+        use std::collections::HashMap;
+
+        let (a, b) = (Point::new(0, 0), Point::new(40, 0));
+        let probed = |edited_after_the_run: bool| {
+            let mut state = AppState::default();
+            state.model.schematic.add_wire(vec![a, b]);
+            state
+                .model
+                .workspace
+                .save_active_schematic(&state.model.schematic);
+            let geometry = rspice_simulation::netlist_gen::SheetNetGeometry {
+                point_to_net: HashMap::from([(a, "out".to_owned()), (b, "out".to_owned())]),
+                net_to_points: HashMap::from([("out".to_owned(), vec![a, b])]),
+                net_segments: HashMap::from([("out".to_owned(), vec![(a, b)])]),
+            };
+            let reference = state.model.workspace.content.active_view.clone();
+            let topology = state.model.schematic.topology_version();
+            state.model.simulation.source.cross_probe.install(
+                reference,
+                HashMap::from([(None, geometry)]),
+                topology,
+                Vec::new(),
+            );
+            if edited_after_the_run {
+                state
+                    .model
+                    .schematic
+                    .add_wire(vec![Point::new(0, 40), Point::new(40, 40)]);
+            }
+            relaunch(saved_session(&mut state))
+        };
+
+        let restored = probed(false);
+        assert!(
+            restored.model.result_mapping_is_current(),
+            "the map answers for the drawing restored beside it"
+        );
+        assert_eq!(
+            restored
+                .model
+                .simulation
+                .source
+                .cross_probe
+                .net_at(None, Point::new(20, 0))
+                .map(String::as_str),
+            Some("out")
+        );
+        assert!(
+            !probed(true).model.result_mapping_is_current(),
+            "a map of the drawing before an edit is not kept"
+        );
     }
 
     /// eframe's storage, held in memory, so a session is saved and read

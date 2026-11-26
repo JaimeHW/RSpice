@@ -123,6 +123,132 @@ fn engine_names_at(
         .collect()
 }
 
+/// The map as a session keeps it, beside the drawings it was read off: the
+/// root's geometry and each emitted master's, sheet by sheet. A topology
+/// revision is the running instance's own count, so none is kept; restored
+/// beside the same drawings, the map takes the revisions they stand at then.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct KeptCrossProbe {
+    source: CellViewRef,
+    sheets: Vec<KeptSheet>,
+    masters: Vec<KeptMaster>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct KeptMaster {
+    reference: CellViewRef,
+    sheets: Vec<KeptSheet>,
+}
+
+/// One sheet's geometry as lists, in a fixed order, so the same map is kept
+/// as the same text.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct KeptSheet {
+    sheet: Option<SheetId>,
+    point_to_net: Vec<(Point, String)>,
+    net_to_points: Vec<(String, Vec<Point>)>,
+    net_segments: Vec<(String, Vec<(Point, Point)>)>,
+}
+
+fn kept_sheets(sheets: &SheetNetGeometries) -> Vec<KeptSheet> {
+    let mut kept: Vec<KeptSheet> = sheets
+        .iter()
+        .map(|(sheet, geometry)| {
+            let mut point_to_net: Vec<(Point, String)> = geometry
+                .point_to_net
+                .iter()
+                .map(|(point, net)| (*point, net.clone()))
+                .collect();
+            point_to_net.sort_by_key(|(point, _)| (point.x, point.y));
+            let mut net_to_points: Vec<(String, Vec<Point>)> = geometry
+                .net_to_points
+                .iter()
+                .map(|(net, points)| (net.clone(), points.clone()))
+                .collect();
+            net_to_points.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut net_segments: Vec<(String, Vec<(Point, Point)>)> = geometry
+                .net_segments
+                .iter()
+                .map(|(net, segments)| (net.clone(), segments.clone()))
+                .collect();
+            net_segments.sort_by(|a, b| a.0.cmp(&b.0));
+            KeptSheet {
+                sheet: *sheet,
+                point_to_net,
+                net_to_points,
+                net_segments,
+            }
+        })
+        .collect();
+    kept.sort_by_key(|sheet| sheet.sheet);
+    kept
+}
+
+fn sheets_of(kept: Vec<KeptSheet>) -> SheetNetGeometries {
+    kept.into_iter()
+        .map(|sheet| {
+            (
+                sheet.sheet,
+                SheetNetGeometry {
+                    point_to_net: sheet.point_to_net.into_iter().collect(),
+                    net_to_points: sheet.net_to_points.into_iter().collect(),
+                    net_segments: sheet.net_segments.into_iter().collect(),
+                },
+            )
+        })
+        .collect()
+}
+
+impl CrossProbeMapping {
+    /// What a session keeps of the map: nothing unless the drawing it was
+    /// read off still stands as the run read it, as `drawn` gives each
+    /// drawing's topology revision now. A master edited since is left out;
+    /// nothing would read its geometry again.
+    pub fn kept(&self, drawn: impl Fn(&CellViewRef) -> Option<u64>) -> Option<KeptCrossProbe> {
+        let source = self.source_reference.as_ref()?;
+        if self.source_topology_version.is_none() || drawn(source) != self.source_topology_version {
+            return None;
+        }
+        let mut masters: Vec<KeptMaster> = self
+            .masters
+            .values()
+            .filter(|master| drawn(&master.reference) == Some(master.topology_version))
+            .map(|master| KeptMaster {
+                reference: master.reference.clone(),
+                sheets: kept_sheets(&master.sheets),
+            })
+            .collect();
+        masters.sort_by_key(|master| master.reference.key());
+        Some(KeptCrossProbe {
+            source: source.clone(),
+            sheets: kept_sheets(&self.sheets),
+            masters,
+        })
+    }
+
+    /// Install a map a session kept, read back beside the drawings it was
+    /// kept with: they stand as they did when it was kept, so it answers for
+    /// them at the revisions `drawn` gives them now. A drawing the session
+    /// did not bring back takes nothing.
+    pub fn restore(&mut self, kept: KeptCrossProbe, drawn: impl Fn(&CellViewRef) -> Option<u64>) {
+        let Some(version) = drawn(&kept.source) else {
+            return;
+        };
+        let masters = kept
+            .masters
+            .into_iter()
+            .filter_map(|master| {
+                Some(MasterCrossProbe {
+                    topology_version: drawn(&master.reference)?,
+                    sheets: sheets_of(master.sheets),
+                    reference: master.reference,
+                })
+            })
+            .collect();
+        self.install(kept.source, sheets_of(kept.sheets), version, masters);
+    }
+}
+
 impl CrossProbeMapping {
     /// Create a new empty mapping
     #[cfg(test)]

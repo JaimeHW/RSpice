@@ -111,7 +111,7 @@ pub use rspice_results::transfer_function::{
 };
 // Test-only alias: outside tests an attribution's vocabulary is only ever
 // named through the attribution's own fields.
-pub use cross_probe::{CrossProbeIndex, CrossProbeMapping};
+pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, KeptCrossProbe};
 pub use rspice_results::executed_deck::{
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason,
 };
