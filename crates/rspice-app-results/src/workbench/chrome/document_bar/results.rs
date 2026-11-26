@@ -1,22 +1,24 @@
-//! The document bar's Results tabs: one per view and one per saved result
-//! document, and the activation of either.
+//! The document bar's Results tabs: the browser's view, then one per saved
+//! result document, and the activation of either.
 //!
-//! A view is how one plan's results are drawn, or one imported run's. Its
-//! tab shows the run the view is on; which run that is, the newest or one
-//! the reader chose, is picked on the toolbar's run selector, so a plan's
-//! runs never each take a tab.
+//! The data browser picks the run Results shows, and the run is drawn
+//! through its plan's view, or the imported run's. The first tab is that
+//! view's, named for the run: it is never closed, and it is the way back to
+//! the browser's pick from a saved document. Runs and plans take no tab of
+//! their own.
 
-use crate::results::visualization_document::WorkingViewSource;
+use crate::product::DatasetId;
+use crate::results::visualization_document::{ResultDocumentTrackingMode, WorkingViewSource};
 use crate::state::SimulationRun;
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::documents::result_document::working_view::{self, source_of};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads, view_edits};
-use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
+use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
-/// The name a view's tab carries: its plan's, or the imported run's label.
+/// The name a plan's view goes by: its plan's, or the imported run's label.
 pub fn view_title(model: &Model, source: WorkingViewSource, run: &SimulationRun) -> String {
     let WorkingViewSource::Plan { plan_id } = source else {
         return run.label.clone();
@@ -37,51 +39,130 @@ pub fn view_title(model: &Model, source: WorkingViewSource, run: &SimulationRun)
         .unwrap_or_else(|| "Deleted plan".to_owned())
 }
 
-/// The run each view's tab is on, in the order the history first names
-/// them: the run shown when it is one of the view's, else the run the view
-/// reads, else the view's newest run.
-pub fn view_runs(model: &Model) -> Vec<(WorkingViewSource, &SimulationRun)> {
-    let content = &model.workspace.content;
-    let runs = &model.simulation.retained.runs;
-    let shown = model.simulation.active_run().map(|run| run.dataset_id);
-    let mut views: Vec<(WorkingViewSource, &SimulationRun)> = Vec::new();
-    for run in runs.iter() {
-        let source = source_of(run);
-        if views.iter().any(|(seen, _)| *seen == source) {
-            continue;
-        }
-        let of_view = || {
-            runs.iter()
-                .filter(move |candidate| source_of(candidate) == source)
-        };
-        let read = content
-            .visualization_documents
-            .iter()
-            .find(|document| document.working_view() == Some(source))
-            .and_then(|view| view.panes().iter().find_map(|pane| pane.binding))
-            .map(|binding| binding.dataset.dataset_id);
-        let on = of_view()
-            .find(|candidate| Some(candidate.dataset_id) == shown)
-            .or_else(|| of_view().find(|candidate| Some(candidate.dataset_id) == read))
-            .or_else(|| of_view().max_by_key(|candidate| candidate.id))
-            .unwrap_or(run);
-        views.push((source, on));
-    }
-    views
+/// The newest retained run drawn through `source`'s view.
+fn newest_run_of(model: &Model, source: WorkingViewSource) -> Option<&SimulationRun> {
+    model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .filter(|run| source_of(run) == source)
+        .max_by_key(|run| run.id)
 }
 
-/// One tab per view, then one per saved result document in the order the
-/// project made them.
-pub fn result_documents(model: &Model) -> Vec<WorkspaceDocument> {
+/// Whether `source`'s view follows its plan's newest run: it does until the
+/// reader picks an older run, and before it is made.
+fn follows_newest(state: ResultsReads<'_>, source: WorkingViewSource) -> bool {
+    working_view::view_of(state, source)
+        .and_then(|view| state.model.workspace.content.visualization_document(view))
+        .is_none_or(|view| view.tracking().mode == ResultDocumentTrackingMode::Latest)
+}
+
+/// The run the browser's view shows, in the window drawn.
+///
+/// It is the run the window's Results shows, or, while a saved document is
+/// in front, the run it showed before. A run the history starts after it
+/// takes the view only when it is the newest of the same plan and the view
+/// follows its plan's newest run: a run the reader picked in the browser
+/// holds the view, and another plan's run is listed in the browser, not
+/// shown over the one being read.
+pub fn browser_run(state: ResultsReads<'_>) -> Option<&SimulationRun> {
+    let model = state.model;
+    let simulation = &model.simulation;
+    let retained = |dataset: DatasetId| simulation.retained.run_by_dataset_id(dataset);
+    let shown = simulation.active_run();
+    let window = state.workbench.window_session.current();
+    match state
+        .workbench
+        .window_session
+        .active_document(window, Workspace::Results)
+    {
+        Some(WorkspaceDocumentId::ResultDataset(dataset)) => {
+            let Some(held) = retained(*dataset) else {
+                return shown;
+            };
+            let source = source_of(held);
+            let newer = shown.filter(|run| {
+                run.id > held.id
+                    && source_of(run) == source
+                    && newest_run_of(model, source).map(|newest| newest.dataset_id)
+                        == Some(run.dataset_id)
+                    && follows_newest(state, source)
+            });
+            Some(newer.unwrap_or(held))
+        }
+        Some(WorkspaceDocumentId::VisualizationDocument(_)) => {
+            state.results.quick_view_run.and_then(retained).or(shown)
+        }
+        _ => shown,
+    }
+}
+
+/// Keep the window's record of what Results shows on the run the browser's
+/// view shows, while that view is in front: a run that takes the view, and
+/// the run shown when Results opens, are what it goes on showing, whatever
+/// run the history starts next.
+pub fn keep_browser_view(state: &mut ResultsParts<'_>) {
+    if state.workbench.workspace != Workspace::Results {
+        return;
+    }
+    let window = state.workbench.window_session.current();
+    let held = state
+        .workbench
+        .window_session
+        .active_document(window, Workspace::Results)
+        .cloned();
+    if matches!(held, Some(WorkspaceDocumentId::VisualizationDocument(_))) {
+        return;
+    }
+    let Some(run) = browser_run(state.results_reads()).map(|run| run.dataset_id) else {
+        return;
+    };
+    let shown = WorkspaceDocumentId::ResultDataset(run);
+    if held.as_ref() != Some(&shown) {
+        super::record_active_document(state.workbench, &shown);
+    }
+}
+
+/// The tab of the browser's view, named for the run it shows.
+fn browser_view_tab(run: &SimulationRun) -> WorkspaceDocument {
+    WorkspaceDocument {
+        id: WorkspaceDocumentId::ResultDataset(run.dataset_id),
+        label: run.name().to_owned(),
+        icon: WorkbenchIcon::Results,
+        dirty: false,
+    }
+}
+
+/// The browser's view first, then one tab per saved result document in the
+/// order the project made them, then the browser's views other windows show,
+/// which their own strips list.
+pub fn result_documents(state: ResultsReads<'_>) -> Vec<WorkspaceDocument> {
+    let model = state.model;
     let content = &model.workspace.content;
-    let datasets = view_runs(model)
-        .into_iter()
-        .map(|(source, run)| WorkspaceDocument {
-            id: WorkspaceDocumentId::ResultDataset(run.dataset_id),
-            label: view_title(model, source, run),
-            icon: WorkbenchIcon::Results,
-            dirty: false,
-        });
+    let view = browser_run(state).map(browser_view_tab);
+    let shown = view.as_ref().map(|tab| tab.id.clone());
+    let sessions = &state.workbench.window_session;
+    let current = sessions.current();
+    let elsewhere: Vec<WorkspaceDocument> = sessions
+        .windows()
+        .filter(|(window, _)| *window != current)
+        .flat_map(|(window, held)| {
+            held.documents
+                .iter()
+                .filter_map(move |document| match document {
+                    WorkspaceDocumentId::ResultDataset(dataset)
+                        if sessions.owner(document) == window =>
+                    {
+                        Some(*dataset)
+                    }
+                    _ => None,
+                })
+        })
+        .filter_map(|dataset| model.simulation.retained.run_by_dataset_id(dataset))
+        .map(browser_view_tab)
+        .filter(|tab| Some(&tab.id) != shown.as_ref())
+        .collect();
     let documents = content
         .visualization_documents
         .iter()
@@ -97,25 +178,34 @@ pub fn result_documents(model: &Model) -> Vec<WorkspaceDocument> {
                 .visualization_documents_modified
                 .contains(&document.id()),
         });
-    datasets.chain(documents).collect()
+    view.into_iter().chain(documents).chain(elsewhere).collect()
 }
 
 /// The document Results shows, as the document bar resolves it while
-/// Results is the workspace showing: a retained dataset or a saved result
+/// Results is the workspace showing: the browser's view or a saved result
 /// document, and no page document stands in for them.
 pub(in crate::workbench) fn active_result_document(
-    model: &Model,
-    workbench: &WorkbenchSession,
+    state: ResultsReads<'_>,
 ) -> Option<WorkspaceDocumentId> {
-    super::active_document_among(workbench, model, result_documents(model), None)
+    super::active_document_among(state.workbench, state.model, result_documents(state), None)
 }
 
-/// Show a saved result document.
+/// Show a saved result document. The browser's view keeps the run it showed,
+/// which a saved document's pane takes from it, to show it again when its
+/// tab is chosen.
 pub fn activate_visualization_document(
     state: &mut ResultsParts<'_>,
     document_id: &crate::product::ResultDocumentId,
 ) -> bool {
-    crate::workbench::documents::result_document::activate_persistent_document(state, *document_id)
+    let browser = browser_run(state.results_reads()).map(|run| run.dataset_id);
+    let shown = crate::workbench::documents::result_document::activate_persistent_document(
+        state,
+        *document_id,
+    );
+    if shown {
+        state.results.quick_view_run = browser;
+    }
+    shown
 }
 
 /// Show a saved result document as the document Results reads, as choosing
@@ -153,6 +243,7 @@ pub fn activate_result_dataset(
         .is_some_and(|index| simulation.select_run(index));
     if shown {
         crate::workbench::documents::result_document::restore_quick_view_viewer(state.results);
+        state.results.quick_view_run = None;
     }
     shown
 }
@@ -173,9 +264,66 @@ pub(in crate::workbench) fn show_result_dataset(
     true
 }
 
+/// Show the run of `dataset` through the browser's view, as picking it in
+/// the data browser does, whatever Results showed: a plan's run through the
+/// plan's view, which follows the plan's newest run when `dataset` is that
+/// run and holds on `dataset` when it is an older one; an imported run
+/// through its own.
+pub fn show_run(state: &mut ResultsParts<'_>, dataset: DatasetId) -> Result<(), String> {
+    let run = state
+        .model
+        .simulation
+        .retained
+        .run_by_dataset_id(dataset)
+        .ok_or("the run is no longer in the run history")?;
+    let source = source_of(run);
+    let newest = newest_run_of(state.model, source).map(|run| run.dataset_id) == Some(dataset);
+    if !show_result_dataset(state, &dataset) {
+        return Err("Results is not the workspace showing".to_owned());
+    }
+    let WorkingViewSource::Plan { .. } = source else {
+        return Ok(());
+    };
+    if working_view::view_of(state.results_reads(), source).is_none() {
+        // The plan's first run shown makes its view.
+        working_view::sync(state);
+    }
+    // A run still being digested has no view yet; it is shown all the same.
+    if let Some(view) = working_view::view_of(state.results_reads(), source)
+        && let Err(error) = working_view::choose_run(state, view, (!newest).then_some(dataset))
+    {
+        state.prompt(format!("The view could not keep to the run: {error}"));
+    }
+    Ok(())
+}
+
+/// The run after or before the browser's in the data browser's run list,
+/// which lists the retained runs newest first: the newer run when `newer`.
+pub fn stepped_run(state: ResultsReads<'_>, newer: bool) -> Option<DatasetId> {
+    let runs = &state.model.simulation.retained.runs;
+    let at = browser_run(state).and_then(|shown| {
+        runs.iter()
+            .position(|run| run.dataset_id == shown.dataset_id)
+    })?;
+    let next = if newer { at.checked_sub(1)? } else { at + 1 };
+    runs.get(next).map(|run| run.dataset_id)
+}
+
+/// Show the run newer or older than the one the browser's view shows, as
+/// stepping through the data browser's run list does. Says why when there
+/// is no run to step to.
+pub fn step_run(state: &mut ResultsParts<'_>, newer: bool) -> Result<(), String> {
+    let dataset = stepped_run(state.results_reads(), newer).ok_or(if newer {
+        "the run shown is the newest"
+    } else {
+        "the run shown is the oldest"
+    })?;
+    show_run(state, dataset)
+}
+
 /// Why the view Results shows cannot be saved as a document, if it cannot.
 pub(in crate::workbench) fn save_view_refusal(state: ResultsReads<'_>) -> Option<&'static str> {
-    match active_result_document(state.model, state.workbench) {
+    match active_result_document(state) {
         Some(WorkspaceDocumentId::VisualizationDocument(_)) => {
             Some("this is a saved document already")
         }
@@ -218,9 +366,7 @@ pub(in crate::workbench) fn save_shown_view(
     if let Some(reason) = save_view_refusal(reads) {
         return Err(reason.to_owned());
     }
-    let Some(WorkspaceDocumentId::ResultDataset(dataset)) =
-        active_result_document(reads.model, reads.workbench)
-    else {
+    let Some(WorkspaceDocumentId::ResultDataset(dataset)) = active_result_document(reads) else {
         return Err("Results shows no view to save".to_owned());
     };
     let view = working_view::view_of_run(reads, dataset).ok_or("Results shows no view to save")?;
@@ -249,7 +395,7 @@ pub(in crate::workbench) fn save_shown_view(
 
 /// The saved result document Results shows, if it shows one.
 fn shown_saved_document(state: ResultsReads<'_>) -> Option<crate::product::ResultDocumentId> {
-    match active_result_document(state.model, state.workbench) {
+    match active_result_document(state) {
         Some(WorkspaceDocumentId::VisualizationDocument(document)) => Some(document),
         _ => None,
     }
@@ -347,7 +493,7 @@ pub(in crate::workbench) fn delete_shown_document(
         .visualization_document(document)
         .map(|document| document.title().to_owned())
         .ok_or("the document is no longer in the project")?;
-    let tabs = result_documents(reads.model);
+    let tabs = result_documents(reads);
     let at = tabs
         .iter()
         .position(|tab| tab.id == WorkspaceDocumentId::VisualizationDocument(document));

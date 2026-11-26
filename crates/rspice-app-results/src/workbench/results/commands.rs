@@ -99,6 +99,12 @@ pub enum ResultsCommand {
     DeleteDocument,
     /// Put back every run deleted since the project opened.
     RestoreDeletedRuns,
+    /// Show the run above the one shown in the data browser's run list: the
+    /// next newer run.
+    NewerRun,
+    /// Show the run below the one shown in the data browser's run list: the
+    /// next older run.
+    OlderRun,
     /// Draw this many runs of the shown run's plan just before it behind
     /// it, thinner; none for zero.
     OverlayPrevious(u8),
@@ -167,6 +173,10 @@ const PROPERTIES: &[ShortcutBinding] = &[primary(Key::Q, false, false, true, "Sh
 const MINOR_GRID: &[ShortcutBinding] = &[primary(Key::G, false, false, true, "Shift+G")];
 /// Forward again through the views Zoom previous stepped back from.
 const ZOOM_NEXT: &[ShortcutBinding] = &[primary(Key::Z, false, false, true, "Shift+Z")];
+// Up and down the data browser's run list, as Page Up and Page Down step a
+// drawing's sheets.
+const NEWER_RUN: &[ShortcutBinding] = &[primary(Key::PageUp, false, false, false, "Page Up")];
+const OLDER_RUN: &[ShortcutBinding] = &[primary(Key::PageDown, false, false, false, "Page Down")];
 
 /// A command listed in the palette that runs with or without a project.
 const ANYWHERE: CommandFlags = CommandFlags::PALETTE_VISIBLE;
@@ -180,7 +190,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 80] = [
+    pub const ALL: [Self; 82] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -246,6 +256,8 @@ impl ResultsCommand {
         Self::DuplicateDocument,
         Self::DeleteDocument,
         Self::RestoreDeletedRuns,
+        Self::NewerRun,
+        Self::OlderRun,
         Self::OverlayPrevious(0),
         Self::OverlayPrevious(1),
         Self::OverlayPrevious(2),
@@ -311,6 +323,8 @@ impl ResultsCommand {
             Self::DuplicateDocument => CommandKey::new("duplicate-result-document"),
             Self::DeleteDocument => CommandKey::new("delete-result-document"),
             Self::RestoreDeletedRuns => CommandKey::new("restore-deleted-runs"),
+            Self::NewerRun => CommandKey::new("newer-run"),
+            Self::OlderRun => CommandKey::new("older-run"),
             Self::OverlayPrevious(0) => CommandKey::new("overlay-previous-runs-off"),
             Self::OverlayPrevious(1) => CommandKey::new("overlay-previous-run"),
             Self::OverlayPrevious(2) => CommandKey::new("overlay-previous-2-runs"),
@@ -566,6 +580,20 @@ impl ResultsCommand {
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,
                 NONE,
+            ),
+            Self::NewerRun => (
+                "Newer run",
+                "Results",
+                ANYWHERE,
+                ShortcutContext::ResultsWorkspace,
+                NEWER_RUN,
+            ),
+            Self::OlderRun => (
+                "Older run",
+                "Results",
+                ANYWHERE,
+                ShortcutContext::ResultsWorkspace,
+                OLDER_RUN,
             ),
             Self::OverlayPrevious(depth) => (
                 match depth {

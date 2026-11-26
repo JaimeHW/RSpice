@@ -1,27 +1,34 @@
-//! A retained run as the reader handles it in Results: the tab and the run
-//! selector that show it, and its identity across a save and reopen.
+//! A retained run as the reader handles it in Results: picked in the data
+//! browser and shown under the strip's first tab, stepped through, and kept
+//! across a save and reopen.
 
+use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use rspice_app_results::workbench::chrome::document_bar::results::result_documents;
-use rspice_app_results::workbench::chrome::toolbar::results::run_selector;
-use rspice_app_results::workbench::documents::result_document::working_view;
+use rspice_app_results::workbench::chrome::document_bar::results::{result_documents, show_run};
+use rspice_app_results::workbench::documents::result_document::{
+    AnalysisPresentationKey, ResultViewer, working_view,
+};
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_runs::simulation::controller::test_execution::{
     run_generated_batches, state_with_current_clean_drc,
 };
-use rspice_app_state::product::DatasetId;
+use rspice_app_state::product::{DatasetId, ResultDocumentId};
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, RetainedTrace, SimulationRunLifecycle,
 };
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::workbench::layout::LayoutSpec;
+use rspice_app_workbench::workbench::chrome::document_bar::{
+    activate_document, close_all_documents, close_document, close_other_documents, cycle_document,
+    document_descriptors, visible_documents,
+};
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
+use rspice_simulation_contract::plan_catalog::SimulationPlanCloneOptions;
 
 const TIME: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 
-/// Run the session's plan once, its transient answering `out`, and finish
-/// the run, its samples held in memory.
-fn run_plan(state: &mut AppState, out: [f64; 5]) {
+/// Run the session's active plan once, its transient answering `out` over
+/// `time`, and finish the run, its samples held in memory.
+fn run_plan_over(state: &mut AppState, time: [f64; 5], out: [f64; 5]) {
     let mut controller = SimulationController::new();
     controller
         .preflight_run_set(state)
@@ -41,8 +48,8 @@ fn run_plan(state: &mut AppState, out: [f64; 5]) {
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
                 .with_provenance(provenance)
                 .with_waveforms(vec![
-                    RetainedTrace::new("V(in)", TIME.to_vec(), vec![1.0; 5], "#ffffff"),
-                    RetainedTrace::new("V(out)", TIME.to_vec(), out.to_vec(), "#ffffff"),
+                    RetainedTrace::new("V(in)", time.to_vec(), vec![1.0; 5], "#ffffff"),
+                    RetainedTrace::new("V(out)", time.to_vec(), out.to_vec(), "#ffffff"),
                 ]),
         );
     controller.abort();
@@ -53,6 +60,11 @@ fn run_plan(state: &mut AppState, out: [f64; 5]) {
         .expect("the plan's run")
         .finish_lifecycle(SimulationRunLifecycle::Completed)
         .expect("the run finishes");
+}
+
+/// Run the session's active plan once over the first second.
+fn run_plan(state: &mut AppState, out: [f64; 5]) {
+    run_plan_over(state, TIME, out);
 }
 
 /// A session with one finished run of its plan, Results in front.
@@ -66,35 +78,11 @@ fn session_with_a_run() -> AppState {
     state
 }
 
-/// The quick view's frame around nothing: the shown run's working view is
-/// made or followed, drawn, and kept.
-fn quick_frame(state: &mut AppState) {
-    let mut parts = state.results_parts();
-    working_view::sync(&mut parts);
-    working_view::capture(&mut parts);
-}
-
 /// The datasets of the retained runs, newest first.
 fn newest_first(state: &AppState) -> Vec<DatasetId> {
     let mut runs: Vec<_> = state.model.simulation.retained.runs.iter().collect();
     runs.sort_by_key(|run| std::cmp::Reverse(run.id));
     runs.into_iter().map(|run| run.dataset_id).collect()
-}
-
-/// What the run selector reads: the run shown and whether it follows the
-/// plan's newest.
-fn selector(state: &AppState) -> (DatasetId, bool) {
-    let choice =
-        run_selector::run_choice(state.results_reads()).expect("Results shows a run of the plan");
-    (choice.shown.dataset_id, choice.following)
-}
-
-/// The Results tabs: what each shows and what it is called.
-fn tabs(state: &AppState) -> Vec<(WorkspaceDocumentId, String)> {
-    result_documents(&state.model)
-        .into_iter()
-        .map(|tab| (tab.id, tab.label))
-        .collect()
 }
 
 /// Save `state`'s project to a scratch folder and open it again in a new
@@ -209,144 +197,417 @@ fn a_solved_run_reopens_with_the_digest_it_had() {
     );
 }
 
-/// A plan's runs are chosen, not tabbed: three runs of one plan are one tab,
-/// named for the plan, on the newest run.
-#[test]
-fn a_plans_runs_share_one_tab_named_for_the_plan() {
-    let mut state = session_with_a_run();
-    quick_frame(&mut state);
-    for out in [[0.0, 0.2, 0.4, 1.0, 0.1], [0.0, 0.1, 0.2, 0.3, 0.4]] {
-        run_plan(&mut state, out);
-        quick_frame(&mut state);
-    }
-    let plan = state.model.sim_setup.active_plan_name().to_string();
-    assert_eq!(
-        tabs(&state),
-        vec![(
-            WorkspaceDocumentId::ResultDataset(newest_first(&state)[0]),
-            plan
-        )]
-    );
+/// The application on a session, drawn whole, frame after frame.
+struct Desk {
+    ctx: egui::Context,
+    app: RSpiceApp,
+    time: f64,
 }
 
-/// A run chosen from the selector stays shown, frame after frame, until
-/// Latest is chosen or the plan runs again, as Assembler's Results tab
-/// turns to the history a run makes.
-#[test]
-fn a_run_chosen_from_the_selector_stays_shown_until_the_plan_runs_again() {
+impl Desk {
+    fn new(state: AppState) -> Self {
+        let ctx = egui::Context::default();
+        rspice_app_workbench::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state = state;
+        app.state.workbench.activate(Workspace::Results);
+        let mut desk = Self {
+            ctx,
+            app,
+            time: 0.0,
+        };
+        desk.settle();
+        desk
+    }
+
+    /// Draw one frame of the whole application with `events`.
+    fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+        self.time += 0.02;
+        let app = &mut self.app;
+        self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 900.0),
+                )),
+                time: Some(self.time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                app.prepare_frame(ui.ctx());
+                app.render_frame_chrome(ui);
+                app.render_frame_dialogs(ui.ctx());
+            },
+        )
+    }
+
+    fn settle(&mut self) -> egui::FullOutput {
+        self.frame(Vec::new());
+        self.frame(Vec::new());
+        self.frame(Vec::new())
+    }
+
+    /// Press `key` and draw the frames it takes.
+    fn press(&mut self, key: egui::Key) {
+        self.frame(vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        self.settle();
+    }
+
+    /// Pick the run of `dataset` in the data browser, as clicking its row
+    /// does, and draw the frames it takes.
+    fn pick(&mut self, dataset: DatasetId) {
+        show_run(&mut self.app.state.results_parts(), dataset).expect("the run shows");
+        self.settle();
+    }
+
+    /// The Results tabs: what each shows and what it is called.
+    fn tabs(&self) -> Vec<(WorkspaceDocumentId, String)> {
+        result_documents(self.app.state.results_reads())
+            .into_iter()
+            .map(|tab| (tab.id, tab.label))
+            .collect()
+    }
+
+    /// The document the strip has in front.
+    fn front(&self) -> Option<WorkspaceDocumentId> {
+        document_descriptors(&self.app.state)
+            .into_iter()
+            .find(|document| document.active)
+            .map(|document| document.id)
+    }
+
+    /// The run Results draws.
+    fn shown(&self) -> Option<DatasetId> {
+        let simulation = &self.app.state.model.simulation;
+        simulation.active_run().map(|run| run.dataset_id)
+    }
+
+    fn name_of(&self, dataset: DatasetId) -> String {
+        let simulation = &self.app.state.model.simulation;
+        let run = simulation.retained.run_by_dataset_id(dataset);
+        run.expect("a retained run").name().to_owned()
+    }
+}
+
+/// A second plan, cloned from the first, as Clone plan does, and made the
+/// active one.
+fn clone_plan(state: &mut AppState, name: &str) {
+    let model = &mut state.model;
+    let source = model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("a plan is active")
+        .id();
+    model.workspace.content.migrate_active_plan_data(source);
+    let outcome = model
+        .sim_setup
+        .clone_active_plan(name, SimulationPlanCloneOptions::default())
+        .expect("the plan clones");
+    model
+        .workspace
+        .content
+        .clone_plan_data(
+            outcome.source_plan_id,
+            outcome.cloned_plan_id,
+            outcome.contents.copy_variables_outputs_and_specifications,
+            outcome.contents.copy_regression_baseline_ownership,
+            &outcome.analysis_identity_map,
+        )
+        .expect("its data clones");
+}
+
+/// Two runs of the first plan, the newer over two seconds; a run of a
+/// second plan; and the first plan's view saved as a document. The browser
+/// shows the first plan's newer run.
+struct Bench {
+    desk: Desk,
+    /// The first plan's runs, older first.
+    first: [DatasetId; 2],
+    /// The second plan's run.
+    other: DatasetId,
+    saved: ResultDocumentId,
+}
+
+fn bench() -> Bench {
     let mut state = session_with_a_run();
-    quick_frame(&mut state);
-    run_plan(&mut state, [0.0, 0.2, 0.4, 1.0, 0.1]);
-    quick_frame(&mut state);
-    let [second, first] = newest_first(&state)[..] else {
+    run_plan_over(
+        &mut state,
+        [0.0, 0.5, 1.0, 1.5, 2.0],
+        [0.0, 0.2, 0.4, 1.0, 0.1],
+    );
+    let [newer, older] = newest_first(&state)[..] else {
         panic!("two runs");
     };
-    assert_eq!(selector(&state), (second, true), "Latest shows the newest");
-    let listed: Vec<DatasetId> = run_selector::run_choice(state.results_reads())
-        .expect("the plan's runs")
-        .runs
-        .iter()
-        .map(|run| run.dataset_id)
-        .collect();
-    assert_eq!(listed, vec![second, first], "newest first");
-
-    run_selector::choose(&mut state.results_parts(), Some(first)).expect("the first run shows");
-    for _ in 0..3 {
-        quick_frame(&mut state);
+    let mut desk = Desk::new(state);
+    assert_eq!(desk.shown(), Some(newer));
+    let view =
+        working_view::view_of_run(desk.app.state.results_reads(), newer).expect("the plan's view");
+    let saved = working_view::save_as_document(&mut desk.app.state.results_parts(), view, "Bias")
+        .expect("the view saves as a document");
+    clone_plan(&mut desk.app.state, "Corner");
+    run_plan(&mut desk.app.state, [0.0, 0.1, 0.2, 0.3, 0.4]);
+    desk.settle();
+    let other = newest_first(&desk.app.state)[0];
+    Bench {
+        desk,
+        first: [older, newer],
+        other,
+        saved,
     }
-    assert_eq!(selector(&state), (first, false));
-    let plan = state.model.sim_setup.active_plan_name().to_string();
-    assert_eq!(
-        tabs(&state),
-        vec![(WorkspaceDocumentId::ResultDataset(first), plan.clone())],
-        "the plan's tab shows the run chosen"
-    );
+}
 
-    run_selector::choose(&mut state.results_parts(), None).expect("Latest");
-    quick_frame(&mut state);
-    assert_eq!(selector(&state), (second, true));
+/// Runs are picked in the data browser, not tabbed: two plans' runs and a
+/// saved document are the browser's tab and the document's.
+#[test]
+fn two_plans_runs_and_a_saved_document_take_two_tabs() {
+    let Bench {
+        desk, first, saved, ..
+    } = bench();
+    let expected = vec![
+        (
+            WorkspaceDocumentId::ResultDataset(first[1]),
+            desk.name_of(first[1]),
+        ),
+        (
+            WorkspaceDocumentId::VisualizationDocument(saved),
+            "Bias".to_owned(),
+        ),
+    ];
+    assert_eq!(desk.tabs(), expected);
+    let strip: Vec<_> = visible_documents(&desk.app.state)
+        .into_iter()
+        .map(|tab| (tab.id, tab.label))
+        .collect();
+    assert_eq!(strip, expected, "the strip draws the same two");
+}
 
-    run_selector::choose(&mut state.results_parts(), Some(first)).expect("the first run shows");
-    quick_frame(&mut state);
-    run_plan(&mut state, [0.0, 0.1, 0.2, 0.3, 0.4]);
-    quick_frame(&mut state);
-    let third = newest_first(&state)[0];
+/// A run picked in the browser shows, and the first tab takes its name.
+#[test]
+fn a_run_picked_in_the_browser_shows_under_the_first_tab() {
+    let Bench {
+        mut desk, other, ..
+    } = bench();
+    desk.pick(other);
+    assert_eq!(desk.shown(), Some(other));
     assert_eq!(
-        selector(&state),
-        (third, true),
-        "the plan's new run takes the view back to Latest"
+        desk.front(),
+        Some(WorkspaceDocumentId::ResultDataset(other))
     );
     assert_eq!(
-        tabs(&state),
-        vec![(WorkspaceDocumentId::ResultDataset(third), plan)]
+        desk.tabs()[0],
+        (
+            WorkspaceDocumentId::ResultDataset(other),
+            desk.name_of(other)
+        )
     );
 }
 
-/// The selector lists two hundred runs and lays out only the rows in view.
-#[cfg(not(target_arch = "wasm32"))]
+/// Stepping to the plan's other run keeps the sheet, the view's panes and
+/// the X range, and each cursor the other run's X still reaches.
 #[test]
-fn the_run_selector_lists_two_hundred_runs_and_lays_out_a_page_of_them() {
-    let mut state = session_with_a_run();
-    quick_frame(&mut state);
-    let template = state.model.simulation.retained.runs[0].clone();
-    let mut runs: Vec<_> = (2..=200)
-        .rev()
-        .map(|id| {
-            let mut run = template.clone();
-            run.id = id;
-            run.dataset_id = DatasetId::new();
-            run.rename(&format!("Run {id}"));
-            run
-        })
-        .collect();
-    runs.push(template);
-    state.model.simulation.retained.runs = runs.into();
-    assert!(state.model.simulation.select_run(0));
-    quick_frame(&mut state);
+fn stepping_through_a_plans_runs_keeps_the_panes_the_x_range_and_the_cursors() {
+    let Bench {
+        mut desk, first, ..
+    } = bench();
+    let [older, newer] = first;
+    let analysis = |desk: &Desk| {
+        let run = desk.app.state.model.simulation.active_run().expect("a run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    };
+    let panes = |desk: &Desk| {
+        let reads = desk.app.state.results_reads();
+        let view = working_view::view_of_run(reads, desk.shown().expect("a run"))
+            .expect("the plan's view");
+        let content = &desk.app.state.model.workspace.content;
+        let document = content.visualization_document(view);
+        let panes = document.expect("the view").panes();
+        (view, panes.iter().map(|pane| pane.id).collect::<Vec<_>>())
+    };
+    let x_range = |desk: &Desk| {
+        let session = &desk.app.state.results.results.session;
+        session
+            .analysis_plot_view_pane(ResultViewer::Waves, analysis(desk), 0)
+            .x
+    };
+    let cursors = |desk: &Desk| {
+        let session = &desk.app.state.results.results.session;
+        (session.cursors.a, session.cursors.b)
+    };
+    assert_eq!(desk.shown(), Some(newer));
+    let key = analysis(&desk);
+    let session = &mut desk.app.state.results.results.session;
+    session.viewer = ResultViewer::Waves;
+    session
+        .analysis_plot_view_pane_mut(ResultViewer::Waves, key, 0)
+        .x = Some((0.25, 0.75));
+    session.cursors.a = Some(0.5);
+    session.cursors.b = Some(1.5);
+    session.cursor_strip = Some(0);
+    desk.settle();
+    let kept = panes(&desk);
+
+    desk.press(egui::Key::PageDown);
     assert_eq!(
-        run_selector::run_choice(state.results_reads())
-            .expect("the plan's runs")
-            .runs
-            .len(),
-        200
+        desk.shown(),
+        Some(older),
+        "Page Down steps to the older run"
+    );
+    assert_eq!(
+        desk.front(),
+        Some(WorkspaceDocumentId::ResultDataset(older))
+    );
+    assert_eq!(
+        desk.app.state.results.results.session.viewer,
+        ResultViewer::Waves
+    );
+    assert_eq!(panes(&desk), kept);
+    assert_eq!(x_range(&desk), Some((0.25, 0.75)));
+    assert_eq!(
+        cursors(&desk),
+        (Some(0.5), None),
+        "B at 1.5 s is past the older run's first second"
     );
 
-    let ctx = egui::Context::default();
-    rspice_app_workbench::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let layout = LayoutSpec::resolve(1_600.0, 900.0, &state.workbench);
-    egui::Popup::open_id(&ctx, run_selector::list_id());
-    let mut frame = || {
-        ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.horizontal(|ui| run_selector::show(ui, &mut state.results_parts(), layout));
-            });
-        })
-    };
-    let _ = frame();
-    let output = frame();
+    desk.press(egui::Key::PageUp);
+    assert_eq!(desk.shown(), Some(newer), "Page Up steps back");
+    assert_eq!(panes(&desk), kept);
+    assert_eq!(x_range(&desk), Some((0.25, 0.75)));
+    assert_eq!(cursors(&desk), (Some(0.5), None));
+}
+
+/// With a saved document in front, a run picked in the browser brings the
+/// browser's tab forward on it; the browser's tab, chosen again, goes back
+/// to the run it showed.
+#[test]
+fn a_run_picked_over_a_saved_document_shows_under_the_browsers_tab() {
+    let Bench {
+        mut desk,
+        first,
+        saved,
+        ..
+    } = bench();
+    let document = WorkspaceDocumentId::VisualizationDocument(saved);
+    assert!(activate_document(&mut desk.app.state, &document));
+    desk.settle();
+    assert_eq!(desk.front(), Some(document.clone()));
+
+    let browser = WorkspaceDocumentId::ResultDataset(first[1]);
+    assert!(activate_document(&mut desk.app.state, &browser));
+    desk.settle();
+    assert_eq!(
+        desk.front(),
+        Some(browser),
+        "the browser's tab is the way back"
+    );
+    assert_eq!(desk.shown(), Some(first[1]));
+
+    assert!(activate_document(&mut desk.app.state, &document));
+    desk.settle();
+    desk.pick(first[0]);
+    assert_eq!(
+        desk.front(),
+        Some(WorkspaceDocumentId::ResultDataset(first[0]))
+    );
+    assert_eq!(desk.shown(), Some(first[0]));
+}
+
+/// The browser's tab has no close control and no close takes it; closing
+/// saved documents' tabs only hides them.
+#[test]
+fn the_browsers_tab_never_closes() {
+    let Bench {
+        mut desk,
+        first,
+        saved,
+        ..
+    } = bench();
+    let browser = WorkspaceDocumentId::ResultDataset(first[1]);
+    let document = WorkspaceDocumentId::VisualizationDocument(saved);
+    let closable: Vec<_> = document_descriptors(&desk.app.state)
+        .into_iter()
+        .map(|tab| (tab.id, tab.closable))
+        .collect();
+    assert_eq!(
+        closable,
+        vec![(browser.clone(), false), (document.clone(), true)]
+    );
+    let output = desk.settle();
     let nodes = output
         .platform_output
         .accesskit_update
-        .expect("an accessibility tree")
+        .expect("accessibility tree")
         .nodes;
-    // The update lists its nodes in no order, so the rows are read top to
-    // bottom by where they stand.
-    let mut placed: Vec<(f64, &str)> = nodes
+    let label = desk.name_of(first[1]);
+    let tab = nodes
         .iter()
-        .filter_map(|(_, node)| Some((node.bounds()?.y0, node.label()?)))
-        .filter(|(_, label)| label.starts_with("Run "))
-        .collect();
-    placed.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let rows: Vec<&str> = placed.into_iter().map(|(_, label)| label).collect();
-    assert_eq!(
-        rows.first(),
-        Some(&"Run 200"),
-        "the newest run heads the list"
-    );
+        .map(|(_, node)| node)
+        .find(|node| {
+            node.role() == egui::accesskit::Role::Tab && node.label() == Some(label.as_str())
+        })
+        .expect("the browser's tab is drawn");
     assert!(
-        rows.len() <= run_selector::VISIBLE_ROWS + 1,
-        "only the rows in view are laid out, not {} of 200",
-        rows.len()
+        !tab.description().unwrap_or_default().contains("close"),
+        "the tab offers no close: {:?}",
+        tab.description()
+    );
+
+    let strip = visible_documents(&desk.app.state);
+    assert!(!close_document(&mut desk.app.state, &browser, &strip));
+    assert_eq!(close_all_documents(&mut desk.app.state), 1);
+    desk.settle();
+    assert_eq!(desk.tabs()[0].0, browser);
+    assert_eq!(desk.front(), Some(browser.clone()));
+    assert_eq!(visible_documents(&desk.app.state).len(), 1);
+
+    assert!(activate_document(&mut desk.app.state, &document));
+    desk.settle();
+    assert!(cycle_document(&mut desk.app.state, false));
+    assert_eq!(desk.front(), Some(browser));
+    assert_eq!(close_other_documents(&mut desk.app.state), 1);
+    let content = &desk.app.state.model.workspace.content;
+    assert!(
+        content.visualization_document(saved).is_some(),
+        "closing a tab keeps its document"
+    );
+    assert_eq!(desk.app.state.model.simulation.retained.runs.len(), 3);
+}
+
+/// A finished run of the plan shown shows, unless the reader picked an
+/// older run of it.
+#[test]
+fn a_new_run_of_the_plan_shown_shows_unless_an_older_run_was_picked() {
+    let mut desk = Desk::new(session_with_a_run());
+    let first = desk.shown().expect("the first run");
+    run_plan(&mut desk.app.state, [0.0, 0.2, 0.4, 1.0, 0.1]);
+    desk.settle();
+    let second = newest_first(&desk.app.state)[0];
+    assert_eq!(desk.shown(), Some(second), "the new run shows");
+    assert_eq!(desk.tabs()[0].0, WorkspaceDocumentId::ResultDataset(second));
+
+    desk.pick(first);
+    run_plan(&mut desk.app.state, [0.0, 0.1, 0.2, 0.3, 0.4]);
+    desk.settle();
+    let third = newest_first(&desk.app.state)[0];
+    assert_ne!(third, second);
+    assert_eq!(desk.shown(), Some(first), "the run picked stays");
+    assert_eq!(desk.tabs()[0].0, WorkspaceDocumentId::ResultDataset(first));
+
+    desk.pick(third);
+    run_plan(&mut desk.app.state, [0.0, 0.3, 0.6, 0.9, 1.0]);
+    desk.settle();
+    let fourth = newest_first(&desk.app.state)[0];
+    assert_eq!(
+        desk.shown(),
+        Some(fourth),
+        "the newest run picked, the plan's next run shows"
     );
 }

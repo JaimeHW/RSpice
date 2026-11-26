@@ -687,7 +687,7 @@ pub(in crate::workbench) fn results(
                     );
                 }
                 let marks = run_marks(state, runs);
-                for (run, mark) in runs.iter().zip(&marks) {
+                for (run_at, (run, mark)) in runs.iter().zip(&marks).enumerate() {
                     let run_active = active_run == Some(run.run_index);
                     // A run whose results store no folder holds, or holds damaged, says so
                     // before anything about its data.
@@ -736,6 +736,7 @@ pub(in crate::workbench) fn results(
                     };
                     let responses = result_dataset_row(
                         ui,
+                        run_row_id(run.dataset_id),
                         if run.success {
                             WorkbenchIcon::Success
                         } else {
@@ -751,19 +752,46 @@ pub(in crate::workbench) fn results(
                         let asked = mark.show_in(ui, slot, run.dataset_id);
                         mark.apply(state, &asked);
                     }
-                    if responses.selection.clicked() {
-                        // A plan's run is shown through the plan's view and
-                        // stays shown, as choosing it on the toolbar's run
-                        // selector does.
+                    // Up and Down on a run's row step to the run above or
+                    // below it and show that one, as a click on it would.
+                    let stepped = responses
+                        .selection
+                        .has_focus()
+                        .then(|| {
+                            ui.input_mut(|input| {
+                                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                                    run_at.checked_sub(1)
+                                } else if input
+                                    .consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                                {
+                                    Some(run_at + 1)
+                                } else {
+                                    None
+                                }
+                            })
+                        })
+                        .flatten()
+                        .and_then(|at| runs.get(at));
+                    let picked = if let Some(next) = stepped {
+                        ui.memory_mut(|memory| memory.request_focus(run_row_id(next.dataset_id)));
+                        Some((next.dataset_id, &next.label))
+                    } else if responses.selection.clicked() {
+                        responses.selection.request_focus();
+                        Some((run.dataset_id, &run.label))
+                    } else {
+                        None
+                    };
+                    if let Some((dataset, label)) = picked {
+                        // A plan's run is shown through the plan's view, which
+                        // holds on it unless it is the plan's newest.
                         if let Err(error) =
-                            crate::workbench::chrome::toolbar::results::run_selector::show_run(
-                                state,
-                                run.dataset_id,
+                            crate::workbench::chrome::document_bar::results::show_run(
+                                state, dataset,
                             )
                         {
                             state
                                 .workbench
-                                .prompt(format!("Could not show {}: {error}", run.label));
+                                .prompt(format!("Could not show {label}: {error}"));
                         }
                         state.results.session.selected_trace = None;
                         state.results.session.selected_result_artifact = None;
@@ -2392,8 +2420,15 @@ fn pick_results_folder() -> Option<std::path::PathBuf> {
         .pick_folder()
 }
 
+/// The data browser's row of the run of `dataset`, which Up and Down hand the
+/// keyboard on to.
+fn run_row_id(dataset: DatasetId) -> egui::Id {
+    egui::Id::new(("workbench.results.run-row", dataset))
+}
+
 fn result_dataset_row(
     ui: &mut Ui,
+    id: egui::Id,
     icon: WorkbenchIcon,
     label: &str,
     selected: bool,
@@ -2412,11 +2447,7 @@ fn result_dataset_row(
         rect.left_top(),
         egui::pos2(rect.right() - overlay_width, rect.bottom()),
     );
-    let selection = ui.interact(
-        selection_rect,
-        ui.id().with(("result-dataset-selection", label)),
-        egui::Sense::click(),
-    );
+    let selection = ui.interact(selection_rect, id, egui::Sense::click());
     selection.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -2564,7 +2595,10 @@ fn result_dataset_row(
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
-    theme::paint_focus_ring(ui, &selection, selection_rect);
+    // A click gives the row the keyboard, for Up and Down, without a ring.
+    if theme::focus_is_visible(ui.ctx(), &selection) {
+        theme::paint_focus_ring(ui, &selection, selection_rect);
+    }
     let mark = mark_width.map(|width| run_mark_slot(rect, label_end + RUN_MARK_GAP, width));
     ResultDatasetRowResponses {
         selection,

@@ -33,6 +33,7 @@ impl ResultsState {
             .session
             .window_view(run, simulation.view.active_analysis_idx);
         view.quick_view_viewer = self.quick_view_viewer;
+        view.quick_view_run = self.quick_view_run;
         view
     }
 
@@ -68,6 +69,7 @@ impl ResultsState {
             binding.window_shown(&self.session);
         }
         self.quick_view_viewer = view.quick_view_viewer;
+        self.quick_view_run = view.quick_view_run;
         self.seen_selection = shown_selection(simulation);
         if let Some(kind) = self.seen_selection.and_then(|shown| shown.kind) {
             self.cursor_kind = Some(kind);

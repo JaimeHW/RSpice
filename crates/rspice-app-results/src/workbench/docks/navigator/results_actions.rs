@@ -205,8 +205,9 @@ pub fn select_result_dataset(state: &mut ResultsParts<'_>, run_index: usize) -> 
     else {
         return false;
     };
-    if !super::super::super::chrome::document_bar::results::show_result_dataset(state, &dataset_id)
-    {
+    // The browser picks the run Results shows, an analysis or a signal of it
+    // as much as the run's own row.
+    if crate::workbench::chrome::document_bar::results::show_run(state, dataset_id).is_err() {
         return false;
     }
     crate::workbench::documents::result_document::open_shown_run(state);

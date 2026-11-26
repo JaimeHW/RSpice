@@ -780,6 +780,22 @@ impl CommandSet for ResultsCommand {
                     )
                 }
             }
+            Self::NewerRun | Self::OlderRun => {
+                let newer = self == Self::NewerRun;
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else {
+                    available_or(
+                        crate::workbench::chrome::document_bar::results::stepped_run(state, newer)
+                            .is_some(),
+                        if newer {
+                            "the run shown is the newest"
+                        } else {
+                            "the run shown is the oldest"
+                        },
+                    )
+                }
+            }
             Self::RestoreDeletedRuns => {
                 crate::workbench::docks::navigator::results_runs::restore_refusal(&model.simulation)
                     .map_or(
@@ -990,6 +1006,15 @@ impl CommandSet for ResultsCommand {
                 )
                 .unwrap_or_else(|error| error);
                 parts.prompt(said);
+            }
+            Self::NewerRun | Self::OlderRun => {
+                let mut parts = results_parts(cx);
+                if let Err(error) = crate::workbench::chrome::document_bar::results::step_run(
+                    &mut parts,
+                    self == Self::NewerRun,
+                ) {
+                    parts.prompt(format!("Could not step to another run: {error}."));
+                }
             }
             Self::MarkerAtCursor => place_marker_at_cursor(&mut results_parts(cx)),
             Self::FitYToVisibleX => fit_y_to_visible_x(&mut results_parts(cx)),

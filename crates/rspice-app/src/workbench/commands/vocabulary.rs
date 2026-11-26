@@ -662,6 +662,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::SendTraceToCalculator.key(),
     ResultsCommand::TraceSpectrum.key(),
     ResultsCommand::RestoreDeletedRuns.key(),
+    ResultsCommand::NewerRun.key(),
+    ResultsCommand::OlderRun.key(),
     ResultsCommand::DatasetManifestBrowser.key(),
     ResultsCommand::OpenRunInResults.key(),
     ResultsCommand::OpenProducingPlan.key(),

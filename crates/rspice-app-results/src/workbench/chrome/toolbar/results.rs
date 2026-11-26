@@ -13,8 +13,6 @@ use crate::workbench::state::Workspace;
 
 use rspice_app_workbench::workbench::chrome::toolbar::{explicit_label_width, take_tool_slot};
 
-pub mod run_selector;
-
 /// A group of the Results toolbar's commands, drawn as icons and named by
 /// the host, with a rule between one group and the next.
 type ToolGroup = &'static [(CommandKey, WorkbenchIcon)];
@@ -67,19 +65,16 @@ pub fn offered_tool_groups(state: ResultsReads<'_>) -> impl Iterator<Item = Tool
     .flatten()
 }
 
-/// The controls of the document Results shows: for a plan's view, the run
-/// selector; for a saved result document, its tracking (Historical when no
-/// completed run matches the current design, otherwise the Latest / Pinned
-/// toggle) and Archive into document. Whether it drew anything, for the rule
-/// after it.
+/// The controls of a saved result document Results shows: its tracking
+/// (Historical when no completed run matches the current design, otherwise
+/// the Latest / Pinned toggle) and Archive into document. The browser's view
+/// has none: the data browser picks its run. Whether it drew anything, for
+/// the rule after it.
 pub fn results_tracking_button(
     ui: &mut egui::Ui,
     state: &mut ResultsParts<'_>,
     layout: LayoutSpec,
 ) -> bool {
-    if run_selector::show(ui, state, layout) {
-        return true;
-    }
     let tracking = tracking_control(ui, state, layout);
     let archive = archive_control(ui, state, layout);
     tracking || archive

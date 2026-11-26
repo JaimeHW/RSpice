@@ -1236,7 +1236,7 @@ impl DocumentHost for AppState {
             // exists would put a document in the window session that nothing can
             // detach, close, or save.
             Workspace::Stimulus => Vec::new(),
-            Workspace::Results => result_documents(&state.model),
+            Workspace::Results => result_documents(state.results_reads()),
             Workspace::Verify => verification_documents(),
             Workspace::Models => models_documents(),
             Workspace::Netlist => netlist_workspace_documents(

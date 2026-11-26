@@ -14,7 +14,7 @@ pub(super) fn show(
     run_controller: &mut SimulationController,
 ) {
     if let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) =
-        active_result_document(state.model, state.workbench)
+        active_result_document(state.results_reads())
     {
         crate::workbench::documents::result_document::show_persistent_document(
             ui,

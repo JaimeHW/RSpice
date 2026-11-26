@@ -1072,8 +1072,7 @@ pub fn keep_plotted_expression(
     text: String,
 ) -> Result<bool, String> {
     let in_front = crate::workbench::chrome::document_bar::results::active_result_document(
-        state.model,
-        state.workbench,
+        state.results_reads(),
     );
     if let Some(crate::workbench::state::WorkspaceDocumentId::VisualizationDocument(document)) =
         in_front
@@ -1950,6 +1949,9 @@ pub struct ResultsState {
     /// The quick view's viewer while a saved document's pane shows its own,
     /// put back when the quick view is shown again.
     pub(crate) quick_view_viewer: Option<ResultViewer>,
+    /// The run the browser's view showed while a saved document's pane shows
+    /// its own: the view's tab names it, and choosing the tab shows it again.
+    pub(crate) quick_view_run: Option<DatasetId>,
     /// The working view the quick view last drew and the drawing state it
     /// left, so what the reader changed is written back to it. Boxed to keep
     /// the results state inside its stack budget. Transient.
@@ -2206,6 +2208,7 @@ fn prepare_quick_view(ui: &Ui, state: &mut ResultsParts<'_>) {
     // project-owned document would scope its plot views, cursors and marker
     // edits onto them.
     state.results.session.leave_persistent_document();
+    crate::workbench::chrome::document_bar::results::keep_browser_view(state);
     let family = document_edit::family::quick_view_selection(state.results_reads());
     state.results.set_sample_selection(family);
     prepare_viewer_state(state);
@@ -2513,6 +2516,17 @@ pub(crate) fn keep_picked_analysis(state: &mut ResultsParts<'_>) {
     working_view::keep_analysis(state, dataset, kept);
 }
 
+/// The X `analysis` spans, over every waveform it holds; `None` when it
+/// holds none.
+fn analysis_x_domain(analysis: &crate::state::AnalysisResult) -> Option<(f64, f64)> {
+    analysis
+        .waveforms
+        .iter()
+        .filter_map(|waveform| waveform.x.ends())
+        .map(|(first, last)| (first.min(last), first.max(last)))
+        .reduce(|(low, high), (first, last)| (low.min(first), high.max(last)))
+}
+
 fn shown_selection(simulation: &crate::state::SimulationState) -> Option<ShownSelection> {
     let run = simulation.active_run()?;
     let analysis = simulation.active_analysis();
@@ -2531,6 +2545,11 @@ pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
         .reconcile_retained_datasets(&state.model.simulation);
     let data_version = state.model.simulation.view.data_version;
     let shown = shown_selection(&state.model.simulation);
+    let domain = state
+        .model
+        .simulation
+        .active_analysis()
+        .and_then(analysis_x_domain);
     let results = &mut *state.results;
     results.synchronize_wave_caches(&state.model.simulation);
     if results.seen_version != data_version {
@@ -2552,6 +2571,18 @@ pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
         if other_quantity {
             results.session.clear_cursors();
             results.session.horizontal_cursors.clear();
+        } else if let Some((low, high)) = domain {
+            // A cursor stays where the run now shown reaches it; one past
+            // its X goes, as it would mark nothing.
+            let cursors = &mut results.session.cursors;
+            for at in [&mut cursors.a, &mut cursors.b] {
+                if at.is_some_and(|x| !(low..=high).contains(&x)) {
+                    *at = None;
+                }
+            }
+            if cursors.a.is_none() && cursors.b.is_none() {
+                results.session.clear_cursors();
+            }
         }
         if shown.is_none() {
             results.cursor_kind = None;

@@ -782,6 +782,9 @@ const MARKERS_MENU: &[MenuEntry] = &[
 /// The run shown and the history it is one of: where it came from, and
 /// the runs deleted or cleared from it.
 const HISTORY_MENU: &[MenuEntry] = &[
+    results(ResultsCommand::NewerRun).access('N'),
+    results(ResultsCommand::OlderRun).access('D'),
+    Separator,
     results(ResultsCommand::OpenRunInResults).access('O'),
     results(ResultsCommand::OpenProducingPlan).access('P'),
     results(ResultsCommand::OpenTaskDeck).access('I'),

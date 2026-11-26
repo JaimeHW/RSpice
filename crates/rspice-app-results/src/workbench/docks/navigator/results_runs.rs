@@ -9,7 +9,6 @@ use egui::Ui;
 use crate::product::DatasetId;
 use crate::state::{RunRetention, SimulationRun, SimulationState};
 use crate::ui::theme;
-use crate::workbench::chrome::toolbar::results::run_selector;
 use crate::workbench::documents::result_document::ResultsParts;
 
 /// The reason Delete and Restore give while a run owns the history.
@@ -211,12 +210,19 @@ pub fn run_menu(ui: &mut Ui, state: &mut ResultsParts<'_>, dataset: DatasetId) {
         row.note.clone(),
         row.retention().is_pinned(),
     );
+    // A saved document shows its own run; Show goes back to the browser's
+    // view of it.
+    let in_view = crate::workbench::chrome::document_bar::results::active_result_document(
+        state.results_reads(),
+    ) == Some(crate::workbench::state::WorkspaceDocumentId::ResultDataset(
+        dataset,
+    ));
     let overlaid = state.model.simulation.is_dataset_overlaid(dataset);
     let release = pinned.then(|| release_refusal(state, row)).flatten();
     let mut said: Option<String> = None;
 
-    if item(ui, "Show", shown.then_some("Results shows this run.")) {
-        said = run_selector::show_run(state, dataset)
+    if item(ui, "Show", in_view.then_some("Results shows this run.")) {
+        said = crate::workbench::chrome::document_bar::results::show_run(state, dataset)
             .err()
             .map(|error| format!("Could not show {name}: {error}"));
         ui.close();

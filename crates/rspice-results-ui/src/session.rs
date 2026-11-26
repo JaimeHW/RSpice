@@ -464,6 +464,9 @@ pub struct WindowResultsView {
     /// The quick view's sheet while the window shows a saved document's.
     #[serde(deserialize_with = "known_viewer")]
     pub quick_view_viewer: Option<ResultViewer>,
+    /// The run the browser's view showed while the window shows a saved
+    /// document's.
+    pub quick_view_run: Option<DatasetId>,
     pub cursor_a: Option<f64>,
     pub cursor_b: Option<f64>,
     pub cursor_strip: Option<usize>,
@@ -556,6 +559,7 @@ impl ResultViewerState {
             analysis,
             viewer: Some(self.viewer),
             quick_view_viewer: None,
+            quick_view_run: None,
             cursor_a: self.cursors.a,
             cursor_b: self.cursors.b,
             cursor_strip: self.cursor_strip,

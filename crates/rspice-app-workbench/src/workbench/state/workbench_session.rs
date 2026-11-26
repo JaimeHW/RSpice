@@ -142,11 +142,15 @@ impl WorkspaceDocumentId {
         }
     }
 
-    /// Whether the document's tab stays while its workspace is open: the
-    /// generated netlist and the Added lines, which every schematic design
-    /// has.
+    /// Whether the document's tab stays while its workspace is open, first
+    /// on its strip: the generated netlist and the Added lines, which every
+    /// schematic design has, and the run the data browser picked for
+    /// Results.
     pub const fn is_pinned(&self) -> bool {
-        matches!(self, Self::NetlistGenerated(_) | Self::NetlistAddedLines)
+        matches!(
+            self,
+            Self::NetlistGenerated(_) | Self::NetlistAddedLines | Self::ResultDataset(_)
+        )
     }
 }
 
