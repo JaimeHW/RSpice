@@ -188,12 +188,8 @@ pub fn linear_ticks_at(min: f64, max: f64, step: f64) -> TickSeries {
 
 /// The ticks at the ladder indices `indices` of `step`, labelled.
 fn series_at(min: f64, max: f64, step: f64, indices: std::ops::RangeInclusive<i64>) -> TickSeries {
-    let anchor = wants_offset_notation(min, max).then(|| {
-        // An anchor on the tick grid keeps every delta an exact multiple of
-        // the step, so the offsets read as round numbers rather than as the
-        // rounding error between two of them.
-        (((min + max) * 0.5) / step).round() * step
-    });
+    let anchor =
+        wants_offset_notation(min, max).then(|| offset_anchor(min, max, step, indices.clone()));
     let values = indices
         .map(|index| {
             let value = index as f64 * step;
@@ -221,6 +217,32 @@ fn series_at(min: f64, max: f64, step: f64, indices: std::ops::RangeInclusive<i6
         anchor,
         step,
     }
+}
+
+/// The value an offset axis states once and labels its ticks from: the tick
+/// in view written with the fewest digits, the one nearest the middle among
+/// equals, so the anchor says no more than it must. On the tick grid, so
+/// every offset is an exact multiple of the step rather than the rounding
+/// error between two values; the tick nearest the middle when none is in
+/// view.
+fn offset_anchor(min: f64, max: f64, step: f64, indices: std::ops::RangeInclusive<i64>) -> f64 {
+    let middle = ((min + max) * 0.5 / step).round() as i64;
+    // A tick's digits are its index times the step's own leading digit
+    // (1, 2 or 5); the more of them end in zero, the fewer it is written in.
+    let leading = (step / 10f64.powf(step.log10().floor())).round() as i128;
+    let zeros = |index: i64| {
+        let mut digits = i128::from(index) * leading;
+        let mut zeros = 0;
+        while digits != 0 && digits % 10 == 0 {
+            digits /= 10;
+            zeros += 1;
+        }
+        zeros
+    };
+    let index = indices
+        .max_by_key(|index| (zeros(*index), std::cmp::Reverse(index.abs_diff(middle))))
+        .unwrap_or(middle);
+    index as f64 * step
 }
 
 /// How a column of tick labels stands along an axis `length` points long:
@@ -737,6 +759,19 @@ mod tests {
         let plain = linear_ticks(0.0, 1.0e-3, 6);
         assert!(plain.anchor.is_none());
         assert_eq!(anchor_label(&plain, "s"), None);
+    }
+
+    /// A few nanowatts of ripple on 20.77 mW: the anchor is the tick in view
+    /// written with the fewest digits, not the one nearest the middle, and
+    /// the ticks count from it.
+    #[test]
+    fn an_offset_axis_anchors_at_its_roundest_tick() {
+        let series = linear_ticks(20.769_062_5e-3, 20.769_070_5e-3, 4);
+        assert_eq!(anchor_label(&series, "W").as_deref(), Some("+20.76907 mW"));
+        assert_eq!(
+            series.ticks.last().map(|(_, label)| label.as_str()),
+            Some("0")
+        );
     }
 
     /// A log grid's minor lines are the mantissas, not a screen-space
