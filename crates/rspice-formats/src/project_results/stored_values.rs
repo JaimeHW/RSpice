@@ -235,11 +235,17 @@ fn segments_of<'a>(
         if segments.iter().any(|segment| segment.digest == digest) {
             return;
         }
+        // A window read before its segment's first check names the segment, not a file: the
+        // file is the one the folders hold under its name, which a save copies all the same.
         let source = std::path::PathBuf::from(store);
-        segments.push(StoredSegment {
-            digest,
-            source: source.is_file().then_some(source),
-        });
+        let source = if source.is_file() {
+            Some(source)
+        } else {
+            super::unread_segments::kept_file(&rspice_results::store_reader::kept_segment_name(
+                &digest,
+            ))
+        };
+        segments.push(StoredSegment { digest, source });
     };
     for analysis in analyses {
         for waveform in &analysis.waveforms {

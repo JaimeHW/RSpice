@@ -57,15 +57,28 @@ pub(super) fn values(reference: &ColumnReference) -> Result<WaveformValues, Stri
 const NOT_HELD_HERE: &str =
     "neither this page's memory nor this browser's storage for RSpice holds these results";
 
+/// The file a folder holds under the kept segment name `name`, from the first folder that holds
+/// one: the file a reader of that segment opens, checked or not.
+#[cfg(any(unix, windows))]
+pub fn kept_file(name: &str) -> Option<PathBuf> {
+    let folders = FOLDERS.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    folders
+        .iter()
+        .map(|folder| folder.join(name))
+        .find(|path| path.is_file())
+}
+
+/// A build without files has no folder to hold a segment.
+#[cfg(not(any(unix, windows)))]
+pub fn kept_file(_name: &str) -> Option<PathBuf> {
+    None
+}
+
 /// The kept segment file `name` that a folder holds, and what is wrong with it; `None` when no
 /// folder holds one, or the one it holds is still waiting for its first check.
 #[cfg(any(unix, windows))]
 fn damage(name: &str) -> Option<(PathBuf, String)> {
-    let folders = FOLDERS.lock().unwrap_or_else(|p| p.into_inner()).clone();
-    let path = folders
-        .iter()
-        .map(|folder| folder.join(name))
-        .find(|path| path.is_file())?;
+    let path = kept_file(name)?;
     if rspice_results::store_reader::awaiting_check(&path) {
         return None;
     }
