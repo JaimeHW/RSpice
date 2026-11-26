@@ -238,7 +238,7 @@ fn probing_the_other_analysis_switches_the_page() {
         .simulation
         .retained
         .runs
-        .get(0)
+        .first()
         .expect("the run");
     let trace = SelectedResultTrace::from_run_indices(run, AC, 0).expect("the sweep's magnitude");
     user.app.state.workbench.outbox.push(PlotProbedTrace {
