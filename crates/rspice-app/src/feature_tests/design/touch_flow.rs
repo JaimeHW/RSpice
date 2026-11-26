@@ -356,7 +356,7 @@ fn a_phone_reaches_draw_wire_and_undo_from_the_tool_row() {
     phone.wake();
     // The row has room for two buttons beside Run: Select, and More tools.
     let more = phone.expect("More tools");
-    let run = phone.expect("Run active simulation plan at TT · 27 °C (F5)");
+    let run = phone.expect("Run active simulation plan at 27 °C (F5)");
     assert!(
         more.right() <= run.left(),
         "More tools {more:?} clears Run {run:?}"

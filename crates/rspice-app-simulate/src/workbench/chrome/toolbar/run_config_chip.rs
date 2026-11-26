@@ -19,7 +19,7 @@ use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 use rspice_simulation_contract::plan_model::AnalysisInstance;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
-use super::pvt_temperature_label;
+use super::{reference_processes, reference_pvt_label};
 use crate::product::{AnalysisInstanceId, ProcessCorner, SimulationPlanId};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -74,16 +74,6 @@ const UNIT_GAP: f32 = 4.0;
 const FIELD_PAD: f32 = 8.0;
 /// What the popover keeps clear of the screen's edges.
 const SCREEN_MARGIN: f32 = 8.0;
-/// The processes a reference can name, fast to slow, as a corner table
-/// orders them.
-const PROCESSES: [ProcessCorner; 5] = [
-    ProcessCorner::FF,
-    ProcessCorner::FS,
-    ProcessCorner::TT,
-    ProcessCorner::SF,
-    ProcessCorner::SS,
-];
-
 /// Every string the run chip measures, paints, and announces.
 struct RunConfigChipCopy {
     title: String,
@@ -105,10 +95,9 @@ fn run_config_chip_copy(model: &Model) -> RunConfigChipCopy {
     }
 }
 
-/// What Run runs at, as the chip's second line says it: the reference,
-/// `TT · 27 °C`, where a plain Run runs at that one point, by its temperature
-/// alone where no model library defines a process to tell it by; how many
-/// points otherwise.
+/// What Run runs at, as the chip's second line says it: the reference, as
+/// every control names it, where a plain Run runs at that one point; how
+/// many points otherwise.
 fn pvt_summary(model: &Model) -> String {
     let run_set = &model.sim_setup.run_set;
     let points = configured_pvt_count(model);
@@ -122,48 +111,7 @@ fn pvt_summary(model: &Model) -> String {
     if !at_reference {
         return format!("{points} PVT");
     }
-    let reference = model.sim_setup.reference_pvt;
-    let temperature = pvt_temperature_label(
-        reference.temperature_celsius,
-        model.preferences.quantity_presentation_policy(),
-    );
-    if library_processes(model, reference.process).is_empty() {
-        temperature
-    } else {
-        format!("{} \u{00b7} {temperature}", reference.process.short_name())
-    }
-}
-
-/// `TT · 27 °C`: a reference as the prompt that confirms it names it.
-pub(in crate::workbench) fn reference_label(
-    model: &Model,
-    process: ProcessCorner,
-    celsius: f64,
-) -> String {
-    format!(
-        "{} \u{00b7} {}",
-        process.short_name(),
-        pvt_temperature_label(celsius, model.preferences.quantity_presentation_policy())
-    )
-}
-
-/// The processes a reference can name, fast to slow: each one the run binds
-/// its models at, and the current one, which stays offered whatever the run
-/// makes of it. Empty where the process is no choice: no source the run
-/// reads binds by it, a library's corners or a PDK's process contracts, and
-/// the run binds at the current one.
-///
-/// What the run binds is read through the decision the run's own binding
-/// takes, so the row never offers a process the run refuses.
-fn library_processes(model: &Model, current: ProcessCorner) -> Vec<ProcessCorner> {
-    let choice = model.technology_inputs().reference_process_choice();
-    if !choice.selects() && choice.binds(current) {
-        return Vec::new();
-    }
-    PROCESSES
-        .into_iter()
-        .filter(|process| *process == current || choice.binds(*process))
-        .collect()
+    reference_pvt_label(model)
 }
 
 /// The analyses Run is for: the plan's enabled analyses that no other
@@ -502,7 +450,7 @@ impl PopoverRows {
             reference: ReferenceRow {
                 process: reference.process,
                 celsius: reference.temperature_celsius,
-                processes: library_processes(model, reference.process),
+                processes: reference_processes(model),
             },
         }
     }

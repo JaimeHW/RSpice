@@ -172,6 +172,26 @@ fn type_temperature(user: &mut User, text: &str) {
     key(user, egui::Key::Enter, egui::Modifiers::NONE);
 }
 
+/// The chip's line and the Run control name the reference alike, as
+/// `reference`: the process only where the reference offers one.
+fn assert_names_reference(user: &User, reference: &str) {
+    assert!(
+        chip(user).0.contains(&format!(", {reference};")),
+        "{}",
+        chip(user).0
+    );
+    let run = format!("Run active simulation plan at {reference} (F5)");
+    assert!(
+        user.named.iter().any(|(name, _)| *name == run),
+        "{run}: {:?}",
+        user.named
+            .iter()
+            .map(|(name, _)| name)
+            .filter(|name| name.starts_with("Run "))
+            .collect::<Vec<_>>()
+    );
+}
+
 /// The model libraries the project holds, none left.
 fn without_libraries(app: &mut RSpiceApp) {
     let manager = &mut app.state.model.model_library_manager;
@@ -422,20 +442,7 @@ fn the_process_shows_only_where_it_changes_what_the_run_binds() {
     let mut app = RSpiceApp::test_instance();
     without_libraries(&mut app);
     let mut user = User::new(app);
-    let plan = user
-        .app
-        .state
-        .model
-        .sim_setup
-        .active_plan_name()
-        .to_string();
-    assert!(
-        chip(&user)
-            .0
-            .contains(&format!(", plan {plan}, 27 \u{b0}C;")),
-        "{}",
-        chip(&user).0
-    );
+    assert_names_reference(&user, "27 \u{b0}C");
     press_chip(&mut user);
     assert!(in_popover(&user, TEMPERATURE_FIELD).is_some());
     for process in ["FF", "FS", "TT", "SF", "SS"] {
@@ -445,23 +452,11 @@ fn the_process_shows_only_where_it_changes_what_the_run_binds() {
 
     bind_corner_library(&mut user.app);
     user.settle();
-    assert!(
-        chip(&user)
-            .0
-            .contains(&format!(", plan {plan}, 27 \u{b0}C;")),
-        "{}",
-        chip(&user).0
-    );
+    assert_names_reference(&user, "27 \u{b0}C");
 
     follow_the_reference(&mut user.app);
     user.settle();
-    assert!(
-        chip(&user)
-            .0
-            .contains(&format!(", plan {plan}, TT \u{b7} 27 \u{b0}C;")),
-        "{}",
-        chip(&user).0
-    );
+    assert_names_reference(&user, "TT \u{b7} 27 \u{b0}C");
     press_chip(&mut user);
     assert!(in_popover(&user, "TT").is_some());
     assert!(in_popover(&user, "SS").is_some());
@@ -474,6 +469,7 @@ fn the_process_shows_only_where_it_changes_what_the_run_binds() {
     let reference = user.app.state.model.sim_setup.reference_pvt;
     assert_eq!(reference.process, ProcessCorner::SS);
     assert_eq!(reference.temperature_celsius, 27.0);
+    assert_names_reference(&user, "SS \u{b7} 27 \u{b0}C");
 }
 
 /// A PDK whose model sources are contracted by process makes the process a
@@ -494,11 +490,7 @@ fn a_pdk_that_binds_by_process_shows_the_process_without_library_corners() {
     );
     let mut user = User::new(app);
 
-    assert!(
-        chip(&user).0.contains(", TT \u{b7} 27 \u{b0}C;"),
-        "{}",
-        chip(&user).0
-    );
+    assert_names_reference(&user, "TT \u{b7} 27 \u{b0}C");
     press_chip(&mut user);
     for process in ["FF", "FS", "TT", "SF", "SS"] {
         assert!(in_popover(&user, process).is_some(), "{process}");

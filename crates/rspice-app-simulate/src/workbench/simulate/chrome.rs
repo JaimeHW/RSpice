@@ -10,8 +10,9 @@
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::run_preflight;
+use crate::workbench::chrome::toolbar::reference_pvt_label;
 use crate::workbench::chrome::toolbar::run_config_chip::{
-    RunChipRequest, deck_chip, reference_label, run_config_selector,
+    RunChipRequest, deck_chip, run_config_selector,
 };
 use crate::workbench::chrome::toolbar::simulate::{RunControls, RunEntry, run_controls};
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
@@ -94,7 +95,7 @@ fn apply_run_chip_request(cx: &mut Cx<'_, SimulateFeature>, request: RunChipRequ
         RunChipRequest::Reference(process, celsius) => {
             match commit_reference_pvt(cx, process, celsius) {
                 Ok(true) => {
-                    let label = reference_label(cx.model, process, celsius);
+                    let label = reference_pvt_label(cx.model);
                     cx.wb.prompt(format!("Reference PVT changed to {label}."));
                 }
                 Ok(false) => {}

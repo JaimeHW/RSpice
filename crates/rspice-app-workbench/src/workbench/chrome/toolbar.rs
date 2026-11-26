@@ -263,10 +263,14 @@ pub fn run_control_label_for(
     } else if model.simulation.execution.has_active_execution() {
         "Stop".to_owned()
     } else if layout.compact_shell {
-        format!(
-            "Run · {}",
-            model.sim_setup.reference_pvt.process.short_name()
-        )
+        if reference_processes(model).is_empty() {
+            "Run".to_owned()
+        } else {
+            format!(
+                "Run · {}",
+                model.sim_setup.reference_pvt.process.short_name()
+            )
+        }
     } else {
         "Run plan".to_owned()
     }
@@ -841,6 +845,55 @@ pub fn pvt_temperature_label(
         .format_temperature(celsius + 273.15, 1)
         .replace(".0 ", " ")
         .replace('-', "−")
+}
+
+/// The processes a reference can name, fast to slow, as a corner table
+/// orders them.
+const REFERENCE_PROCESSES: [crate::product::ProcessCorner; 5] = [
+    crate::product::ProcessCorner::FF,
+    crate::product::ProcessCorner::FS,
+    crate::product::ProcessCorner::TT,
+    crate::product::ProcessCorner::SF,
+    crate::product::ProcessCorner::SS,
+];
+
+/// The processes the reference offers, fast to slow: each one the run binds
+/// its models at, and the current one, which stays offered whatever the run
+/// makes of it. Empty where the process is no choice: no source the run
+/// reads binds by it, a library's corners or a PDK's process contracts, and
+/// the run binds at the current one.
+///
+/// What the run binds is read through the decision the run's own binding
+/// takes, so the reference never offers a process the run refuses.
+pub fn reference_processes(
+    model: &crate::workbench::app_state::Model,
+) -> Vec<crate::product::ProcessCorner> {
+    let current = model.sim_setup.reference_pvt.process;
+    let choice = model.technology_inputs().reference_process_choice();
+    if !choice.selects() && choice.binds(current) {
+        return Vec::new();
+    }
+    REFERENCE_PROCESSES
+        .into_iter()
+        .filter(|process| *process == current || choice.binds(*process))
+        .collect()
+}
+
+/// The reference PVT as every control names it: the run chip's line, its
+/// accessibility label, the Run control's and the prompt that confirms a
+/// change. `TT · 27 °C`, or `27 °C` alone where the process is no choice,
+/// [`reference_processes`] offering none.
+pub fn reference_pvt_label(model: &crate::workbench::app_state::Model) -> String {
+    let reference = model.sim_setup.reference_pvt;
+    let temperature = pvt_temperature_label(
+        reference.temperature_celsius,
+        model.preferences.quantity_presentation_policy(),
+    );
+    if reference_processes(model).is_empty() {
+        temperature
+    } else {
+        format!("{} \u{00b7} {temperature}", reference.process.short_name())
+    }
 }
 
 /// How wide the rule between two groups of tools is.

@@ -14,7 +14,7 @@ use crate::workbench::layout::LayoutSpec;
 use crate::workbench::simulate::commands::SimulateCommand;
 
 use super::{
-    context_separator, pvt_temperature_label, run_control_label_for, toolbar_icon_command,
+    context_separator, reference_pvt_label, run_control_label_for, toolbar_icon_command,
     toolbar_text_command,
 };
 
@@ -145,12 +145,9 @@ pub(in crate::workbench) fn run_controls(
             } else if let Some(deck) = &controls.deck {
                 format!("Run deck {deck}")
             } else {
-                let reference = model.sim_setup.reference_pvt;
-                let quantity_policy = model.preferences.quantity_presentation_policy();
                 format!(
-                    "Run active simulation plan at {} · {}",
-                    reference.process.short_name(),
-                    pvt_temperature_label(reference.temperature_celsius, quantity_policy)
+                    "Run active simulation plan at {}",
+                    reference_pvt_label(model)
                 )
             };
             let shortcut = &controls.primary.shortcut;
