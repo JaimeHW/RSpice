@@ -24,6 +24,7 @@ mod navigator_browser;
 mod op_inspector;
 mod optimization_apply;
 mod persistent_document;
+mod plot_page;
 mod result_import_adapters;
 mod result_import_workflow;
 mod retained_memo;
