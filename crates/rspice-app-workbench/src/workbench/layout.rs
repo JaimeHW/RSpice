@@ -246,9 +246,11 @@ impl LayoutSpec {
             // cutoff; only the compact toolbar projects icons alone.
             toolbar_labels: viewport_width > 820.0 && !short_landscape,
             toolbar_tool_limit: toolbar_tool_limit(viewport_width, viewport_height),
-            // The canonical run-configuration summary is present only when
-            // both workstation docks fit (the mockup removes it at 1260 px).
-            show_run_config_selector: matches!(width_class, WidthClass::Wide) && !short_landscape,
+            // The run chip stands wherever the toolbar is a workstation's:
+            // it is where the reference PVT is edited, and no page edits it
+            // instead, so a window too narrow for both docks keeps it too.
+            show_run_config_selector: matches!(width_class, WidthClass::Desktop | WidthClass::Wide)
+                && !short_landscape,
             // Every docked projection of a context dock carries its splitter;
             // only drawer and touch projections own an exact width.
             navigator_resizable: matches!(width_class, WidthClass::Desktop | WidthClass::Wide),

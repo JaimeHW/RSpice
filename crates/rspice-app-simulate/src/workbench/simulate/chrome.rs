@@ -26,12 +26,9 @@ use super::{SimulateFeature, invalidate_preflight};
 /// Draw the trailing group: the run controls, then the run chip where
 /// `layout` has room for it. Where Run runs a deck, the deck's
 /// chip stands in the plan chip's place, and pressing it brings the deck's
-/// tab to the front of the Netlist workspace. The Netlist workspace runs
-/// either, so there the chip naming what Run runs stays wherever the
-/// toolbar's tools keep their labels.
+/// tab to the front of the Netlist workspace.
 pub fn show_trailing(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui, layout: LayoutSpec) {
-    let names_target = layout.show_run_config_selector
-        || (cx.wb.workspace == Workspace::Netlist && layout.toolbar_labels);
+    let names_target = layout.show_run_config_selector;
     let mut controls = run_control_parts(cx, ui);
     let pressed = run_controls(ui, &controls, layout);
     let deck = controls.deck.take();
