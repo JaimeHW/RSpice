@@ -100,13 +100,12 @@ impl<'r> Host<'r> {
             &tokens,
             &mut self.envelopes,
             ModelsMaker {
-                build:
-                    |derived: &mut DerivedSeries,
-                     projection: ProjectionOptions<'_>,
-                     visibility: &HashMap<SourceWaveformPresentationKey, bool>| {
-                        *builds += 1;
-                        built(run, decks, derived, projection, visibility, colors)
-                    },
+                build: |derived: &mut DerivedSeries,
+                        projection: ProjectionOptions<'_>,
+                        visibility: &VisibilityOverrides| {
+                    *builds += 1;
+                    built(run, decks, derived, projection, visibility, colors)
+                },
                 retick: |derived: &mut DerivedSeries,
                          models: &mut [StripModel],
                          edited: &[&SourceWaveformPresentationKey],
@@ -121,6 +120,7 @@ impl<'r> Host<'r> {
                             colors,
                             looks,
                             palette: &tokens.color.traces,
+                            ticks,
                         },
                     )
                 },
@@ -170,7 +170,7 @@ fn built(
     decks: &ExecutedDeckArchive,
     derived: &mut DerivedSeries,
     projection: ProjectionOptions<'_>,
-    visibility: &HashMap<SourceWaveformPresentationKey, bool>,
+    visibility: &VisibilityOverrides,
     colors: &HashMap<SourceWaveformPresentationKey, TraceColor>,
 ) -> Vec<StripModel> {
     let tokens = Tokens::default();

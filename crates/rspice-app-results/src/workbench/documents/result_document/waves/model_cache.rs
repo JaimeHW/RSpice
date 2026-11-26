@@ -89,7 +89,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
         ModelsMaker {
             build: |derived: &mut DerivedSeries,
                     projection: ProjectionOptions<'_>,
-                    visibility: &std::collections::HashMap<SourceWaveformPresentationKey, bool>| {
+                    visibility: &rspice_results_ui::session::VisibilityOverrides| {
             // Whether each analysis is complete, from the memo of its
             // evidence: the validator reads every column of the run.
             let display_runs = simulation.display_runs();
@@ -178,6 +178,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
                         colors: &session.waveform_colors,
                         looks: &session.waveform_looks,
                         palette: &t.color.traces,
+                        ticks: &session.waveform_visibility,
                     },
                 )
             },

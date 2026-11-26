@@ -21,7 +21,8 @@ use rspice_results::{
 };
 use rspice_ui_kit::plot::{CursorId, CursorPair, DecimationCache};
 use rspice_vocabulary::product::{DatasetId, ResultDocumentId};
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 /// One axis interval, low then high, in data space.
 pub type AxisExtent = (f64, f64);
@@ -631,6 +632,45 @@ pub struct VisibilityOverrides {
     /// Each revision an edit left while something held it, oldest first,
     /// with where in `edited` the edits since it begin.
     left: Vec<(rspice_vocabulary::source_revision::SourceRevision, usize)>,
+    /// The colour each signal the reader put on the plot holds.
+    places: PlotPlaces,
+}
+
+/// The palette place each signal the reader put on the plot holds among the
+/// curves they added to its analysis, from when it went on until it comes
+/// off: a signal plotted next takes the lowest place free, so it gets a
+/// colour of its own and none on the plot changes colour.
+#[derive(Debug, Clone, Default)]
+struct PlotPlaces {
+    held: HashMap<SourceWaveformPresentationKey, usize>,
+    /// By analysis: the place after every one handed out, and the places
+    /// given back, lowest first.
+    pools: HashMap<AnalysisPresentationKey, (usize, BinaryHeap<Reverse<usize>>)>,
+}
+
+impl PlotPlaces {
+    fn hold(&mut self, key: &SourceWaveformPresentationKey) {
+        if self.held.contains_key(key) {
+            return;
+        }
+        let (next, freed) = self.pools.entry(key.analysis()).or_default();
+        let place = freed.pop().map_or_else(
+            || {
+                *next += 1;
+                *next - 1
+            },
+            |Reverse(place)| place,
+        );
+        self.held.insert(key.clone(), place);
+    }
+
+    fn release(&mut self, key: &SourceWaveformPresentationKey) {
+        if let Some(place) = self.held.remove(key)
+            && let Some((_, freed)) = self.pools.get_mut(&key.analysis())
+        {
+            freed.push(Reverse(place));
+        }
+    }
 }
 
 impl Clone for VisibilityOverrides {
@@ -643,6 +683,7 @@ impl Clone for VisibilityOverrides {
             set_since: self.set_since.clone(),
             edited: Vec::new(),
             left: Vec::new(),
+            places: self.places.clone(),
         }
     }
 }
@@ -657,6 +698,9 @@ impl VisibilityOverrides {
     /// (`Some(false)`) or leaves it to its dataset (`None`); kept as one the
     /// reader set. Whether that changed anything.
     pub fn set(&mut self, key: SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
+        if visible == Some(true) {
+            self.places.hold(&key);
+        }
         if !self.put(&key, visible) {
             return false;
         }
@@ -664,6 +708,24 @@ impl VisibilityOverrides {
             set.push(key);
         }
         true
+    }
+
+    /// The palette place `key`'s signal holds among the curves the reader
+    /// added to its analysis' plot, from when they put it on; `None` for one
+    /// they did not put on, or took off since.
+    pub fn plot_place(&self, key: &SourceWaveformPresentationKey) -> Option<usize> {
+        self.places.held.get(key).copied()
+    }
+
+    /// [`Self::plot_place`] of each signal of `analysis` that holds one, by
+    /// its name.
+    pub fn plot_places(&self, analysis: AnalysisPresentationKey) -> HashMap<&str, usize> {
+        self.places
+            .held
+            .iter()
+            .filter(|(key, _)| key.analysis() == analysis)
+            .map(|(key, place)| (key.source_name(), *place))
+            .collect()
     }
 
     /// [`Self::set`] for what a view draws, not what the reader set.
@@ -732,7 +794,10 @@ impl VisibilityOverrides {
                     true
                 }
             },
-            None => self.overrides.remove(key).is_some(),
+            None => {
+                self.places.release(key);
+                self.overrides.remove(key).is_some()
+            }
         };
         if changed {
             self.note(key.clone());

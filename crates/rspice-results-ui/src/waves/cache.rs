@@ -206,7 +206,7 @@ impl ModelsCache {
         B: FnOnce(
             &mut crate::derived::DerivedSeries,
             ProjectionOptions<'_>,
-            &HashMap<SourceWaveformPresentationKey, bool>,
+            &crate::session::VisibilityOverrides,
         ) -> Vec<StripModel>,
         R: FnOnce(
             &mut crate::derived::DerivedSeries,
@@ -349,7 +349,7 @@ impl ModelsCache {
 pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
     models: &mut [StripModel],
     active_run: Option<&SimulationRun<A>>,
-    overrides: &HashMap<SourceWaveformPresentationKey, bool>,
+    overrides: &crate::session::VisibilityOverrides,
     colors: &HashMap<SourceWaveformPresentationKey, TraceColor>,
     hidden_family_traces: &HashSet<FamilyTraceVisibilityKey>,
     palette: &[egui::Color32],
@@ -373,7 +373,8 @@ pub fn apply_waveform_visibility<A: AsRef<AnalysisResult<RetainedTrace>>>(
             trace.visible = shown && family_shown;
         }
         model.forget_trace_panes();
-        let first_lane_slot = rank_palette_slots(model, analysis, &source_visible, colors, palette);
+        let first_lane_slot =
+            rank_palette_slots(model, analysis, &source_visible, overrides, colors, palette);
         for lane in &mut model.lane_traces {
             let key = SourceWaveformPresentationKey::new(
                 model.analysis_key,
@@ -523,18 +524,24 @@ pub(crate) fn rank_lane_hues(
 ///
 /// The curves the dataset plots rank first, in column order, and keep that
 /// rank whatever the reader hides, so hiding one recolours none of the
-/// others. A curve the reader adds takes the next place after them, as a
-/// waveform viewer gives a newly plotted signal the next free colour, so
-/// the curves on the strip take distinct hues before any repeats one with a
-/// dash. A real and an imaginary part rank apart; a family's members share
-/// their source's place; an overlay run's curve takes the place of the
-/// active run's curve it is merged with. `source_visible` is each trace's
-/// source visibility with the reader's overrides applied. Returns the first
-/// place after the shown curves'.
+/// others. A curve the reader adds comes after them, at the place its signal
+/// took when they plotted it (see [`VisibilityOverrides::plot_place`]), as a
+/// waveform viewer gives a newly plotted signal the next free colour: adding
+/// one recolours none on the plot, and the curves on the strip take
+/// distinct hues before any repeats one with a dash. One with no place of
+/// its own takes the lowest place free, in column order. A real and an
+/// imaginary part rank apart; a family's members share their source's
+/// place; an overlay run's curve takes the place of the active run's curve
+/// it is merged with. `source_visible` is each trace's source visibility
+/// with the reader's overrides applied. Returns the first place after the
+/// shown curves'.
+///
+/// [`VisibilityOverrides::plot_place`]: crate::session::VisibilityOverrides::plot_place
 fn rank_palette_slots(
     model: &mut StripModel,
     analysis: &AnalysisResult<RetainedTrace>,
     source_visible: &[bool],
+    ticks: &crate::session::VisibilityOverrides,
     colors: &HashMap<SourceWaveformPresentationKey, TraceColor>,
     palette: &[egui::Color32],
 ) -> usize {
@@ -546,8 +553,9 @@ fn rank_palette_slots(
     // Each source once, in the order its first curve comes, found by its key:
     // a strip can draw a million curves, so none is found by searching the
     // others.
-    let mut sources: Vec<((usize, TraceKind), bool, bool)> = Vec::new();
+    let mut sources: Vec<RankedSource> = Vec::new();
     let mut source_at = HashMap::<(usize, TraceKind), usize>::new();
+    let held = ticks.plot_places(model.analysis_key);
     for (trace, shown) in model.traces.iter().zip(source_visible) {
         if !ranked(trace) {
             continue;
@@ -558,38 +566,49 @@ fn rank_palette_slots(
             .get(trace.waveform_index)
             .is_some_and(|waveform| waveform.visible);
         match source_at.entry(key) {
-            std::collections::hash_map::Entry::Occupied(at) => sources[*at.get()].2 |= *shown,
+            std::collections::hash_map::Entry::Occupied(at) => {
+                sources[*at.get()].shown |= *shown;
+            }
             std::collections::hash_map::Entry::Vacant(at) => {
                 at.insert(sources.len());
-                sources.push((key, dataset, *shown));
+                sources.push(RankedSource {
+                    key,
+                    dataset,
+                    shown: *shown,
+                    place: held.get(trace.source_waveform_name.as_str()).copied(),
+                });
             }
         }
     }
     // The curves the dataset plots keep the places they were counted to as
     // the model was built, the ones the reader took off the plot among them.
     let plotted = model.dataset_plotted;
-    let added = sources
-        .iter()
-        .filter(|(key, dataset, shown)| {
-            !(*dataset && model.dataset_ranks.contains_key(key)) && *shown
-        })
-        .count();
-    let (mut added_rank, mut spare_rank) = (plotted, plotted + added);
-    let slots: HashMap<(usize, TraceKind), usize> = sources
-        .iter()
-        .map(|(key, dataset, shown)| {
-            if *dataset && let Some(&rank) = model.dataset_ranks.get(key) {
-                return (*key, rank);
-            }
-            let counter = if *shown {
-                &mut added_rank
-            } else {
-                &mut spare_rank
-            };
-            *counter += 1;
-            (*key, *counter - 1)
-        })
-        .collect();
+    let mut slots = HashMap::<(usize, TraceKind), usize>::with_capacity(sources.len());
+    let mut places = AddedPlaces::default();
+    for source in &sources {
+        if source.dataset
+            && let Some(&rank) = model.dataset_ranks.get(&source.key)
+        {
+            slots.insert(source.key, rank);
+        } else if source.shown
+            && let Some(place) = places.take(source.place)
+        {
+            slots.insert(source.key, plotted + place);
+        }
+    }
+    for source in sources.iter().filter(|source| source.shown) {
+        slots
+            .entry(source.key)
+            .or_insert_with(|| plotted + places.lowest_free());
+    }
+    let end = plotted + places.end();
+    let mut spare_rank = end;
+    for source in &sources {
+        slots.entry(source.key).or_insert_with(|| {
+            spare_rank += 1;
+            spare_rank - 1
+        });
+    }
     let mut merged = HashMap::new();
     let analysis_key = model.analysis_key;
     for trace in model.traces.iter_mut().filter(|trace| ranked(trace)) {
@@ -634,5 +653,43 @@ fn rank_palette_slots(
             trace.color = color;
         }
     }
-    plotted + added
+    end
+}
+
+/// A signal's curves on a strip as their palette place is decided: whether
+/// the dataset plots them, whether the reader shows them, and the place the
+/// signal holds since the reader plotted it.
+struct RankedSource {
+    key: (usize, super::TraceKind),
+    dataset: bool,
+    shown: bool,
+    place: Option<usize>,
+}
+
+/// The places among a strip's added curves given out so far: the place each
+/// signal holds first, then the lowest free to the curves with none.
+#[derive(Default)]
+pub(crate) struct AddedPlaces {
+    taken: HashSet<usize>,
+    lowest: usize,
+}
+
+impl AddedPlaces {
+    /// `place`, unless no place was asked for or a curve before took it.
+    pub(crate) fn take(&mut self, place: Option<usize>) -> Option<usize> {
+        place.filter(|place| self.taken.insert(*place))
+    }
+
+    pub(crate) fn lowest_free(&mut self) -> usize {
+        while self.taken.contains(&self.lowest) {
+            self.lowest += 1;
+        }
+        self.taken.insert(self.lowest);
+        self.lowest
+    }
+
+    /// The first place after every one given out.
+    pub(crate) fn end(&self) -> usize {
+        self.taken.iter().max().map_or(0, |last| last + 1)
+    }
 }

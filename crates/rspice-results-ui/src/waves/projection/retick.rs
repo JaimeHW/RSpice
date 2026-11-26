@@ -24,6 +24,9 @@ pub struct Retick<'a, A> {
     pub looks: &'a HashMap<SourceWaveformPresentationKey, WaveformLook>,
     /// The canvas palette the curves take their places in.
     pub palette: &'a [egui::Color32],
+    /// The reader's ticks, for the palette place each signal they plotted
+    /// holds.
+    pub ticks: &'a crate::session::VisibilityOverrides,
 }
 
 /// Change `models`, built from the reader's ticks, by the ticks of the
@@ -179,29 +182,47 @@ fn merge_by_column(traces: &mut Vec<StripTrace>, fresh: Vec<StripTrace>) {
 
 /// Give each curve of `model` its place in the palette's cycle as a build
 /// does: a curve the dataset plots keeps its rank among them, and the others
-/// follow in column order. Only a curve whose place moved, or that was just
-/// added, takes its colour again. Returns the first place after the curves'.
+/// follow, each at the place its signal holds, else at the lowest free in
+/// column order. Only a curve whose place moved, or that was just added,
+/// takes its colour again. Returns the first place after the curves'.
 fn rank_curves<A>(
     model: &mut StripModel,
     analysis: &AnalysisResult<RetainedTrace>,
     with: &Retick<'_, A>,
 ) -> usize {
-    let mut added = model.dataset_plotted;
+    let plotted = model.dataset_plotted;
     if with.palette.is_empty() {
         return 0;
     }
     let analysis_key: AnalysisPresentationKey = model.analysis_key;
     let ranks = &model.dataset_ranks;
-    for trace in &mut model.traces {
+    let held = with.ticks.plot_places(analysis_key);
+    let mut places = crate::waves::cache::AddedPlaces::default();
+    let mut slots: Vec<Option<usize>> = model
+        .traces
+        .iter()
+        .map(|trace| {
+            let dataset = analysis
+                .waveforms
+                .get(trace.waveform_index)
+                .is_some_and(|waveform| waveform.visible)
+                .then(|| ranks.get(&(trace.waveform_index, trace.kind)).copied())
+                .flatten();
+            dataset.or_else(|| {
+                places
+                    .take(held.get(trace.source_waveform_name.as_str()).copied())
+                    .map(|place| plotted + place)
+            })
+        })
+        .collect();
+    for slot in slots.iter_mut().filter(|slot| slot.is_none()) {
+        *slot = Some(plotted + places.lowest_free());
+    }
+    for (trace, slot) in model.traces.iter_mut().zip(slots) {
+        let Some(slot) = slot else {
+            continue;
+        };
         let column = analysis.waveforms.get(trace.waveform_index);
-        let dataset = column
-            .is_some_and(|waveform| waveform.visible)
-            .then(|| ranks.get(&(trace.waveform_index, trace.kind)).copied())
-            .flatten();
-        let slot = dataset.unwrap_or_else(|| {
-            added += 1;
-            added - 1
-        });
         if trace.palette_slot == Some(slot) {
             continue;
         }
@@ -219,5 +240,5 @@ fn rank_curves<A>(
             crate::waves::cache::give_look(trace, analysis_key, with.looks);
         }
     }
-    added
+    plotted + places.end()
 }
