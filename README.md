@@ -20,6 +20,8 @@ noise.
 
 <img src="assets/screenshots/schematic-cross-probe.webp" alt="The schematic editor with the LM741 example: the probed input and output nets take their trace colours, and the Plot dock below shows the op-amp's input and amplified output" width="100%" />
 
+<img src="assets/screenshots/results-mixed-signal.png" alt="The Results workspace on an 8-bit SAR ADC built from a Verilog register and testbench, a Verilog-A comparator and a SPICE capacitor DAC: clock, sample, comparator and end-of-conversion logic lanes, the output code as a hex bus, the sine input against the DAC's reconstructed staircase, and cursors A and B spanning one conversion" width="100%" />
+
 </div>
 
 ---
@@ -35,8 +37,6 @@ compact models generated from their Verilog-A sources. Mixed-signal decks are
 first-class: RSpice has both halves of Verilog-AMS, so digital and real-number
 modules simulate alongside the analog solve, with connect modules inserted
 automatically where a deck node joins analog and discrete ports.
-
-<img src="assets/screenshots/results-mixed-signal.png" alt="The Results workspace on an 8-bit SAR ADC built from a Verilog register and testbench, a Verilog-A comparator and a SPICE capacitor DAC: clock, sample, comparator and end-of-conversion logic lanes, the output code as a hex bus, the sine input against the DAC's reconstructed staircase, and cursors A and B spanning one conversion" width="100%" />
 
 RSpice has one engine behind every interface. The command line and the desktop
 and browser application run the same `rspice-core` code, so a result never depends on how the run was launched. Where a deck needs physics RSpice does not have, the answer is a
