@@ -54,11 +54,12 @@ pub(in crate::workbench) fn answer_surface_request(
 
 /// Plot the trace a probe named through the tick the results workspace's
 /// Data Browser uses, so the row, the legend and the strip all show it,
-/// select it, and say what changed.
+/// select it, and say what changed. The dock's Plot page shows the trace's
+/// analysis.
 pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: PlotProbedTrace) {
     use rspice_app_results::workbench::docks::navigator::results_actions::set_result_quantity_ticked;
     use rspice_app_results::workbench::documents::result_document::{
-        plot_alone, plot_on_own_strip, waveform_plotted,
+        plot_alone, plot_on_own_strip, show_on_plot_page, waveform_plotted,
     };
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
     use rspice_results_ui::selection::ResultBrowserSelectionKey;
@@ -92,10 +93,12 @@ pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: Plot
             tick,
         ),
     }
+    let analysis = trace.analysis_key();
     state.results.select_probed_trace(trace);
     // A probe asks to see the signal: the dock opens on its plot, whether
-    // or not the reader put the plot away before.
+    // or not the reader put the plot away before, showing its analysis.
     if tick && state.workbench.plots_in_dock() {
+        show_on_plot_page(&mut state.results_parts(), analysis);
         state.workbench.show_plot_page();
     }
     state.prompt(match (plot, plotted, tick) {
@@ -118,7 +121,7 @@ pub(in crate::workbench) fn plot_probed_difference(
     probed: PlotProbedDifference,
 ) {
     use rspice_app_results::workbench::documents::result_document::{
-        keep_for_next_run, keep_plotted_expression,
+        keep_for_next_run, keep_plotted_expression, show_on_plot_page,
     };
 
     let PlotProbedDifference {
@@ -149,8 +152,9 @@ pub(in crate::workbench) fn plot_probed_difference(
         (Ok(_), Some(waiting)) => state.prompt(waiting),
         (Ok(added), None) => {
             // A probe asks to see the signal, as a single net's probe does:
-            // the dock opens on its plot.
+            // the dock opens on its plot, showing its analysis.
             if state.workbench.plots_in_dock() {
+                show_on_plot_page(&mut state.results_parts(), analysis);
                 state.workbench.show_plot_page();
             }
             state.prompt(if added {
