@@ -824,7 +824,11 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     if response.double_clicked() {
         output.viewport = Some(SharedXViewChange::Fit);
     }
-    theme::paint_focus_ring(ui, &response, rect);
+    // A click takes the keyboard so the keys above work, and the ring that
+    // shows where the keyboard is stays for focus Tab moved here.
+    if theme::focus_is_visible(ui.ctx(), &response) {
+        theme::paint_focus_ring(ui, &response, rect);
+    }
     response.on_hover_text(hover.unwrap_or_else(|| {
         "Drag an end to zoom in \u{00b7} drag the window to pan \u{00b7} click to recenter \u{00b7} \
          wheel to zoom \u{00b7} double-click or F for the full view \u{00b7} End follows a \
