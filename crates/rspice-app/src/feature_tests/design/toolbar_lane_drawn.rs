@@ -204,20 +204,14 @@ fn the_tool_lane_reaches_the_run_controls_at_every_desktop_width() {
             .map(|(_, rect)| rect.left())
             .filter(|left| *left > save.right())
             .fold(f32::INFINITY, f32::min);
-        let process = replay
-            .app
-            .state
-            .model
-            .sim_setup
-            .reference_pvt
-            .process
-            .short_name();
+        // The run chip leads the run controls wherever it stands; it names
+        // the reference PVT the deleted PVT chip used to.
         let run_controls = controls
             .iter()
             .filter(|(label, _)| {
                 label.starts_with("Run active simulation plan")
                     || label.starts_with("Simulation plan")
-                    || (label.starts_with(process) && label.contains(" \u{b7} "))
+                    || label.starts_with("Analysis ")
             })
             .map(|(_, rect)| rect.left())
             .fold(f32::INFINITY, f32::min);
