@@ -293,3 +293,69 @@ fn a_net_ticked_after_the_lanes_were_drawn_stays_on_the_plot() {
     };
     assert_eq!(order, &vec![net("D(clk)"), net("D(addr[0])")]);
 }
+
+/// A declared bus opened and closed again keeps its members on the plot.
+/// The document holds an opened bus as a user bus over its nets, and
+/// closing it takes that bus away, which takes its row out of the order;
+/// the order the edits write must put the row back, or the nets the bus
+/// read are listed nowhere and leave the plot.
+#[test]
+fn closing_a_declared_bus_keeps_its_members_plotted() {
+    use crate::results::visualization_document::EventLaneRef;
+    use rspice_results_ui::waves::lanes::{BusView, EventLaneLayout, LaneKey};
+
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        crate::workbench::documents::result_document::test_fixtures::events_analysis(),
+    );
+    let run = host.model.simulation.active_run().expect("a run");
+    let analysis = &run.analyses[0];
+    let names = lanes::EventNames::of(analysis, None).expect("an event history");
+    let source = crate::workbench::documents::result_document::create_document::source_reference(
+        run,
+        analysis,
+        digest(0x53),
+    )
+    .expect("a source");
+    let mut document = VisualizationDocument::new("Waves", vec![source]).expect("a document");
+    let pane = document.panes()[0].id;
+    let plotted = ["D(clk)", "D(addr[1])", "D(addr[0])"];
+    let drawn = |expanded: bool| EventLaneLayout {
+        order: vec![
+            LaneKey::Signal("D(clk)".to_owned()),
+            LaneKey::Bus("addr[1:0]".to_owned()),
+        ],
+        buses: [(
+            "addr[1:0]".to_owned(),
+            BusView {
+                expanded,
+                ..BusView::default()
+            },
+        )]
+        .into(),
+        ..EventLaneLayout::default()
+    };
+    for expanded in [false, true, false] {
+        let edits = lanes::lane_edits(&document, pane, &names, &drawn(expanded), &plotted);
+        document
+            .transact(document.revision(), edits)
+            .expect("the lanes' edits apply");
+    }
+    assert!(
+        document
+            .event_lane_order(pane)
+            .contains(&EventLaneRef::Bus {
+                name: "addr[1:0]".to_owned()
+            }),
+        "the bus keeps its row: {:?}",
+        document.event_lane_order(pane)
+    );
+    let listed =
+        lanes::plotted_history_nets(&document, pane, &names).expect("the pane lists lanes");
+    for member in ["D(addr[1])", "D(addr[0])"] {
+        assert!(
+            listed.contains(member),
+            "{member} stays plotted: {listed:?}"
+        );
+    }
+}

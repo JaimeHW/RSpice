@@ -350,10 +350,12 @@ pub(in crate::workbench::documents::result_document) fn lane_edits(
         .iter()
         .filter(|bus| bus.pane_id == pane)
         .collect();
+    let mut removed: HashSet<&str> = HashSet::new();
     for gone in held
         .iter()
         .filter(|held| !desired.iter().any(|wanted| wanted.name == held.name))
     {
+        removed.insert(gone.name.as_str());
         edits.push(DocumentEdit::RemoveUserBus {
             pane_id: pane,
             name: gone.name.clone(),
@@ -423,7 +425,14 @@ pub(in crate::workbench::documents::result_document) fn lane_edits(
                 name: (*name).to_owned(),
             }),
     );
-    if order.as_slice() != document.event_lane_order(pane) {
+    // Removing a user bus takes its row out of the order too. A declared bus
+    // read the default way again is still a row, the one that keeps its
+    // members on the plot, so the order is compared with what the document
+    // holds once the removals are made.
+    let held_order = document.event_lane_order(pane).iter().filter(
+        |lane| !matches!(lane, EventLaneRef::Bus { name } if removed.contains(name.as_str())),
+    );
+    if !order.iter().eq(held_order) {
         edits.push(DocumentEdit::SetEventLaneOrder(EventLaneOrder {
             pane_id: pane,
             lanes: order,
