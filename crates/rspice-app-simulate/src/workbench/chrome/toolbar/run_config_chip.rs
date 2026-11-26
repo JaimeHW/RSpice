@@ -16,7 +16,6 @@
 
 use egui::{Rect, Ui, Vec2, pos2, vec2};
 use rspice_simulation_contract::analysis_draft::AnalysisDraft;
-use rspice_simulation_contract::plan_model::AnalysisInstance;
 use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 use super::{reference_processes, reference_pvt_label};
@@ -114,32 +113,10 @@ fn pvt_summary(model: &Model) -> String {
     reference_pvt_label(model)
 }
 
-/// The analyses Run is for: the plan's enabled analyses that no other
-/// enabled analysis runs as its prerequisite, in plan order. An AC sweep's
-/// operating point runs because the sweep needs it, so the sweep is what the
-/// chip names.
-fn leading_analyses(model: &Model) -> Vec<&AnalysisInstance> {
-    let enabled: Vec<&AnalysisInstance> = model.sim_setup.enabled_analysis_instances().collect();
-    let prerequisite = |candidate: &AnalysisInstance| {
-        enabled.iter().any(|other| {
-            other
-                .dependencies()
-                .iter()
-                .any(|dependency| dependency.target() == candidate.id())
-        })
-    };
-    let leading: Vec<&AnalysisInstance> = enabled
-        .iter()
-        .copied()
-        .filter(|candidate| !prerequisite(candidate))
-        .collect();
-    if leading.is_empty() { enabled } else { leading }
-}
-
 /// The analysis Run runs, as the chip's first line names it: the lead
 /// analysis and its main number, and how many more run beside it.
 fn analysis_title(model: &Model) -> String {
-    let leading = leading_analyses(model);
+    let leading = model.sim_setup.leading_analysis_instances();
     let Some(lead) = leading.first() else {
         return "No analysis".to_owned();
     };

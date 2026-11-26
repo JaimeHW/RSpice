@@ -21,6 +21,29 @@ impl SimulationSetup {
             .filter(|instance| instance.enabled())
     }
 
+    /// The analyses Run is for: the enabled analyses that no other enabled
+    /// analysis runs as its prerequisite, in plan order; every enabled one
+    /// when each is another's prerequisite. An AC sweep's operating point
+    /// runs because the sweep needs it, so the sweep leads. The first is the
+    /// plan's lead analysis.
+    pub fn leading_analysis_instances(&self) -> Vec<&AnalysisInstance> {
+        let enabled: Vec<&AnalysisInstance> = self.enabled_analysis_instances().collect();
+        let prerequisite = |candidate: &AnalysisInstance| {
+            enabled.iter().any(|other| {
+                other
+                    .dependencies()
+                    .iter()
+                    .any(|dependency| dependency.target() == candidate.id())
+            })
+        };
+        let leading: Vec<&AnalysisInstance> = enabled
+            .iter()
+            .copied()
+            .filter(|candidate| !prerequisite(candidate))
+            .collect();
+        if leading.is_empty() { enabled } else { leading }
+    }
+
     /// Number of enabled stable instances, including multiple instances of
     /// the same analysis kind.
     pub fn enabled_analysis_instance_count(&self) -> usize {
