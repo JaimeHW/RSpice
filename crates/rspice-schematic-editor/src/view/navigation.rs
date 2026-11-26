@@ -124,7 +124,8 @@ pub fn frame_world_rect(
     );
 }
 
-/// What the mouse wheel does over a canvas.
+/// What a mouse wheel's notches do over a canvas. A trackpad is not a wheel:
+/// two fingers drag the drawing as they would a page, and pinch zooms.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WheelAction {
     /// Zoom about the pointer; Shift+wheel scrolls sideways.
@@ -300,6 +301,39 @@ pub fn handle_viewport_navigation(
     // Cursor-centered zoom, matching professional CAD tools.
     if response.hovered() {
         let wheel = raw_wheel_navigation_delta(ui);
+        let cursor = response.hover_pos();
+        // A trackpad pinch zooms about the pointer; it is the reader's own
+        // hand, so neither the rate nor the inversion of the wheel applies.
+        if (wheel.pinch - 1.0).abs() > f32::EPSILON
+            && let Some(cursor_pos) = cursor
+        {
+            apply_zoom_about(
+                zoom,
+                pan,
+                available,
+                cursor_pos,
+                f64::from(wheel.pinch),
+                min_zoom,
+            );
+        }
+        // Two fingers on a trackpad drag the drawing as they would a page,
+        // whatever the wheel does; with Command (Ctrl) held they zoom.
+        if wheel.glide != Vec2::ZERO {
+            if !wheel.zoom_modifier {
+                apply_pan_delta(pan, wheel.glide);
+            } else if wheel.glide.y != 0.0
+                && let Some(cursor_pos) = cursor
+            {
+                apply_zoom_about(
+                    zoom,
+                    pan,
+                    available,
+                    cursor_pos,
+                    navigation.wheel_zoom_factor(wheel.glide.y),
+                    min_zoom,
+                );
+            }
+        }
         let zooms = match navigation.wheel {
             WheelAction::Zoom => !wheel.shift,
             WheelAction::Scroll => wheel.zoom_modifier,
@@ -389,7 +423,12 @@ pub fn apply_edge_pan(
 /// One frame of wheel travel, in canonical points, and the modifiers held
 /// while it happened.
 struct WheelTravel {
+    /// A wheel's notches.
     delta: Vec2,
+    /// What scrolls by the point, as a trackpad's two fingers do.
+    glide: Vec2,
+    /// A trackpad pinch, as a zoom factor: 1 for none.
+    pinch: f32,
     shift: bool,
     /// Ctrl, or Command on a Mac.
     zoom_modifier: bool,
@@ -399,23 +438,33 @@ fn raw_wheel_navigation_delta(ui: &Ui) -> WheelTravel {
     ui.input(|input| {
         let mut travel = WheelTravel {
             delta: Vec2::ZERO,
+            glide: Vec2::ZERO,
+            pinch: 1.0,
             shift: input.modifiers.shift,
             zoom_modifier: input.modifiers.command || input.modifiers.ctrl,
         };
         for event in &input.raw.events {
-            let Event::MouseWheel {
-                unit,
-                delta,
-                phase: TouchPhase::Move,
-                modifiers,
-            } = event
-            else {
-                continue;
+            let (unit, delta, modifiers) = match event {
+                Event::MouseWheel {
+                    unit,
+                    delta,
+                    phase: TouchPhase::Move,
+                    modifiers,
+                } => (unit, delta, modifiers),
+                Event::Zoom(factor) => {
+                    travel.pinch *= factor;
+                    continue;
+                }
+                _ => continue,
             };
             travel.shift |= modifiers.shift;
             travel.zoom_modifier |= modifiers.command || modifiers.ctrl;
-            travel.delta.x += canonical_wheel_points(*unit, delta.x);
-            travel.delta.y += canonical_wheel_points(*unit, delta.y);
+            if *unit == MouseWheelUnit::Point {
+                travel.glide += *delta;
+            } else {
+                travel.delta.x += canonical_wheel_points(*unit, delta.x);
+                travel.delta.y += canonical_wheel_points(*unit, delta.y);
+            }
         }
         travel
     })
@@ -830,22 +879,50 @@ mod tests {
         assert!(zoom < 1.0, "the shipped wheel zooms");
     }
 
+    /// With the wheel zooming, as it ships, two fingers on a trackpad still
+    /// drag the drawing and leave the zoom alone, and a pinch zooms.
+    #[test]
+    fn a_trackpad_pans_with_two_fingers_and_zooms_with_a_pinch() {
+        let glide = Event::MouseWheel {
+            unit: MouseWheelUnit::Point,
+            delta: egui::vec2(12.0, -30.0),
+            phase: TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let (zoom, pan) = navigate_once(CanvasNavigation::default(), egui::Modifiers::NONE, glide);
+        assert_eq!((zoom, pan), (1.0, (12.0, -30.0)));
+        let (zoom, _) = navigate_once(
+            CanvasNavigation::default(),
+            egui::Modifiers::NONE,
+            Event::Zoom(1.25),
+        );
+        assert!((zoom - 1.25).abs() < 1e-6, "{zoom}");
+    }
+
     /// One notch of wheel-down over the middle of a canvas, returning the
     /// zoom and pan it leaves behind.
     fn wheel_once(navigation: CanvasNavigation, modifiers: egui::Modifiers) -> (f64, (f64, f64)) {
+        let notch = Event::MouseWheel {
+            unit: MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -1.0),
+            phase: TouchPhase::Move,
+            modifiers,
+        };
+        navigate_once(navigation, modifiers, notch)
+    }
+
+    /// `event` over the middle of a canvas, returning the zoom and pan it
+    /// leaves behind.
+    fn navigate_once(
+        navigation: CanvasNavigation,
+        modifiers: egui::Modifiers,
+        event: Event,
+    ) -> (f64, (f64, f64)) {
         let ctx = egui::Context::default();
         let canvas = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0));
         let mut zoom = 1.0;
         let mut pan = (0.0, 0.0);
-        for events in [
-            vec![Event::PointerMoved(canvas.center())],
-            vec![Event::MouseWheel {
-                unit: MouseWheelUnit::Line,
-                delta: egui::vec2(0.0, -1.0),
-                phase: TouchPhase::Move,
-                modifiers,
-            }],
-        ] {
+        for events in [vec![Event::PointerMoved(canvas.center())], vec![event]] {
             let _ = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(canvas),
