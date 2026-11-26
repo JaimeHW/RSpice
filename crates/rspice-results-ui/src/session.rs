@@ -1317,6 +1317,34 @@ impl ResultViewerState {
         self.plot_tool == ResultPlotTool::HorizontalCursor
     }
 
+    /// Whether any cursor stands: A or B, or a horizontal cursor on a pane.
+    pub fn any_cursor_placed(&self) -> bool {
+        self.cursors.any()
+            || self
+                .horizontal_cursors
+                .values()
+                .any(|cursors| cursors.iter().any(Option::is_some))
+    }
+
+    /// Take every cursor off the plot: the A/B pair and each pane's
+    /// horizontal cursors. The tools stay as they are.
+    pub fn remove_all_cursors(&mut self) {
+        self.clear_cursors();
+        self.horizontal_cursors.clear();
+    }
+
+    /// Take up the horizontal-cursor tool, or put it down when it is in
+    /// hand. Putting it down clears the horizontal cursors, as disarming A│B
+    /// clears the pair, and gives the plot back its ordinary tool.
+    pub fn toggle_horizontal_cursor_tool(&mut self) {
+        if self.horizontal_cursor_placement_enabled() {
+            self.plot_tool = ResultPlotTool::default();
+            self.horizontal_cursors.clear();
+        } else {
+            self.plot_tool = ResultPlotTool::HorizontalCursor;
+        }
+    }
+
     pub fn cursor_a_is_next(&self) -> bool {
         self.cursors.next_placed() == Some(CursorId::A)
     }

@@ -2719,6 +2719,7 @@ fn plot_menu(
     let against = chrome.then(|| abscissa_menu(host.session(), model, pane, None));
     let offers = MenuOffers {
         notes: host.offers_notes(model),
+        cursors: host.session().any_cursor_placed(),
         against: against.as_ref().map(|menu| {
             (
                 menu,
@@ -2784,6 +2785,10 @@ fn plot_menu(
         super::plot_menu::PlotChoice::Cursor(cursor) => {
             place_cursor(host, model, cursor, place.x, place.trace);
             super::plot_menu::PlotChoice::Cursor(cursor)
+        }
+        super::plot_menu::PlotChoice::RemoveCursors => {
+            host.session_mut().remove_all_cursors();
+            super::plot_menu::PlotChoice::RemoveCursors
         }
         super::plot_menu::PlotChoice::Marker(index) => {
             if let Some(trace) = model.traces.get(index) {

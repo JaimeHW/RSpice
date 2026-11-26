@@ -315,7 +315,7 @@ fn bar_controls(
             0,
             ControlKind::Text("H".to_owned()),
             "Horizontal cursor",
-            "Horizontal cursor - click or drag in the active pane",
+            "Horizontal cursors - click or drag in the active pane; click H again to remove them",
             controls.plot_tool == ResultPlotTool::HorizontalCursor,
             true,
             || Some(InstrumentAction::Tool(ResultPlotTool::HorizontalCursor)),

@@ -464,9 +464,9 @@ const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
     },
     RoutedCommand {
         key: ids::CANCEL,
-        takes: |reads| in_results(reads) && reads.state.results.session.cursors.any(),
+        takes: |reads| in_results(reads) && reads.state.results.session.any_cursor_placed(),
         enabled: |_| true,
-        execute: |cx| cx.state.results.session.clear_cursors(),
+        execute: |cx| cx.state.results.session.remove_all_cursors(),
     },
 ];
 

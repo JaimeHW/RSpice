@@ -128,3 +128,55 @@ fn a_plotted_signal_holds_its_colour_place_until_it_comes_off() {
     ticks.replot_first(&key("V(a)"));
     assert_eq!(ticks.plot_place(&key("V(a)")), Some(0));
 }
+
+/// Clicking H a second time puts the horizontal-cursor tool down, clears
+/// every pane's horizontal cursors, and gives the plot back its ordinary
+/// tool, as disarming A│B clears the pair.
+#[test]
+fn putting_the_horizontal_cursor_tool_down_clears_its_cursors() {
+    let mut results = ResultViewerState::default();
+    let analysis = AnalysisResult::<RetainedWaveform>::new(1, AnalysisType::Transient, "TRAN", 0.0);
+    let pane = WavePanePresentationKey {
+        analysis: AnalysisPresentationKey::new(
+            rspice_vocabulary::product::DatasetId::new(),
+            &analysis,
+        ),
+        unit: "V".to_owned(),
+    };
+
+    results.toggle_horizontal_cursor_tool();
+    assert!(results.horizontal_cursor_placement_enabled());
+    results.set_horizontal_cursor(pane.clone(), 0, 11.2);
+    results.set_horizontal_cursor(pane.clone(), 1, 1.12);
+
+    results.toggle_horizontal_cursor_tool();
+    assert_eq!(results.plot_tool, ResultPlotTool::Cursor);
+    assert_eq!(results.pane_horizontal_cursors(&pane), [None, None]);
+}
+
+/// "Remove cursors" on the plot's menu, and Escape, take A, B and every
+/// horizontal cursor off the plot, and leave the tools as they were.
+#[test]
+fn removing_cursors_takes_the_pair_and_the_horizontal_ones() {
+    let mut results = ResultViewerState::default();
+    let analysis = AnalysisResult::<RetainedWaveform>::new(1, AnalysisType::Transient, "TRAN", 0.0);
+    let pane = WavePanePresentationKey {
+        analysis: AnalysisPresentationKey::new(
+            rspice_vocabulary::product::DatasetId::new(),
+            &analysis,
+        ),
+        unit: "V".to_owned(),
+    };
+    assert!(!results.any_cursor_placed());
+    results.set_horizontal_cursor(pane.clone(), 0, 1.0);
+    assert!(
+        results.any_cursor_placed(),
+        "a horizontal cursor alone counts"
+    );
+    results.cursors.place(2.0e-3);
+
+    results.remove_all_cursors();
+
+    assert!(!results.any_cursor_placed());
+    assert_eq!(results.pane_horizontal_cursors(&pane), [None, None]);
+}

@@ -30,6 +30,8 @@ pub(crate) struct MenuPlace {
 pub(crate) enum PlotChoice {
     /// Put this cursor at the X clicked.
     Cursor(CursorId),
+    /// Take every cursor off the plot: A, B and the horizontal ones.
+    RemoveCursors,
     /// Put a marker on this curve at the X clicked.
     Marker(usize),
     /// Add a note at the point clicked, or on this curve at the X clicked.
@@ -48,6 +50,8 @@ pub(crate) enum PlotChoice {
 pub(crate) struct MenuOffers<'a> {
     /// Whether the host takes a note added at a point.
     pub notes: bool,
+    /// Whether any cursor stands for "Remove cursors" to take off.
+    pub cursors: bool,
     /// What the strip's curves may be plotted against, with the strip's
     /// unit and the id the menu keeps a typed expression under.
     pub against: Option<(&'a AbscissaMenu, &'a str, egui::Id)>,
@@ -67,6 +71,11 @@ pub(crate) fn show(
     pick(ui, &response, PlotChoice::Cursor(CursorId::A), &mut chosen);
     let response = ui.button("Place cursor B here");
     pick(ui, &response, PlotChoice::Cursor(CursorId::B), &mut chosen);
+    let response = ui
+        .add_enabled(offers.cursors, egui::Button::new("Remove cursors"))
+        .on_hover_text("Take cursors A and B and the horizontal cursors off the plot")
+        .on_disabled_hover_text("No cursor is placed");
+    pick(ui, &response, PlotChoice::RemoveCursors, &mut chosen);
     let no_curve = "No curve is near the point clicked";
     let marker = ui
         .add_enabled(nearest.is_some(), egui::Button::new("Add marker here"))

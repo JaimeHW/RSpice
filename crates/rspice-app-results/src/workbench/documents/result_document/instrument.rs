@@ -93,6 +93,9 @@ impl WaveInstrumentHost for Host<'_, '_> {
                     }
                 }
             }
+            InstrumentAction::Tool(ResultPlotTool::HorizontalCursor) => {
+                self.state.results.session.toggle_horizontal_cursor_tool()
+            }
             InstrumentAction::Tool(tool) => self.state.results.session.plot_tool = tool,
             InstrumentAction::Zoom(factor) => {
                 waves::zoom_active_pane(self.state, self.tokens, factor)
