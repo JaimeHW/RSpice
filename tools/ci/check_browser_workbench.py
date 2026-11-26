@@ -479,7 +479,7 @@ def run_with_saved_provider(browser, decision):
     # plan's 1 ms transient, so it edits that transient first, as a reader who
     # wants it does; a step bound leaves its stop time as it is.
     edit_transient(browser, ("Max step", "1u"))
-    browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
+    browser.click("Run active simulation plan at 27 °C (Ctrl+Enter)", "button")
     # Run leaves the reader on the schematic and opens Results when the run
     # completes there; how fast this deck finishes decides which of the two
     # the next frame shows. The Simulation workspace states the plan's newest
@@ -1164,7 +1164,7 @@ def quota_stop_cuts_a_page_run(browser):
     browser.click("Collapse console", "button")
     browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin, "quotaSize": quota})
     try:
-        browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
+        browser.click("Run active simulation plan at 27 °C (Ctrl+Enter)", "button")
         wait_for(lambda: reports(controls(browser.snapshot()), "results storage full"),
                  "the run stopped by the full storage", 300)
         # The finished run opens on Results, whose console starts collapsed; the stop's finding
@@ -1215,7 +1215,7 @@ def quota_refusal_keeps_nothing(browser):
     edit_transient(browser, ("Stop time", "3m"), ("Max step", "auto"))
     browser.cdp("Storage.overrideQuotaForOrigin", {"origin": browser.origin, "quotaSize": quota})
     try:
-        browser.click("Run active simulation plan at TT · 27 °C (Ctrl+Enter)", "button")
+        browser.click("Run active simulation plan at 27 °C (Ctrl+Enter)", "button")
         wait_for(lambda: reports(controls(browser.snapshot()), "results not kept"),
                  "the run the full storage did not keep", 120)
         browser.click("Expand console", "button")
