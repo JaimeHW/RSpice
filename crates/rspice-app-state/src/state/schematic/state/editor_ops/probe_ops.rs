@@ -63,6 +63,21 @@ impl SchematicState {
         edit.committed
     }
 
+    /// Take the probe flags `ids` off the drawing, as one undoable step.
+    pub fn remove_probes(&mut self, ids: &[u64]) -> bool {
+        if self.session.read_only || ids.is_empty() {
+            return false;
+        }
+        let edit = self.design.remove_probes(ids);
+        for id in ids {
+            self.session.editor.selection.probes.remove(id);
+        }
+        if edit.value || edit.committed {
+            self.finish_document_edit(edit.committed);
+        }
+        edit.value
+    }
+
     /// Make probe `id` the `end` of a two-net probe. Its net is saved for
     /// the voltage between the ends and is not plotted on its own.
     pub fn mark_probe_difference_end(&mut self, id: u64, end: DifferenceEnd) -> bool {

@@ -170,7 +170,8 @@ pub use waves::{
 };
 
 pub use browser_plot::{
-    ResultQuantityDrag, set_result_quantities_ticked, set_result_quantity_ticked,
+    ResultQuantityDrag, plot_alone, plot_on_own_strip, set_result_quantities_ticked,
+    set_result_quantity_ticked,
 };
 pub use waves::{event_net_plotted, set_event_net_plotted, toggle_visibility, waveform_plotted};
 
@@ -1844,6 +1845,32 @@ pub(crate) fn analysis_evidence_failure(
     )
 }
 
+impl ResultsState {
+    /// The signals of the shown run the strips drew last, each with its
+    /// curve's colour, the first strip's first and each signal once. The
+    /// schematic inks a probed net in it, so the drawing and the plot share
+    /// one key. Read off the models the strips last built, never by building
+    /// them: what the plot has not drawn yet has no colour.
+    pub(crate) fn plotted_traces(&self) -> Vec<(String, egui::Color32)> {
+        let mut traces: Vec<(String, egui::Color32)> = Vec::new();
+        for model in self.models.last_built().unwrap_or_default() {
+            for trace in &model.traces {
+                if trace.overlay
+                    || trace.is_expression()
+                    || !trace.visible
+                    || traces
+                        .iter()
+                        .any(|(name, _)| *name == trace.source_waveform_name)
+                {
+                    continue;
+                }
+                traces.push((trace.source_waveform_name.clone(), trace.color));
+            }
+        }
+        traces
+    }
+}
+
 /// Application composition of viewer state and source-bound caches.
 #[derive(Debug, Clone, Default)]
 pub struct ResultsState {
@@ -1935,6 +1962,9 @@ pub struct ResultsState {
     /// The differences a two-net probe named while no run was shown, by the
     /// plan whose next run's view takes them in. Transient.
     pub(crate) next_run_expressions: Vec<(crate::product::SimulationPlanId, String)>,
+    /// The signal a Command-click with the Probe tool plotted, until the plot
+    /// draws it and its curve is given a strip of its own. Transient.
+    pub(crate) own_strip_pending: Option<SourceWaveformPresentationKey>,
     /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
     pub analysis_expr_cache:

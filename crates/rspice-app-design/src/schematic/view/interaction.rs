@@ -241,7 +241,17 @@ pub fn handle_tool_interactions(
                 );
             }
             ToolPointerAction::Probe(position) => {
-                handle_probe_click(state, position, symbol_context);
+                let modifiers = click_modifiers(ui);
+                if modifiers.alt {
+                    probe_power(state, position, symbol_context);
+                } else {
+                    handle_probe_click(
+                        state,
+                        position,
+                        symbol_context,
+                        ProbePlot::for_click(modifiers),
+                    );
+                }
             }
             ToolPointerAction::NoConnect { position, radius } => {
                 super::no_connect::handle_no_connect_click(state, position, radius, symbol_context);
@@ -1445,8 +1455,10 @@ fn publish_plan_outputs(
     Ok(())
 }
 
-/// Resolve a probe into either an immediate plot transaction or a durable
-/// plan-owned output request.
+/// Look at a signal: plot what the last run holds of it, and write nothing.
+/// Looking edits neither the drawing nor the plan, so the run looked at stays
+/// current. Only a signal the run does not hold is saved, for the next run
+/// to plot, and its probe keeps a flag that says the design saves it.
 ///
 /// The saved-output fallback publishes a cloned, fully validated workspace
 /// and plan setup together. Failures therefore leave the live configuration
@@ -1454,41 +1466,64 @@ fn publish_plan_outputs(
 /// making repeated probes idempotent even if an output was named elsewhere.
 /// That expression is the engine's, never the reader's: two instances of one
 /// master show the same `V(n1)` and request two different nodes.
-///
-/// A probe puts its signal on the plot and never takes one off, as
-/// Virtuoso's direct plot and KiCad's simulator probe do: a net the run
-/// already plots stays plotted.
 fn request_probe_signal(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
+    plot: ProbePlot,
+) -> ProbeSignalOutcome {
+    request_probe_plot(state, spelling, plot, None)
+}
+
+/// Keep a signal: the active plan saves it on every run, as well as the plot
+/// showing it now. A kept probe owns its output, which lives as long as its
+/// flag does.
+fn keep_probe_signal(
+    state: &mut CanvasParts<'_>,
+    spelling: &OccurrenceProbeSpelling,
+    plot: ProbePlot,
 ) -> ProbeSignalOutcome {
     request_probe_plot(
         state,
         spelling,
-        ProbePlot::Show,
-        SavedOutputOrigin::SchematicProbe,
+        plot,
+        Some(SavedOutputOrigin::SchematicProbe),
     )
 }
 
 /// The net inspector's Plot button: on the plot, or off it when it is
-/// there. It keeps no marker, so what it saves for the next run is the
-/// plan's.
+/// there. It keeps no marker, so what it saves for a next run that is to
+/// hold the signal is the plan's.
 fn request_net_plot(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
-) -> ProbeSignalOutcome {
-    request_probe_plot(state, spelling, ProbePlot::Toggle, SavedOutputOrigin::Plan)
-}
-
-fn request_probe_plot(
-    state: &mut CanvasParts<'_>,
-    spelling: &OccurrenceProbeSpelling,
-    plot: ProbePlot,
-    origin: SavedOutputOrigin,
+    _plot: ProbePlot,
 ) -> ProbeSignalOutcome {
     if is_ground_voltage_expression(spelling.engine()) {
         return ProbeSignalOutcome::GroundReference;
     }
+    if let Some(outcome) = plot_materialized_trace(state, spelling, ProbePlot::Toggle) {
+        return outcome;
+    }
+    save_for_next_run(state, spelling, SavedOutputOrigin::Plan)
+}
+
+/// Plot `spelling`'s signal as `plot` asks. `keep` saves it for every run
+/// first, owned by `keep`; without it the plan is written only when the
+/// last run does not hold the signal, and then the probe owns the output.
+fn request_probe_plot(
+    state: &mut CanvasParts<'_>,
+    spelling: &OccurrenceProbeSpelling,
+    plot: ProbePlot,
+    keep: Option<SavedOutputOrigin>,
+) -> ProbeSignalOutcome {
+    if is_ground_voltage_expression(spelling.engine()) {
+        return ProbeSignalOutcome::GroundReference;
+    }
+    let Some(origin) = keep else {
+        return plot_materialized_trace(state, spelling, plot).unwrap_or_else(|| {
+            save_for_next_run(state, spelling, SavedOutputOrigin::SchematicProbe)
+        });
+    };
     let binding = match ensure_plan_probe_output(state, spelling, origin) {
         Ok(binding) => binding,
         Err(reason) => return ProbeSignalOutcome::Rejected { reason },
@@ -1496,6 +1531,22 @@ fn request_probe_plot(
     if let Some(outcome) = plot_materialized_trace(state, spelling, plot) {
         return outcome;
     }
+    saved_outcome(binding)
+}
+
+/// Save a signal the last run does not hold, for the next run to plot.
+fn save_for_next_run(
+    state: &mut CanvasParts<'_>,
+    spelling: &OccurrenceProbeSpelling,
+    origin: SavedOutputOrigin,
+) -> ProbeSignalOutcome {
+    match ensure_plan_probe_output(state, spelling, origin) {
+        Ok(binding) => saved_outcome(binding),
+        Err(reason) => ProbeSignalOutcome::Rejected { reason },
+    }
+}
+
+fn saved_outcome(binding: ProbeOutputBinding) -> ProbeSignalOutcome {
     if binding.created {
         ProbeSignalOutcome::SavedOutputCreated {
             plan_name: binding.plan_name,
@@ -1512,12 +1563,12 @@ fn request_probe_plot(
 fn request_retained_probe_signal(
     state: &mut CanvasParts<'_>,
     spelling: &OccurrenceProbeSpelling,
+    plot: ProbePlot,
 ) -> ProbeSignalOutcome {
     if is_ground_voltage_expression(spelling.engine()) {
         return ProbeSignalOutcome::GroundReference;
     }
-    plot_materialized_trace(state, spelling, ProbePlot::Show)
-        .unwrap_or(ProbeSignalOutcome::NotInLastRun)
+    plot_materialized_trace(state, spelling, plot).unwrap_or(ProbeSignalOutcome::NotInLastRun)
 }
 
 /// Whether the last run's trace of `display`, the voltage or current of the
@@ -1581,11 +1632,12 @@ fn commit_element_current(
     drawn: &str,
     engine: &str,
     request: ProbeRequest,
+    plot: ProbePlot,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
     let occurrence = state.model.workspace.content.occurrence_path();
     match OccurrenceProbeSpelling::for_element(&occurrence, 'I', drawn, engine) {
         Some(spelling) => {
-            let outcome = request(state, &spelling);
+            let outcome = request(state, &spelling, plot);
             (spelling, outcome)
         }
         None => (
@@ -1607,10 +1659,11 @@ fn commit_probe_request(
     name: &str,
     display: &str,
     request: ProbeRequest,
+    plot: ProbePlot,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
     match probe_spelling_for(state.model, name, display) {
         Ok(spelling) => {
-            let outcome = request(state, &spelling);
+            let outcome = request(state, &spelling, plot);
             (spelling, outcome)
         }
         Err(reason) => (
@@ -1631,7 +1684,8 @@ pub(crate) fn toggle_probe_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let (spelling, outcome) = commit_probe_request(state, name, display, request_net_plot);
+    let (spelling, outcome) =
+        commit_probe_request(state, name, display, request_net_plot, ProbePlot::Toggle);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
     report_probe_outcome(state, spelling.display(), outcome);
     configuration_changed
@@ -1644,10 +1698,99 @@ pub(crate) fn ensure_probe_visible_with_feedback(
     name: &str,
     display: &str,
 ) -> bool {
-    let (spelling, outcome) = commit_probe_request(state, name, display, request_probe_signal);
+    let (spelling, outcome) =
+        commit_probe_request(state, name, display, request_probe_signal, ProbePlot::Show);
     let configuration_changed = matches!(&outcome, ProbeSignalOutcome::SavedOutputCreated { .. });
     report_probe_outcome(state, spelling.display(), outcome);
     configuration_changed
+}
+
+/// Whether the net `name`'s voltage `display` is kept: a probe flag of the
+/// drawing saves it on every run.
+pub(crate) fn probe_is_kept(model: &Model, name: &str, display: &str) -> bool {
+    let Ok(spelling) = probe_spelling_for(model, name, display) else {
+        return false;
+    };
+    let key = normalized_probe_expression(spelling.engine());
+    model.schematic.document().probes.iter().any(|probe| {
+        probe.enabled
+            && probe
+                .source_expression
+                .as_deref()
+                .is_some_and(|expression| normalized_probe_expression(expression) == key)
+    })
+}
+
+/// Keep the net `name`'s voltage `display`: the plan saves it on every run,
+/// a flag on one of the net's wires says so, and the plot shows it. Pressed
+/// again on a kept net, the flags come off and the plan stops saving it.
+/// Whether the plan changed.
+pub(crate) fn toggle_kept_net_with_feedback(
+    state: &mut CanvasParts<'_>,
+    name: &str,
+    display: &str,
+) -> bool {
+    if let Err(reason) = probe_edit_identity_is_current(state) {
+        state.prompt(format!("{display} not kept: {reason}."));
+        return false;
+    }
+    if probe_is_kept(state.model, name, display) {
+        let Ok(spelling) = probe_spelling_for(state.model, name, display) else {
+            return false;
+        };
+        let key = normalized_probe_expression(spelling.engine());
+        let flags: Vec<u64> = state
+            .model
+            .schematic
+            .document()
+            .probes
+            .iter()
+            .filter(|probe| {
+                probe
+                    .source_expression
+                    .as_deref()
+                    .is_some_and(|expression| normalized_probe_expression(expression) == key)
+            })
+            .map(|probe| probe.id)
+            .collect();
+        state.model.schematic.remove_probes(&flags);
+        state.sync_active_schematic_to_workspace();
+        state.prompt(format!("{display} is no longer saved on every run."));
+        return true;
+    }
+    let nets = live_design_nets(state.model);
+    let Some(place) = nets
+        .iter()
+        .find(|net| net.name.eq_ignore_ascii_case(name))
+        .and_then(|net| {
+            let document = state.model.schematic.document();
+            net.wire_ids.iter().find_map(|id| {
+                document
+                    .wires
+                    .iter()
+                    .find(|wire| wire.id == *id && state.design_view().object_is_visible(wire.id))
+                    .and_then(|wire| wire.points.first().copied())
+            })
+        })
+    else {
+        state.prompt(format!(
+            "{display} not kept: the net has no wire on this sheet to carry its flag."
+        ));
+        return false;
+    };
+    let (spelling, outcome) =
+        commit_probe_request(state, name, display, keep_probe_signal, ProbePlot::Show);
+    if let ProbeSignalOutcome::Rejected { reason } = outcome {
+        state.prompt(format!("{display} not kept: {reason}."));
+        return false;
+    }
+    let binding = current_probe_output_binding(state, spelling.engine());
+    if let Err(reason) = retain_probe_flag(state, place, Some(&spelling), binding) {
+        state.prompt(format!("{display} not kept: {reason}."));
+        return false;
+    }
+    state.prompt(format!("{display} is saved on every run."));
+    true
 }
 
 /// Reveal already-retained evidence without authoring a future output. This
@@ -1832,7 +1975,7 @@ fn retain_probe_flag(
 /// receipt, and a name taken from a hierarchy the design does not have is
 /// wrong rather than approximate. The reason is logged so the gesture that
 /// found no name is explicable.
-fn live_design_nets(model: &Model) -> std::sync::Arc<Vec<DesignNet>> {
+pub(super) fn live_design_nets(model: &Model) -> std::sync::Arc<Vec<DesignNet>> {
     match model.workspace.design_projection(
         &model.library_manager,
         &model.workspace.content.active_view,
@@ -2074,9 +2217,10 @@ pub(super) fn handle_probe_click(
     state: &mut CanvasParts<'_>,
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
+    plot: ProbePlot,
 ) {
     let subject = probe_subject_at(state, grid_pos, symbol_context);
-    probe_subject(state, grid_pos, subject, symbol_context);
+    probe_subject(state, grid_pos, subject, symbol_context, plot);
 }
 
 /// Where a Probe-tool press or release at `screen` lands, as a click there
@@ -2093,12 +2237,240 @@ pub(super) fn probe_point(
     }
 }
 
+/// The modifiers held as the pointer clicked: those held now and those the
+/// frame's button events carry, so a key let go in the frame of the click
+/// still counts.
+fn click_modifiers(ui: &egui::Ui) -> egui::Modifiers {
+    ui.input(|input| {
+        input
+            .raw
+            .events
+            .iter()
+            .fold(input.modifiers, |held, event| match event {
+                egui::Event::PointerButton { modifiers, .. } => held | *modifiers,
+                _ => held,
+            })
+    })
+}
+
+/// What a Probe-tool click at a grid point would plot, as the tag beside the
+/// pointer names it, held while the pointer rests on that point and the
+/// drawing stands still.
+#[derive(Clone)]
+struct ProbeTag {
+    at: Point,
+    topology: u64,
+    occurrence: String,
+    signal: Option<String>,
+}
+
+/// While the Probe tool is armed, a tag beside the pointer names what a click
+/// there would plot, `V(out)` or `I(R1)`, so a crowded drawing is probed
+/// where the reader means: Shift reads `+ V(out)`, as the click adds it, and
+/// Command names the strip of its own it gets. Nothing is named where a click
+/// would probe nothing, or while a button is down.
+pub(super) fn paint_probe_tag(
+    painter: &egui::Painter,
+    response: &egui::Response,
+    state: &CanvasParts<'_>,
+    viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
+) {
+    let ctx = painter.ctx();
+    if state.model.schematic.session.editor.tool != Tool::Probe
+        || ctx.input(|input| input.pointer.any_down())
+    {
+        return;
+    }
+    let Some(pointer) = response.hover_pos() else {
+        return;
+    };
+    let Some(at) = probe_point(state, viewport, symbol_context, pointer) else {
+        return;
+    };
+    let id = egui::Id::new("rspice.design.probe-tag");
+    let topology = state.model.schematic.topology_version();
+    let occurrence = state.model.workspace.content.occurrence_path().to_string();
+    let held = ctx
+        .data(|data| data.get_temp::<ProbeTag>(id))
+        .filter(|tag| tag.at == at && tag.topology == topology && tag.occurrence == occurrence);
+    let alt = ctx.input(|input| input.modifiers.alt);
+    if alt {
+        let power = power_probe_at(state, at, symbol_context);
+        let label = match power {
+            Some(Ok((display, _))) => display,
+            Some(Err(_)) | None => return,
+        };
+        paint_tag(painter, pointer, label);
+        return;
+    }
+    let tag = held.unwrap_or_else(|| {
+        let signal = probe_signal_at(state, at, symbol_context).map(|signal| match signal {
+            ComponentProbe::Voltage(net) => {
+                let display = format!("V({net})");
+                probe_spelling_for(state.model, &net, &display)
+                    .map_or(display, |spelling| spelling.display().to_owned())
+            }
+            ComponentProbe::Current { drawn, .. } => format!("I({drawn})"),
+        });
+        let tag = ProbeTag {
+            at,
+            topology,
+            occurrence,
+            signal,
+        };
+        ctx.data_mut(|data| data.insert_temp(id, tag.clone()));
+        tag
+    });
+    let Some(signal) = tag.signal else {
+        return;
+    };
+    let label = match ProbePlot::for_click(ctx.input(|input| input.modifiers)) {
+        ProbePlot::Show => format!("+ {signal}"),
+        ProbePlot::NewStrip => format!("{signal} on a new strip"),
+        ProbePlot::Replace | ProbePlot::Toggle => signal,
+    };
+    paint_tag(painter, pointer, label);
+}
+
+/// The Probe tool's tag, `label`, just under and right of the pointer.
+fn paint_tag(painter: &egui::Painter, pointer: egui::Pos2, label: String) {
+    let t = crate::ui::tokens::Tokens::get(painter.ctx());
+    let galley = painter.layout_no_wrap(
+        label,
+        crate::ui::theme::mono(
+            crate::ui::tokens::FS_0,
+            crate::ui::theme::FontWeight::Medium,
+        ),
+        t.color.text,
+    );
+    let pad = egui::vec2(4.0, 2.0);
+    let rect =
+        egui::Rect::from_min_size(pointer + egui::vec2(14.0, 14.0), galley.size() + 2.0 * pad);
+    painter.rect_filled(rect, 3.0, t.color.bg_panel);
+    painter.rect_stroke(
+        rect,
+        3.0,
+        egui::Stroke::new(1.0, t.color.border),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(rect.min + pad, galley, t.color.text);
+}
+
+/// What an Alt-click on a two-terminal part plots: the power it absorbs,
+/// `(V(a) - V(b)) * I(X)`, its voltage across times the current the engine
+/// reads into its first terminal, from what the run holds. Each operand is
+/// spelled as the plot names its trace. `None` where the part has no such
+/// power: no part there, or one with more terminals or no one current.
+fn power_probe_at(
+    state: &CanvasParts<'_>,
+    place: Point,
+    symbol_context: &SchematicSymbolContext,
+) -> Option<Result<(String, String), String>> {
+    let Some(ProbeSubject::Part(part)) = probe_subject_at(state, place, symbol_context) else {
+        return None;
+    };
+    let component = state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == part)?;
+    if !component.carries_one_current() {
+        return None;
+    }
+    let terminals =
+        component.terminal_positions_resolved(symbol_context.resolved_symbol(component));
+    let [(pin_a, at_a), (pin_b, at_b)] = terminals.as_slice() else {
+        return None;
+    };
+    let drawn = component.spice_instance_name();
+    let display = format!("P({drawn})");
+    let net = |pin: &str, at: Point| {
+        live_terminal_probe_net_name(state, component.id, pin, at)
+            .or_else(|| retained_probe_net_name(state, at))
+    };
+    let (Some(a), Some(b)) = (net(pin_a, *at_a), net(pin_b, *at_b)) else {
+        return Some(Err(format!(
+            "{display} is not plotted: a terminal of {drawn} is on no net."
+        )));
+    };
+    let occurrence = state.model.workspace.content.occurrence_path();
+    let current = OccurrenceProbeSpelling::for_element(
+        &occurrence,
+        'I',
+        &drawn,
+        &component.engine_element_name(),
+    );
+    let voltage = |net: &str| probe_spelling_for(state.model, net, &format!("V({net})"));
+    let (Some(current), Ok(a), Ok(b)) = (current, voltage(&a), voltage(&b)) else {
+        return Some(Err(format!(
+            "{display} is not plotted: {}",
+            unspellable_occurrence(&occurrence)
+        )));
+    };
+    let notations = crate::state::bus_notations(&state.model.workspace, &state.model.schematic);
+    let mut missing = Vec::new();
+    let mut operand = |spelling: &OccurrenceProbeSpelling| -> Option<String> {
+        if is_ground_voltage_expression(spelling.engine()) {
+            return None;
+        }
+        match materialized_probe_trace(state.model, spelling.engine()) {
+            Some(trace) => Some(notations.display(trace.source_name()).into_owned()),
+            None => {
+                missing.push(spelling.display().to_owned());
+                Some(String::new())
+            }
+        }
+    };
+    let i = operand(&current).unwrap_or_default();
+    let across = match (operand(&a), operand(&b)) {
+        (Some(a), Some(b)) => format!("({a} - {b})"),
+        (Some(a), None) => a,
+        (None, Some(b)) => format!("-{b}"),
+        (None, None) => {
+            return Some(Err(format!(
+                "{display} is 0: both terminals are on ground."
+            )));
+        }
+    };
+    if !missing.is_empty() {
+        return Some(Err(format!(
+            "{display} is not plotted: the last run does not hold {}. Probe them first, and run again.",
+            missing.join(" and ")
+        )));
+    }
+    Some(Ok((display, format!("{across} * {i}"))))
+}
+
+/// An Alt-click with the Probe tool on a part: plot the power it absorbs
+/// as an expression on the shown run's view, as a two-net probe plots the
+/// voltage between two nets. It reads what the run holds and writes nothing.
+fn probe_power(state: &mut CanvasParts<'_>, place: Point, symbol_context: &SchematicSymbolContext) {
+    match power_probe_at(state, place, symbol_context) {
+        None => state.prompt(
+            "No power there: Alt-click the body of a part with two terminals, such as a resistor or a source.",
+        ),
+        Some(Err(reason)) => state.prompt(reason),
+        Some(Ok((_, expression))) => match shown_analysis(state.model) {
+            Some(analysis) => state.workbench.outbox.push(PlotProbedDifference {
+                on: DifferencePlot::Analysis(analysis),
+                expression,
+                saved: Vec::new(),
+            }),
+            None => state.prompt("Nothing plotted: run the plan first, then Alt-click a part for its power."),
+        },
+    }
+}
+
 /// A two-net probe from `plus` to `minus`: the voltage between the nets
 /// under each end, `V(a) - V(b)`, goes on the plot as an expression, each
-/// net spelled as the plot names its trace. On a view that may write the
-/// design, each end keeps a marker with its sign, which saves its net for the
-/// next run; the difference stays on the shown run's view, or with no run
-/// shown waits for the plan's next run, and plots once a run holds both nets.
+/// net spelled as the plot names its trace. A run that holds both nets is
+/// only looked at. On a view that may write the design, an end whose net the
+/// run lacks keeps a marker with its sign, which saves its net for the next
+/// run; the difference stays on the shown run's view, or with no run shown
+/// waits for the plan's next run, and plots once a run holds both nets.
 /// Ground at the minus end is a probe of the other net, with its marker;
 /// ground at the plus end reads the other net negated.
 pub(super) fn probe_difference(
@@ -2141,7 +2513,7 @@ pub(super) fn probe_difference(
     // The difference to ground is the plus net's own voltage, which the run
     // already names: a single net's probe, marker and all.
     if ground(&minus) {
-        let outcome = probe_request(read_only)(state, &plus);
+        let outcome = probe_request(read_only)(state, &plus, ProbePlot::Show);
         finish_probe(state, plus_at, &plus, outcome, read_only);
         return;
     }
@@ -2205,9 +2577,18 @@ pub(super) fn probe_difference(
             }
         },
     };
-    // Each end's marker owns the output that saves its net, as a single
-    // net's marker does, so the net is saved for as long as the marker
-    // stands.
+    // Both nets in the run: looking writes nothing.
+    if missing.is_empty() {
+        state.workbench.outbox.push(PlotProbedDifference {
+            on,
+            expression,
+            saved: Vec::new(),
+        });
+        return;
+    }
+    // A net the run lacks is saved for the next run, and its end keeps a
+    // marker that owns the output, as a single net's flag does, so the net
+    // is saved for as long as the marker stands.
     let mut saved = Vec::new();
     for spelling in &missing {
         match ensure_plan_probe_output(state, spelling, SavedOutputOrigin::SchematicProbe) {
@@ -2218,13 +2599,17 @@ pub(super) fn probe_difference(
             }
         }
     }
+    let unsaved: Vec<String> = missing
+        .iter()
+        .map(|spelling| spelling.engine().to_owned())
+        .collect();
     state
         .model
         .schematic
         .begin_operation("probe the voltage between two nets");
     let mut kept = Vec::new();
     for (at, spelling, end) in ends {
-        if ground(spelling) {
+        if ground(spelling) || !unsaved.iter().any(|engine| engine == spelling.engine()) {
             continue;
         }
         let binding = current_probe_output_binding(state, spelling.engine());
@@ -2294,7 +2679,14 @@ pub(super) fn probe_context_target(
             (click_pos, ProbeSubject::Part(part))
         }
     };
-    probe_subject(state, position, Some(subject), symbol_context);
+    // A menu row adds to the plot rather than clearing it.
+    probe_subject(
+        state,
+        position,
+        Some(subject),
+        symbol_context,
+        ProbePlot::Show,
+    );
 }
 
 fn probe_subject_at(
@@ -2318,6 +2710,7 @@ fn probe_subject(
     grid_pos: Point,
     subject: Option<ProbeSubject>,
     symbol_context: &SchematicSymbolContext,
+    plot: ProbePlot,
 ) {
     // A read-only view writes neither its drawing nor the plan: a probe there
     // plots what the last run holds and keeps no marker.
@@ -2334,17 +2727,12 @@ fn probe_subject(
         {
             log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
 
+            // The net's wires take its trace's colour while it is plotted,
+            // so the probe lights nothing else.
             let display = format!("V({net_name})");
-            let (spelling, outcome) = commit_probe_request(state, &net_name, &display, request);
+            let (spelling, outcome) =
+                commit_probe_request(state, &net_name, &display, request, plot);
             finish_probe(state, grid_pos, &spelling, outcome, read_only);
-            if net_name != "0"
-                && state
-                    .model
-                    .preferences
-                    .toggle(crate::workbench::TogglePreference::CrossProbeBehavior)
-            {
-                highlight_canvas_net(state.model, |net| net.name.eq_ignore_ascii_case(&net_name));
-            }
         } else {
             log::info!(
                 "Probe: wire at {:?} has no unambiguous live or retained net identity",
@@ -2359,11 +2747,12 @@ fn probe_subject(
             state.prompt("Nothing probed: click a wire, a pin or a part to probe it.");
             return;
         };
-        handle_component_probe(state, comp_id, grid_pos, symbol_context, read_only);
+        handle_component_probe(state, comp_id, grid_pos, symbol_context, read_only, plot);
     }
 }
 
-type ProbeRequest = fn(&mut CanvasParts<'_>, &OccurrenceProbeSpelling) -> ProbeSignalOutcome;
+type ProbeRequest =
+    fn(&mut CanvasParts<'_>, &OccurrenceProbeSpelling, ProbePlot) -> ProbeSignalOutcome;
 
 /// What a probe at `place` measures, as a Probe-tool click there resolves
 /// it: the net of the wire under it, the voltage at an exact pin, or the
@@ -2386,13 +2775,14 @@ fn commit_signal(
     state: &mut CanvasParts<'_>,
     probe: &ComponentProbe,
     request: ProbeRequest,
+    plot: ProbePlot,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
     match probe {
         ComponentProbe::Voltage(net) => {
-            commit_probe_request(state, net, &format!("V({net})"), request)
+            commit_probe_request(state, net, &format!("V({net})"), request, plot)
         }
         ComponentProbe::Current { drawn, engine } => {
-            commit_element_current(state, drawn, engine, request)
+            commit_element_current(state, drawn, engine, request, plot)
         }
     }
 }
@@ -2518,7 +2908,7 @@ fn probe_pasted_place(
     symbol_context: &SchematicSymbolContext,
 ) -> Option<u64> {
     let signal = probe_signal_at(state, place, symbol_context)?;
-    let (spelling, outcome) = commit_signal(state, &signal, request_probe_signal);
+    let (spelling, outcome) = commit_signal(state, &signal, keep_probe_signal, ProbePlot::Show);
     if matches!(
         outcome,
         ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
@@ -2539,7 +2929,10 @@ fn probe_request(read_only: bool) -> ProbeRequest {
     }
 }
 
-/// Report what a probe got and, on an editable view, keep its marker.
+/// Report what a probe got and, when it had to save its signal for the next
+/// run, keep a flag for it: the flag owns the saved output and says the
+/// design saves the signal. A probe the last run answered leaves the drawing
+/// as it was.
 fn finish_probe(
     state: &mut CanvasParts<'_>,
     grid_pos: Point,
@@ -2548,9 +2941,10 @@ fn finish_probe(
     read_only: bool,
 ) {
     let retain_marker = !read_only
-        && !matches!(
+        && matches!(
             &outcome,
-            ProbeSignalOutcome::Rejected { .. } | ProbeSignalOutcome::GroundReference
+            ProbeSignalOutcome::SavedOutputCreated { .. }
+                | ProbeSignalOutcome::SavedOutputAlreadyPresent { .. }
         );
     report_probe_outcome(state, spelling.display(), outcome);
     if retain_marker {
@@ -2567,6 +2961,7 @@ fn handle_component_probe(
     grid_pos: Point,
     symbol_context: &SchematicSymbolContext,
     read_only: bool,
+    plot: ProbePlot,
 ) {
     if let Some(component) = state
         .model
@@ -2591,7 +2986,7 @@ fn handle_component_probe(
             return;
         };
 
-        let (spelling, outcome) = commit_signal(state, &probe, probe_request(read_only));
+        let (spelling, outcome) = commit_signal(state, &probe, probe_request(read_only), plot);
         finish_probe(state, grid_pos, &spelling, outcome, read_only);
     }
 }

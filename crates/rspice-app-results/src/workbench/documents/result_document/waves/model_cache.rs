@@ -12,6 +12,56 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
     complex_display: ComplexNumberDisplay,
     t: &Tokens,
 ) -> Arc<Vec<StripModel>> {
+    let models = built_models(simulation, results, complex_display, t);
+    if give_own_strip(results, &models) {
+        return built_models(simulation, results, complex_display, t);
+    }
+    models
+}
+
+/// Give the curve a Command-click probe plotted a strip of its own, once the
+/// models draw it. Whether the strips were arranged anew.
+fn give_own_strip(results: &mut ResultsState, models: &[StripModel]) -> bool {
+    let Some(key) = results.own_strip_pending.as_ref() else {
+        return false;
+    };
+    let Some((model, index)) = models
+        .iter()
+        .filter(|model| model.analysis_key == key.analysis())
+        .find_map(|model| {
+            model
+                .traces
+                .iter()
+                .position(|trace| {
+                    !trace.overlay
+                        && !trace.is_expression()
+                        && trace.source_waveform_name == key.source_name()
+                })
+                .map(|index| (model, index))
+        })
+    else {
+        return false;
+    };
+    results.own_strip_pending = None;
+    let curve = rspice_results_ui::waves::strip_layout::Curve::Trace(index);
+    // A curve that is alone on its strip already keeps it.
+    let Ok(strips) = rspice_results_ui::waves::strip_layout::move_to_new_strip(model, curve) else {
+        return false;
+    };
+    results
+        .session
+        .strip_layouts
+        .insert(model.analysis_key, strips);
+    results.models.invalidate();
+    true
+}
+
+fn built_models(
+    simulation: &SimulationState,
+    results: &mut ResultsState,
+    complex_display: ComplexNumberDisplay,
+    t: &Tokens,
+) -> Arc<Vec<StripModel>> {
     results.synchronize_wave_caches(simulation);
     results.reconcile_expression_projection(simulation);
     let logic = logic_lanes_fingerprint(&results.session);

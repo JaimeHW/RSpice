@@ -97,6 +97,25 @@ pub enum ProbePlot {
     Show,
     /// Put the trace on the plot, or take it off when it is there.
     Toggle,
+    /// The trace alone on its analysis' plot: a plain Probe-tool click.
+    Replace,
+    /// The trace on a strip of its own under the others: a Command-click.
+    NewStrip,
+}
+
+impl ProbePlot {
+    /// What a Probe-tool click asks of the plot by the modifier held: Shift
+    /// adds the trace, Command gives it a strip of its own, and a plain
+    /// click shows it alone.
+    pub fn for_click(modifiers: egui::Modifiers) -> Self {
+        if modifiers.command {
+            Self::NewStrip
+        } else if modifiers.shift {
+            Self::Show
+        } else {
+            Self::Replace
+        }
+    }
 }
 
 /// A trace of the last run a probe named, for the results workspace to plot

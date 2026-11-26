@@ -57,7 +57,9 @@ pub(in crate::workbench) fn answer_surface_request(
 /// select it, and say what changed.
 pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: PlotProbedTrace) {
     use rspice_app_results::workbench::docks::navigator::results_actions::set_result_quantity_ticked;
-    use rspice_app_results::workbench::documents::result_document::waveform_plotted;
+    use rspice_app_results::workbench::documents::result_document::{
+        plot_alone, plot_on_own_strip, waveform_plotted,
+    };
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
     use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
@@ -78,24 +80,32 @@ pub(in crate::workbench) fn plot_probed_trace(state: &mut AppState, probed: Plot
         waveform.visible,
     );
     let tick = match plot {
-        ProbePlot::Show => true,
+        ProbePlot::Show | ProbePlot::Replace | ProbePlot::NewStrip => true,
         ProbePlot::Toggle => !plotted,
     };
-    set_result_quantity_ticked(
-        &mut state.results_parts(),
-        &ResultBrowserSelectionKey::Waveform(key),
-        tick,
-    );
+    match plot {
+        ProbePlot::Replace => plot_alone(&mut state.results_parts(), &key),
+        ProbePlot::NewStrip => plot_on_own_strip(&mut state.results_parts(), key),
+        ProbePlot::Show | ProbePlot::Toggle => set_result_quantity_ticked(
+            &mut state.results_parts(),
+            &ResultBrowserSelectionKey::Waveform(key),
+            tick,
+        ),
+    }
     state.results.select_probed_trace(trace);
     // A probe asks to see the signal: the dock opens on its plot, whether
     // or not the reader put the plot away before.
     if tick && state.workbench.plots_in_dock() {
         state.workbench.show_plot_page();
     }
-    state.prompt(match (plotted, tick) {
-        (false, _) => format!("{display} added to the plot."),
-        (true, true) => format!("{display} is already in the plot."),
-        (true, false) => format!("{display} removed from the plot."),
+    state.prompt(match (plot, plotted, tick) {
+        (ProbePlot::Replace, ..) => {
+            format!("{display} plotted. Shift-click adds a signal to the plot.")
+        }
+        (ProbePlot::NewStrip, ..) => format!("{display} plotted on a strip of its own."),
+        (_, false, _) => format!("{display} added to the plot."),
+        (_, true, true) => format!("{display} is already in the plot."),
+        (_, true, false) => format!("{display} removed from the plot."),
     });
 }
 

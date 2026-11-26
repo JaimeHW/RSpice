@@ -383,7 +383,8 @@ fn ground_probe_is_reference_only_and_never_creates_output() {
     assert_eq!(
         request_probe_signal(
             &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim(" v ( 0 ) ")
+            &OccurrenceProbeSpelling::verbatim(" v ( 0 ) "),
+            ProbePlot::Show
         ),
         ProbeSignalOutcome::GroundReference
     );
@@ -458,7 +459,8 @@ fn preexisting_equivalent_output_prevents_duplicate_probe_output() {
     assert!(matches!(
         request_probe_signal(
             &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+            &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+            ProbePlot::Show
         ),
         ProbeSignalOutcome::SavedOutputAlreadyPresent { .. }
     ));
@@ -497,7 +499,8 @@ fn unrelated_output_name_collision_gets_a_deterministic_probe_name() {
     assert!(matches!(
         request_probe_signal(
             &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+            &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+            ProbePlot::Show
         ),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));

@@ -34,10 +34,8 @@ use super::symbol_context::SchematicSymbolContext;
 use super::viewport::Viewport;
 
 pub(crate) const PROBE_RADIUS: f32 = 9.0;
-pub(crate) const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
-/// Where a probe's label, a bus declaration and a tap slice stand, in world
-/// units, from the shared layout the SVG and the printed page read too.
-pub(crate) const PROBE_LABEL_OFFSET_WU: Vec2 = layout_vec(label_layout::PROBE_LABEL_OFFSET);
+/// Where a bus declaration and a tap slice stand, in world units, from the
+/// shared layout the SVG and the printed page read too.
 pub(crate) const BUS_DECLARATION_OFFSET_WU: Vec2 = layout_vec(label_layout::BUS_DECLARATION_OFFSET);
 pub(crate) const TAP_SLICE_OFFSET_WU: Vec2 = layout_vec(label_layout::TAP_SLICE_OFFSET);
 pub(crate) const SMALL_TEXT_WORLD: f32 = label_layout::SMALL_TEXT_WORLD;
@@ -128,20 +126,28 @@ pub enum ConductorInk {
     Plain,
     /// A net-class colour (ground, supply, clock).
     Class(egui::Color32),
+    /// The net's voltage is on the plot: the colour of its trace.
+    Traced(egui::Color32),
+    /// The net's trace is the one the reader is on in the plot: its colour,
+    /// raised.
+    TracedLit(egui::Color32),
     /// The net is highlighted.
     Highlighted,
     Selected,
 }
 
 impl ConductorInk {
-    /// Precedence: plain, class colour, highlighted, selected. Painting in
-    /// this order keeps emphasis on top.
+    /// Precedence: plain, class colour, trace colour, the trace the reader
+    /// is on, highlighted, selected. Painting in this order keeps emphasis on
+    /// top.
     pub const fn rank(self) -> u8 {
         match self {
             Self::Plain => 0,
             Self::Class(_) => 1,
-            Self::Highlighted => 2,
-            Self::Selected => 3,
+            Self::Traced(_) => 2,
+            Self::TracedLit(_) => 3,
+            Self::Highlighted => 4,
+            Self::Selected => 5,
         }
     }
 
@@ -158,18 +164,18 @@ impl ConductorInk {
     pub fn colour(self, palette: &rspice_ui_kit::palette::Palette) -> egui::Color32 {
         match self {
             Self::Plain => palette.wire,
-            Self::Class(colour) => colour,
+            Self::Class(colour) | Self::Traced(colour) | Self::TracedLit(colour) => colour,
             Self::Highlighted => palette.canvas_net_highlight,
             Self::Selected => palette.canvas_select,
         }
     }
 
-    /// Selection and a highlight raise the stroke; a class colour is a
-    /// colour, not emphasis.
+    /// Selection, a highlight and the trace the reader is on raise the
+    /// stroke; a class or trace colour is a colour, not emphasis.
     pub const fn emphasis(self) -> Emphasis {
         match self {
-            Self::Plain | Self::Class(_) => Emphasis::Plain,
-            Self::Highlighted | Self::Selected => Emphasis::Raised,
+            Self::Plain | Self::Class(_) | Self::Traced(_) => Emphasis::Plain,
+            Self::TracedLit(_) | Self::Highlighted | Self::Selected => Emphasis::Raised,
         }
     }
 }
@@ -528,9 +534,9 @@ pub fn draw_bus_tap(
     );
 }
 
-/// Paint a retained probe flag using the upgraded mockup's circle, crosshair,
-/// and exact source/reference label. The marker scales with the drawing so it
-/// stays anchored to its authored schematic coordinate at every zoom.
+/// What a probe's flag says of it beyond its name: nothing while all is
+/// well, and the problem when there is one. A flag waiting for its first run
+/// is in its normal state and says nothing about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeVisualStatus {
     Materialized,
@@ -546,13 +552,19 @@ pub enum ProbeVisualStatus {
 impl ProbeVisualStatus {
     pub(crate) const fn suffix(self) -> &'static str {
         match self {
-            Self::Materialized => "",
-            Self::Hidden => " · hidden",
-            Self::Pending => " · pending next run",
+            Self::Materialized | Self::Hidden | Self::Pending => "",
             Self::Unavailable => " · unavailable",
             Self::NotConnected => " · not connected",
-            Self::Disabled => " · disabled",
+            Self::Disabled => " · off",
         }
+    }
+
+    /// Whether the flag reports a problem rather than a kept signal.
+    const fn is_problem(self) -> bool {
+        matches!(
+            self,
+            Self::Unavailable | Self::NotConnected | Self::Disabled
+        )
     }
 }
 
@@ -569,92 +581,160 @@ pub enum ProbeEmphasis {
     Plain,
 }
 
+/// The name a probe's flag shows: the net alone for a net's voltage, as the
+/// wire it stands on already says it is a voltage, else the expression.
+/// Each end of a two-net probe leads with its sign.
+pub fn probe_flag_name(probe: &SchematicProbe) -> String {
+    let reference = probe.reference.trim();
+    let name = reference
+        .strip_prefix("V(")
+        .or_else(|| reference.strip_prefix("v("))
+        .and_then(|inner| inner.strip_suffix(')'))
+        .filter(|inner| !inner.contains(','))
+        .unwrap_or(reference);
+    match probe.difference_end {
+        None => name.to_owned(),
+        Some(DifferenceEnd::Plus) => format!("+{name}"),
+        Some(DifferenceEnd::Minus) => format!("\u{2212}{name}"),
+    }
+}
+
+/// Where a probe's flag leaves its stem, from the probe, and the tag's
+/// padding, in world units.
+const PROBE_STEM_WU: Vec2 = Vec2::new(6.0, -8.0);
+const PROBE_TAG_PAD_WU: Vec2 = Vec2::new(3.0, 1.0);
+const PROBE_DOT_WU: f32 = 2.5;
+
+/// Paint a kept probe: a dot on the signal, a short stem, and a small tag
+/// with the probe's name, in the colour of its trace while the plot shows
+/// it. A flag whose signal is not plotted is drawn hollow in ink, and one
+/// with a problem names it in the problem's colour. The flag scales with the
+/// drawing so it stays on its authored point at every zoom.
 pub fn draw_probe(
     painter: &Painter,
     viewport: &Viewport,
     probe: &SchematicProbe,
     status: ProbeVisualStatus,
     emphasis: ProbeEmphasis,
+    trace: Option<egui::Color32>,
     palette: &Palette,
 ) {
-    let selected = emphasis == ProbeEmphasis::Selected;
-    let status_color = match status {
-        ProbeVisualStatus::Materialized => palette.ok,
-        ProbeVisualStatus::Hidden => palette.text_faint,
-        // Waiting for its first run is a probe's normal state, not a problem.
-        ProbeVisualStatus::Pending => palette.text,
+    let ppp = painter.pixels_per_point();
+    let zoom = viewport.zoom;
+    let at = viewport.schematic_to_screen(probe.position);
+    let colour = match status {
         ProbeVisualStatus::Unavailable => palette.err,
         ProbeVisualStatus::NotConnected | ProbeVisualStatus::Disabled => palette.text_faint,
+        ProbeVisualStatus::Materialized
+        | ProbeVisualStatus::Hidden
+        | ProbeVisualStatus::Pending => trace.unwrap_or(palette.text_dim),
     };
-    let ppp = painter.pixels_per_point();
-    let center = viewport.schematic_to_screen(probe.position);
-    let radius = PROBE_RADIUS * viewport.zoom;
-    let half_span = PROBE_CROSSHAIR_HALF_SPAN * viewport.zoom;
-    let ring = lod::stroke_pt(
+    let filled = trace.is_some() && !status.is_problem();
+    let stem = lod::stroke_pt(
         StrokeRole::Probe,
-        viewport.zoom,
+        zoom,
         ppp,
-        Emphasis::raised_if(selected),
+        Emphasis::raised_if(emphasis == ProbeEmphasis::Traced),
     );
-    let crosshair = lod::stroke_pt(StrokeRole::Probe, viewport.zoom, ppp, Emphasis::Plain);
+    let corner = at + PROBE_STEM_WU * zoom;
+    painter.line_segment([at, corner], Stroke::new(stem, colour));
+    painter.circle_filled(at, (PROBE_DOT_WU * zoom).max(2.0), colour);
+
+    // Below the floor the tag hides and the dot and stem stay.
+    let Some(size) = lod::annotation_size(SMALL_TEXT_WORLD, zoom, ppp) else {
+        if emphasis != ProbeEmphasis::Plain {
+            draw_probe_emphasis(
+                painter,
+                Rect::from_center_size(at, Vec2::splat(PROBE_RADIUS * zoom)),
+                emphasis,
+                zoom,
+                ppp,
+                palette,
+            );
+        }
+        return;
+    };
+    let text_colour = if filled { palette.canvas_bg } else { colour };
+    let galley = painter.layout_no_wrap(
+        format!("{}{}", probe_flag_name(probe), status.suffix()),
+        rspice_ui_kit::theme::mono(size, rspice_ui_kit::theme::FontWeight::Medium),
+        text_colour,
+    );
+    let pad = PROBE_TAG_PAD_WU * zoom;
+    let tag = Rect::from_min_max(
+        corner - Vec2::new(0.0, galley.size().y + 2.0 * pad.y),
+        corner + Vec2::new(galley.size().x + 2.0 * pad.x, 0.0),
+    );
+    let rounding = 2.0 * zoom;
+    if emphasis != ProbeEmphasis::Plain {
+        draw_probe_emphasis(
+            painter,
+            tag.union(Rect::from_center_size(
+                at,
+                Vec2::splat(2.0 * PROBE_DOT_WU * zoom),
+            )),
+            emphasis,
+            zoom,
+            ppp,
+            palette,
+        );
+    }
+    if filled {
+        painter.rect_filled(tag, rounding, colour);
+    } else {
+        painter.rect_filled(tag, rounding, palette.canvas_bg);
+        painter.rect_stroke(
+            tag,
+            rounding,
+            Stroke::new(lod::mark_outline_pt(ppp), colour),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.galley(tag.min + pad, galley, text_colour);
+}
+
+/// The ring around a probe's flag that says it is selected, under the
+/// pointer, or the trace selected in Results.
+fn draw_probe_emphasis(
+    painter: &Painter,
+    around: Rect,
+    emphasis: ProbeEmphasis,
+    zoom: f32,
+    ppp: f32,
+    palette: &Palette,
+) {
+    let ring = around.expand(2.0 * zoom);
+    let rounding = 3.0 * zoom;
     match emphasis {
         ProbeEmphasis::Selected => {
-            painter.circle_filled(center, radius + 4.0 * viewport.zoom, palette.canvas_select);
+            painter.rect_filled(ring, rounding, palette.canvas_select.gamma_multiply(0.35));
+            painter.rect_stroke(
+                ring,
+                rounding,
+                Stroke::new(lod::mark_outline_pt(ppp), palette.canvas_select),
+                egui::StrokeKind::Outside,
+            );
         }
         ProbeEmphasis::Hovered => {
-            painter.circle_stroke(
-                center,
-                radius + 4.0 * viewport.zoom,
+            painter.rect_stroke(
+                ring,
+                rounding,
                 Stroke::new(lod::mark_outline_pt(ppp), palette.canvas_select),
+                egui::StrokeKind::Outside,
             );
         }
         ProbeEmphasis::Traced => {
-            painter.circle_stroke(
-                center,
-                radius + 4.0 * viewport.zoom,
+            painter.rect_stroke(
+                ring,
+                rounding,
                 Stroke::new(
-                    lod::stroke_pt(StrokeRole::Probe, viewport.zoom, ppp, Emphasis::Raised),
+                    lod::stroke_pt(StrokeRole::Probe, zoom, ppp, Emphasis::Raised),
                     palette.canvas_net_highlight,
                 ),
+                egui::StrokeKind::Outside,
             );
         }
         ProbeEmphasis::Plain => {}
-    }
-    painter.circle_filled(center, radius, palette.canvas_bg);
-    painter.circle_stroke(center, radius, Stroke::new(ring, status_color));
-    // A single net's probe is a sight across its ring. Each end of a
-    // two-net probe carries its sign inside the ring instead, as a meter's
-    // terminals do, so the pair reads as the voltage between them.
-    let (half_span, upright) = match probe.difference_end {
-        None => (half_span, true),
-        Some(DifferenceEnd::Plus) => (radius * 0.55, true),
-        Some(DifferenceEnd::Minus) => (radius * 0.55, false),
-    };
-    painter.line_segment(
-        [
-            center - Vec2::new(half_span, 0.0),
-            center + Vec2::new(half_span, 0.0),
-        ],
-        Stroke::new(crosshair, status_color),
-    );
-    if upright {
-        painter.line_segment(
-            [
-                center - Vec2::new(0.0, half_span),
-                center + Vec2::new(0.0, half_span),
-            ],
-            Stroke::new(crosshair, status_color),
-        );
-    }
-    // Below the floor the label hides and the marker stays.
-    if let Some(size) = lod::annotation_size(SMALL_TEXT_WORLD, viewport.zoom, ppp) {
-        painter.text(
-            center + PROBE_LABEL_OFFSET_WU * viewport.zoom,
-            egui::Align2::LEFT_BOTTOM,
-            format!("{}{}", probe.reference, status.suffix()),
-            rspice_ui_kit::theme::mono(size, rspice_ui_kit::theme::FontWeight::Medium),
-            status_color,
-        );
     }
 }
 
@@ -668,7 +748,7 @@ pub fn probe_world_bounds(probe: &SchematicProbe) -> (Point, Point) {
 /// The bounds of the marker and the label [`draw_probe`] paints for it in
 /// `status`: what a ring around the probe hugs.
 pub fn probe_drawn_bounds(probe: &SchematicProbe, status: ProbeVisualStatus) -> (Point, Point) {
-    probe.drawn_bounds(probe.reference.chars().count() + status.suffix().chars().count())
+    probe.drawn_bounds(probe_flag_name(probe).chars().count() + status.suffix().chars().count())
 }
 
 /// Resolve a retained probe marker in screen space. The minimum radius keeps

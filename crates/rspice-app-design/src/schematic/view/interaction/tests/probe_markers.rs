@@ -16,6 +16,7 @@ fn a_probe_click_on_the_bare_sheet_places_nothing_and_says_what_to_click() {
         &mut canvas_parts(&mut state),
         Point::new(30, 40),
         &symbol_context,
+        ProbePlot::Replace,
     );
 
     assert!(state.model.schematic.document().probes.is_empty());
@@ -139,7 +140,7 @@ fn an_occurrence_probe_saves_the_display_name_and_requests_the_engine_node() {
     .expect("an ASCII occurrence spells");
 
     assert!(matches!(
-        request_probe_signal(&mut canvas_parts(&mut state), &spelling),
+        request_probe_signal(&mut canvas_parts(&mut state), &spelling, ProbePlot::Show),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
 
@@ -176,7 +177,8 @@ fn bound_probe_marker_retains_stable_plan_output_identity() {
     assert!(matches!(
         request_probe_signal(
             &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+            &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+            ProbePlot::Show
         ),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
@@ -284,6 +286,7 @@ fn two_net_host() -> (DesignTestHost, SchematicProbe) {
         &mut canvas_parts(&mut state),
         Point::new(40, 20),
         &symbol_context,
+        ProbePlot::Replace,
     );
     let original = state.model.schematic.document().probes[0].clone();
     assert_eq!(original.reference, "V(OUT)");

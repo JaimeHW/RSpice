@@ -92,6 +92,7 @@ pub(super) fn draw_interaction_previews(
     preview::draw_selection_rect(painter, &view, viewport);
     super::zoom_box::paint_zoom_box(painter, state.model, viewport);
     super::difference_probe::paint(painter, viewport);
+    super::interaction::paint_probe_tag(painter, response, state, viewport, symbol_context);
     draw_placement_badge(painter, response, &state.facts());
 }
 

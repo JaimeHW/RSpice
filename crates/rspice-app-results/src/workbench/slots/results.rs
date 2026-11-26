@@ -284,6 +284,15 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         self.results.session.cursors
     }
 
+    fn plotted_traces(&self) -> Vec<(String, egui::Color32)> {
+        self.results.plotted_traces()
+    }
+
+    fn pointed_trace(&self) -> Option<&str> {
+        let pointer = self.results.session.plot_pointer.as_ref()?;
+        Some(pointer.trace.as_ref()?.trace.source_name.as_str())
+    }
+
     fn fft_settings(&self) -> &rspice_results_ui::fft::FftState {
         &self.analysis.fft_state
     }

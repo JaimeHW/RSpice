@@ -39,7 +39,8 @@ fn plot_request(state: &DesignTestHost) -> Option<(String, ProbePlot, String)> {
 
 /// A probe of a signal the last run holds asks the results workspace to
 /// plot that run's trace, through its Data Browser's tick, and never to take
-/// one off; the signal stays a saved output of the plan for the next run.
+/// one off. Looking writes nothing: the plan saves no output for it, so the
+/// run looked at stays current.
 #[test]
 fn a_probe_of_a_signal_the_run_holds_asks_the_results_to_plot_it() {
     let mut state = DesignTestHost::default();
@@ -49,7 +50,8 @@ fn a_probe_of_a_signal_the_run_holds_asks_the_results_to_plot_it() {
         assert_eq!(
             request_probe_signal(
                 &mut canvas_parts(&mut state),
-                &OccurrenceProbeSpelling::verbatim("V(OUT)")
+                &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+                ProbePlot::Show
             ),
             ProbeSignalOutcome::PlotRequested
         );
@@ -57,13 +59,14 @@ fn a_probe_of_a_signal_the_run_holds_asks_the_results_to_plot_it() {
             plot_request(&state),
             Some(("V(OUT)".to_owned(), ProbePlot::Show, "V(OUT)".to_owned()))
         );
-        assert_eq!(saved_outputs(&state).len(), 1);
+        assert!(saved_outputs(&state).is_empty());
         state.workbench.outbox = Default::default();
     }
 }
 
 /// The inspector's Plot button asks for its trace to be put on the plot or
-/// taken off; the results workspace knows which.
+/// taken off; the results workspace knows which. A trace the run holds needs
+/// no saved output.
 #[test]
 fn the_inspector_plot_button_asks_for_a_toggle() {
     let mut state = DesignTestHost::default();
@@ -75,7 +78,7 @@ fn the_inspector_plot_button_asks_for_a_toggle() {
         plot_request(&state),
         Some(("V(OUT)".to_owned(), ProbePlot::Toggle, "V(OUT)".to_owned()))
     );
-    assert_eq!(saved_outputs(&state).len(), 1);
+    assert!(saved_outputs(&state).is_empty());
 }
 
 #[test]
@@ -292,7 +295,8 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
     assert!(matches!(
         request_probe_signal(
             &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("V(OUT)")
+            &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+            ProbePlot::Show
         ),
         ProbeSignalOutcome::SavedOutputCreated { .. }
     ));
@@ -328,7 +332,8 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
     assert!(matches!(
         request_probe_signal(
             &mut canvas_parts(&mut state),
-            &OccurrenceProbeSpelling::verbatim("v(out)")
+            &OccurrenceProbeSpelling::verbatim("v(out)"),
+            ProbePlot::Show
         ),
         ProbeSignalOutcome::SavedOutputAlreadyPresent { .. }
     ));
@@ -359,6 +364,7 @@ fn probe_without_stable_plan_fails_closed() {
     let outcome = request_probe_signal(
         &mut canvas_parts(&mut state),
         &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+        ProbePlot::Show,
     );
 
     assert!(matches!(outcome, ProbeSignalOutcome::Rejected { .. }));
@@ -463,11 +469,16 @@ fn a_read_only_view_probes_without_a_marker_or_a_plan_output() {
     let Some(ToolPointerAction::Probe(position)) = action else {
         panic!("a probe click on a read-only view is a probe, not a refused edit: {action:?}");
     };
-    handle_probe_click(&mut canvas_parts(&mut state), position, &symbol_context);
+    handle_probe_click(
+        &mut canvas_parts(&mut state),
+        position,
+        &symbol_context,
+        ProbePlot::Replace,
+    );
 
     assert_eq!(
         plot_request(&state),
-        Some(("V(OUT)".to_owned(), ProbePlot::Show, "V(OUT)".to_owned()))
+        Some(("V(OUT)".to_owned(), ProbePlot::Replace, "V(OUT)".to_owned()))
     );
     assert!(state.model.schematic.document().probes.is_empty());
     assert!(!state.model.schematic.can_undo());
@@ -516,6 +527,7 @@ fn the_net_inspector_plot_before_a_run_is_saved_by_the_next_run() {
     request_probe_signal(
         &mut canvas_parts(&mut state),
         &OccurrenceProbeSpelling::verbatim("V(OUT)"),
+        ProbePlot::Show,
     );
     assert_eq!(
         saved_outputs(&state)[0].origin,

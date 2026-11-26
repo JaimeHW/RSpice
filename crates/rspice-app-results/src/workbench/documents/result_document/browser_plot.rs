@@ -99,6 +99,73 @@ pub(crate) fn result_quantity_ticked(
     }
 }
 
+/// Show `key`'s signal alone on its analysis' plot, as a plain Probe-tool
+/// click does: every other curve the plot draws of the analysis comes off,
+/// its expressions are hidden, and the signal goes on.
+pub fn plot_alone(state: &mut ResultsParts<'_>, key: &SourceWaveformPresentationKey) {
+    let analysis = key.analysis();
+    let mut others: Vec<ResultBrowserSelectionKey> = last_strip_models(state)
+        .and_then(|models| models.iter().find(|model| model.analysis_key == analysis))
+        .map(|model| {
+            model
+                .traces
+                .iter()
+                .filter(|trace| {
+                    !trace.overlay
+                        && !trace.is_expression()
+                        && trace.source_waveform_name != key.source_name()
+                })
+                .map(|trace| {
+                    ResultBrowserSelectionKey::Waveform(SourceWaveformPresentationKey::new(
+                        analysis,
+                        &trace.source_waveform_name,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    others.dedup();
+    set_result_quantities_ticked(state, others.iter(), false);
+    state
+        .results
+        .reconcile_expression_projection(&state.model.simulation);
+    let shown = state
+        .model
+        .simulation
+        .active_run()
+        .and_then(|run| analysis.resolve(run))
+        .map(|(index, _)| index);
+    if let Some(index) = shown
+        && let Some(expressions) = state.results.session.analysis_exprs.get_mut(&analysis)
+        && expressions.iter().any(|expression| expression.visible)
+    {
+        for expression in expressions.iter_mut() {
+            expression.visible = false;
+        }
+        state
+            .results
+            .session
+            .sync_expression_projection(analysis, index);
+    }
+    set_result_quantity_ticked(
+        state,
+        &ResultBrowserSelectionKey::Waveform(key.clone()),
+        true,
+    );
+}
+
+/// Give `key`'s curve a strip of its own under the others once the plot
+/// draws it, as a Command-click with the Probe tool asks.
+pub fn plot_on_own_strip(state: &mut ResultsParts<'_>, key: SourceWaveformPresentationKey) {
+    set_result_quantity_ticked(
+        state,
+        &ResultBrowserSelectionKey::Waveform(key.clone()),
+        true,
+    );
+    state.results.own_strip_pending = Some(key);
+    state.results.models.invalidate();
+}
+
 pub fn set_result_quantity_ticked(
     state: &mut ResultsParts<'_>,
     key: &ResultBrowserSelectionKey,

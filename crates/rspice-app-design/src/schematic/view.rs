@@ -71,8 +71,8 @@ use self::shelf_drag::{
 pub(crate) use self::text_entry::InstanceTextEntry;
 
 pub(crate) use self::interaction::{
-    ensure_probe_visible_with_feedback, ensure_retained_probe_visible_with_feedback,
-    probe_trace_plotted, toggle_probe_with_feedback,
+    ensure_probe_visible_with_feedback, ensure_retained_probe_visible_with_feedback, probe_is_kept,
+    probe_trace_plotted, toggle_kept_net_with_feedback, toggle_probe_with_feedback,
 };
 pub use self::mobile_controls::show as show_mobile_canvas_controls;
 pub use self::parts::{

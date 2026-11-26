@@ -69,6 +69,18 @@ impl Schematic {
             committed: self.end_operation(),
         }
     }
+    /// Take the probe flags `ids` off the drawing, as one step.
+    pub fn remove_probes(&mut self, ids: &[u64]) -> DocumentEdit<bool> {
+        self.begin_operation("remove schematic probes");
+        let before = self.document.probes.len();
+        self.document
+            .probes
+            .retain(|probe| !ids.contains(&probe.id));
+        DocumentEdit {
+            value: self.document.probes.len() != before,
+            committed: self.end_operation(),
+        }
+    }
     /// Make probe `id` the `end` of a two-net probe. Its net is saved for
     /// the voltage between the ends and is not plotted on its own.
     pub fn mark_probe_difference_end(&mut self, id: u64, end: DifferenceEnd) -> DocumentEdit<bool> {

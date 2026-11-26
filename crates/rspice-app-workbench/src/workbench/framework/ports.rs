@@ -179,6 +179,17 @@ pub trait ResultsPort {
     fn selected_trace(&self, model: &Model) -> Option<&SelectedResultTrace>;
     /// Where the reader's A and B cursors stand.
     fn cursors(&self) -> CursorPair;
+    /// The signals of the shown run the plot drew last, each with the
+    /// colour of its curve, the first strip's first; empty where the host
+    /// keeps no plot.
+    fn plotted_traces(&self) -> Vec<(String, egui::Color32)> {
+        Vec::new()
+    }
+    /// The signal of the curve the pointer is over on the plot, while it is
+    /// over one.
+    fn pointed_trace(&self) -> Option<&str> {
+        None
+    }
     /// How the FFT viewer is set up.
     fn fft_settings(&self) -> &FftState;
     /// The response the reader chose for the Bode card to measure on the

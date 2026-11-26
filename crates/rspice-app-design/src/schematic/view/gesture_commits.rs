@@ -28,11 +28,17 @@ pub fn click_junction(frame: &mut CanvasFrame<'_>, at: Point) {
     interaction::handle_junction_click(&mut frame.parts(), at);
 }
 
-/// A click with the probe tool at `at`: the signal there goes on the plot,
-/// and an editable view keeps a probe marker for it.
+/// A plain click with the probe tool at `at`: the signal there goes on the
+/// plot alone, and when the last run does not hold it an editable view saves
+/// it and keeps a probe flag for it.
 pub fn click_probe(frame: &mut CanvasFrame<'_>, at: Point) {
     let symbols = schematic_symbol_context(&*frame.model);
-    interaction::handle_probe_click(&mut frame.parts(), at, &symbols);
+    interaction::handle_probe_click(
+        &mut frame.parts(),
+        at,
+        &symbols,
+        super::requests::ProbePlot::Replace,
+    );
 }
 
 /// A drag with the probe tool from `plus` to `minus`: the voltage between

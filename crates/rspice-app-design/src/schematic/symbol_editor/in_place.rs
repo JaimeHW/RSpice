@@ -215,6 +215,8 @@ fn draw_parent(
             operating_point_layout: None,
             probe_status: &unannotated_probe,
             selected_trace_expression: &|| None,
+            wire_traces: HashMap::new(),
+            probe_trace: &|_| None,
             open_pins: &HashMap::new(),
             variant_marks: &HashMap::new(),
             stale_instances: &Default::default(),

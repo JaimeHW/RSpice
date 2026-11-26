@@ -157,6 +157,13 @@ pub(super) fn draw_scene(
     let probe_status =
         |probe: &crate::state::SchematicProbe| probe_visual_status(probe, &probe_statuses);
     let selected_trace_expression = || state.selected_trace().map(|trace| trace.source_name());
+    let (wire_traces, probe_traces) = plotted_trace_inks(state);
+    let probe_trace = |probe: &crate::state::SchematicProbe| {
+        let expression = probe.source_expression.as_deref()?;
+        probe_traces
+            .get(&scene::normalized_probe_expression(expression))
+            .copied()
+    };
     scene::draw_content(
         painter,
         available,
@@ -193,6 +200,8 @@ pub(super) fn draw_scene(
             ),
             probe_status: &probe_status,
             selected_trace_expression: &selected_trace_expression,
+            wire_traces,
+            probe_trace: &probe_trace,
             open_pins: &open_pins(painter.ctx(), state, symbol_context),
             variant_marks: &variant_marks(painter.ctx(), state.model),
             stale_instances: &stale_instances(painter.ctx(), state),
@@ -228,6 +237,62 @@ pub(super) fn draw_scene(
         symbol_context,
         &probe_status,
     );
+}
+
+/// Each wire's colour from its net's plotted trace, with whether it is lit,
+/// and each plotted signal's colour by its expression.
+type TraceInks = (
+    HashMap<u64, (egui::Color32, bool)>,
+    HashMap<String, egui::Color32>,
+);
+
+/// The ink the plot lends the drawing: each wire of a net whose voltage the
+/// plot shows takes its trace's colour, raised while that trace is the one
+/// selected in Results or the pointer is over its curve; and each plotted
+/// signal's colour by its expression, for the probe flags. Nothing while the
+/// shown run is not of this drawing as it stands, whose nets it might not
+/// name alike.
+fn plotted_trace_inks(state: &CanvasFacts<'_>) -> TraceInks {
+    use rspice_schematic_editor::view::scene::normalized_probe_expression;
+    let traces = state.results.plotted_traces();
+    if traces.is_empty()
+        || !state.model.simulation.source.cross_probe.is_current_at(
+            &state.model.workspace.content.active_view,
+            &state.model.workspace.content.occurrence_path(),
+            state.model.schematic.topology_version(),
+        )
+    {
+        return (HashMap::new(), HashMap::new());
+    }
+    let colours: HashMap<String, egui::Color32> = traces
+        .into_iter()
+        .map(|(name, colour)| (normalized_probe_expression(&name), colour))
+        .collect();
+    let selected = state
+        .selected_trace()
+        .map(|trace| normalized_probe_expression(trace.source_name()));
+    let pointed = state
+        .results
+        .pointed_trace()
+        .map(normalized_probe_expression);
+    let occurrence = state.model.workspace.content.occurrence_path();
+    let mut wires = HashMap::new();
+    for net in super::interaction::live_design_nets(state.model).iter() {
+        let Some(spelling) =
+            crate::state::OccurrenceProbeSpelling::for_leaf(&occurrence, 'V', &net.name)
+        else {
+            continue;
+        };
+        let key = normalized_probe_expression(spelling.engine());
+        let Some(colour) = colours.get(&key) else {
+            continue;
+        };
+        let lit = selected.as_ref() == Some(&key) || pointed.as_ref() == Some(&key);
+        for wire in &net.wire_ids {
+            wires.insert(*wire, (*colour, lit));
+        }
+    }
+    (wires, colours)
 }
 
 /// While the pointer rests on a probe the last run could not produce, the
@@ -819,6 +884,24 @@ fn annotated_operating_point<'a>(
     if annotations == SchematicAnnotationVisibility::TransientVoltages {
         let (dc_op, _) = transient_operating_point(state)?;
         return Some((std::borrow::Cow::Owned(dc_op), None, None));
+    }
+    // Cursor A placed on the transient shown reads the drawing at its
+    // instant, as the plot reads it there: drag the cursor and every badge
+    // follows. Without it the badges show the operating point.
+    if let Some(transient) = annotated_transient(state.model).filter(|transient| {
+        state
+            .model
+            .simulation
+            .active_analysis()
+            .is_some_and(|shown| std::ptr::eq(shown, *transient))
+    }) && let Some((time, true)) =
+        transient_annotation_time(transient, state.results.cursors().a)
+    {
+        return Some((
+            std::borrow::Cow::Owned(transient_values_at(transient, time)),
+            None,
+            None,
+        ));
     }
     // The selected analysis's operating point, else the one its run solved
     // beside it; a run that solved none still started its transient from

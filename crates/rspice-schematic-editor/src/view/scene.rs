@@ -73,6 +73,11 @@ pub struct SceneOverlays<'a> {
     pub operating_point_layout: Option<&'a BadgeLayoutMemo>,
     pub probe_status: &'a dyn Fn(&SchematicProbe) -> ProbeVisualStatus,
     pub selected_trace_expression: &'a dyn Fn() -> Option<&'a str>,
+    /// The colour each wire takes from its net's trace while the plot shows
+    /// it, and whether that trace is the one the reader is on.
+    pub wire_traces: HashMap<u64, (egui::Color32, bool)>,
+    /// The colour of the trace of a probe's signal while the plot shows it.
+    pub probe_trace: &'a dyn Fn(&SchematicProbe) -> Option<egui::Color32>,
     /// Each instance's open terminals (nothing meets them), which take the
     /// open-pin mark.
     pub open_pins: &'a HashMap<u64, Vec<Point>>,
@@ -219,10 +224,21 @@ pub fn draw_content(
             | SchematicNetHighlighting::SelectedNetAcrossHierarchy
             | SchematicNetHighlighting::Off => ConductorInk::Plain,
         };
+        let traced =
+            overlays
+                .wire_traces
+                .get(&wire.id)
+                .map_or(ConductorInk::Plain, |(colour, lit)| {
+                    if *lit {
+                        ConductorInk::TracedLit(*colour)
+                    } else {
+                        ConductorInk::Traced(*colour)
+                    }
+                });
         let ink = if is_selected {
             ConductorInk::Selected
         } else {
-            net_ink
+            net_ink.max(traced)
         };
         if ink != ConductorInk::Plain {
             inked_wires.insert(index, ink);
@@ -232,7 +248,9 @@ pub fn draw_content(
             continue;
         }
         let colour_key = match ink {
-            ConductorInk::Class(colour) => colour.to_array(),
+            ConductorInk::Class(colour)
+            | ConductorInk::Traced(colour)
+            | ConductorInk::TracedLit(colour) => colour.to_array(),
             ConductorInk::Plain | ConductorInk::Highlighted | ConductorInk::Selected => [0; 4],
         };
         conductor_groups
@@ -539,6 +557,7 @@ pub fn draw_content(
             probe,
             (overlays.probe_status)(probe),
             emphasis,
+            (overlays.probe_trace)(probe),
             palette,
         );
     }
@@ -728,6 +747,8 @@ mod band_tests {
                 operating_point_layout: None,
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
+                wire_traces: HashMap::new(),
+                probe_trace: &|_| None,
                 open_pins: &HashMap::new(),
                 variant_marks: &HashMap::new(),
                 stale_instances: &HashSet::new(),
@@ -860,6 +881,8 @@ mod hover_tests {
                 operating_point_layout: None,
                 probe_status: &|_| ProbeVisualStatus::Materialized,
                 selected_trace_expression: &|| None,
+                wire_traces: HashMap::new(),
+                probe_trace: &|_| None,
                 open_pins,
                 variant_marks: &HashMap::new(),
                 stale_instances: &HashSet::new(),

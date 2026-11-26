@@ -280,7 +280,8 @@ fn a_schematic_probe_puts_its_signal_on_the_working_view() {
 
 /// A drag with the probe tool from one net to another puts the voltage
 /// between them on the plan's working view, and the strip reads the two
-/// nets' difference at every sample.
+/// nets' difference at every sample. The run holds both nets, so the drawing
+/// keeps no marker.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_two_net_probe_plots_the_voltage_between_the_nets() {
@@ -288,7 +289,7 @@ fn a_two_net_probe_plots_the_voltage_between_the_nets() {
     use rspice_app_design::schematic::view::gesture_commits::drag_probe;
     use rspice_app_results::analysis::calculator::{CalcValue, RealValue, WaveformsContext};
     use rspice_app_runs::simulation::controller::test_execution::state_with_current_clean_drc;
-    use rspice_app_state::state::{DifferenceEnd, RetainedTrace};
+    use rspice_app_state::state::RetainedTrace;
     use rspice_results::calculator::{evaluator::evaluate, spice_parser::try_parse};
 
     let host = state_with_current_clean_drc();
@@ -339,13 +340,9 @@ fn a_two_net_probe_plots_the_voltage_between_the_nets() {
         status_line(&app).as_deref(),
         Some("V(PA) - V(PB) added to the plot.")
     );
-    assert_eq!(
-        difference_ends(&app),
-        vec![
-            (Point::new(2020, 2000), DifferenceEnd::Plus),
-            (Point::new(2020, 2100), DifferenceEnd::Minus),
-        ],
-        "a marker with its sign at each end"
+    assert!(
+        difference_ends(&app).is_empty(),
+        "a run that holds both nets is only looked at: no marker is kept"
     );
     let run = app.state.model.simulation.active_run().expect("the run");
     let expression = try_parse(difference).expect("the view's expression parses");

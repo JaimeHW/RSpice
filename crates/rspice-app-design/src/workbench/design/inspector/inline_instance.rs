@@ -1018,6 +1018,38 @@ pub fn net_panel(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>, name: &str, nets: 
                     );
                 }
             }
+            // Keeping a voltage saves it on every run, with a flag on the
+            // net that says so; looking at it saves nothing.
+            if probes.contains(&'V') && !cx.model.schematic_edit_read_only() {
+                let display = format!("V({net_name})");
+                let kept = crate::schematic::view::probe_is_kept(cx.model, &net_name, &display);
+                let label = if kept {
+                    format!("Kept: {display}")
+                } else {
+                    format!("Keep {display}")
+                };
+                let hover = if kept {
+                    "Saved on every run. Press to stop saving it and take its flag off."
+                } else {
+                    "Save this voltage on every run, for measurements and specifications, and flag the net"
+                };
+                if Button::new(&label)
+                    .ghost()
+                    .show(ui)
+                    .on_hover_text(hover)
+                    .clicked()
+                    && crate::schematic::view::toggle_kept_net_with_feedback(
+                        &mut crate::schematic::view::canvas_parts_in(cx),
+                        &net_name,
+                        &display,
+                    )
+                {
+                    rspice_app_runs::workbench::preflight::invalidate(
+                        &mut cx.runs.preflight,
+                        &mut *cx.handles.run_controller,
+                    );
+                }
+            }
             if !connected.is_empty()
                 && Button::new("Select connected instances")
                     .ghost()
