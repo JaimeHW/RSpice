@@ -18,6 +18,8 @@ noise.
 [Dialect](#netlist-dialect) · [Interfaces](#interfaces) ·
 [Validation](#validation) · [Repository](#repository)
 
+<img src="assets/screenshots/schematic-cross-probe.webp" alt="The schematic editor with the LM741 example: the probed input and output nets take their trace colours, and the Plot dock below shows the op-amp's input and amplified output" width="100%" />
+
 </div>
 
 ---
