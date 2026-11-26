@@ -33,6 +33,7 @@ pub mod operational_state;
 mod optimization;
 pub mod persistent_document;
 mod phase_noise;
+mod plot_page;
 mod polar;
 mod population;
 mod pz;
@@ -72,6 +73,7 @@ pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
 pub use optimization::apply_best_to_design;
 pub(crate) use optimization::export_csv as export_optimization_csv;
+pub use plot_page::{plot_page_status, show_on_plot_page, show_plot_page};
 pub use trace_style::{rename_trace, set_trace_style};
 pub(crate) use view_history::{
     zoom_next, zoom_next_available, zoom_previous, zoom_previous_available,
@@ -1931,6 +1933,13 @@ pub struct ResultsState {
     /// The runs the quick view has settled on an analysis to show; see
     /// [`settling_analysis`]. Transient.
     pub(crate) settled_runs: HashSet<DatasetId>,
+    /// The authored analysis last probed, plotted or picked on the dock's
+    /// Plot page, which the page opens the plan's next run on. A choice for
+    /// the session, not the project's. Transient.
+    pub(crate) plot_page_followed: Option<AnalysisInstanceId>,
+    /// The analyses of the shown run the Plot page can offer, kept until
+    /// what they were read from changes. Transient.
+    pub(crate) plot_page_offer: Option<Box<plot_page::PlotPageOffer>>,
     /// The analysis kind the A/B cursors were last read against. Their X is
     /// kept across runs and analyses of one kind, and cleared for another.
     cursor_kind: Option<crate::state::AnalysisType>,
@@ -2187,162 +2196,6 @@ pub fn activate_persistent_document(
     document_id: crate::product::ResultDocumentId,
 ) -> bool {
     persistent_document::activate(state, document_id)
-}
-
-/// The dock's Plot page, on the pages that plot in the dock: its toolbar
-/// band, then the plot, flush to the dock's sides and foot. This is the same
-/// canonical retained result state Results draws, not a second result
-/// document, so Open in Results shows the same view.
-pub fn show_plot_page(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    // The page plots; the run's other sheets (its table, spectrum, eye and
-    // manifest) are in Results, a press of the band's Open in Results away.
-    let sheets = pane_sheets(state.results_reads());
-    if let Some(&first) = sheets.first()
-        && !sheets.contains(&state.results.session.viewer)
-    {
-        state.results.session.viewer = first;
-    }
-    prepare_quick_view(ui, state);
-    let open_in_results = rspice_app_workbench::workbench::docks::console::toolbar(ui, |ui| {
-        plot_page_band(ui, state, &sheets)
-    });
-    crate::ui::plot::set_interaction_mode(
-        ui.ctx(),
-        state.results.session.plot_tool.interaction_mode(),
-    );
-    let well = ui.available_rect_before_wrap();
-    ui.allocate_ui(well.size(), |ui| {
-        ui.set_min_height(well.height());
-        if sheets.is_empty() && state.model.simulation.retained.has_results() {
-            let t = Tokens::get(ui.ctx());
-            ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
-            // An analysis that failed has nothing to plot for that reason:
-            // its card takes the well, as on its sheet in Results.
-            let viewer = state.results.session.viewer;
-            let status = operational_state::classify_viewer(state, viewer);
-            if !(status.blocks_visuals
-                && operational_state::show_result_operational_status(ui, state, &status))
-            {
-                well_hint(
-                    ui,
-                    "Nothing to plot from this run: its values are on the drawing, and Open in Results shows every sheet",
-                );
-            }
-        } else if viewer_well_is_open(ui, state) {
-            waves::show_compact(ui, state);
-        }
-    });
-    working_view::capture_at_frame_end(state);
-    waves::marker_dialog::show(ui.ctx(), state);
-    if open_in_results {
-        state
-            .workbench
-            .activate(rspice_app_state::workbench::workspace::Workspace::Results);
-    }
-}
-
-/// The Plot page's band: the result's state when it is not complete, the
-/// sheet when the run has more than one to plot, the cursor tools, zoom and
-/// fit, and at its right end what the cursors read and Open in Results.
-/// Returns whether Open in Results was pressed.
-fn plot_page_band(ui: &mut Ui, state: &mut ResultsParts<'_>, sheets: &[ResultViewer]) -> bool {
-    let mut open_in_results = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = PLOT_BAND_GAP;
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            open_in_results = crate::ui::widgets::Button::new("Open in Results")
-                .compact()
-                .show(ui)
-                .on_hover_text("Open this plot in Results: measurements, cursors and every sheet")
-                .clicked();
-            let t = Tokens::get(ui.ctx());
-            if let Some(readout) = waves::inline_cursor_readout(state, &t) {
-                ui.label(
-                    egui::RichText::new(readout)
-                        .font(crate::ui::theme::mono(
-                            crate::ui::tokens::FS_0,
-                            crate::ui::theme::FontWeight::Regular,
-                        ))
-                        .color(t.color.text_dim),
-                );
-            }
-            let rest = ui.available_size();
-            ui.allocate_ui_with_layout(
-                rest,
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
-                    if operational_state::show_status_mark(ui, state) {
-                        instrument::separator(ui);
-                    }
-                    if sheets.len() > 1 {
-                        let labels: Vec<&str> =
-                            sheets.iter().map(|sheet| sheet.tab_label()).collect();
-                        let mut chosen = sheets
-                            .iter()
-                            .position(|&sheet| sheet == state.results.session.viewer)
-                            .unwrap_or(0);
-                        if rspice_ui_kit::widgets::segmented(
-                            ui,
-                            "results.plot-page.sheet",
-                            &labels,
-                            &mut chosen,
-                            rspice_ui_kit::widgets::SegmentedWidth::Natural,
-                        ) {
-                            state.results.session.viewer = sheets[chosen];
-                        }
-                        instrument::separator(ui);
-                    }
-                    instrument::show_plot_tools(ui, state);
-                },
-            );
-        });
-    });
-    open_in_results
-}
-
-/// The gap between two items of the Plot page's band.
-const PLOT_BAND_GAP: f32 = 6.0;
-
-/// The sheets the dock's Plot page can show for the active run: the ones
-/// that plot it against time, a sweep or frequency.
-pub(crate) fn pane_sheets(state: ResultsReads<'_>) -> Vec<ResultViewer> {
-    ResultViewer::all()
-        .filter(|&viewer| pane_sheet(viewer) && viewer_availability(state, viewer).available)
-        .collect()
-}
-
-/// Whether the dock's Plot page draws `viewer`: the sheets that plot a run
-/// against time, a sweep or frequency.
-const fn pane_sheet(viewer: ResultViewer) -> bool {
-    matches!(
-        viewer,
-        ResultViewer::Waves
-            | ResultViewer::DcSweep
-            | ResultViewer::Bode
-            | ResultViewer::NoiseContrib
-    )
-}
-
-/// The state of the result the dock's Plot page draws, when it is one the
-/// reader should notice, for the page's tab to carry.
-pub fn plot_page_status(
-    state: &mut ResultsParts<'_>,
-) -> Option<rspice_results_ui::operational::ResultOperationalStatus> {
-    let viewer = plot_page_viewer(state.results_reads())?;
-    operational_state::notable_status(state, viewer)
-}
-
-/// The sheet the Plot page draws: the one shown when the page can draw it,
-/// else the first the run can plot.
-pub(crate) fn plot_page_viewer(state: ResultsReads<'_>) -> Option<ResultViewer> {
-    let viewer = state.results.session.viewer;
-    let sheets = pane_sheets(state);
-    if sheets.contains(&viewer) {
-        Some(viewer)
-    } else {
-        sheets.first().copied()
-    }
 }
 
 /// Settle the quick view's selection and working view before it draws, in

@@ -439,16 +439,30 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut ResultsParts<'_>, t: &Tokens) 
 
 /// Render the strip stack.
 pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    show_with_pane_chrome(ui, state, true);
+    show_with_pane_chrome(ui, state, Stack::Sheet);
 }
 
-/// Render the same retained strips on the dock's Plot page: each strip is
-/// its panes alone, each pane keeping its own controls (log Y, fit) on its
-/// legend row. Trace selection and swatch visibility remain fully
+/// Render the same retained strips on the dock's Plot page: `analysis`'
+/// strip alone, or the first strip the sheet draws when it draws none of
+/// it, fitted to the page. Each pane keeps its own controls (log Y, fit) on
+/// its legend row, and trace selection and swatch visibility remain fully
 /// interactive, while the strip headers and the expression controls stay on
 /// the Results sheet.
-pub fn show_compact(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    show_with_pane_chrome(ui, state, false);
+pub fn show_compact(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    analysis: Option<AnalysisPresentationKey>,
+) {
+    show_with_pane_chrome(ui, state, Stack::PlotPage(analysis));
+}
+
+/// Which stack a sheet draws.
+#[derive(Clone, Copy)]
+enum Stack {
+    /// The Results sheet's: every analysis, each strip with its header.
+    Sheet,
+    /// The dock's Plot page: one analysis, fitted.
+    PlotPage(Option<AnalysisPresentationKey>),
 }
 
 /// The Bode sheet: the run's AC response through the same pane-stack
@@ -457,21 +471,21 @@ pub fn show_compact(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 /// scope rides the viewer-aware model cache; stability margins stay in the
 /// right panel's inspector card.
 pub fn show_bode(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    show_with_pane_chrome(ui, state, true);
+    show_with_pane_chrome(ui, state, Stack::Sheet);
 }
 
 /// The Noise sheet: retained noise PSDs as an nV/√Hz pane through the same
 /// instrument, scoped to Noise analyses by the viewer-aware model cache.
 /// The spectrum summary card stays in the right panel.
 pub fn show_noise(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    show_with_pane_chrome(ui, state, true);
+    show_with_pane_chrome(ui, state, Stack::Sheet);
 }
 
-fn show_with_pane_chrome(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome: bool) {
+fn show_with_pane_chrome(ui: &mut Ui, state: &mut ResultsParts<'_>, stack: Stack) {
     // The whole area the strips take is where browser rows can be dropped,
     // including the hint that stands in for strips while there are none.
     let zone = ui.available_rect_before_wrap();
-    show_strips(ui, state, pane_chrome);
+    show_strips(ui, state, stack);
     drop::accept_browser_drop(ui, state, zone);
 }
 
@@ -493,7 +507,7 @@ fn nothing_plotted_hint(state: &ResultsParts<'_>) -> &'static str {
     }
 }
 
-fn show_strips(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome: bool) {
+fn show_strips(ui: &mut Ui, state: &mut ResultsParts<'_>, stack: Stack) {
     let t = Tokens::get(ui.ctx());
     let presentation = state.results_reads().presentation_policy();
     let models = cached_models(
@@ -524,12 +538,19 @@ fn show_strips(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome: bool) {
 
     let quantity = state.model.preferences.quantity_presentation_policy();
     let trace_width = state.model.preferences.wave_trace_width();
+    let fitted = match stack {
+        Stack::Sheet => None,
+        Stack::PlotPage(analysis) => analysis
+            .filter(|analysis| models.iter().any(|model| model.analysis_key == *analysis))
+            .or_else(|| models.first().map(|model| model.analysis_key)),
+    };
     rspice_results_ui::waves::stack::show(
         ui,
         &mut stack_host::WaveStackHost(state),
         &models,
         rspice_results_ui::waves::stack::StackOptions {
-            pane_chrome,
+            pane_chrome: matches!(stack, Stack::Sheet),
+            fitted,
             readout: presentation.readout(),
             quantity,
             trace_width,

@@ -128,6 +128,9 @@ impl StackHost for WaveStackHost<'_, '_> {
             crate::workbench::results::commands::ResultsCommand::SendTraceToCalculator,
         );
     }
+    fn open_in_results(&mut self, model: &StripModel) {
+        super::super::plot_page::open_in_results(self.0, Some(model.analysis_key));
+    }
     fn event_lane_height(&self, model: &StripModel) -> f32 {
         super::lanes::lane_height(self.0, model)
     }

@@ -34,6 +34,13 @@ pub struct StackOptions {
     /// and the controls that arrange panes. Without it the stack is the
     /// dock's Plot page: each strip is its panes alone.
     pub pane_chrome: bool,
+    /// The one analysis the stack shows, fitted to its height: the dock's
+    /// Plot page. Its panes share the height down to the least a pane reads
+    /// at, and the ones that do not fit are counted on a line above the
+    /// ruler that opens Results on the analysis; nothing scrolls. `None` is
+    /// the Results sheet: every analysis, stacked, scrolling once the
+    /// strips outgrow it.
+    pub fitted: Option<AnalysisPresentationKey>,
     pub readout: ReadoutPolicy,
     pub quantity: QuantityPresentationPolicy,
     /// Stroke of the active run's traces, in points.
@@ -108,6 +115,9 @@ pub trait StackHost {
     fn edit_note(&mut self, _model: &StripModel, _edit: super::notes::NoteEdit) {}
     /// Hand `trace` to the waveform calculator, as the plot's menu asks.
     fn send_to_calculator(&mut self, _model: &StripModel, _trace: &StripTrace) {}
+    /// Open Results on `model`'s analysis: what a fitted stack's line of
+    /// panes it had no room for asks.
+    fn open_in_results(&mut self, _model: &StripModel) {}
     /// Evaluate `text` as the abscissa a pane is drawn against, once per
     /// member of the strip. A host without a calculator has none to offer.
     fn resolve_abscissa_expression(
@@ -792,14 +802,26 @@ pub fn show(
     let pane_chrome = options.pane_chrome;
     // The plot the pointer hovers says so as it is drawn.
     host.session_mut().plot_pointer = None;
-    // Apply hide/maximize strip state.
+    // Apply hide/maximize strip state. A fitted stack shows the analysis it
+    // was given, which the Results sheet's arrangement does not decide.
     let results = host.session();
-    let visible: Vec<&StripModel> = match results.maximized_strip {
-        Some(max_key) if models.iter().any(|m| m.analysis_key == max_key) => models
+    let visible: Vec<&StripModel> = match (options.fitted, results.maximized_strip) {
+        (Some(fitted), _) => {
+            let only: Vec<&StripModel> = models
+                .iter()
+                .filter(|model| model.analysis_key == fitted)
+                .collect();
+            if only.is_empty() {
+                nothing_plotted(ui, host);
+                return;
+            }
+            only
+        }
+        (None, Some(max_key)) if models.iter().any(|m| m.analysis_key == max_key) => models
             .iter()
             .filter(|m| m.analysis_key == max_key)
             .collect(),
-        _ => models
+        (None, _) => models
             .iter()
             .filter(|m| !results.hidden_strips.contains(&m.analysis_key))
             .collect(),
@@ -840,13 +862,26 @@ pub fn show(
             )
         })
         .collect();
+    // A fitted stack draws the analysis' own strip; the strips that plot its
+    // panes against a signal are counted with the panes it has no room for.
+    let (rows, unseen_xy) = if options.fitted.is_some() {
+        let unseen = rows.iter().filter(|(_, xy)| xy.is_some()).count();
+        let own: Vec<_> = rows.into_iter().filter(|(_, xy)| xy.is_none()).collect();
+        (own, unseen)
+    } else {
+        (rows, 0)
+    };
     let separators = rows.len().saturating_sub(1) as f32 * STRIP_DIVIDER;
     let share = (avail.height() - separators) / rows.len() as f32;
     // An analysis' block grows with its strips, each kept readable, and the
-    // stack scrolls once the blocks outgrow the window.
+    // stack scrolls once the blocks outgrow the window. A fitted stack's one
+    // block is the height it is given.
     let row_heights: Vec<f32> = rows
         .iter()
         .map(|(model, xy)| {
+            if options.fitted.is_some() {
+                return avail.height();
+            }
             let needed = if xy.is_some() {
                 BLOCK_MIN_HEIGHT
             } else {
@@ -876,192 +911,199 @@ pub fn show(
         .and_then(|owner| models.iter().find(|model| model.analysis_index == owner))
         .map(|model| model.cursor_domain());
 
-    egui::ScrollArea::vertical()
-        .id_salt("rspice.results.strips")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-            for (position, &(model, xy)) in rows.iter().enumerate() {
-                if position > 0 {
-                    let (divider, _) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), STRIP_DIVIDER),
-                        egui::Sense::hover(),
-                    );
-                    ui.painter().rect_filled(divider, 0.0, t.color.border);
-                }
-                let strip_height = row_heights[position];
-                if let Some(index) = xy {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(ui.available_width(), strip_height),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.set_min_height(strip_height);
-                            let mut edits = ExpressionEdits::default();
-                            // An XY strip keeps a place for the maximize
-                            // control the strips drawn against time carry
-                            // beside their close one, so every scale chip
-                            // ends on one rule.
-                            let slots = 1 + usize::from(pane_chrome && !maximized && n > 1);
-                            if show_xy_strip(
-                                ui,
-                                host,
-                                model,
-                                (index, slots, several),
-                                linked_cursor_domain.as_ref(),
-                                options,
-                                &mut edits,
-                            ) {
-                                close_xy = Some(index);
-                            }
-                            if let Some(slot) = edits.toggle {
-                                toggle_expr = Some((model.analysis_key, slot));
-                            }
-                            if let Some(slot) = edits.remove {
-                                remove_expr = Some((model.analysis_key, slot));
-                            }
-                        },
-                    );
-                    continue;
-                }
+    let mut strips = |ui: &mut Ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+        for (position, &(model, xy)) in rows.iter().enumerate() {
+            if position > 0 {
+                let (divider, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), STRIP_DIVIDER),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(divider, 0.0, t.color.border);
+            }
+            let strip_height = row_heights[position];
+            if let Some(index) = xy {
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), strip_height),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.set_min_height(strip_height);
-                        // The window controls the header keeps: maximize,
-                        // and close beside it when several strips are shown.
-                        // Each pane's row ends under them.
-                        let closable = pane_chrome && !maximized && n > 1;
-                        let window_slots = 1 + usize::from(closable);
-                        // Beside a document the strip is its panes alone:
-                        // the pane's axis names the analysis, and the
-                        // Results sheet is where strips are told apart.
-                        if pane_chrome {
-                            // Analysis identity remains in the strip header.
-                            // Unit-owned signal legends live in the pane headers;
-                            // only unitless expressions remain alongside the
-                            // analysis identity here.
-                            let strip_exprs: Vec<ExprTrace> = host
-                                .session()
-                                .analysis_exprs
-                                .get(&model.analysis_key)
-                                .cloned()
-                                .unwrap_or_default();
-                            let expr_labels: Vec<String> = strip_exprs
-                                .iter()
-                                .map(|expr| {
-                                    let complex =
-                                        host.expression_is_complex(model.analysis_key, &expr.text);
-                                    expression_label(expr, complex)
-                                })
-                                .collect();
-                            let legend: Vec<LegendChip<'_>> = strip_exprs
-                                .iter()
-                                .enumerate()
-                                .map(|(i, expr)| LegendChip {
-                                    name: &expr_labels[i],
-                                    color: expr_color(&t, expr_palette_slot(model, i)),
-                                    on: expr.visible,
-                                    glyph: crate::strip::LegendGlyph::Line,
-                                })
-                                .collect();
-
-                            let zoomed = host
-                                .session()
-                                .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
-                            let mut conversions = |ui: &mut Ui, index: usize| {
-                                if let Some(expr) = strip_exprs.get(index) {
-                                    expression_conversions(ui, host, model, index, expr, &t);
-                                }
-                            };
-                            let header =
-                                StripHeader::new(&model.kind_tag, strip_subtitle(model), &legend)
-                                    .id_salt(model.analysis_key)
-                                    .incomplete(model.incomplete)
-                                    .maximized(maximized)
-                                    .closable(closable)
-                                    .zoomed(zoomed)
-                                    .expr_action(pane_chrome)
-                                    .removable_from(0)
-                                    .chip_menu(&mut conversions)
-                                    .pane_actions(pane_chrome)
-                                    .x_scale(true)
-                                    .show(ui);
-                            // The strip header owns the shared X axis, and with
-                            // it the axis' scale toggle.
-                            if let Some(rect) = header.scale_rect
-                                && crate::strip::x_scale_chip(
-                                    ui,
-                                    egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
-                                    rect,
-                                    (
-                                        model.x_scale == XScale::Log10,
-                                        log_x_refusal(model).as_deref(),
-                                    ),
-                                )
-                            {
-                                let scale = match model.x_scale {
-                                    XScale::Log10 => XScale::Linear,
-                                    XScale::Linear => XScale::Log10,
-                                };
-                                let session = host.session_mut();
-                                session.x_scales.insert(model.analysis_key, scale);
-                                // A range read on one scale is no viewport on the
-                                // other.
-                                set_shared_x_view(session, model.analysis_key, None);
-                            }
-                            if let Some(chip_index) = header.legend_clicked {
-                                toggle_expr = Some((model.analysis_key, chip_index));
-                            }
-                            if let Some(chip_index) = header.legend_visibility_clicked {
-                                toggle_expr = Some((model.analysis_key, chip_index));
-                            }
-                            if let Some(chip_index) = header.legend_removed {
-                                remove_expr = Some((model.analysis_key, chip_index));
-                            }
-                            if header.maximize_clicked {
-                                toggle_maximize = Some(model.analysis_key);
-                            }
-                            if header.close_clicked {
-                                close_strip = Some(model.analysis_key);
-                            }
-                            if header.fit_clicked {
-                                fit_strip = Some(model.analysis_key);
-                            }
-                            if header.add_expr_clicked {
-                                open_editor = Some(model.analysis_key);
-                            }
+                        let mut edits = ExpressionEdits::default();
+                        // An XY strip keeps a place for the maximize
+                        // control the strips drawn against time carry
+                        // beside their close one, so every scale chip
+                        // ends on one rule.
+                        let slots = 1 + usize::from(pane_chrome && !maximized && n > 1);
+                        if show_xy_strip(
+                            ui,
+                            host,
+                            model,
+                            (index, slots, several),
+                            linked_cursor_domain.as_ref(),
+                            options,
+                            &mut edits,
+                        ) {
+                            close_xy = Some(index);
                         }
-
-                        host.edit_expression(ui, model);
-
-                        // Strips scrolled out of view skip the plot body
-                        // entirely (range lookups, envelope mapping, shape
-                        // building) — only the space is reserved.
-                        let plot_rect = ui.available_rect_before_wrap();
-                        if ui.is_rect_visible(plot_rect) {
-                            let mut edits = ExpressionEdits::default();
-                            show_strip_plot(
-                                ui,
-                                host,
-                                (models, model, window_slots, several),
-                                linked_cursor_domain.as_ref(),
-                                options,
-                                &mut edits,
-                            );
-                            if let Some(slot) = edits.toggle {
-                                toggle_expr = Some((model.analysis_key, slot));
-                            }
-                            if let Some(slot) = edits.remove {
-                                remove_expr = Some((model.analysis_key, slot));
-                            }
-                        } else {
-                            ui.allocate_exact_size(plot_rect.size(), egui::Sense::hover());
+                        if let Some(slot) = edits.toggle {
+                            toggle_expr = Some((model.analysis_key, slot));
+                        }
+                        if let Some(slot) = edits.remove {
+                            remove_expr = Some((model.analysis_key, slot));
                         }
                     },
                 );
+                continue;
             }
-        });
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), strip_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_min_height(strip_height);
+                    // The window controls the header keeps: maximize,
+                    // and close beside it when several strips are shown.
+                    // Each pane's row ends under them.
+                    let closable = pane_chrome && !maximized && n > 1;
+                    let window_slots = 1 + usize::from(closable);
+                    // Beside a document the strip is its panes alone:
+                    // the pane's axis names the analysis, and the
+                    // Results sheet is where strips are told apart.
+                    if pane_chrome {
+                        // Analysis identity remains in the strip header.
+                        // Unit-owned signal legends live in the pane headers;
+                        // only unitless expressions remain alongside the
+                        // analysis identity here.
+                        let strip_exprs: Vec<ExprTrace> = host
+                            .session()
+                            .analysis_exprs
+                            .get(&model.analysis_key)
+                            .cloned()
+                            .unwrap_or_default();
+                        let expr_labels: Vec<String> = strip_exprs
+                            .iter()
+                            .map(|expr| {
+                                let complex =
+                                    host.expression_is_complex(model.analysis_key, &expr.text);
+                                expression_label(expr, complex)
+                            })
+                            .collect();
+                        let legend: Vec<LegendChip<'_>> = strip_exprs
+                            .iter()
+                            .enumerate()
+                            .map(|(i, expr)| LegendChip {
+                                name: &expr_labels[i],
+                                color: expr_color(&t, expr_palette_slot(model, i)),
+                                on: expr.visible,
+                                glyph: crate::strip::LegendGlyph::Line,
+                            })
+                            .collect();
+
+                        let zoomed = host
+                            .session()
+                            .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
+                        let mut conversions = |ui: &mut Ui, index: usize| {
+                            if let Some(expr) = strip_exprs.get(index) {
+                                expression_conversions(ui, host, model, index, expr, &t);
+                            }
+                        };
+                        let header =
+                            StripHeader::new(&model.kind_tag, strip_subtitle(model), &legend)
+                                .id_salt(model.analysis_key)
+                                .incomplete(model.incomplete)
+                                .maximized(maximized)
+                                .closable(closable)
+                                .zoomed(zoomed)
+                                .expr_action(pane_chrome)
+                                .removable_from(0)
+                                .chip_menu(&mut conversions)
+                                .pane_actions(pane_chrome)
+                                .x_scale(true)
+                                .show(ui);
+                        // The strip header owns the shared X axis, and with
+                        // it the axis' scale toggle.
+                        if let Some(rect) = header.scale_rect
+                            && crate::strip::x_scale_chip(
+                                ui,
+                                egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
+                                rect,
+                                (
+                                    model.x_scale == XScale::Log10,
+                                    log_x_refusal(model).as_deref(),
+                                ),
+                            )
+                        {
+                            let scale = match model.x_scale {
+                                XScale::Log10 => XScale::Linear,
+                                XScale::Linear => XScale::Log10,
+                            };
+                            let session = host.session_mut();
+                            session.x_scales.insert(model.analysis_key, scale);
+                            // A range read on one scale is no viewport on the
+                            // other.
+                            set_shared_x_view(session, model.analysis_key, None);
+                        }
+                        if let Some(chip_index) = header.legend_clicked {
+                            toggle_expr = Some((model.analysis_key, chip_index));
+                        }
+                        if let Some(chip_index) = header.legend_visibility_clicked {
+                            toggle_expr = Some((model.analysis_key, chip_index));
+                        }
+                        if let Some(chip_index) = header.legend_removed {
+                            remove_expr = Some((model.analysis_key, chip_index));
+                        }
+                        if header.maximize_clicked {
+                            toggle_maximize = Some(model.analysis_key);
+                        }
+                        if header.close_clicked {
+                            close_strip = Some(model.analysis_key);
+                        }
+                        if header.fit_clicked {
+                            fit_strip = Some(model.analysis_key);
+                        }
+                        if header.add_expr_clicked {
+                            open_editor = Some(model.analysis_key);
+                        }
+                    }
+
+                    host.edit_expression(ui, model);
+
+                    // Strips scrolled out of view skip the plot body
+                    // entirely (range lookups, envelope mapping, shape
+                    // building) — only the space is reserved.
+                    let plot_rect = ui.available_rect_before_wrap();
+                    if ui.is_rect_visible(plot_rect) {
+                        let mut edits = ExpressionEdits::default();
+                        show_strip_plot(
+                            ui,
+                            host,
+                            (models, model, window_slots, several, unseen_xy),
+                            linked_cursor_domain.as_ref(),
+                            options,
+                            &mut edits,
+                        );
+                        if let Some(slot) = edits.toggle {
+                            toggle_expr = Some((model.analysis_key, slot));
+                        }
+                        if let Some(slot) = edits.remove {
+                            remove_expr = Some((model.analysis_key, slot));
+                        }
+                    } else {
+                        ui.allocate_exact_size(plot_rect.size(), egui::Sense::hover());
+                    }
+                },
+            );
+        }
+    };
+    // A fitted stack never scrolls: the wheel over a pane zooms it, and a
+    // strip cut by the foot reads as a fault.
+    if options.fitted.is_some() {
+        ui.scope(|ui| strips(ui));
+    } else {
+        egui::ScrollArea::vertical()
+            .id_salt("rspice.results.strips")
+            .auto_shrink([false, false])
+            .show(ui, |ui| strips(ui));
+    }
 
     // Apply deferred mutations.
     let results = host.session_mut();
@@ -1358,7 +1400,13 @@ struct ExpressionEdits {
 fn show_strip_plot(
     ui: &mut Ui,
     host: &mut impl StackHost,
-    (strips, model, window_slots, several): (&Arc<Vec<StripModel>>, &StripModel, usize, bool),
+    (strips, model, window_slots, several, unseen_xy): (
+        &Arc<Vec<StripModel>>,
+        &StripModel,
+        usize,
+        bool,
+        usize,
+    ),
     linked_cursor_domain: Option<&CursorDomain>,
     options: StackOptions,
     edits: &mut ExpressionEdits,
@@ -1407,18 +1455,70 @@ fn show_strip_plot(
         })
         .collect();
     host.note_sample_reads(0, extrema_samples);
-    let collapsed_count = collapsed.iter().filter(|collapsed| **collapsed).count();
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
     let gutter = strip_gutter(ui, host, model);
     let marker_height = event_marker_band(ui, host, model, (x_domain, gutter));
     let lane_height = marker_height
         + event_lane_band(ui, host, model, (x_domain, gutter), count, wanted_lanes, &t);
-    let expanded_count = count - collapsed_count;
-    let geometry = wave_stack_geometry(
-        available.height() - lane_height - collapsed_count as f32 * (WAVE_PANE_HEADER_HEIGHT + 1.0),
-        expanded_count,
-    );
+    let least = WAVE_PANE_HEADER_HEIGHT + LEAST_PLOT_HEIGHT;
+    // A fitted strip draws the panes that fit at the least a pane reads at,
+    // and counts the others on a line above its ruler.
+    let shown: Vec<bool> = if options.fitted.is_some() {
+        let active = host
+            .session()
+            .active_wave_pane
+            .as_ref()
+            .filter(|active| active.analysis == model.analysis_key)
+            .and_then(|active| panes.iter().position(|pane| pane.unit == active.unit));
+        let needs: Vec<f32> = collapsed
+            .iter()
+            .map(|collapsed| {
+                if *collapsed {
+                    WAVE_PANE_HEADER_HEIGHT + 1.0
+                } else {
+                    least
+                }
+            })
+            .collect();
+        fitted_panes(
+            available.height() - lane_height - WAVE_SHARED_X_HEIGHT,
+            &needs,
+            active,
+            unseen_xy,
+        )
+    } else {
+        vec![true; count]
+    };
+    let unseen = shown.iter().filter(|shown| !**shown).count() + unseen_xy;
+    let overflow_height = if unseen > 0 {
+        FITTED_OVERFLOW_HEIGHT
+    } else {
+        0.0
+    };
+    let collapsed_count = (0..count)
+        .filter(|ordinal| shown[*ordinal] && collapsed[*ordinal])
+        .count();
+    let expanded_count = (0..count)
+        .filter(|ordinal| shown[*ordinal] && !collapsed[*ordinal])
+        .count();
+    let content = available.height()
+        - lane_height
+        - overflow_height
+        - collapsed_count as f32 * (WAVE_PANE_HEADER_HEIGHT + 1.0);
+    // A fitted strip keeps its whole ruler while its panes have the room
+    // they read in; a stack's ruler gives way to its panes first.
+    let geometry = if options.fitted.is_some()
+        && expanded_count > 0
+        && content >= (expanded_count as f32).mul_add(least, WAVE_SHARED_X_HEIGHT)
+    {
+        WaveStackGeometry {
+            pane_height: (content - WAVE_SHARED_X_HEIGHT) / expanded_count as f32,
+            shared_x_height: WAVE_SHARED_X_HEIGHT,
+        }
+    } else {
+        wave_stack_geometry(content, expanded_count)
+    };
     let frame = StripFrame {
         model,
         x_domain,
@@ -1433,19 +1533,22 @@ fn show_strip_plot(
     // them; a divider being dragged moves the line between two of them
     // until it is let go.
     let expanded_total = geometry.pane_height * expanded_count as f32;
-    let least = WAVE_PANE_HEADER_HEIGHT + LEAST_PLOT_HEIGHT;
     let mut heights = weighted_heights(
         expanded_total,
         &panes
             .iter()
-            .zip(&collapsed)
-            .map(|(pane, collapsed)| (!*collapsed).then_some(pane.weight))
+            .enumerate()
+            .map(|(ordinal, pane)| (shown[ordinal] && !collapsed[ordinal]).then_some(pane.weight))
             .collect::<Vec<_>>(),
         least,
     );
+    // Only two strips drawn one on the other have a divider between them.
+    let joined = |index: usize| {
+        shown[index] && shown[index + 1] && !collapsed[index] && !collapsed[index + 1]
+    };
     for index in 0..count.saturating_sub(1) {
         let offset = super::strip_drag::divider_offset(ui.ctx(), model, index);
-        if offset != 0.0 && !collapsed[index] && !collapsed[index + 1] {
+        if offset != 0.0 && joined(index) {
             // A divider dragged stops where either strip would lose the
             // room its plot needs.
             let floor = least.min(heights[index]).min(heights[index + 1]);
@@ -1457,14 +1560,18 @@ fn show_strip_plot(
     let mut rects = Vec::with_capacity(count);
     // The ruler's boxes name the cursors; the panes draw their lines plain,
     // one cursor read as one line down the strip. Only the top open pane
-    // marks a cursor scrolled out of view, by a chevron on the edge it left by.
-    let top_open = collapsed
-        .iter()
-        .position(|collapsed| !collapsed)
+    // drawn marks a cursor scrolled out of view, by a chevron on the edge it
+    // left by.
+    let top_open = (0..count)
+        .find(|ordinal| shown[*ordinal] && !collapsed[*ordinal])
         .unwrap_or(0);
+    let mut above: Option<usize> = None;
     for (ordinal, pane) in panes.iter().enumerate() {
-        if ordinal > 0 {
-            if collapsed[ordinal - 1] || collapsed[ordinal] {
+        if !shown[ordinal] {
+            continue;
+        }
+        if let Some(upper) = above {
+            if collapsed[upper] || collapsed[ordinal] {
                 let (seam, _) = ui.allocate_exact_size(
                     egui::vec2(
                         ui.available_width(),
@@ -1473,17 +1580,18 @@ fn show_strip_plot(
                     egui::Sense::hover(),
                 );
                 ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
-            } else {
+            } else if joined(upper) {
                 super::strip_drag::divider(
                     ui,
                     host,
                     model,
-                    ordinal - 1,
-                    (heights[ordinal - 1], heights[ordinal]),
-                    panes[ordinal - 1].locked || pane.locked,
+                    upper,
+                    (heights[upper], heights[ordinal]),
+                    panes[upper].locked || pane.locked,
                 );
             }
         }
+        above = Some(ordinal);
         let pane_height = if collapsed[ordinal] {
             WAVE_PANE_HEADER_HEIGHT.min(ui.available_height())
         } else {
@@ -1512,13 +1620,99 @@ fn show_strip_plot(
         );
         rects.push(drawn.response.rect);
     }
-    super::strip_drag::drops(ui, host, model, &rects);
+    // A drop lands by the panes' places in the strip, which only a strip
+    // drawing every pane shows.
+    if rects.len() == count {
+        super::strip_drag::drops(ui, host, model, &rects);
+    }
+    if unseen > 0 {
+        fitted_overflow(ui, host, model, (unseen, gutter), &t);
+    }
     let shared_x_height = if expanded_count == 0 {
-        WAVE_SHARED_X_HEIGHT.min((available.height() - lane_height).max(0.0))
+        WAVE_SHARED_X_HEIGHT.min((available.height() - lane_height - overflow_height).max(0.0))
     } else {
         geometry.shared_x_height
     };
     show_shared_x_axis(ui, host, shared_x_height, frame);
+}
+
+/// The height of a fitted strip's line counting the panes it has no room
+/// for: its link's.
+const FITTED_OVERFLOW_HEIGHT: f32 = rspice_ui_kit::widgets::notice::OFFER_HEIGHT;
+
+/// Which of a fitted strip's panes it draws in `room`, by their place in the
+/// stack: every one while all fit with `unseen` other strips counted, else
+/// as many as leave room for the line that counts the rest. The active pane
+/// is taken first, so it is never the one counted, then the others in the
+/// stack's order; one is drawn however little room there is.
+fn fitted_panes(room: f32, needs: &[f32], active: Option<usize>, unseen: usize) -> Vec<bool> {
+    let total: f32 = needs.iter().sum();
+    if unseen == 0 && total <= room {
+        return vec![true; needs.len()];
+    }
+    let room = room - FITTED_OVERFLOW_HEIGHT;
+    let mut shown = vec![false; needs.len()];
+    let mut used = 0.0;
+    let order = active
+        .into_iter()
+        .chain((0..needs.len()).filter(|ordinal| Some(*ordinal) != active));
+    for ordinal in order {
+        if used > 0.0 && used + needs[ordinal] > room {
+            break;
+        }
+        used += needs[ordinal];
+        shown[ordinal] = true;
+    }
+    shown
+}
+
+/// The line a fitted strip draws above its ruler when it has no room for
+/// every pane: how many it does not draw, and the link that opens Results on
+/// the analysis, where every pane stands.
+fn fitted_overflow(
+    ui: &mut Ui,
+    host: &mut impl StackHost,
+    model: &StripModel,
+    (unseen, gutter): (usize, Gutter),
+    t: &Tokens,
+) {
+    let height = FITTED_OVERFLOW_HEIGHT.min(ui.available_height().max(0.0));
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::hover(),
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.top(),
+        egui::Stroke::new(1.0, t.color.canvas_grid),
+    );
+    let count = if unseen == 1 {
+        "+1 pane".to_owned()
+    } else {
+        format!("+{unseen} panes")
+    };
+    let mut line = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_max(
+                egui::pos2(rect.left() + gutter.width(), rect.top()),
+                rect.right_bottom(),
+            ))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    line.spacing_mut().item_spacing.x = 6.0;
+    line.label(
+        egui::RichText::new(format!("{count} \u{b7}"))
+            .font(rspice_ui_kit::theme::sans(
+                rspice_ui_kit::tokens::FS_0,
+                rspice_ui_kit::theme::FontWeight::Regular,
+            ))
+            .color(t.color.text_dim),
+    );
+    if rspice_ui_kit::widgets::notice::offer_link(&mut line, "Open in Results", &count, false)
+        .clicked()
+    {
+        host.open_in_results(model);
+    }
 }
 
 /// The legend entries of the strip's expressions on `pane`: one for each

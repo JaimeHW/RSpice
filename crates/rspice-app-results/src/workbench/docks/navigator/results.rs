@@ -335,17 +335,7 @@ pub(in crate::workbench) fn results(
                         || signals.pending()
                         || !signals.is_empty()
                         || !artifacts.is_empty();
-                    // A deck that labelled its analysis with the same code the
-                    // kind glyph carries would print that code twice; the
-                    // canonical name is the useful title in that case.
-                    let label = if analysis
-                        .label
-                        .eq_ignore_ascii_case(analysis.analysis_type.short_label())
-                    {
-                        analysis.kind_display_name().to_owned()
-                    } else {
-                        analysis.label.clone()
-                    };
+                    let label = analysis_label(analysis);
                     matches_analysis.then(|| ResultAnalysis {
                         domain: result_analysis_domain(
                             analysis.analysis_type,
@@ -2851,5 +2841,20 @@ impl OrderGroups {
             ResultsBrowserOrder::Samples => u8::MAX,
             ResultsBrowserOrder::Name | ResultsBrowserOrder::RunOrder => kind_rank,
         }
+    }
+}
+
+/// What the data browser calls `analysis`, and so the dock's Plot page too:
+/// its label. A deck that labelled its analysis with the same code the kind
+/// glyph carries would print that code twice; the canonical name is the
+/// useful title in that case.
+pub(crate) fn analysis_label(analysis: &crate::state::AnalysisResult) -> String {
+    if analysis
+        .label
+        .eq_ignore_ascii_case(analysis.analysis_type.short_label())
+    {
+        analysis.kind_display_name().to_owned()
+    } else {
+        analysis.label.clone()
     }
 }
