@@ -77,3 +77,54 @@ fn browser_signal_marks_do_not_alias_equal_names_from_different_datasets() {
     assert_eq!(results.recent_signal_rank(&first), Some(0));
     assert_eq!(results.recent_signal_rank(&second), None);
 }
+
+/// A signal plotted takes the lowest colour place free and holds it until it
+/// comes off, so plotting another never recolours one on the plot; a signal
+/// drawn without a place (a restored session) adopts the one it is drawn
+/// at, and one plotted alone starts again at the first.
+#[test]
+fn a_plotted_signal_holds_its_colour_place_until_it_comes_off() {
+    let analysis = AnalysisResult::<RetainedWaveform>::new(1, AnalysisType::Transient, "TRAN", 0.0);
+    let analysis_key =
+        AnalysisPresentationKey::new(rspice_vocabulary::product::DatasetId::new(), &analysis);
+    let key = |name: &str| SourceWaveformPresentationKey::new(analysis_key, name);
+    let mut ticks = VisibilityOverrides::default();
+
+    ticks.set(key("V(b)"), Some(true));
+    ticks.set(key("V(a)"), Some(true));
+    assert_eq!(ticks.plot_place(&key("V(b)")), Some(0));
+    assert_eq!(ticks.plot_place(&key("V(a)")), Some(1), "not by column");
+
+    ticks.set(key("V(b)"), Some(false));
+    assert_eq!(
+        ticks.plot_place(&key("V(b)")),
+        Some(0),
+        "hidden, still held"
+    );
+    ticks.set(key("V(b)"), None);
+    ticks.set(key("V(c)"), Some(true));
+    assert_eq!(ticks.plot_place(&key("V(c)")), Some(0), "the place freed");
+
+    ticks.project(&key("V(d)"), Some(true));
+    assert_eq!(ticks.plot_place(&key("V(d)")), None);
+    ticks.adopt_plot_place(&key("V(d)"), 3);
+    ticks.adopt_plot_place(&key("V(a)"), 0);
+    assert_eq!(ticks.plot_place(&key("V(d)")), Some(3));
+    assert_eq!(
+        ticks.plot_place(&key("V(a)")),
+        Some(1),
+        "a held place stays"
+    );
+    ticks.set(key("V(e)"), Some(true));
+    assert_eq!(
+        ticks.plot_place(&key("V(e)")),
+        Some(2),
+        "below the adopted one"
+    );
+
+    for name in ["V(c)", "V(d)", "V(e)"] {
+        ticks.set(key(name), None);
+    }
+    ticks.replot_first(&key("V(a)"));
+    assert_eq!(ticks.plot_place(&key("V(a)")), Some(0));
+}

@@ -664,6 +664,29 @@ impl PlotPlaces {
         self.held.insert(key.clone(), place);
     }
 
+    /// Hold `place` for `key`, unless it holds one or another signal of its
+    /// analysis holds that place: the places between the last handed out
+    /// and it are free.
+    fn adopt(&mut self, key: &SourceWaveformPresentationKey, place: usize) {
+        let analysis = key.analysis();
+        if self.held.contains_key(key)
+            || self
+                .held
+                .iter()
+                .any(|(held, at)| *at == place && held.analysis() == analysis)
+        {
+            return;
+        }
+        let (next, freed) = self.pools.entry(analysis).or_default();
+        if place >= *next {
+            freed.extend((*next..place).map(Reverse));
+            *next = place + 1;
+        } else {
+            freed.retain(|Reverse(free)| *free != place);
+        }
+        self.held.insert(key.clone(), place);
+    }
+
     fn release(&mut self, key: &SourceWaveformPresentationKey) {
         if let Some(place) = self.held.remove(key)
             && let Some((_, freed)) = self.pools.get_mut(&key.analysis())
@@ -715,6 +738,25 @@ impl VisibilityOverrides {
     /// they did not put on, or took off since.
     pub fn plot_place(&self, key: &SourceWaveformPresentationKey) -> Option<usize> {
         self.places.held.get(key).copied()
+    }
+
+    /// Let `key`'s signal, on the plot at palette place `place` without
+    /// holding one, as a signal the reader plotted before a restored session
+    /// does, hold the place it is drawn at, so a signal plotted next takes
+    /// another colour.
+    pub fn adopt_plot_place(&mut self, key: &SourceWaveformPresentationKey, place: usize) {
+        if self.overrides.get(key) == Some(&true) {
+            self.places.adopt(key, place);
+        }
+    }
+
+    /// Give `key`'s signal, on the plot alone, the lowest palette place
+    /// free: the first colour once the others are off.
+    pub fn replot_first(&mut self, key: &SourceWaveformPresentationKey) {
+        if self.overrides.get(key) == Some(&true) {
+            self.places.release(key);
+            self.places.hold(key);
+        }
     }
 
     /// [`Self::plot_place`] of each signal of `analysis` that holds one, by

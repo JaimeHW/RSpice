@@ -152,6 +152,47 @@ pub fn plot_alone(state: &mut ResultsParts<'_>, key: &SourceWaveformPresentation
         &ResultBrowserSelectionKey::Waveform(key.clone()),
         true,
     );
+    state.results.session.waveform_visibility.replot_first(key);
+    state.results.models.invalidate();
+}
+
+/// Let each curve of `analysis` the plot draws without holding a palette
+/// place, as one plotted before a restored session does, hold the place it
+/// is drawn at, so a signal plotted next takes a colour none of them has.
+fn adopt_drawn_places(state: &mut ResultsParts<'_>, analysis: AnalysisPresentationKey) {
+    let held = state
+        .results
+        .session
+        .waveform_visibility
+        .plot_places(analysis);
+    let drawn: Vec<(SourceWaveformPresentationKey, usize)> = last_strip_models(state)
+        .and_then(|models| models.iter().find(|model| model.analysis_key == analysis))
+        .map(|model| {
+            model
+                .traces
+                .iter()
+                .filter(|trace| {
+                    !trace.overlay
+                        && !trace.is_expression()
+                        && !held.contains_key(trace.source_waveform_name.as_str())
+                })
+                .filter_map(|trace| {
+                    let place = trace.palette_slot?.checked_sub(model.dataset_plotted)?;
+                    Some((
+                        SourceWaveformPresentationKey::new(analysis, &trace.source_waveform_name),
+                        place,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    for (key, place) in &drawn {
+        state
+            .results
+            .session
+            .waveform_visibility
+            .adopt_plot_place(key, *place);
+    }
 }
 
 /// Give `key`'s curve a strip of its own under the others once the plot
@@ -242,6 +283,8 @@ struct Gesture<'k> {
     revealed: Vec<AnalysisPresentationKey>,
     recent: Vec<&'k SourceWaveformPresentationKey>,
     forgot: bool,
+    /// The analyses whose drawn curves hold their palette places.
+    placed: Vec<AnalysisPresentationKey>,
 }
 
 impl Gesture<'_> {
@@ -290,6 +333,10 @@ fn tick_quick_signal<'k>(
     else {
         return true;
     };
+    if plotted && !dataset_default && !gesture.placed.contains(&key.analysis()) {
+        gesture.placed.push(key.analysis());
+        adopt_drawn_places(state, key.analysis());
+    }
     let session = &mut state.results.session;
     if session.waveform_visibility(key, dataset_default) != plotted {
         // Put on, a signal the dataset hides is shown; taken off, one it
