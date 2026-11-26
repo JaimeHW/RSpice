@@ -19,7 +19,11 @@ pub(crate) fn context_menu<R>(
     if from_keys {
         popup = popup.open_memory(Some(SetOpenCommand::Bool(true)));
     }
-    if Popup::position_of_id(&response.ctx, id).is_none() {
+    // A right click opens the menu at the pointer, which egui keeps from
+    // the click on. Only a menu the keyboard opened has no such point and
+    // stands beside the widget; the frame of the click has none stored yet
+    // either, so the click itself must not count as one.
+    if !response.secondary_clicked() && Popup::position_of_id(&response.ctx, id).is_none() {
         popup = popup.anchor(response);
     }
     popup.show(add_contents)
