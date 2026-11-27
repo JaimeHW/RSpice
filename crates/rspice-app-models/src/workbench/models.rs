@@ -32,7 +32,6 @@ use model_editor_workflow::{
     ModelEditorWorkflow, model_library_rescan_diagnostic, request_model_editor_workflow,
     selected_model_for_project_copy, selected_project_model_for_editor,
 };
-use rspice_app_workbench::workbench::app::dialogs::model_browser::render_model_browser;
 
 /// The models feature.
 pub struct ModelsFeature;
@@ -70,11 +69,6 @@ const DIALOGS: &[FeatureDialog<ModelsFeature>] = &[
         key: DialogKey("models.pdk_settings"),
         is_open: |models| models.pdk_settings_dialog.open,
         render: ModelsFeature::process_pdk_settings_dialog,
-    },
-    FeatureDialog {
-        key: DialogKey("models.model_browser"),
-        is_open: |models| models.model_browser_state.open,
-        render: render_model_browser_dialog,
     },
     FeatureDialog {
         key: DialogKey("models.models_view"),
@@ -202,7 +196,6 @@ fn command_enabled(command: ModelsCommand, reads: &CommandReads<'_>) -> bool {
         }
         ModelsCommand::ModelValidate => state.model_editor.draft.is_some(),
         ModelsCommand::Page(_)
-        | ModelsCommand::ModelBrowser
         | ModelsCommand::PdkSettings
         | ModelsCommand::RescanModelLibraries => true,
     }
@@ -230,7 +223,6 @@ fn disabled_reason(command: ModelsCommand, reads: &CommandReads<'_>) -> &'static
         ModelsCommand::ModelSaveRevision => "the open model candidate has no changes to save",
         ModelsCommand::ModelValidate => "no project-owned model candidate is open",
         ModelsCommand::Page(_)
-        | ModelsCommand::ModelBrowser
         | ModelsCommand::PdkSettings
         | ModelsCommand::RescanModelLibraries => "command is unavailable in this context",
     }
@@ -265,7 +257,6 @@ impl CommandSet for ModelsCommand {
                 cx.wb.activate(Workspace::Models);
                 cx.state.models_page = page;
             }
-            Self::ModelBrowser => cx.state.model_browser_state.open = true,
             // The Models workspace draws its own dialogs.
             Self::ModelNew => {
                 cx.wb.activate(Workspace::Models);
@@ -352,16 +343,6 @@ impl CommandSet for ModelsCommand {
             }
         }
     }
-}
-
-/// The standalone model browser the Models menu opens, over every loaded
-/// model.
-fn render_model_browser_dialog(cx: &mut Cx<'_, ModelsFeature>, ctx: &egui::Context) {
-    let _ = render_model_browser(
-        ctx,
-        &mut cx.state.model_browser_state,
-        &cx.model.model_library_manager,
-    );
 }
 
 /// What the models feature's tests build from.

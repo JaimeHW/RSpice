@@ -781,7 +781,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ModelsCommand::Page(ModelsPage::Corners).key(),
     ModelsCommand::Page(ModelsPage::Bins).key(),
     ModelsCommand::Page(ModelsPage::Include).key(),
-    ModelsCommand::ModelBrowser.key(),
     ModelsCommand::PdkSettings.key(),
     ModelsCommand::RescanModelLibraries.key(),
     DesignCommand::NewStimulusDefinition.key(),

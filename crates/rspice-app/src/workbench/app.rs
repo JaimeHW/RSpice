@@ -2020,10 +2020,6 @@ mod tests {
         assert!(state.application_modal_open());
         state.models.pdk_settings_dialog.open = false;
 
-        state.models.model_browser_state.open = true;
-        assert!(state.application_modal_open());
-        state.models.model_browser_state.open = false;
-
         state.workbench.workspace = rspice_app_state::workbench::workspace::Workspace::Netlist;
         state.code.netlist.comparison_dialog.open = true;
         assert!(state.application_modal_open());

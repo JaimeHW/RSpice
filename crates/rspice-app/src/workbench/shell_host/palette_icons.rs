@@ -5,7 +5,6 @@ use crate::workbench::commands::vocabulary::ShellCommand;
 use rspice_app_code::workbench::code::commands::SourceCommand;
 use rspice_app_design::workbench::design::commands::DesignCommand;
 use rspice_app_hardcopy::workbench::hardcopy::commands::HardcopyCommand;
-use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
@@ -78,9 +77,6 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             }
             _ => None,
         };
-    }
-    if ModelsCommand::from_key(key) == Some(ModelsCommand::ModelBrowser) {
-        return Some(Icon::Folder);
     }
     if let Some(command) = ProjectCommand::from_key(key) {
         return match command {

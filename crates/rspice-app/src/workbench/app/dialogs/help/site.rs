@@ -138,7 +138,6 @@ const DIALOG_TOPICS: &[(&str, DocsTopic)] = &[
     ("results.create_result_document", DocsTopic::Results),
     ("results.result_document", DocsTopic::Results),
     ("models.pdk_settings", DocsTopic::ModelsAndPdks),
-    ("models.model_browser", DocsTopic::ModelsAndPdks),
     ("models.models_view", DocsTopic::ModelsAndPdks),
     ("project.technology_attachment", DocsTopic::ModelsAndPdks),
     ("code.new_veriloga_device", DocsTopic::VerilogA),

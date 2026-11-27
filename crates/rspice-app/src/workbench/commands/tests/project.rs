@@ -197,7 +197,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     }
     for command in [
         ModelsCommand::Page(ModelsPage::Models),
-        ModelsCommand::ModelBrowser,
         ModelsCommand::ModelEditor,
         ModelsCommand::PdkSettings,
         ModelsCommand::RescanModelLibraries,

@@ -1,6 +1,6 @@
 //! The commands the models feature declares, as the registry lists them: the
-//! Models & PDKs workspace's pages, the model browser, the device-model
-//! editor and its workflows, and the PDK and model library paths.
+//! Models & PDKs workspace's pages, the device-model editor and its
+//! workflows, and the PDK and model library paths.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -14,7 +14,6 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 pub enum ModelsCommand {
     /// Open the Models workspace on one of its pages.
     Page(ModelsPage),
-    ModelBrowser,
     /// Create a project model: the device type first, then its card with the
     /// type's parameters at their defaults.
     ModelNew,
@@ -28,12 +27,11 @@ pub enum ModelsCommand {
 
 impl ModelsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 11] = [
         Self::Page(ModelsPage::Models),
         Self::Page(ModelsPage::Corners),
         Self::Page(ModelsPage::Bins),
         Self::Page(ModelsPage::Include),
-        Self::ModelBrowser,
         Self::ModelNew,
         Self::ModelCreateProjectCopy,
         Self::ModelEditor,
@@ -50,7 +48,6 @@ impl ModelsCommand {
             Self::Page(ModelsPage::Corners) => CommandKey::new("corner-sections"),
             Self::Page(ModelsPage::Bins) => CommandKey::new("model-bins"),
             Self::Page(ModelsPage::Include) => CommandKey::new("include-graph"),
-            Self::ModelBrowser => CommandKey::new("model-browser"),
             Self::ModelNew => CommandKey::new("model-new"),
             Self::ModelCreateProjectCopy => CommandKey::new("model-create-project-copy"),
             Self::ModelEditor => CommandKey::new("model-editor"),
@@ -85,7 +82,6 @@ impl ModelsCommand {
             Self::Page(ModelsPage::Corners) => ("Corners & sections", page),
             Self::Page(ModelsPage::Bins) => ("Bins & geometry", page),
             Self::Page(ModelsPage::Include) => ("Include graph", page),
-            Self::ModelBrowser => ("Model browser…", open),
             Self::ModelNew => ("New model…", writes),
             Self::ModelCreateProjectCopy => ("Create editable project copy", writes),
             Self::ModelEditor => ("Edit model…", writes),

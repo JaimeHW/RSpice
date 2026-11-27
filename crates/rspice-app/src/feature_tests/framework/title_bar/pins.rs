@@ -636,7 +636,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
         ApplicationMenu::Tools,
         &[
             "Models | models-catalog |  | on",
-            "Model browser… | model-browser |  | on",
             "New model… | model-new |  | on",
             "Edit model… | model-editor |  | off: select one model in the library manager",
             "Create editable project copy | model-create-project-copy |  | off: select one external or built-in model in the library manager",

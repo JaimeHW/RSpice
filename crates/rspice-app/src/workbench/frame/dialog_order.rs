@@ -408,12 +408,6 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| app.render_shortcuts_help_dialog(ctx),
     },
     DialogSpec {
-        key: DialogKey("models.model_browser"),
-        modality: Modality::Application,
-        is_open: Some(|state| features::dialog_open(state, DialogKey("models.model_browser"))),
-        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("models.model_browser")),
-    },
-    DialogSpec {
         key: DialogKey("project.new_cell"),
         modality: Modality::Dialog,
         is_open: Some(|state| features::dialog_open(state, DialogKey("project.new_cell"))),

@@ -854,7 +854,6 @@ const VERIFY_MENU: &[MenuEntry] = &[
 /// Tools: the libraries and models a design draws on, then the netlist.
 const TOOLS_MENU: &[MenuEntry] = &[
     models(ModelsCommand::Page(ModelsPage::Models)).access('O'),
-    models(ModelsCommand::ModelBrowser).access('B'),
     models(ModelsCommand::ModelNew).access('W'),
     models(ModelsCommand::ModelEditor).access('E'),
     models(ModelsCommand::ModelCreateProjectCopy).access('C'),

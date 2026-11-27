@@ -97,9 +97,6 @@ const APPLICATION_GATE: &[GateRow] = &[
     ("pdk_settings_dialog", |state| {
         state.models.pdk_settings_dialog.open = true;
     }),
-    ("model_browser_state", |state| {
-        state.models.model_browser_state.open = true;
-    }),
 ];
 
 /// Each term of the application gate makes the application modal on its

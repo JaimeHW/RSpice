@@ -23,9 +23,6 @@ pub struct ModelsState {
     /// working copy and its original.
     pub pdk_settings_dialog:
         Box<crate::workbench::app_state::session::pdk_settings::PdkSettingsDialogState>,
-    /// Standalone model browser state (for Tools menu access)
-    pub model_browser_state:
-        rspice_app_workbench::workbench::app::dialogs::model_browser::ModelBrowserState,
 }
 
 impl ModelsState {
