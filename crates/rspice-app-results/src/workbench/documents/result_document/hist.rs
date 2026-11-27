@@ -96,6 +96,11 @@ fn moments_from_samples(samples: &[f64]) -> Option<SampleMoments> {
     SampleMoments::from_samples(samples)
 }
 
+/// Whether the retained summary of a population states the moments its
+/// samples have. The mean and standard deviation are sums of the samples,
+/// so they agree to the rounding of sums at the samples' own size: the mean
+/// of a population centred on zero is a few ulps of its samples either way
+/// (−2.6e−17 summed in order, 0 compensated), and the two are one mean.
 fn moments_match(
     moments: SampleMoments,
     count: usize,
@@ -104,11 +109,21 @@ fn moments_match(
     min: f64,
     max: f64,
 ) -> bool {
+    let size = moments.min.abs().max(moments.max.abs());
     moments.count == count
-        && nearly_equal(moments.mean, mean)
-        && nearly_equal(moments.std_dev, std_dev)
+        && agree_at(moments.mean, mean, size)
+        && agree_at(moments.std_dev, std_dev, size)
         && nearly_equal(moments.min, min)
         && nearly_equal(moments.max, max)
+}
+
+/// [`nearly_equal`], judged at the larger of the two values and `size`.
+fn agree_at(left: f64, right: f64, size: f64) -> bool {
+    if left == right {
+        return left.is_finite();
+    }
+    let scale = left.abs().max(right.abs()).max(size);
+    (left / scale - right / scale).abs() <= 128.0 * f64::EPSILON
 }
 
 fn yield_result_is_consistent(result: &YieldResult) -> bool {
@@ -1006,6 +1021,42 @@ mod tests {
             runs_completed: 100,
             sampling_mode: MonteCarloSamplingMode::PseudoRandom,
         }
+    }
+
+    /// A population centred on zero, its summary taken by summing in order,
+    /// states the moments its samples have: the summary's mean is rounding
+    /// at the samples' size, not a different mean. A mean off by more than
+    /// rounding still does not.
+    #[test]
+    fn a_zero_mean_population_summed_in_order_states_its_own_moments() {
+        let samples: Vec<f64> = (0..101)
+            .map(|index| (f64::from(index) - 50.0) / 50.0)
+            .collect();
+        let count = samples.len() as f64;
+        let mean = samples.iter().sum::<f64>() / count;
+        let variance = samples
+            .iter()
+            .map(|value| (value - mean).powi(2))
+            .sum::<f64>()
+            / (count - 1.0);
+        let moments = moments_from_samples(&samples).expect("finite samples");
+        assert_ne!(moments.mean, mean, "the two sums round apart");
+        assert!(moments_match(
+            moments,
+            samples.len(),
+            mean,
+            variance.sqrt(),
+            -1.0,
+            1.0
+        ));
+        assert!(!moments_match(
+            moments,
+            samples.len(),
+            mean + 1.0e-6,
+            variance.sqrt(),
+            -1.0,
+            1.0
+        ));
     }
 
     #[test]
