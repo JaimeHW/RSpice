@@ -338,7 +338,7 @@ pub(in crate::workbench) fn save_view_refusal(state: ResultsReads<'_>) -> Option
 
 /// `base`, or `base` and the first number after it that no document of the
 /// project is titled, as titles are told apart regardless of case.
-fn free_title(model: &Model, base: &str) -> String {
+pub(in crate::workbench) fn free_title(model: &Model, base: &str) -> String {
     let taken = |title: &str| {
         model
             .workspace

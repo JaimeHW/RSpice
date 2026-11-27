@@ -1258,7 +1258,9 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
                     let eye_refused = sheet == "eye-viewer"
                         && nodes.iter().any(|(_, node)| {
                             node.role() == egui::accesskit::Role::Status
-                                && node.label().is_some_and(|label| label.contains("usable source"))
+                                && node
+                                    .label()
+                                    .is_some_and(|label| label.contains("usable source"))
                         });
                     assert!(
                         shown >= layout.pane_count() || eye_refused,

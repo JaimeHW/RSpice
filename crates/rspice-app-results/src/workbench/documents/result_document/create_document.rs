@@ -54,17 +54,22 @@ pub struct ResolvedDraft<'a> {
     plotted: Vec<String>,
 }
 
-/// Open the form on what Results shows: its run, the analysis the data
-/// browser picked, the sheet on the canvas and the signals it plots.
+/// Open the form on what Results shows: the run of the browser's view, the
+/// analysis the data browser picked, the sheet on the canvas and the
+/// signals it plots.
 pub fn open(state: &mut ResultsParts<'_>) {
     let reads = state.results_reads();
     let simulation = &reads.model.simulation;
-    let shown = simulation.active_run().filter(|run| finished(run));
+    let shown = crate::workbench::chrome::document_bar::results::browser_run(reads)
+        .filter(|run| finished(run));
     // The history lists its newest run first.
     let run = shown.or_else(|| simulation.retained.runs.iter().find(|run| finished(run)));
     let analysis = run.and_then(|run| {
-        let picked = shown
-            .filter(|shown| shown.dataset_id == run.dataset_id)
+        // The picked analysis is the active run's, which a saved document
+        // in front may hold on a run of its own.
+        let picked = simulation
+            .active_run()
+            .filter(|active| active.dataset_id == run.dataset_id)
             .and(simulation.view.active_analysis_idx)
             .filter(|index| *index < run.analyses.len());
         picked.or_else(|| (!run.analyses.is_empty()).then_some(0))
@@ -135,7 +140,11 @@ pub fn choices(
             let shared = finished_runs
                 .iter()
                 .any(|other| other.dataset_id != run.dataset_id && other.name() == run.name());
-            let label = if shared { run.label.as_str() } else { run.name() };
+            let label = if shared {
+                run.label.as_str()
+            } else {
+                run.name()
+            };
             (run.dataset_id, label.to_owned())
         })
         .collect();
@@ -264,15 +273,10 @@ fn default_name(state: ResultsReads<'_>, run: &SimulationRun, analysis: &Analysi
         }
         WorkingViewSource::Imported { .. } => run.name().to_owned(),
     };
-    let base = format!("{owner} \u{2014} {}", analysis_name(analysis));
-    let taken = |title: &str| title_taken(state, title);
-    if !taken(&base) {
-        return base;
-    }
-    (2..)
-        .map(|number| format!("{base} {number}"))
-        .find(|title| !taken(title))
-        .unwrap_or(base)
+    crate::workbench::chrome::document_bar::results::free_title(
+        state.model,
+        &format!("{owner} \u{2014} {}", analysis_name(analysis)),
+    )
 }
 
 fn title_taken(state: ResultsReads<'_>, title: &str) -> bool {
