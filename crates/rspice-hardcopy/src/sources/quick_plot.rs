@@ -10,11 +10,12 @@ pub use axis::plot_axes;
 use axis::{project, ruled_at, ruled_axis};
 pub(crate) use columns::print_read;
 pub use columns::{PRINT_COLUMNS_PER_INCH, print_columns};
-use overlay::resolved_overlay_geometry;
 pub use overlay::{
-    PlotFrame, RetainedCursorInterpolation, RetainedQuickMarker, RetainedQuickViewOverlay,
-    RetainedQuickViewOverlays, RetainedQuickViewport,
+    PlotFrame, RetainedCursorInterpolation, RetainedQuickMarker, RetainedQuickNote,
+    RetainedQuickNoteAnchor, RetainedQuickViewOverlay, RetainedQuickViewOverlays,
+    RetainedQuickViewport,
 };
+use overlay::{placed_notes, resolved_overlay_geometry};
 pub use strips::QuickAbscissa;
 use strips::{StripRect, strip_rects};
 
@@ -346,7 +347,18 @@ pub(crate) fn quick_plot_in(
         traces,
         cursors,
         markers,
-        annotations: Vec::new(),
+        annotations: overlay.map_or_else(
+            || Ok(Vec::new()),
+            |overlay| {
+                placed_notes(
+                    overlay,
+                    &units,
+                    (x_scale, &scales),
+                    &frames,
+                    |strip, point| rects[strip].place(point),
+                )
+            },
+        )?,
         captions,
         frames: rects
             .iter()

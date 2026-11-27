@@ -295,6 +295,11 @@ pub struct SemanticPlotAnnotation {
     pub source_x_bits: Option<u64>,
     pub source_y_bits: Option<u64>,
     pub position: Option<SemanticPoint>,
+    /// A note pinned to a place of the plot rather than a point of its
+    /// data: `position` is where its words start, and no leader runs to
+    /// them, as the sheet letters it where it was put.
+    #[serde(default)]
+    pub placed: bool,
 }
 
 /// Plot metadata or axis context placed by the source's page layout.

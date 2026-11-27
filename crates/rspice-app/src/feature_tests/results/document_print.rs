@@ -11,7 +11,7 @@ use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::create_document::commit;
 use rspice_app_state::product::{ContentDigest, ResultDocumentId};
 use rspice_app_state::results::visualization_document::{
-    AxisOrientation, AxisScale, DocumentEdit, EntityRef, NewAxis, NewTrace,
+    AnnotationAnchor, AxisOrientation, AxisScale, DocumentEdit, EntityRef, NewAxis, NewTrace,
 };
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle,
@@ -326,6 +326,98 @@ fn a_saved_ac_document_prints_its_frequency_on_decades() {
             .all(|point| (gain.minimum.y_um..=gain.maximum.y_um).contains(&point.y_um)),
         "the 0 dB line runs across the gain strip"
     );
+}
+
+/// Pin a note to a place a quarter down the current's strip, halfway
+/// across it, and another to the point 50 ns, 1 V of the voltage's data.
+fn pin_notes(app: &mut RSpiceApp, document_id: ResultDocumentId) {
+    let document = app
+        .state
+        .model
+        .workspace
+        .content
+        .visualization_documents
+        .iter_mut()
+        .find(|document| document.id() == document_id)
+        .expect("the project owns it");
+    let pane_id = document.panes()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![
+                DocumentEdit::AddAnnotation {
+                    pane_id,
+                    anchor: AnnotationAnchor::Pane {
+                        x_fraction: 0.5,
+                        y_fraction: 0.25,
+                        unit: Some("A".to_owned()),
+                    },
+                    text: "Settled".to_owned(),
+                },
+                DocumentEdit::AddAnnotation {
+                    pane_id,
+                    anchor: AnnotationAnchor::Data {
+                        x: 50.0e-9,
+                        y: 1.0,
+                        unit: "V".to_owned(),
+                    },
+                    text: "Mid-rail".to_owned(),
+                },
+            ],
+        )
+        .expect("the notes are pinned");
+}
+
+/// A note pinned to a place in the pane prints in the plot of the strip it
+/// names, its words starting from that place, and a note pinned to a point
+/// of the data prints on that point, as the screen stands each of them.
+#[test]
+fn notes_pinned_to_a_place_or_a_point_print_where_the_screen_stands_them() {
+    let mut app = app_holding(mixed_units_run(), ResultViewer::Waves);
+    let document_id = new_document(&mut app, "Notes", "viewer-waveform", &["V(out)", "I(R1)"]);
+    pin_notes(&mut app, document_id);
+    let page = printed(&mut app);
+    let plot = plot_of(&page);
+    let note = |text: &str| {
+        plot.annotations
+            .iter()
+            .find(|annotation| annotation.text == text)
+            .unwrap_or_else(|| panic!("{text} prints: {:?}", plot.annotations))
+    };
+
+    let settled = note("Settled");
+    assert!(settled.placed, "a place note is lettered where it stands");
+    let at = settled.position.expect("it has a place");
+    let current = &plot.frames[1];
+    let quarter = current.minimum.y_um + (current.maximum.y_um - current.minimum.y_um) / 4;
+    let middle = (current.minimum.x_um + current.maximum.x_um) / 2;
+    assert!(
+        (quarter..quarter + 3_000).contains(&at.y_um),
+        "a quarter down the current's strip: {at:?} in {current:?}"
+    );
+    assert!(
+        (middle..middle + 2_000).contains(&at.x_um),
+        "from halfway across it: {at:?} in {current:?}"
+    );
+
+    let mid_rail = note("Mid-rail");
+    assert!(!mid_rail.placed, "a point note is led off its point");
+    assert_eq!(mid_rail.source_x_bits, Some(50.0e-9_f64.to_bits()));
+    assert_eq!(mid_rail.source_y_bits, Some(1.0_f64.to_bits()));
+    let at = mid_rail.position.expect("its point is in the window");
+    let volts = &plot.frames[0];
+    assert!((volts.minimum.y_um..=volts.maximum.y_um).contains(&at.y_um));
+    let across =
+        (at.x_um - volts.minimum.x_um) as f64 / (volts.maximum.x_um - volts.minimum.x_um) as f64;
+    assert!(
+        (across - 50.0 / 99.75).abs() < 0.01,
+        "50 ns along a 99.75 ns window: {across}"
+    );
+
+    let text = page_text(&page);
+    for words in ["Settled", "Mid-rail"] {
+        assert!(text.iter().any(|text| text == words), "{words}: {text:?}");
+    }
 }
 
 /// A pane that reads its current against a second, right-hand axis prints,

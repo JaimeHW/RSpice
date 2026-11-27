@@ -41,10 +41,10 @@ pub(crate) use quick_plot::PlotArea;
 pub(crate) use quick_plot::print_read;
 pub use quick_plot::{
     PRINT_COLUMNS_PER_INCH, PlotFrame, QuickAbscissa, QuickResultSeries,
-    RetainedCursorInterpolation, RetainedQuickMarker, RetainedQuickViewOverlay,
-    RetainedQuickViewOverlays, RetainedQuickViewport, nondegenerate_range, plot_axes,
-    print_columns, quick_plot_from_scaled_series, quick_plot_from_series, stable_page_id,
-    stable_quick_trace_id,
+    RetainedCursorInterpolation, RetainedQuickMarker, RetainedQuickNote, RetainedQuickNoteAnchor,
+    RetainedQuickViewOverlay, RetainedQuickViewOverlays, RetainedQuickViewport,
+    nondegenerate_range, plot_axes, print_columns, quick_plot_from_scaled_series,
+    quick_plot_from_series, stable_page_id, stable_quick_trace_id,
 };
 pub(crate) use report_figure::report_figure_plot;
 pub use reports::{ReportHardcopySource, resolve_report_source};

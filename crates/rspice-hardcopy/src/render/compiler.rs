@@ -1505,7 +1505,6 @@ impl<'a> SemanticSceneCompiler<'a> {
                 ))
             })?;
             let origin = self.semantic_point(position)?;
-            let label = self.offset_scene_point(origin, 4_000, -4_000)?;
             let stable_id = format!("annotation:{}", annotation.annotation_id);
             let stroke = self.mapped_stroke(
                 PrintObjectKind::ReviewAnnotation,
@@ -1517,6 +1516,17 @@ impl<'a> SemanticSceneCompiler<'a> {
                     None,
                 )?,
             );
+            if annotation.placed {
+                self.add_text(
+                    origin,
+                    &annotation.text,
+                    SceneFont::Sans,
+                    2_400,
+                    stroke.color,
+                )?;
+                continue;
+            }
+            let label = self.offset_scene_point(origin, 4_000, -4_000)?;
             self.primitives.push(ScenePrimitive::Line {
                 from: origin,
                 to: label,

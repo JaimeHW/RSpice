@@ -44,16 +44,36 @@ pub struct PaneFigure {
     pub cursors: Vec<FigureCursor>,
     /// The markers that ride the traces it shows.
     pub markers: Vec<PaneFigureMarker>,
-    /// The notes the reader pinned to the traces it shows.
+    /// The notes the reader pinned on the pane: to the traces it shows, to
+    /// places in its plot, and to points of its data.
     pub notes: Vec<PaneFigureNote>,
 }
 
-/// A note pinned to a point of a trace of a printed pane.
+/// A note pinned on a printed pane, lettered with what the reader wrote.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaneFigureNote {
-    pub trace_id: TraceId,
+    /// The annotation's id, which names it on every page it prints on.
+    pub id: u64,
     pub text: String,
-    pub x: f64,
+    pub anchor: PaneFigureNoteAnchor,
+}
+
+/// Where a note of a printed pane stands.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaneFigureNoteAnchor {
+    /// The point of a trace the pane shows at the abscissa `x`.
+    Trace { trace_id: TraceId, x: f64 },
+    /// A place in the plot of the strip whose unit is `unit`, the first
+    /// strip where it names none: shares of the plot's width and height
+    /// from its top left.
+    Place {
+        unit: Option<String>,
+        x_fraction: f32,
+        y_fraction: f32,
+    },
+    /// A point of the data: `x` on the abscissa, `y` on the axis of `unit`,
+    /// empty for a plain number.
+    Point { unit: String, x: f64, y: f64 },
 }
 
 /// One trace of a printed pane.
@@ -268,16 +288,40 @@ pub fn resolve_pane_figure(
         .annotations()
         .iter()
         .filter(|annotation| annotation.pane_id == pane_id)
-        .filter_map(|annotation| match &annotation.anchor {
-            AnnotationAnchor::Trace {
-                trace_id,
-                coordinate,
-            } if traces.iter().any(|trace| trace.trace_id == *trace_id) => Some(PaneFigureNote {
-                trace_id: *trace_id,
+        .filter_map(|annotation| {
+            let anchor = match &annotation.anchor {
+                AnnotationAnchor::Trace {
+                    trace_id,
+                    coordinate,
+                } => {
+                    // A note on a trace the pane does not show has nothing
+                    // to stand on.
+                    traces.iter().find(|trace| trace.trace_id == *trace_id)?;
+                    PaneFigureNoteAnchor::Trace {
+                        trace_id: *trace_id,
+                        x: exact_position(coordinate)?,
+                    }
+                }
+                AnnotationAnchor::Pane {
+                    x_fraction,
+                    y_fraction,
+                    unit,
+                } => PaneFigureNoteAnchor::Place {
+                    unit: unit.clone(),
+                    x_fraction: *x_fraction,
+                    y_fraction: *y_fraction,
+                },
+                AnnotationAnchor::Data { x, y, unit } => PaneFigureNoteAnchor::Point {
+                    unit: unit.clone(),
+                    x: *x,
+                    y: *y,
+                },
+            };
+            Some(PaneFigureNote {
+                id: annotation.id.get(),
                 text: annotation.text.clone(),
-                x: exact_position(coordinate)?,
-            }),
-            _ => None,
+                anchor,
+            })
         })
         .collect();
 

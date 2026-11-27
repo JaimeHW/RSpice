@@ -51,6 +51,34 @@ pub struct RetainedQuickMarker {
     pub trace_name: Option<String>,
 }
 
+/// A note the reader pinned to the plot itself rather than to a curve.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedQuickNote {
+    /// The id that names it on every page it prints on.
+    pub id: u64,
+    /// What the reader wrote.
+    pub text: String,
+    pub anchor: RetainedQuickNoteAnchor,
+}
+
+/// Where a note pinned to the plot stands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum RetainedQuickNoteAnchor {
+    /// A place in the plot of the strip whose unit is `unit`, the first
+    /// strip where it names none: shares of the plot's width and height
+    /// from its top left. It stays put whatever window the plot shows.
+    Place {
+        unit: Option<String>,
+        x_fraction: f64,
+        y_fraction: f64,
+    },
+    /// A point of the data: `x` on the abscissa and `y` on the strip whose
+    /// unit is `unit`, empty for a plain number.
+    Point { unit: String, x: f64, y: f64 },
+}
+
 /// The transient reading state of one captured strip.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +103,9 @@ pub struct RetainedQuickViewOverlay {
     /// own extents, which is what the page rules when nothing is captured.
     #[serde(default)]
     viewport: Option<RetainedQuickViewport>,
+    /// The notes the reader pinned to the plot rather than to a curve.
+    #[serde(default)]
+    notes: Vec<RetainedQuickNote>,
 }
 
 /// One captured zoom, in the source space of the axes it was pinned on.
@@ -187,9 +218,20 @@ impl RetainedQuickViewOverlay {
             markers,
             interpolation,
             viewport,
+            notes: Vec::new(),
         };
         captured.validate()?;
         Ok(captured)
+    }
+
+    /// The same reading, with the notes the reader pinned to the plot.
+    pub fn with_notes(
+        mut self,
+        notes: Vec<RetainedQuickNote>,
+    ) -> Result<Self, HardcopySourceError> {
+        self.notes = notes;
+        self.validate()?;
+        Ok(self)
     }
 
     /// Reject a capture that cannot describe a page before it crosses the
@@ -238,6 +280,38 @@ impl RetainedQuickViewOverlay {
         if let Some(names) = &self.visible_traces {
             for name in names {
                 validate_label("prepared overlay trace", name, DISPLAY_NAME_LIMIT)?;
+            }
+        }
+        if self.notes.len() > MAX_RETAINED_OVERLAY_MARKERS {
+            return invalid(format!(
+                "prepared overlay carries {} notes, above the governed limit",
+                self.notes.len()
+            ));
+        }
+        for note in &self.notes {
+            validate_label("prepared overlay note", &note.text, DISPLAY_NAME_LIMIT)?;
+            let (unit, finite) = match &note.anchor {
+                RetainedQuickNoteAnchor::Place {
+                    unit,
+                    x_fraction,
+                    y_fraction,
+                } => (
+                    unit.as_deref(),
+                    x_fraction.is_finite() && y_fraction.is_finite(),
+                ),
+                RetainedQuickNoteAnchor::Point { unit, x, y } => {
+                    (Some(unit.as_str()), x.is_finite() && y.is_finite())
+                }
+            };
+            optional_label(
+                "prepared overlay note unit",
+                unit.filter(|unit| !unit.is_empty()),
+            )?;
+            if !finite {
+                return invalid(format!(
+                    "prepared overlay note {} has a non-finite position",
+                    note.id
+                ));
             }
         }
         Ok(())
@@ -449,6 +523,131 @@ pub(super) fn resolved_overlay_geometry(
         });
     }
     Ok((cursors, markers))
+}
+
+/// The height of a note's lettering, as the page compiler sets it.
+const NOTE_TEXT_UM: u64 = 2_400;
+/// Where a note pinned to a place starts its words, from that place: the
+/// pad the sheet boxes them in, and the lettering's ascent under it.
+const NOTE_INSET_UM: (i64, i64) = (1_250, 2_400);
+/// The room a note's words keep under their baseline, inside the plot.
+const NOTE_DESCENT_UM: i64 = 1_200;
+
+/// Place the notes the reader pinned to the plot, as the sheet places them.
+///
+/// A note pinned to a place stands there in the plot of its strip, its
+/// words starting from that corner as the sheet boxes them and held inside
+/// the plot. A note pinned to a point of the data stands on that point
+/// while the window shows it, its words led off it, as the sheet leads
+/// them; a point outside the window, or on a strip the page does not draw,
+/// has nowhere to stand. `units` are the strips' units, top to bottom, and
+/// `place` moves a point mapped into the whole plot area into a strip.
+pub(super) fn placed_notes(
+    overlay: &RetainedQuickViewOverlay,
+    units: &[&str],
+    (x_scale, y_scales): (AxisScale, &[AxisScale]),
+    frames: &[PlotFrame],
+    place: impl Fn(usize, SemanticPoint) -> SemanticPoint,
+) -> Result<Vec<SemanticPlotAnnotation>, HardcopySourceError> {
+    let strip_of = |unit: &str| units.iter().position(|strip| *strip == unit);
+    let mut annotations = Vec::new();
+    for note in &overlay.notes {
+        match &note.anchor {
+            RetainedQuickNoteAnchor::Place {
+                unit,
+                x_fraction,
+                y_fraction,
+            } => {
+                let Some((strip, frame)) = unit
+                    .as_deref()
+                    .map_or(Some(0), strip_of)
+                    .and_then(|strip| Some((strip, frames.get(strip)?)))
+                else {
+                    continue;
+                };
+                let share = |fraction: f64, span: i64| {
+                    (fraction.clamp(0.0, 1.0) * span as f64).round() as i64
+                };
+                let corner = |x: i64, y: i64| place(strip, SemanticPoint::new(x, y));
+                let (top_left, bottom_right) = (
+                    corner(PLOT_INSET_UM, PLOT_INSET_UM),
+                    corner(
+                        PLOT_INSET_UM + frame.plot_width,
+                        PLOT_INSET_UM + frame.plot_height,
+                    ),
+                );
+                let at = corner(
+                    PLOT_INSET_UM + share(*x_fraction, frame.plot_width),
+                    PLOT_INSET_UM + share(*y_fraction, frame.plot_height),
+                );
+                let width = i64::try_from(crate::sources::report_layout::set_width(
+                    rspice_fonts::Role::Sans,
+                    &note.text,
+                    NOTE_TEXT_UM,
+                ))
+                .unwrap_or(i64::MAX);
+                let (left, top) = (
+                    top_left.x_um + NOTE_INSET_UM.0,
+                    top_left.y_um + NOTE_INSET_UM.1,
+                );
+                let x = (at.x_um + NOTE_INSET_UM.0)
+                    .min(bottom_right.x_um - NOTE_INSET_UM.0 - width)
+                    .max(left);
+                let y = (at.y_um + NOTE_INSET_UM.1)
+                    .min(bottom_right.y_um - NOTE_DESCENT_UM)
+                    .max(top);
+                annotations.push(SemanticPlotAnnotation {
+                    annotation_id: note.id,
+                    text: note.text.clone(),
+                    trace_id: None,
+                    source_x_bits: None,
+                    source_y_bits: None,
+                    position: Some(SemanticPoint::new(x, y)),
+                    placed: true,
+                });
+            }
+            RetainedQuickNoteAnchor::Point { unit, x, y } => {
+                let Some((strip, frame)) =
+                    strip_of(unit).and_then(|strip| Some((strip, frames.get(strip)?)))
+                else {
+                    continue;
+                };
+                let (Some(page_x), Some(page_y)) =
+                    (project(x_scale, *x), project(y_scales[strip], *y))
+                else {
+                    continue;
+                };
+                if page_x < frame.x_minimum
+                    || page_x > frame.x_maximum
+                    || page_y < frame.y_minimum
+                    || page_y > frame.y_maximum
+                {
+                    continue;
+                }
+                annotations.push(SemanticPlotAnnotation {
+                    annotation_id: note.id,
+                    text: note.text.clone(),
+                    trace_id: None,
+                    source_x_bits: Some(x.to_bits()),
+                    source_y_bits: Some(y.to_bits()),
+                    position: Some(place(
+                        strip,
+                        map_plot_point(
+                            (page_x, page_y),
+                            frame.x_minimum,
+                            frame.y_minimum,
+                            frame.x_span,
+                            frame.y_span,
+                            frame.plot_width,
+                            frame.plot_height,
+                        )?,
+                    )),
+                    placed: false,
+                });
+            }
+        }
+    }
+    Ok(annotations)
 }
 
 /// A stable id for one overlay entity, in the same shape as the trace ids so

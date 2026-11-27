@@ -13,7 +13,9 @@ use super::*;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::bode::retained::response_signal;
 use rspice_results::nyquist::LOOP_PHASE_TRACE;
-use rspice_results::pane_figure::{PaneFigure, PaneFigureTrace, resolve_pane_figure};
+use rspice_results::pane_figure::{
+    PaneFigure, PaneFigureNoteAnchor, PaneFigureTrace, resolve_pane_figure,
+};
 use rspice_results::result_presentation::{MarkerKind, MarkerOffset};
 use rspice_results::visualization_document::PlotMarkerKind;
 
@@ -252,19 +254,49 @@ fn pane_overlay(
             trace_name: (kind != MarkerKind::Spec).then(|| series[index].label.clone()),
         })
     });
-    // A note pinned to a trace rides it, lettered with what the reader wrote.
-    let notes = figure.notes.iter().filter_map(|note| {
-        let index = figure
-            .traces
-            .iter()
-            .position(|trace| trace.trace_id == note.trace_id)?;
-        Some(RetainedQuickMarker {
-            label: note.text.clone(),
-            kind: MarkerKind::Note,
-            x: note.x,
-            trace_name: Some(series[index].label.clone()),
-        })
-    });
+    // A note pinned to a trace rides it, lettered with what the reader
+    // wrote; one pinned to a place in the plot or a point of its data stands
+    // there.
+    let mut on_traces = Vec::new();
+    let mut on_plot = Vec::new();
+    for note in &figure.notes {
+        let anchor = match &note.anchor {
+            PaneFigureNoteAnchor::Trace { trace_id, x } => {
+                if let Some(index) = figure
+                    .traces
+                    .iter()
+                    .position(|trace| trace.trace_id == *trace_id)
+                {
+                    on_traces.push(RetainedQuickMarker {
+                        label: note.text.clone(),
+                        kind: MarkerKind::Note,
+                        x: *x,
+                        trace_name: Some(series[index].label.clone()),
+                    });
+                }
+                continue;
+            }
+            PaneFigureNoteAnchor::Place {
+                unit,
+                x_fraction,
+                y_fraction,
+            } => RetainedQuickNoteAnchor::Place {
+                unit: unit.clone(),
+                x_fraction: f64::from(*x_fraction),
+                y_fraction: f64::from(*y_fraction),
+            },
+            PaneFigureNoteAnchor::Point { unit, x, y } => RetainedQuickNoteAnchor::Point {
+                unit: unit.clone(),
+                x: *x,
+                y: *y,
+            },
+        };
+        on_plot.push(RetainedQuickNote {
+            id: note.id,
+            text: note.text.clone(),
+            anchor,
+        });
+    }
     // A pinned ordinate names one axis's window, so it holds only where
     // every trace reads against that axis.
     let y = match figure.traces.as_slice() {
@@ -277,7 +309,7 @@ fn pane_overlay(
         None,
         None,
         None,
-        cursors.chain(markers).chain(notes).collect(),
+        cursors.chain(markers).chain(on_traces).collect(),
         RetainedCursorInterpolation::Linear,
         Some(RetainedQuickViewport {
             x: figure
@@ -286,7 +318,8 @@ fn pane_overlay(
                 .map(|range| (range.minimum, range.maximum)),
             y: y.map(|range| (range.minimum, range.maximum)),
         }),
-    )
+    )?
+    .with_notes(on_plot)
 }
 
 /// What a retained marker is on the sheet.
