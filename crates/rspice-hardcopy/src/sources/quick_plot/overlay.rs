@@ -350,6 +350,20 @@ pub(super) fn resolved_overlay_geometry(
     };
     let mut cursors = Vec::new();
     let mut markers = Vec::new();
+    // Two entities lettered alike, as two notes reading the same can be,
+    // are still two: the second and later of a name are told apart by
+    // their order, and the first keeps the id the name alone gives it.
+    let taken = std::cell::RefCell::new(std::collections::HashMap::<(&str, String), u32>::new());
+    let overlay_id = |kind: &'static str, label: &str| {
+        let mut taken = taken.borrow_mut();
+        let seen = taken.entry((kind, label.to_owned())).or_insert(0);
+        let id = match *seen {
+            0 => stable_overlay_id(viewer, kind, label),
+            n => stable_overlay_id(viewer, kind, &format!("{label}#{n}")),
+        };
+        *seen += 1;
+        id
+    };
     let mut vertical = |label: &str, source_x: f64| -> Result<(), HardcopySourceError> {
         // The frame is in the axes' own space, so the source coordinate is
         // projected before it is placed — and the exact source value still
@@ -372,7 +386,7 @@ pub(super) fn resolved_overlay_geometry(
             )
         };
         cursors.push(SemanticPlotCursor {
-            cursor_id: stable_overlay_id(viewer, "cursor", label),
+            cursor_id: overlay_id("cursor", label),
             label: label.to_owned(),
             source_x_bits: source_x.to_bits(),
             start: place(last, point(frame.y_minimum)?),
@@ -415,7 +429,7 @@ pub(super) fn resolved_overlay_geometry(
             continue;
         }
         markers.push(SemanticPlotMarker {
-            marker_id: stable_overlay_id(viewer, "marker", &marker.label),
+            marker_id: overlay_id("marker", &marker.label),
             label: marker.label.clone(),
             trace_id: Some(stable_quick_trace_id(viewer, index, &source.identity)),
             source_x_bits: Some(marker.x.to_bits()),

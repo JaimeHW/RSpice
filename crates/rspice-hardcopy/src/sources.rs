@@ -73,9 +73,7 @@ use rspice_results::report_document::{
     FrozenReportArtifact, ReportBlockId, ReportBlockKind, ReportReferenceSnapshot,
 };
 use rspice_results::result_presentation::ResultViewer;
-use rspice_results::visualization_document::{
-    AxisScale, PageId, PaneId, VisualizationDocument,
-};
+use rspice_results::visualization_document::{AxisScale, PageId, PaneId, VisualizationDocument};
 use rspice_results::visualization_raster::VisualizationRasterError;
 use rspice_vocabulary::product::ContentDigest;
 pub use schematic::{

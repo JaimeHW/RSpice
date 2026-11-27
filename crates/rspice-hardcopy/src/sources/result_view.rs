@@ -383,7 +383,12 @@ fn analysis_abscissa<W>(analysis: &AnalysisResult<W>, scale: AxisScale) -> Quick
 
 /// The unit a retained series reads in, as the sheet names it.
 fn printed_unit(waveform: &RetainedWaveform, analysis: AnalysisType) -> String {
-    series_unit(&waveform.name, waveform.unit.as_deref(), None, Some(analysis))
+    series_unit(
+        &waveform.name,
+        waveform.unit.as_deref(),
+        None,
+        Some(analysis),
+    )
 }
 
 /// The unit a series named `name` reads in, as the sheet names it: the unit

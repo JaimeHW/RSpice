@@ -21,7 +21,10 @@ pub fn resolve_visualization_document_source(
             .iter()
             .find(|pane| pane.id == pane_id)
             .and_then(|pane| {
-                let page = document.pages().iter().find(|page| page.id == pane.page_id)?;
+                let page = document
+                    .pages()
+                    .iter()
+                    .find(|page| page.id == pane.page_id)?;
                 Some((page, pane))
             })
             .ok_or_else(|| {
@@ -107,7 +110,11 @@ pub fn resolve_visualization_document_source(
 
 /// What a printed pane is called: its document and the pane, with the page
 /// between them where the document has more than one.
-pub fn visualization_pane_title(document: &VisualizationDocument, page: &Page, pane: &Pane) -> String {
+pub fn visualization_pane_title(
+    document: &VisualizationDocument,
+    page: &Page,
+    pane: &Pane,
+) -> String {
     let mut parts = vec![document.title()];
     if document.pages().len() > 1 {
         parts.push(&page.title);

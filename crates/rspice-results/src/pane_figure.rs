@@ -12,8 +12,8 @@ use crate::analysis_type::AnalysisType;
 use crate::report_document::{ReportReferenceSnapshot, ReportSourceId};
 use crate::report_figure::FigureCursor;
 use crate::visualization_document::{
-    Axis, AxisOrientation, ColumnRole, MarkerId, PageId, PaneId, PaneKind, PlotMarkerKind,
-    SourceDataset, Trace, TraceId, TypedValue, ValueType, VisualizationDocument,
+    AnnotationAnchor, Axis, AxisOrientation, ColumnRole, MarkerId, PageId, PaneId, PaneKind,
+    PlotMarkerKind, SourceDataset, Trace, TraceId, TypedValue, ValueType, VisualizationDocument,
 };
 use crate::visualization_raster::{
     MAX_RASTER_CURSORS, MAX_RASTER_TRACES, VisualizationRasterError,
@@ -44,6 +44,16 @@ pub struct PaneFigure {
     pub cursors: Vec<FigureCursor>,
     /// The markers that ride the traces it shows.
     pub markers: Vec<PaneFigureMarker>,
+    /// The notes the reader pinned to the traces it shows.
+    pub notes: Vec<PaneFigureNote>,
+}
+
+/// A note pinned to a point of a trace of a printed pane.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaneFigureNote {
+    pub trace_id: TraceId,
+    pub text: String,
+    pub x: f64,
 }
 
 /// One trace of a printed pane.
@@ -254,6 +264,22 @@ pub fn resolve_pane_figure(
             })
         })
         .collect();
+    let notes = document
+        .annotations()
+        .iter()
+        .filter(|annotation| annotation.pane_id == pane_id)
+        .filter_map(|annotation| match &annotation.anchor {
+            AnnotationAnchor::Trace {
+                trace_id,
+                coordinate,
+            } if traces.iter().any(|trace| trace.trace_id == *trace_id) => Some(PaneFigureNote {
+                trace_id: *trace_id,
+                text: annotation.text.clone(),
+                x: exact_position(coordinate)?,
+            }),
+            _ => None,
+        })
+        .collect();
 
     Ok(PaneFigure {
         viewer_id: pane.viewer_id.clone(),
@@ -272,6 +298,7 @@ pub fn resolve_pane_figure(
         traces,
         cursors,
         markers,
+        notes,
     })
 }
 
@@ -356,7 +383,12 @@ fn trace_points(
             .and_then(|series| run.figure_samples(&series));
         return match carried {
             Some(samples) if !samples.x().is_empty() => Ok(Some((
-                samples.x().iter().copied().zip(samples.y().iter().copied()).collect(),
+                samples
+                    .x()
+                    .iter()
+                    .copied()
+                    .zip(samples.y().iter().copied())
+                    .collect(),
                 samples.unit().map(str::to_owned),
             ))),
             None if run.carries_figure_samples() => Ok(None),

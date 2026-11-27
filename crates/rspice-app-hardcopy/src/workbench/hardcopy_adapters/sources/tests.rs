@@ -674,8 +674,14 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
     let HardcopySemanticDocument::Plot(plot) = first.semantic_document() else {
         panic!("expected semantic plot")
     };
-    assert_eq!(plot.markers.len(), 1);
-    assert_eq!(plot.annotations.len(), 1);
+    // The note rides its trace as the peak marker does.
+    assert_eq!(plot.markers.len(), 2);
+    assert!(
+        plot.markers
+            .iter()
+            .any(|marker| marker.label == "Settling begins")
+    );
+    assert!(plot.annotations.is_empty());
     assert_eq!(plot.cursors.len(), 1);
     assert_eq!(plot.cursors[0].label, "A");
     assert_eq!(plot.cursors[0].source_x_bits, 0.5f64.to_bits());

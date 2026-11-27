@@ -99,9 +99,8 @@ fn pane_plot(
     // A strip is logarithmic when the axis its traces read against is, or
     // when the pane keeps its unit on a logarithmic axis, as the sheet keeps
     // the scale of each unit pane. A plain number's pane is kept as "1".
-    let logarithmic = |axis: &rspice_results::visualization_document::Axis| {
-        axis.scale == AxisScale::Logarithmic
-    };
+    let logarithmic =
+        |axis: &rspice_results::visualization_document::Axis| axis.scale == AxisScale::Logarithmic;
     let log_units = figure
         .traces
         .iter()
@@ -203,8 +202,8 @@ fn printed_series(
     (series, None)
 }
 
-/// The pane's cursors and markers as the reading a sheet's print carries,
-/// and the window the reader pinned it to.
+/// The pane's cursors, markers and notes as the reading a sheet's print
+/// carries, and the window the reader pinned it to.
 fn pane_overlay(
     figure: &PaneFigure,
     series: &[QuickResultSeries],
@@ -243,6 +242,19 @@ fn pane_overlay(
             trace_name: (kind != MarkerKind::Spec).then(|| series[index].label.clone()),
         })
     });
+    // A note pinned to a trace rides it, lettered with what the reader wrote.
+    let notes = figure.notes.iter().filter_map(|note| {
+        let index = figure
+            .traces
+            .iter()
+            .position(|trace| trace.trace_id == note.trace_id)?;
+        Some(RetainedQuickMarker {
+            label: note.text.clone(),
+            kind: MarkerKind::Note,
+            x: note.x,
+            trace_name: Some(series[index].label.clone()),
+        })
+    });
     // A pinned ordinate names one axis's window, so it holds only where
     // every trace reads against that axis.
     let y = match figure.traces.as_slice() {
@@ -255,7 +267,7 @@ fn pane_overlay(
         None,
         None,
         None,
-        cursors.chain(markers).collect(),
+        cursors.chain(markers).chain(notes).collect(),
         RetainedCursorInterpolation::Linear,
         Some(RetainedQuickViewport {
             x: figure
