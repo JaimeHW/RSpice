@@ -34,6 +34,7 @@ pub struct Button<'a> {
     square: bool,
     menu: bool,
     mono: bool,
+    selected: Option<bool>,
     accessible_label: Option<&'a str>,
 }
 
@@ -91,6 +92,7 @@ impl<'a> Button<'a> {
             square: false,
             menu: false,
             mono: false,
+            selected: None,
             accessible_label: None,
         }
     }
@@ -99,6 +101,15 @@ impl<'a> Button<'a> {
     /// (IBM Plex has no glyph for one).
     pub fn menu(mut self) -> Self {
         self.menu = true;
+        self
+    }
+
+    /// Make the button a toggle, lit while `selected`: the pressed fill, the
+    /// strong border and the full text ink, with no accent. For a toggle that
+    /// stands among buttons, as a plot's grid or scale does on its bar, where
+    /// it reads as one of them rather than as a chip of another family.
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = Some(selected);
         self
     }
 
@@ -219,7 +230,7 @@ impl<'a> Button<'a> {
     /// One owner for that arithmetic, because two surfaces ask for it: the
     /// paint below, and a caller sizing a neighbouring control against the
     /// space this one leaves.
-    fn measure(&self, ui: &mut Ui, fg: egui::Color32) -> (std::sync::Arc<egui::Galley>, f32) {
+    fn measure(&self, ui: &Ui, fg: egui::Color32) -> (std::sync::Arc<egui::Galley>, f32) {
         let t = Tokens::get(ui.ctx());
         let font_id = if self.mono {
             theme::chip_mono()
@@ -270,7 +281,7 @@ impl<'a> Button<'a> {
     /// only honest source for it is the arithmetic the paint uses; a width
     /// authored beside the row is a second account of it, free to drift the
     /// first time a label changes.
-    pub fn measured_width(&self, ui: &mut Ui) -> f32 {
+    pub fn measured_width(&self, ui: &Ui) -> f32 {
         self.measure(ui, egui::Color32::PLACEHOLDER).1
     }
 
@@ -322,11 +333,14 @@ impl<'a> Button<'a> {
         }
 
         response.widget_info(|| {
-            WidgetInfo::labeled(
-                WidgetType::Button,
-                self.enabled && ui.is_enabled(),
-                self.accessible_label.unwrap_or(self.label),
-            )
+            let enabled = self.enabled && ui.is_enabled();
+            let label = self.accessible_label.unwrap_or(self.label);
+            match self.selected {
+                Some(selected) => {
+                    WidgetInfo::selected(WidgetType::Button, enabled, selected, label)
+                }
+                None => WidgetInfo::labeled(WidgetType::Button, enabled, label),
+            }
         });
         if !ui.is_rect_visible(rect) {
             return response;
@@ -348,6 +362,8 @@ impl<'a> Button<'a> {
                 mix(base, egui::Color32::WHITE, hover * 0.07)
             };
             (fill, fill)
+        } else if self.selected == Some(true) {
+            (c.bg_active, c.border_strong)
         } else if self.ghost {
             // Transparent at rest; the standard border remains visible.
             let fill = if pressed {
@@ -667,6 +683,26 @@ mod tests {
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Button && node.label() == Some("Run simulation")
         }));
+    }
+
+    #[test]
+    fn a_toggle_button_publishes_its_state_and_a_plain_one_none() {
+        let nodes = accesskit_nodes(|ui| {
+            Button::new("Grid").selected(true).show(ui);
+            Button::new("Limits").selected(false).show(ui);
+            Button::new("Export").show(ui);
+        });
+        let toggled = |label: &str| {
+            nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(label))
+                .map(|(_, node)| node.toggled())
+                .expect("the button is in the tree")
+        };
+
+        assert_eq!(toggled("Grid"), Some(egui::accesskit::Toggled::True));
+        assert_eq!(toggled("Limits"), Some(egui::accesskit::Toggled::False));
+        assert_eq!(toggled("Export"), None);
     }
 
     #[test]
