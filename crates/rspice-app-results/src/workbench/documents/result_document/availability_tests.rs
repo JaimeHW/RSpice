@@ -1029,11 +1029,13 @@ fn the_strip_and_the_folded_bar_centre_every_control_above_their_rule() {
                 )
             })
             .filter_map(|node| Some((node.label().unwrap_or_default(), node.bounds()?)))
+            // Every control the row's span touches counts, so one that
+            // spills over the row's edge fails rather than drops out.
             .filter(|(_, bounds)| {
                 bounds.x0 >= row.x0
                     && bounds.x1 <= row.x1
-                    && bounds.y0 >= row.y0
-                    && bounds.y1 <= row.y1
+                    && bounds.y0 < row.y1
+                    && bounds.y1 > row.y0
             })
             .collect();
         assert!(controls.len() >= 2, "{scene}: {controls:?}");
