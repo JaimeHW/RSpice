@@ -26,11 +26,11 @@ use rspice_formats::spice_raw::streamed_import::{
 };
 use rspice_results::number_format::fmt_column_reading;
 use rspice_results::provenance::AnalysisResultFamilyMember;
-use rspice_ui_kit::panels::{Fact, PANEL_INSET, fact_rows};
+use rspice_ui_kit::panels::{Fact, PANEL_INSET, fact_rows, panel_body};
 use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, LineHeights};
 use rspice_ui_kit::widgets::{
-    Button, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogHintTone, DialogSize, FormRows,
-    band_header,
+    Button, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogHintTone, DialogSize,
+    DialogTransactionTone, FormRows, Problem, band_header, problem_line,
 };
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
@@ -239,23 +239,22 @@ const MIN_RESULT_ROWS: usize = 1;
 /// The review's title, which the kit's dialog is known by.
 const RESULT_IMPORT_TITLE: &str = "Import result dataset";
 /// What the review is for, said under its title and to assistive technology.
-const RESULT_IMPORT_PURPOSE: &str = "Review the detected structure and mapping before RSpice adds these results to the project history.";
+const RESULT_IMPORT_PURPOSE: &str =
+    "Check how RSpice read this file before it adds the run to the project.";
 /// Every word the review's primary takes, one per step, which it is held as
 /// wide as, so the footer's buttons stand where they stood on the step before.
 const RESULT_IMPORT_PRIMARIES: [&str; 3] = ["Map signals", "Validate import", "Import"];
-/// The review's height on every step: its tallest pages whole, under the
-/// kit's header and over its footer. Map holds the mapping's two rows,
-/// [`RESULT_IMPORT_SIGNAL_ROWS`] signals and the preview's
-/// [`RESULT_IMPORT_PREVIEW_ROWS`] rows; Validate a source's facts and a note
-/// over the same preview, and is the taller by a few rows. One height, so a
-/// step on a screen that holds it scrolls only for a source with more to say
-/// than one analysis, and the footer never moves from step to step.
+/// The review's height on every step: its pages whole, under the kit's
+/// header and over its footer. Detect and Validate state a source's facts
+/// and a note over the source preview's [`RESULT_IMPORT_PREVIEW_ROWS`] rows;
+/// Map its two mapping rows and [`RESULT_IMPORT_SIGNAL_ROWS`] signals over
+/// the same preview. One height, so a step on a screen that holds it scrolls
+/// only for a source with more to say than one analysis, and the footer never
+/// moves from step to step. A screen too short for it holds it to the screen
+/// less the kit's margin, its body scrolling and its footer pinned.
 const RESULT_IMPORT_HEIGHT: f32 = 720.0;
 /// How many signals the Map step lists before its list scrolls.
 const RESULT_IMPORT_SIGNAL_ROWS: f32 = 5.0;
-/// The kit's margin round a transaction dialog, which a screen too short for
-/// the review keeps clear of it.
-const RESULT_IMPORT_WINDOW_MARGIN: f32 = 24.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedResultDataset {
@@ -371,16 +370,13 @@ fn record_import_failure(state: &mut ResultsParts<'_>, error: &str) {
 
 fn result_import_block_reason(model: &Model, platform: &PlatformState) -> Option<String> {
     if !platform.project_lifecycle.is_open() {
-        return Some("Open a project before importing a result dataset.".to_owned());
+        return Some("Open a project before importing results.".to_owned());
     }
     if model.safe_mode.project_read_only() {
-        return Some("The project is read-only; result history cannot be changed.".to_owned());
+        return Some("The project is read-only, so nothing can be imported into it.".to_owned());
     }
     if model.simulation.execution.has_active_execution() {
-        return Some(
-            "Wait for the active simulation execution to finish before importing result data."
-                .to_owned(),
-        );
+        return Some("Wait for the running simulation to finish before importing.".to_owned());
     }
     None
 }
@@ -477,7 +473,7 @@ fn keep_parsed_samples(
     parsed: &mut ParsedResultDataset,
 ) -> Result<(), JobStop> {
     let further = parsed.plots.as_ref().map_or(0, |plots| plots.further.len());
-    job.step("Keeping samples", 1 + further as u64);
+    job.step("Storing samples", 1 + further as u64);
     let format = parsed.source_format;
     let keep = |analysis_type: AnalysisType,
                 coordinate: (&str, &Option<String>),
@@ -744,11 +740,11 @@ fn parsed_result_from_draft(
     draft: &ResultImportDialogState,
 ) -> Result<ParsedResultDataset, String> {
     if draft.source_name.trim().is_empty() {
-        return Err("The import source name is empty.".to_owned());
+        return Err("The file has no name.".to_owned());
     }
     let coordinate_name = draft.coordinate_name.trim();
     if coordinate_name.is_empty() {
-        return Err("Enter a coordinate name before committing the import.".to_owned());
+        return Err("Name the coordinate before importing.".to_owned());
     }
     rspice_results::result_import::ResultImportCoordinate {
         name: coordinate_name.to_owned(),
@@ -762,27 +758,22 @@ fn parsed_result_from_draft(
             | AnalysisType::DcSweep
             | AnalysisType::SParameter
     ) {
-        return Err(
-            "Select a supported transient, AC, DC-sweep, or S-parameter domain.".to_owned(),
-        );
+        return Err("Choose a transient, AC, DC sweep or S-parameter domain.".to_owned());
     }
     let source_format = ResultImportFormat::from_canonical_id(&draft.source_format_id)
-        .ok_or_else(|| "The staged import format identity is missing or invalid.".to_owned())?;
+        .ok_or_else(|| "RSpice lost track of this file's format; open it again.".to_owned())?;
     let touchstone = matches!(
         source_format,
         ResultImportFormat::TouchstoneV1 | ResultImportFormat::TouchstoneV2
     );
     if touchstone && draft.analysis_type != AnalysisType::SParameter {
-        return Err("Touchstone network data must remain in the S-parameter domain.".to_owned());
+        return Err("A Touchstone file can only be read as S-parameters.".to_owned());
     }
     if !touchstone && draft.analysis_type == AnalysisType::SParameter {
-        return Err(
-            "S-parameter mapping requires a Touchstone source with reference-impedance authority."
-                .to_owned(),
-        );
+        return Err("Only a Touchstone file can be read as S-parameters.".to_owned());
     }
     if draft.selected_signals.len() != draft.waveforms.len() {
-        return Err("The signal mapping no longer matches the parsed source.".to_owned());
+        return Err("The signal list no longer matches the file; open it again.".to_owned());
     }
     let waveforms = draft
         .waveforms
@@ -797,7 +788,9 @@ fn parsed_result_from_draft(
         waveform.x.len() != waveform.y.len()
             || (!touchstone && waveform.x.len() != draft.sample_count)
     }) {
-        return Err("A selected signal no longer matches the detected coordinate grid.".to_owned());
+        return Err(
+            "A selected signal no longer matches the file's coordinate; open it again.".to_owned(),
+        );
     }
     if matches!(
         draft.analysis_type,
@@ -820,7 +813,7 @@ fn parsed_result_from_draft(
         }) = draft.family_metadata.as_ref()
         else {
             return Err(
-                "Touchstone import is missing per-port reference-impedance authority.".to_owned(),
+                "This Touchstone file states no reference impedance for each port.".to_owned(),
             );
         };
         if reference_impedances_ohm.is_empty()
@@ -828,7 +821,7 @@ fn parsed_result_from_draft(
                 waveform.complex.is_none() && !matches!(waveform.name.as_str(), "Fmin" | "Rn")
             })
         {
-            return Err("Touchstone import contains incomplete complex network data.".to_owned());
+            return Err("This Touchstone file holds incomplete network data.".to_owned());
         }
     }
     Ok(ParsedResultDataset {
@@ -1145,19 +1138,28 @@ impl ImportedAnalysis {
 /// lands on it whichever frame the pointer saw. It was a window whose body
 /// filled the window as the last frame sized it, with the footer below: the
 /// window grew by the footer every frame until the screen stopped it.
+///
+/// While the draft's job runs, reading the source or adding the run, the
+/// same dialog stays up with the job's progress over its footer and Cancel
+/// beside it; it closes when the run is added.
 pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut ResultsParts<'_>) {
     if !state.result_import.open {
         return;
     }
-    if let Some(job) = state.result_import.job.clone() {
-        show_result_import_job(ctx, state, &job);
+    if let Some(job) = state.result_import.job.clone()
+        && !poll_result_import_job(state, &job)
+        && !state.result_import.open
+    {
         return;
     }
+    let job = state.result_import.job.clone();
 
     let mut draft = state.result_import.clone();
     let mut choose_log = false;
     #[cfg(target_arch = "wasm32")]
-    apply_browser_result_import_log(&mut draft);
+    if job.is_none() {
+        apply_browser_result_import_log(&mut draft);
+    }
     let digits = usize::from(
         state
             .results_reads()
@@ -1165,13 +1167,17 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
             .displayed_significant_digits()
             .get(),
     );
-    let refused = parsed_result_from_draft(&draft).err();
+    let staged = !matches!(job, Some(ResultImportJob::Reading(_)));
+    let refused = staged
+        .then(|| parsed_result_from_draft(&draft).err())
+        .flatten();
     let blocked = result_import_block_reason(state.model, state.platform);
-    let primary_enabled = match draft.stage {
-        ResultImportStage::Detect => true,
-        ResultImportStage::Map => refused.is_none(),
-        ResultImportStage::Validate => refused.is_none() && blocked.is_none(),
-    };
+    let primary_enabled = job.is_none()
+        && match draft.stage {
+            ResultImportStage::Detect => true,
+            ResultImportStage::Map => refused.is_none(),
+            ResultImportStage::Validate => refused.is_none() && blocked.is_none(),
+        };
     // Why the primary refuses, or why the last attempt did, beside it.
     let refusal = match draft.stage {
         ResultImportStage::Detect => draft.validation_error.clone(),
@@ -1186,15 +1192,18 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
     let mut dialog = Dialog::new(RESULT_IMPORT_TITLE, primary)
         .description(RESULT_IMPORT_PURPOSE)
         .size(DialogSize::Transaction)
-        .fixed_height(result_import_height(ctx.content_rect().height()))
+        .fixed_height(RESULT_IMPORT_HEIGHT)
         .flush_body()
         .overlay_scrollbar()
         .primary_width_of(&RESULT_IMPORT_PRIMARIES)
         .primary_enabled(primary_enabled)
         .secondary("Back")
-        .secondary_enabled(draft.stage != ResultImportStage::Detect)
+        .secondary_enabled(job.is_none() && draft.stage != ResultImportStage::Detect)
         .ghost("Cancel");
-    if let Some(refusal) = refusal {
+    if let Some(job) = &job {
+        let (title, detail) = result_import_progress(&draft.source_name, job);
+        dialog = dialog.transaction_state(DialogTransactionTone::Progress, title, detail);
+    } else if let Some(refusal) = refusal {
         dialog = dialog.hint(refusal).hint_tone(DialogHintTone::Error);
     }
     let mapped = (
@@ -1204,6 +1213,10 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
     );
     let choice = dialog.show(ctx, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
+        if job.is_some() {
+            // The job works on what the pages show; they are read, not edited.
+            ui.disable();
+        }
         result_import_inset(ui, |ui| {
             ui.label(
                 egui::RichText::new(RESULT_IMPORT_PURPOSE)
@@ -1212,14 +1225,37 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
             ui.add_space(8.0);
             result_import_stage_header(ui, draft.stage);
         });
+        if !staged {
+            band_header(ui, "Detected source", None);
+            result_import_block(ui, |ui| {
+                fact_rows(ui, &[Fact::new("File", &draft.source_name)]);
+            });
+            return;
+        }
         match draft.stage {
-            ResultImportStage::Detect => choose_log = result_import_detect_page(ui, &draft),
+            ResultImportStage::Detect => {
+                choose_log = result_import_detect_page(ui, &draft, digits);
+            }
             ResultImportStage::Map => result_import_map_page(ui, &mut draft, digits),
             ResultImportStage::Validate => {
                 choose_log = result_import_validate_page(ui, &draft, digits);
             }
         }
     });
+
+    if let Some(job) = &job {
+        if matches!(choice, DialogChoice::Ghost | DialogChoice::Cancelled) {
+            job.cancel();
+            match job {
+                ResultImportJob::Reading(_) => discard_result_import_draft(state),
+                // Cancel stops the adding and returns to the review.
+                ResultImportJob::Committing(_) => state.result_import.job = None,
+            }
+            return;
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        return;
+    }
     if (
         draft.analysis_type,
         &draft.coordinate_name,
@@ -1270,71 +1306,23 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
     }
 }
 
-/// The dialog while its job runs: what it is doing, how far it is, and
-/// Cancel; and, when the job ends, what follows from how it ended. Reads the
-/// job's progress and nothing it works on.
-fn show_result_import_job(
-    ctx: &egui::Context,
-    state: &mut ResultsParts<'_>,
-    job: &ResultImportJob,
-) {
-    if !poll_result_import_job(state, job) {
-        return;
-    }
+/// What the strip over the footer says while the draft's job runs: what it
+/// is doing to which file, and how far it has got.
+fn result_import_progress(source_name: &str, job: &ResultImportJob) -> (String, String) {
     let progress = job.state();
-    let tokens = Tokens::get(ctx);
-    let mut cancel = false;
-    // A window of its own: the review that follows opens at its own size and
-    // place, not first at this one's.
-    egui::Window::new("Import result dataset")
-        .id(egui::Id::new("rspice.result-import.job"))
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .show(ctx, |ui| {
-            ui.label(
-                egui::RichText::new(&state.result_import.source_name)
-                    .monospace()
-                    .color(tokens.color.text_dim),
-            );
-            let step = match &progress {
-                JobState::Running { step, .. } if !step.is_empty() => step.as_str(),
-                _ => "Starting",
-            };
-            let fraction = progress.fraction();
-            let text = match fraction {
-                Some(fraction) => format!("{step} \u{00b7} {:.0}%", fraction * 100.0),
-                None => step.to_owned(),
-            };
-            ui.add(
-                egui::ProgressBar::new(fraction.unwrap_or(0.0))
-                    .desired_width(360.0)
-                    .text(text),
-            );
-            ui.add_space(8.0);
-            let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
-            ui.allocate_ui_with_layout(
-                row,
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui| cancel = ui.button("Cancel").clicked(),
-            );
-        });
-    if cancel {
-        job.cancel();
-        match job {
-            ResultImportJob::Reading(_) => discard_result_import_draft(state),
-            ResultImportJob::Committing(_) => state.result_import.job = None,
-        }
-        return;
-    }
-    ctx.request_repaint_after(std::time::Duration::from_millis(100));
-}
-
-/// The review's height in a screen `screen_height` tall: its own, or, on a
-/// screen too short for it, the screen's less the kit's margin, the body
-/// scrolling between the header and the footer.
-fn result_import_height(screen_height: f32) -> f32 {
-    RESULT_IMPORT_HEIGHT.min((screen_height - RESULT_IMPORT_WINDOW_MARGIN).max(1.0))
+    let step = match &progress {
+        JobState::Running { step, .. } if !step.is_empty() => step.as_str(),
+        _ => "Starting",
+    };
+    let detail = match progress.fraction() {
+        Some(fraction) => format!("{step} \u{00b7} {:.0}%", fraction * 100.0),
+        None => step.to_owned(),
+    };
+    let title = match job {
+        ResultImportJob::Reading(_) => format!("Opening {source_name}"),
+        ResultImportJob::Committing(_) => format!("Importing {source_name}"),
+    };
+    (title, detail)
 }
 
 /// Act on how the draft's job ended, once it has: review the staged source,
@@ -1405,20 +1393,35 @@ fn result_import_inset<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> 
         .inner
 }
 
-/// Facts on the kit's one band of rows, across the body, their labels on
-/// one column where the dialog's inset starts.
+/// `add` on the kit's panel rhythm, across the body: fact rows on one label
+/// column, problem lines behind their marks, and words, every one starting
+/// where the dialog's title starts.
+fn result_import_block<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let side = (DIALOG_BODY_INSET - PANEL_INSET).max(0.0) as i8;
+    egui::Frame::NONE
+        .inner_margin(egui::Margin {
+            left: side,
+            right: side,
+            top: 6,
+            bottom: 0,
+        })
+        .show(ui, |ui| panel_body(ui, add))
+        .inner
+}
+
+/// Facts on the kit's one band of rows.
 fn result_import_facts(ui: &mut egui::Ui, facts: &[(&str, String)]) {
     let facts = facts
         .iter()
         .map(|(label, value)| Fact::new(label, value))
         .collect::<Vec<_>>();
-    let side = (DIALOG_BODY_INSET - PANEL_INSET).max(0.0);
-    egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(side as i8, 6))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            fact_rows(ui, &facts);
-        });
+    fact_rows(ui, &facts);
+}
+
+/// A line of words on the panel rhythm, wrapping across the body.
+fn result_import_line(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(text).color(Tokens::get(ui.ctx()).color.text));
 }
 
 fn result_import_stage_header(ui: &mut egui::Ui, active: ResultImportStage) {
@@ -1447,63 +1450,95 @@ fn result_import_stage_header(ui: &mut egui::Ui, active: ResultImportStage) {
     });
 }
 
-fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
+/// The source's format as a reader names it: a delimited file with the
+/// separator it was read with. The canonical id stays the draft's, its
+/// identity and the logs'.
+fn result_import_format_name(draft: &ResultImportDialogState) -> String {
+    match ResultImportFormat::from_canonical_id(&draft.source_format_id) {
+        Some(ResultImportFormat::CsvRfc4180) => format!(
+            "CSV ({}-separated)",
+            match draft.delimiter {
+                b';' => "semicolon",
+                b'\t' => "tab",
+                _ => "comma",
+            }
+        ),
+        Some(ResultImportFormat::Tsv) => "TSV (tab-separated)".to_owned(),
+        Some(format) => format.label().to_owned(),
+        None => draft.source_format_id.clone(),
+    }
+}
+
+/// The unit the coordinate is read in, and whether its domain assumed it
+/// for want of one the file stated: a 'time' column that states none is
+/// read in seconds, a 'frequency' one in hertz. A swept quantity that states
+/// none is read in none.
+fn result_import_coordinate_unit(draft: &ResultImportDialogState) -> Option<(&str, bool)> {
+    match draft.coordinate_unit.as_deref() {
+        Some(unit) => Some((unit, false)),
+        None => match draft.analysis_type {
+            AnalysisType::Transient => Some(("s", true)),
+            AnalysisType::Ac | AnalysisType::SParameter => Some(("Hz", true)),
+            _ => None,
+        },
+    }
+}
+
+/// The coordinate's unit as a fact: the unit the import uses, and whether
+/// it was assumed. The note under the facts says why.
+fn result_import_coordinate_unit_fact(draft: &ResultImportDialogState) -> String {
+    match result_import_coordinate_unit(draft) {
+        Some((unit, false)) => unit.to_owned(),
+        Some((unit, true)) => format!("{unit}, assumed"),
+        None => "None".to_owned(),
+    }
+}
+
+fn result_import_detect_page(
+    ui: &mut egui::Ui,
+    draft: &ResultImportDialogState,
+    digits: usize,
+) -> bool {
     band_header(ui, "Detected source", None);
     let mut facts = vec![
         ("File", draft.source_name.clone()),
-        ("Format", draft.source_format_id.clone()),
-    ];
-    if matches!(draft.source_format_id.as_str(), "csv-rfc4180" | "tsv") {
-        let delimiter = match draft.delimiter {
-            b'\t' => "Tab",
-            b';' => "Semicolon",
-            _ => "Comma",
-        };
-        facts.push(("Delimiter", delimiter.to_owned()));
-    }
-    facts.extend([
+        ("Format", result_import_format_name(draft)),
         (
             "Inferred domain",
             result_import_domain_name(draft.analysis_type).to_owned(),
         ),
         ("Coordinate", draft.coordinate_name.clone()),
-        (
-            "Coordinate unit",
-            draft
-                .coordinate_unit
-                .clone()
-                .unwrap_or_else(|| "Unstated".to_owned()),
-        ),
+        ("Coordinate unit", result_import_coordinate_unit_fact(draft)),
         ("Signals", draft.waveforms.len().to_string()),
         ("Samples per signal", draft.sample_count.to_string()),
-    ]);
+    ];
     result_import_plot_facts(&mut facts, draft);
-    result_import_facts(ui, &facts);
-    result_import_inset(ui, |ui| {
+    let choose_log = result_import_block(ui, |ui| {
+        result_import_facts(ui, &facts);
         let choose_log = result_import_notes(ui, draft);
-        ui.label(
-            egui::RichText::new(
-                "No run or analysis has been created. Continue to confirm the engineering domain, coordinate, and included signals.",
-            )
-            .color(Tokens::get(ui.ctx()).color.text_dim),
-        );
+        result_import_line(ui, "Nothing is added until you import.");
         choose_log
-    })
+    });
+    band_header(ui, "Source preview", None);
+    result_import_preview(ui, draft, digits);
+    choose_log
 }
 
-/// What the reader should know of how the source was read, and, when a stepped rawfile's runs
-/// are numbered for want of a log, the button that asks for it. True when it was pressed.
+/// What the reader should know of how the source was read, each behind the
+/// kit's warning mark, and, when a stepped rawfile's runs are numbered for
+/// want of a log, the button that asks for it. True when it was pressed.
 fn result_import_notes(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
-    for note in &draft.notes {
-        ui.colored_label(Tokens::get(ui.ctx()).color.warn, note);
+    if !draft.notes.is_empty() {
         ui.add_space(4.0);
     }
-    let unnamed = unnamed_result_import_runs(draft) > 0;
-    let choose_log = unnamed && Button::new("Choose log\u{2026}").show(ui).clicked();
-    if unnamed || !draft.notes.is_empty() {
-        ui.add_space(8.0);
+    for note in &draft.notes {
+        problem_line(ui, Problem::Warning, note);
     }
-    choose_log
+    let unnamed = unnamed_result_import_runs(draft) > 0;
+    if unnamed {
+        ui.add_space(4.0);
+    }
+    unnamed && Button::new("Choose log\u{2026}").show(ui).clicked()
 }
 
 /// The domains a source that states none can be read in, as the Map step
@@ -1615,7 +1650,6 @@ fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState
         draft.selected_signals[row] = on;
     }
 
-    band_header(ui, "Source preview", None);
     result_import_preview(ui, draft, digits);
     draft.validation_error = parsed_result_from_draft(draft).err();
 }
@@ -1633,45 +1667,44 @@ fn result_import_validate_page(
         .count();
     let mut facts = vec![
         ("Source", draft.source_name.clone()),
-        ("Format", draft.source_format_id.clone()),
+        ("Format", result_import_format_name(draft)),
         (
             "Domain",
             result_import_domain_name(draft.analysis_type).to_owned(),
         ),
         ("Coordinate", draft.coordinate_name.clone()),
-        (
-            "Coordinate unit",
-            draft
-                .coordinate_unit
-                .clone()
-                .unwrap_or_else(|| "Unstated".to_owned()),
-        ),
+        ("Coordinate unit", result_import_coordinate_unit_fact(draft)),
         ("Included signals", selected.to_string()),
         ("Samples per signal", draft.sample_count.to_string()),
     ];
     result_import_plot_facts(&mut facts, draft);
     facts.push((
         "Saved as",
-        "Read-only · imported, not from a run".to_owned(),
+        "Read-only \u{00b7} imported, not simulated by RSpice".to_owned(),
     ));
-    result_import_facts(ui, &facts);
-    let choose_log = result_import_inset(ui, |ui| {
+    let choose_log = result_import_block(ui, |ui| {
+        result_import_facts(ui, &facts);
         let choose_log = result_import_notes(ui, draft);
-        // A refusal is the footer's, beside the Import it holds back.
+        // A refusal is the footer's, beside the Import it holds back. Being
+        // ready is the absence of a problem, said in plain words.
         if parsed_result_from_draft(draft).is_ok() {
-            let message = match draft.plots.as_deref().filter(|plots| !plots.further.is_empty()) {
-                Some(plots) => format!(
-                    "Validation passed. Import will add one completed retained run of {} analyses and open it in Results.",
-                    plots.further.len() + 1
-                ),
-                None => "Validation passed. Import will add one completed retained run and open it in Results."
-                    .to_owned(),
-            };
-            ui.colored_label(Tokens::get(ui.ctx()).color.ok, message);
+            let analyses = draft
+                .plots
+                .as_deref()
+                .map_or(1, |plots| plots.further.len() + 1);
+            result_import_line(
+                ui,
+                &if analyses > 1 {
+                    format!(
+                        "Ready to import: it adds one run of {analyses} analyses and opens it in Results."
+                    )
+                } else {
+                    "Ready to import: it adds one run and opens it in Results.".to_owned()
+                },
+            );
         }
         choose_log
     });
-    band_header(ui, "Source preview", None);
     result_import_preview(ui, draft, digits);
     choose_log
 }
@@ -1701,9 +1734,10 @@ fn result_import_signal_label(waveform: &RetainedTrace) -> String {
     )
 }
 
-/// The first rows of the coordinate and the included signals, each value a
-/// reading at the reader's significant digits with its unit's prefix, as
-/// every other results table reads them.
+/// The first rows of the coordinate and the included signals under their
+/// band, each value a reading at the reader's significant digits with its
+/// unit's prefix, as every other results table reads them. The band says
+/// how much of the source the rows are.
 fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState, digits: usize) {
     const MAX_PREVIEW_ROWS: usize = RESULT_IMPORT_PREVIEW_ROWS;
     const MAX_PREVIEW_SIGNALS: usize = 8;
@@ -1718,23 +1752,41 @@ fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState, dig
         .take(MAX_PREVIEW_SIGNALS)
         .collect::<Vec<_>>();
     if included.is_empty() {
-        result_import_inset(ui, |ui| {
-            ui.label(
-                egui::RichText::new("Select at least one signal to preview.")
-                    .color(Tokens::get(ui.ctx()).color.warn),
+        band_header(ui, "Source preview", None);
+        result_import_block(ui, |ui| {
+            problem_line(
+                ui,
+                Problem::Warning,
+                "Select at least one signal to preview.",
             );
         });
         return;
     }
 
-    let coordinate_unit = draft
-        .coordinate_unit
-        .as_deref()
-        .unwrap_or(match draft.analysis_type {
-            AnalysisType::Transient => "s",
-            AnalysisType::Ac | AnalysisType::SParameter => "Hz",
-            _ => "",
-        });
+    let rows = included[0]
+        .1
+        .len()
+        .min(draft.sample_count.max(1))
+        .min(MAX_PREVIEW_ROWS);
+    let selected = draft
+        .selected_signals
+        .iter()
+        .filter(|selected| **selected)
+        .count();
+    let mut shown = Vec::new();
+    if rows < draft.sample_count {
+        shown.push(format!("first {rows} of {} rows", draft.sample_count));
+    }
+    if included.len() < selected {
+        shown.push(format!("first {} of {selected} signals", included.len()));
+    }
+    let shown = shown.join(" \u{00b7} ");
+    band_header(
+        ui,
+        "Source preview",
+        (!shown.is_empty()).then_some(shown.as_str()),
+    );
+    let coordinate_unit = result_import_coordinate_unit(draft).map_or("", |(unit, _)| unit);
     let units = included
         .iter()
         .map(|(waveform, _)| {
@@ -1753,11 +1805,6 @@ fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState, dig
     let columns = std::iter::once(reading(&draft.coordinate_name))
         .chain(included.iter().map(|(waveform, _)| reading(&waveform.name)))
         .collect::<Vec<_>>();
-    let rows = included[0]
-        .1
-        .len()
-        .min(draft.sample_count.max(1))
-        .min(MAX_PREVIEW_ROWS);
     DataTable::new("rspice.result-import.preview", &columns, rows).show(ui, |row| {
         std::iter::once(Cell::quantity(fmt_column_reading(
             included[0].1[row].0,
@@ -1774,17 +1821,6 @@ fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState, dig
         }))
         .collect()
     });
-    if draft.sample_count > MAX_PREVIEW_ROWS || included.len() < draft.waveforms.len() {
-        result_import_inset(ui, |ui| {
-            ui.label(
-                egui::RichText::new(format!(
-                    "Preview is limited to {MAX_PREVIEW_ROWS} rows and {MAX_PREVIEW_SIGNALS} included signals."
-                ))
-                .small()
-                .color(Tokens::get(ui.ctx()).color.text_dim),
-            );
-        });
-    }
 }
 
 fn analysis_domain_label(analysis_type: AnalysisType) -> &'static str {
@@ -2207,13 +2243,8 @@ mod tests {
         })
     }
 
-    /// Draw the import dialog once; where the frame drew each of `labels`,
-    /// enabled or not.
-    fn drawn(
-        ctx: &egui::Context,
-        state: &mut ResultsTestHost,
-        labels: &[&str],
-    ) -> Vec<Option<egui::Rect>> {
+    /// Draw the import dialog once; the nodes the frame published.
+    fn frame_nodes(ctx: &egui::Context, state: &mut ResultsTestHost) -> Vec<egui::accesskit::Node> {
         let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, BROWSER_SCREEN)),
@@ -2221,16 +2252,32 @@ mod tests {
             },
             |ctx| show_result_import_dialog(ctx, &mut state.results_parts()),
         );
-        let update = output.platform_output.accesskit_update;
+        output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes.into_iter().map(|(_, node)| node).collect())
+            .unwrap_or_default()
+    }
+
+    /// The node labelled `label` among `nodes`.
+    fn node<'n>(
+        nodes: &'n [egui::accesskit::Node],
+        label: &str,
+    ) -> Option<&'n egui::accesskit::Node> {
+        nodes.iter().find(|node| node.label() == Some(label))
+    }
+
+    /// Draw the import dialog once; where the frame drew each of `labels`,
+    /// enabled or not.
+    fn drawn(
+        ctx: &egui::Context,
+        state: &mut ResultsTestHost,
+        labels: &[&str],
+    ) -> Vec<Option<egui::Rect>> {
+        let nodes = frame_nodes(ctx, state);
         labels
             .iter()
-            .map(|label| {
-                update.as_ref()?.nodes.iter().find_map(|(_, node)| {
-                    (node.label() == Some(*label))
-                        .then(|| node_rect(node))
-                        .flatten()
-                })
-            })
+            .map(|label| node(&nodes, label).and_then(node_rect))
             .collect()
     }
 
@@ -2332,6 +2379,65 @@ mod tests {
                 "the dialog, Cancel, Back and the primary on {stage:?} against Detect"
             );
         }
+    }
+
+    /// While the run is added the review stays up where it stood, the strip
+    /// over its footer saying what it is doing beside a live Cancel, with
+    /// nothing else to press; it closes on the frame that adds the run. The
+    /// progress was a window of its own, which replaced the review.
+    #[test]
+    fn the_review_stays_up_over_the_import_until_the_run_is_added() {
+        let mut state = staged_review();
+        state.results_parts().result_import.stage = ResultImportStage::Validate;
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let labels = [RESULT_IMPORT_TITLE, "Cancel", "Back", "Import"];
+        let mut reviewed = Vec::new();
+        for _ in 0..3 {
+            reviewed = drawn(&ctx, &mut state, &labels);
+        }
+
+        crate::workbench::results_job::hold_jobs_for_tests(true);
+        start_result_import_commit(&mut state.results_parts()).expect("the draft commits");
+        crate::workbench::results_job::hold_jobs_for_tests(false);
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            nodes = frame_nodes(&ctx, &mut state);
+        }
+        let placed = labels
+            .iter()
+            .map(|label| node(&nodes, label).and_then(node_rect))
+            .collect::<Vec<_>>();
+        assert_eq!(placed, reviewed, "the review moved when the import began");
+        let progress = node(&nodes, "Importing browser-import.csv").expect("the progress strip");
+        assert_eq!(progress.role(), egui::accesskit::Role::Status);
+        assert!(!node(&nodes, "Cancel").expect("Cancel").is_disabled());
+        for held in ["Back", "Import"] {
+            assert!(
+                node(&nodes, held).expect(held).is_disabled(),
+                "{held} is live while the run is added"
+            );
+        }
+        assert!(state.model.simulation.retained.runs.is_empty());
+
+        let Some(ResultImportJob::Committing(job)) =
+            state.results_parts().result_import.job.clone()
+        else {
+            panic!("the review runs the import");
+        };
+        job.release();
+        assert!(
+            job.wait(std::time::Duration::from_secs(600)),
+            "the import ends"
+        );
+        let nodes = frame_nodes(&ctx, &mut state);
+        assert!(
+            node(&nodes, RESULT_IMPORT_TITLE).is_none(),
+            "the review outlived the run it added"
+        );
+        assert!(!state.results_parts().result_import.open);
+        assert_eq!(state.model.simulation.retained.runs.len(), 1);
     }
 
     /// A binary rawfile of `rows` points of time and V(out), its header
