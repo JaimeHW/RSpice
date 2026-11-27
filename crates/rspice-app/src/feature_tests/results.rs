@@ -10,6 +10,7 @@ mod create_document;
 mod cross_probe;
 mod deck_outputs;
 mod document_edit;
+mod document_print;
 mod expression_diagnostics;
 #[cfg(not(target_arch = "wasm32"))]
 mod full_disk;
