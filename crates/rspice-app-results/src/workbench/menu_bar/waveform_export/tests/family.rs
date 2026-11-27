@@ -231,7 +231,7 @@ fn a_one_analysis_format_writes_the_chosen_member() {
 
 /// What an export's progress is the share of is what it reads: each member's time and V(out)
 /// once, the two columns of a PWL source twice. Nothing else is read for it, on the frame that
-/// starts it or on the job that writes it, so the status bar reaches 100 % as the file ends.
+/// starts it or on the job that writes it, so the status bar reaches 100% as the file ends.
 #[test]
 fn every_format_reads_the_samples_its_progress_counts() {
     // Three rows of a time and one trace, in each of three members.

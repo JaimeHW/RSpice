@@ -865,7 +865,7 @@ fn cancel_results_save(app: &mut RSpiceApp) {
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn exporting(name: &str, read: u64, samples: u64) -> String {
     match read.min(samples).saturating_mul(100).checked_div(samples) {
-        Some(percent) => format!("Exporting {name} · {percent} % · Cancel"),
+        Some(percent) => format!("Exporting {name} · {percent}% · Cancel"),
         None => format!("Exporting {name} · Cancel"),
     }
 }
@@ -894,7 +894,7 @@ mod tests {
     fn an_export_names_its_file_and_the_share_it_has_read() {
         assert_eq!(
             exporting("out.npz", 14_000, 100_000),
-            "Exporting out.npz \u{00b7} 14 % \u{00b7} Cancel"
+            "Exporting out.npz \u{00b7} 14% \u{00b7} Cancel"
         );
         assert_eq!(
             exporting("events.vcd", 0, 0),
