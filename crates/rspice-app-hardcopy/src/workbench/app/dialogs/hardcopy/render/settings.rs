@@ -950,7 +950,14 @@ fn content_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState, action: &m
         .source
         .as_ref()
         .is_some_and(|source| source.document_kind() == HardcopyDocumentKind::PlotOrWorksheet);
-    let mut title_block = draft.include_header;
+    // The identity a page carries: a drawing sheet's own title block, or
+    // elsewhere the header and the footer naming what made the page.
+    let shown_title_block = if sheet.is_some() {
+        draft.include_sheet_title_block
+    } else {
+        draft.include_header
+    };
+    let mut title_block = shown_title_block;
     let mut watermark = !matches!(draft.watermark, Watermark::None);
     let mut checks: Vec<(&str, &mut bool)> = vec![
         ("Title block", &mut title_block),
@@ -969,12 +976,13 @@ fn content_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState, action: &m
     }
     checks.push(("Draft watermark", &mut watermark));
     check_grid(rows, "Show", &mut checks);
-    if title_block != draft.include_header {
-        // One switch for the identity a page carries: its header, the footer
-        // naming what made it, and a drawing sheet's own title block.
-        draft.include_header = title_block;
-        draft.include_provenance = title_block;
-        draft.include_sheet_title_block = title_block;
+    if title_block != shown_title_block {
+        if sheet.is_some() {
+            draft.include_sheet_title_block = title_block;
+        } else {
+            draft.include_header = title_block;
+            draft.include_provenance = title_block;
+        }
     }
     draft.watermark = if watermark {
         if matches!(draft.watermark, Watermark::None) {
