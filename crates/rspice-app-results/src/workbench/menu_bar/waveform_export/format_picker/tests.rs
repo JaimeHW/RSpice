@@ -328,7 +328,9 @@ fn a_stepped_view_offers_all_members_and_a_one_member_format_says_so() {
         "{texts:?}"
     );
     // One array has no names: the reader is told before choosing it.
-    let hint = FORMATS[NPY].hint.expect("NumPy array states its column order");
+    let hint = FORMATS[NPY]
+        .hint
+        .expect("NumPy array states its column order");
     assert!(texts.iter().any(|text| text == hint), "{texts:?}");
 }
 
