@@ -1059,18 +1059,16 @@ fn truncated_label(ui: &mut Ui, rect: Rect, label: Label, full_text: &str) {
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
     }
-    let response = ui
-        .scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(rect)
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            |ui| {
-                ui.set_clip_rect(rect);
-                ui.add_sized(rect.size(), label)
-            },
-        )
-        .inner;
-    response.on_hover_text(full_text);
+    // A child of its own, which leaves the row's cursor where the row put
+    // it: a scope would move it to the label's bottom, which stands above
+    // the row's rule, and the row under it would start on that rule.
+    let mut slot = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    slot.set_clip_rect(rect);
+    slot.add_sized(rect.size(), label).on_hover_text(full_text);
 }
 
 /// The face a legend chip's name is set in.
