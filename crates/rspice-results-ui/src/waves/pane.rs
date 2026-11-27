@@ -1062,12 +1062,12 @@ pub fn show_plot<'a>(
         .ticks
         .iter()
         .map(|(_, label)| label.clone())
-        .chain(
-            y_axis
-                .ticks
-                .last()
-                .map(|(_, label)| plot::tick_with_unit(label, pane.axis_unit())),
-        )
+        .chain(y_axis.ticks.last().map(|(_, label)| {
+            plot::caption_with_note(
+                plot::tick_with_unit(label, pane.axis_unit()),
+                log_y.then_some(plot::LOG_CAPTION_NOTE),
+            )
+        }))
         .map(|text| {
             ui.painter()
                 .layout_no_wrap(text, plot::y_tick_font(), egui::Color32::PLACEHOLDER)
@@ -1089,7 +1089,10 @@ pub fn show_plot<'a>(
     }
     spec.left_margin = input.left_margin;
     if log_y {
-        spec = spec.with_log_y();
+        // The axis says it is logarithmic on its unit, "V · log".
+        spec = spec
+            .with_log_y()
+            .with_y_caption_note(plot::LOG_CAPTION_NOTE);
     }
     spec.limit_lines = input.specification_limits;
     spec.minor_grid = input.minor_grid;

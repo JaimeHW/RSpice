@@ -653,12 +653,16 @@ struct ResultsWindow {
 #[cfg(not(target_arch = "wasm32"))]
 impl ResultsWindow {
     fn new() -> Self {
+        Self::over(retained_run_with(AnalysisType::Transient))
+    }
+
+    /// The window over `run`.
+    fn over(mut run: SimulationRun) -> Self {
         let ctx = egui::Context::default();
         rspice_app_workbench::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
-        let mut run = retained_run_with(AnalysisType::Transient);
         // A project saves a run only once its provenance is classified.
         run.restore_provenance(
             rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed,
@@ -758,6 +762,17 @@ impl ResultsWindow {
         &mut self,
         name: &str,
     ) -> Result<rspice_app_state::product::ResultDocumentId, CreateResultDocumentError> {
+        self.create_in(name, ResultDocumentLayout::TwoLinkedPanes, &["V(out)"])
+    }
+
+    /// Create a waveform document named `name` over the run in `layout`,
+    /// plotting `signals`, the way the New result document form commits it.
+    fn create_in(
+        &mut self,
+        name: &str,
+        layout: ResultDocumentLayout,
+        signals: &[&str],
+    ) -> Result<rspice_app_state::product::ResultDocumentId, CreateResultDocumentError> {
         self.app.state.results.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: name.to_owned(),
@@ -765,11 +780,24 @@ impl ResultsWindow {
             dataset_id: Some(self.dataset_id),
             analysis: Some(0),
             viewer_id: "viewer-waveform".to_owned(),
-            layout: ResultDocumentLayout::TwoLinkedPanes,
-            signals: vec!["V(out)".to_owned()],
+            layout,
+            signals: signals.iter().map(|signal| (*signal).to_owned()).collect(),
             validation_error: None,
         };
         commit(&mut self.app.state.results_parts())
+    }
+
+    /// What the last of a few frames paints in words.
+    fn painted(&mut self) -> Vec<String> {
+        let mut output = self.frame(Vec::new());
+        for _ in 0..2 {
+            output = self.frame(Vec::new());
+        }
+        let mut texts = Vec::new();
+        for clipped in &output.shapes {
+            painted_texts(&clipped.shape, &mut texts);
+        }
+        texts
     }
 
     /// Save the whole project to a fresh file, as Save all does. Each save
@@ -1153,13 +1181,13 @@ fn a_press_in_another_pane_moves_the_full_tag_and_the_inspectors_pane() {
     assert!(!texts.iter().any(|text| text == "Top \u{b7} analysis"));
 }
 
-/// Every control on a document pane's bar stands centred on the band above
-/// the bar's 1 px rule: as far from the rule as from the bar's top, to the
-/// half point. A control centred on the row with its rule in it stood half a
-/// point low and read as resting on the rule.
+/// Every control on a document pane's control row stands centred on the
+/// band above the row's 1 px rule: as far from the rule as from the row's
+/// top, to the half point. A control centred on the row with its rule in it
+/// stood half a point low and read as resting on the rule.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn every_control_on_a_document_pane_bar_stands_centred_above_its_rule() {
+fn every_control_on_a_document_panes_control_row_stands_centred_above_its_rule() {
     use egui::accesskit::Role;
     let rect = |node: &egui::accesskit::Node| {
         node.bounds().map(|bounds| {
@@ -1172,13 +1200,17 @@ fn every_control_on_a_document_pane_bar_stands_centred_above_its_rule() {
     let mut window = ResultsWindow::new();
     window.create("Transient review").expect("document commits");
     let nodes = window.settled_frames();
-    // Each bar's row: the analysis tag spans it, its rule included.
+    // Each control row: the row names its analysis, its rule included.
     let rows: Vec<egui::Rect> = nodes
         .iter()
-        .filter(|(_, node)| node.label() == Some("TR"))
+        .filter(|(_, node)| node.label() == Some("TR") && node.role() != Role::Label)
         .filter_map(|(_, node)| rect(node))
         .collect();
-    assert_eq!(rows.len(), 2, "each pane of the document has its bar");
+    assert_eq!(
+        rows.len(),
+        2,
+        "each pane of the document has its control row"
+    );
     let mut checked = Vec::new();
     for (_, node) in &nodes {
         if !matches!(
@@ -1200,7 +1232,7 @@ fn every_control_on_a_document_pane_bar_stands_centred_above_its_rule() {
         let below = (row.bottom() - 1.0) - control.bottom();
         assert!(
             (above - below).abs() <= 0.5,
-            "{:?} stands {above} below the bar's top and {below} above its rule",
+            "{:?} stands {above} below the row's top and {below} above its rule",
             node.label()
         );
         checked.push(node.label().unwrap_or_default().to_owned());
@@ -1208,9 +1240,260 @@ fn every_control_on_a_document_pane_bar_stands_centred_above_its_rule() {
     for control in ["+ Expression", "Logarithmic X axis", "Maximize strip"] {
         assert!(
             checked.iter().any(|label| label == control),
-            "{control} is among the bar's controls checked: {checked:?}"
+            "{control} is among the row's controls checked: {checked:?}"
         );
     }
+}
+
+/// A run of one transient whose V(out) and I(R1) stand in panes of their
+/// own on its one time axis, each with values to draw on decades.
+#[cfg(not(target_arch = "wasm32"))]
+fn volts_and_amps_run() -> SimulationRun {
+    let mut run = SimulationRun::new(7);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    let x = vec![0.0, 0.5, 1.0];
+    run.analyses.push(
+        AnalysisResult::new(11, AnalysisType::Transient, "analysis").with_waveforms(vec![
+            RetainedTrace::new("V(out)", x.clone(), vec![0.5, 1.0, 0.5], "#55aaff"),
+            RetainedTrace::new("I(R1)", x, vec![1.0e-3, 2.0e-3, 1.0e-3], "#ffaa55"),
+        ]),
+    );
+    run
+}
+
+/// A node's bounds as a rectangle.
+#[cfg(not(target_arch = "wasm32"))]
+fn node_rect(node: &egui::accesskit::Node) -> Option<egui::Rect> {
+    node.bounds().map(|bounds| {
+        egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+        )
+    })
+}
+
+/// Where the node labelled `label` stands, the first of its role.
+#[cfg(not(target_arch = "wasm32"))]
+fn labelled(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+    role: egui::accesskit::Role,
+    label: &str,
+) -> Option<(egui::accesskit::NodeId, egui::Rect)> {
+    nodes
+        .iter()
+        .filter(|(_, node)| node.role() == role && node.label() == Some(label))
+        .find_map(|(id, node)| Some((*id, node_rect(node)?)))
+}
+
+/// Two panes on one time axis stand under one control row, which names the
+/// analysis and carries the strip's controls; each pane names its curves on
+/// a legend row of its own directly over its plot, the full width, its
+/// entries starting where the row's analysis tag does, and no row carries a
+/// Y scale button.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn panes_on_one_time_axis_stand_under_one_control_row_each_with_its_legend_row() {
+    use egui::accesskit::Role;
+    let mut window = ResultsWindow::over(volts_and_amps_run());
+    window
+        .create_in(
+            "Supply review",
+            ResultDocumentLayout::SinglePane,
+            &["V(out)", "I(R1)"],
+        )
+        .expect("document commits");
+    let nodes = window.settled_frames();
+    let rows: Vec<egui::Rect> = nodes
+        .iter()
+        .filter(|(_, node)| node.label() == Some("TR") && node.role() != Role::Label)
+        .filter_map(|(_, node)| node_rect(node))
+        .collect();
+    assert_eq!(
+        rows.len(),
+        1,
+        "the strip's control row stands once: {rows:?}"
+    );
+    let row = rows[0];
+    let tag = nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.role() == Role::Label && (node.value() == Some("TR") || node.label() == Some("TR"))
+        })
+        .find_map(|(_, node)| node_rect(node))
+        .expect("the control row writes its analysis tag");
+    let (_, volts) = labelled(&nodes, Role::Button, "V pane").expect("the volts pane's row");
+    let (_, amps) = labelled(&nodes, Role::Button, "A pane").expect("the amps pane's row");
+    assert!(
+        (volts.top() - row.bottom()).abs() <= 0.5,
+        "the first pane's legend row stands right under the control row: {row:?} {volts:?}"
+    );
+    assert!(
+        amps.top() > volts.bottom(),
+        "the amps pane stands under the volts pane"
+    );
+    for (legend, curve) in [(volts, "V(out)"), (amps, "I(R1)")] {
+        assert!(
+            (legend.left() - row.left()).abs() <= 0.5
+                && (legend.right() - row.right()).abs() <= 0.5,
+            "{curve}'s legend row spans the pane: {legend:?} under {row:?}"
+        );
+        let (_, chip) = labelled(&nodes, Role::Button, &format!("Toggle {curve} visibility"))
+            .unwrap_or_else(|| panic!("{curve} is named on its legend row"));
+        assert!(
+            legend.contains_rect(chip),
+            "{curve} stands on its own pane's row"
+        );
+        assert!(
+            (chip.left() - tag.left()).abs() <= 0.5,
+            "{curve}'s entry starts where the analysis tag does: {chip:?} {tag:?}"
+        );
+    }
+    assert!(
+        !nodes.iter().any(|(_, node)| node.label() == Some("log Y")),
+        "no row carries a Y scale button"
+    );
+}
+
+/// A pane's plot menu, opened on its plot or on its Y axis, turns that
+/// pane's Y axis logarithmic and back with a checked item, and the axis then
+/// says so on its unit; the other pane on the time axis stays linear.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_panes_plot_menu_turns_its_own_y_axis_logarithmic_and_its_unit_says_so() {
+    use egui::PointerButton;
+    use egui::accesskit::{Role, Toggled};
+    let mut window = ResultsWindow::over(volts_and_amps_run());
+    window
+        .create_in(
+            "Supply review",
+            ResultDocumentLayout::SinglePane,
+            &["V(out)", "I(R1)"],
+        )
+        .expect("document commits");
+    let plots = |window: &mut ResultsWindow| {
+        let mut plots: Vec<egui::Rect> = window
+            .settled_frames()
+            .iter()
+            .filter(|(_, node)| {
+                node.role() == Role::GraphicsDocument
+                    && node
+                        .label()
+                        .is_some_and(|label| label.starts_with("Waveform plot"))
+            })
+            .filter_map(|(_, node)| node_rect(node))
+            .collect();
+        plots.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        plots
+    };
+    // The item the menu opened at `at` offers, and whether it is checked.
+    let log_item = |window: &mut ResultsWindow, at: egui::Pos2| {
+        window.press(at, PointerButton::Secondary);
+        let nodes = window.frames(Vec::new());
+        nodes
+            .iter()
+            .find(|(_, node)| node.role() == Role::CheckBox && node.label() == Some("Log Y axis"))
+            .map(|(id, node)| (*id, node.toggled() == Some(Toggled::True)))
+            .expect("the plot's menu offers Log Y axis")
+    };
+    let closed = |window: &mut ResultsWindow| {
+        window.frames(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+    };
+    let logged = |texts: &[String], unit: &str| {
+        texts
+            .iter()
+            .any(|text| text.ends_with(&format!("{unit} \u{b7} log")))
+    };
+
+    let [volts, amps] = plots(&mut window)[..] else {
+        panic!("the document draws a plot for each pane");
+    };
+    let (item, checked) = log_item(&mut window, amps.center());
+    assert!(!checked, "the amps pane starts linear");
+    window.click(item);
+    let texts = window.painted();
+    assert!(
+        logged(&texts, "A"),
+        "the amps axis says it is logarithmic: {texts:?}"
+    );
+    assert!(
+        !logged(&texts, "V"),
+        "the volts axis stays linear: {texts:?}"
+    );
+
+    let (_, checked) = log_item(&mut window, volts.center());
+    assert!(!checked, "the volts pane's own item is not checked");
+    closed(&mut window);
+
+    // On the Y axis, left of the plot, the same menu turns it back.
+    let [_, amps] = plots(&mut window)[..] else {
+        panic!("the document draws a plot for each pane");
+    };
+    let (item, checked) = log_item(&mut window, egui::pos2(amps.left() + 6.0, amps.center().y));
+    assert!(checked, "the amps pane's item reads checked on its Y axis");
+    window.click(item);
+    let texts = window.painted();
+    assert!(
+        !logged(&texts, "A"),
+        "the amps axis is linear again: {texts:?}"
+    );
+}
+
+/// Fit joins a document pane's control row only while its strip is zoomed,
+/// at the group's left end with the gap the row's buttons keep, so no other
+/// control moves; pressed, it goes again.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn fit_joins_the_control_row_at_its_left_end_only_while_the_strip_is_zoomed() {
+    use egui::accesskit::Role;
+    let mut window = ResultsWindow::new();
+    window.create("Transient review").expect("document commits");
+    let nodes = window.settled_frames();
+    assert!(
+        labelled(&nodes, Role::Button, "Fit").is_none(),
+        "an unzoomed strip offers no Fit"
+    );
+    let (_, expression) =
+        labelled(&nodes, Role::Button, "+ Expression").expect("the row's + Expression");
+    let plot = nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.role() == Role::GraphicsDocument
+                && node
+                    .label()
+                    .is_some_and(|label| label.starts_with("Waveform plot"))
+        })
+        .find_map(|(_, node)| node_rect(node))
+        .expect("the top pane's plot");
+    window.frames(vec![
+        egui::Event::PointerMoved(plot.center()),
+        egui::Event::Zoom(2.0),
+    ]);
+    let nodes = window.settled_frames();
+    let (fit, at) = labelled(&nodes, Role::Button, "Fit").expect("a zoomed strip offers Fit");
+    let (_, moved) =
+        labelled(&nodes, Role::Button, "+ Expression").expect("the row's + Expression");
+    assert!(
+        (moved.left() - expression.left()).abs() <= 0.5,
+        "+ Expression stays where it stood: {expression:?} {moved:?}"
+    );
+    let (_, log_x) = labelled(&nodes, Role::Button, "Logarithmic X axis").expect("the row's log X");
+    let gap = log_x.left() - moved.right();
+    assert!(
+        at.right() <= moved.left() && ((moved.left() - at.right()) - gap).abs() <= 0.5,
+        "Fit stands left of + Expression at the row's gap: {at:?} {moved:?} {log_x:?}"
+    );
+    window.click(fit);
+    let nodes = window.settled_frames();
+    assert!(
+        labelled(&nodes, Role::Button, "Fit").is_none(),
+        "Fit goes once the view is fitted"
+    );
 }
 
 /// An edit to one of two saved documents marks that document's tab and not
@@ -1523,13 +1806,13 @@ fn a_bode_document_of_a_temperature_run_draws_every_member() {
         temperatures.len(),
         "the document draws every temperature"
     );
-    // The document's one bar shares its row with the strip's tag and
-    // controls, so it may list fewer members before it counts the rest;
-    // each it lists is one the sheet listed.
+    // The document's legend has a row of its own, the pane's whole width,
+    // so it lists at least the members the sheet's row has room for, each
+    // chip naming one member.
     let document = output_curves(&nodes);
     assert!(
-        !document.is_empty() && document.iter().all(|chip| sheet.contains(chip)),
-        "the document lists members the sheet listed: {document:?} of {sheet:?}"
+        document.len() >= sheet.len() && document.iter().all(|chip| members.contains(chip)),
+        "the document lists the members by name, as many as the sheet: {document:?} of {sheet:?}"
     );
 }
 

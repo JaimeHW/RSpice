@@ -968,27 +968,30 @@ pub fn show(
                     // Each pane's row ends under them.
                     let closable = pane_chrome && !maximized && n > 1;
                     let window_slots = 1 + usize::from(closable);
-                    // In a document pane the strip is one bar on its first
-                    // pane, which carries the strip's tag and controls with
-                    // the pane's own; a strip with no pane to carry them
-                    // keeps its header row.
-                    let on_its_panes = one_bar(host.session(), options)
-                        && model.x_range.is_some()
-                        && !model.unit_panes().is_empty();
+                    // In a document pane the strip's control row stands once
+                    // over its panes, and each pane names its curves on a
+                    // legend row of its own over its plot; a strip with no
+                    // pane to name them on keeps them on its control row.
+                    let control_row = control_row(host.session(), options);
+                    let on_its_panes =
+                        control_row && model.x_range.is_some() && !model.unit_panes().is_empty();
                     // Beside a document the strip is its panes alone:
                     // the pane's axis names the analysis, and the
                     // Results sheet is where strips are told apart.
-                    if pane_chrome && !on_its_panes {
+                    if pane_chrome {
                         // Analysis identity remains in the strip header.
                         // Unit-owned signal legends live in the pane headers;
                         // only unitless expressions remain alongside the
                         // analysis identity here.
-                        let strip_exprs: Vec<ExprTrace> = host
-                            .session()
-                            .analysis_exprs
-                            .get(&model.analysis_key)
-                            .cloned()
-                            .unwrap_or_default();
+                        let strip_exprs: Vec<ExprTrace> = if on_its_panes {
+                            Vec::new()
+                        } else {
+                            host.session()
+                                .analysis_exprs
+                                .get(&model.analysis_key)
+                                .cloned()
+                                .unwrap_or_default()
+                        };
                         let expr_labels: Vec<String> = strip_exprs
                             .iter()
                             .map(|expr| {
@@ -1011,7 +1014,6 @@ pub fn show(
                         let zoomed = host
                             .session()
                             .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
-                        let trailing_expression = one_bar(host.session(), options);
                         let mut conversions = |ui: &mut Ui, index: usize| {
                             if let Some(expr) = strip_exprs.get(index) {
                                 expression_conversions(ui, host, model, index, expr, &t);
@@ -1025,8 +1027,8 @@ pub fn show(
                                 .closable(closable)
                                 .zoomed(zoomed)
                                 .expr_action(pane_chrome)
-                                .expr_trailing(trailing_expression)
-                                .height(if trailing_expression {
+                                .expr_trailing(control_row)
+                                .height(if control_row {
                                     WAVE_PANE_HEADER_HEIGHT
                                 } else {
                                     crate::strip::HEADER_HEIGHT
@@ -1074,9 +1076,7 @@ pub fn show(
                         }
                     }
 
-                    if !on_its_panes {
-                        host.edit_expression(ui, model);
-                    }
+                    host.edit_expression(ui, model);
 
                     // Strips scrolled out of view skip the plot body
                     // entirely (range lookups, envelope mapping, shape
@@ -1097,15 +1097,6 @@ pub fn show(
                         }
                         if let Some(slot) = edits.remove {
                             remove_expr = Some((model.analysis_key, slot));
-                        }
-                        if edits.maximize {
-                            toggle_maximize = Some(model.analysis_key);
-                        }
-                        if edits.fit {
-                            fit_strip = Some(model.analysis_key);
-                        }
-                        if edits.add_expression {
-                            open_editor = Some(model.analysis_key);
                         }
                     } else {
                         ui.allocate_exact_size(plot_rect.size(), egui::Sense::hover());
@@ -1431,16 +1422,14 @@ fn show_shared_x_axis(ui: &mut Ui, host: &mut impl StackHost, height: f32, frame
 struct ExpressionEdits {
     toggle: Option<usize>,
     remove: Option<usize>,
-    /// The one bar's maximize, Fit and + Expression, pressed.
-    maximize: bool,
-    fit: bool,
-    add_expression: bool,
 }
 
-/// Whether the strips stand in a document pane, where each strip is one bar
-/// over each of its panes: the first pane's row carries the strip's tag and
-/// controls, and no row repeats them.
-fn one_bar(session: &ResultViewerState, options: StackOptions) -> bool {
+/// Whether the strips stand in the one pane chrome: each strip's control row
+/// once over its panes (its analysis tag and name at the left, and Fit while
+/// zoomed, + Expression, log X and maximize at the right), and each pane's
+/// legend on a row of its own over its plot, the full width, with the pane's
+/// Y scale on its plot's menu. A document pane stands in it.
+fn control_row(session: &ResultViewerState, options: StackOptions) -> bool {
     options.pane_chrome && session.persistent_pane_context.is_some()
 }
 
@@ -1632,7 +1621,6 @@ fn show_strip_plot(
         .find(|ordinal| shown[*ordinal] && !collapsed[*ordinal])
         .unwrap_or(0);
     let mut above: Option<usize> = None;
-    let carrier = (0..count).find(|ordinal| shown[*ordinal]);
     for (ordinal, pane) in panes.iter().enumerate() {
         if !shown[ordinal] {
             continue;
@@ -1673,7 +1661,7 @@ fn show_strip_plot(
                 show_unit_pane(
                     ui,
                     host,
-                    (pane, carrier == Some(ordinal)),
+                    pane,
                     &pane_exprs,
                     frame,
                     edits,
@@ -2052,8 +2040,7 @@ fn show_xy_strip(
         window_slots: slots,
         arrange: false,
         folded_axes: Vec::new(),
-        one_bar: false,
-        strip: None,
+        legend_row: false,
     };
     let header = ui
         .push_id(("xy-strip-pane", identity), |ui| {
@@ -2270,7 +2257,7 @@ fn event_lane_band(
 fn show_unit_pane(
     ui: &mut Ui,
     host: &mut impl StackHost,
-    (pane, carries_bar): (&UnitPane, bool),
+    pane: &UnitPane,
     exprs: &[ResolvedExpr],
     frame: StripFrame<'_>,
     edits: &mut ExpressionEdits,
@@ -2352,7 +2339,6 @@ fn show_unit_pane(
             .map(|x| (x, options.readout, options.quantity))
     })
     .flatten();
-    let bar = one_bar(host.session(), options);
     let input = pane_header::PaneHeader {
         height: WAVE_PANE_HEADER_HEIGHT.min(ui.available_height()),
         active: host.session().active_wave_pane.as_ref() == Some(&pane_key),
@@ -2368,27 +2354,9 @@ fn show_unit_pane(
         window_slots,
         arrange: options.pane_chrome,
         folded_axes: folded_axes(model, pane, gutter),
-        one_bar: bar,
-        strip: (bar && carries_bar).then(|| pane_header::StripBar {
-            maximized: host.session().maximized_strip.is_some(),
-            zoomed: host
-                .session()
-                .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key),
-            log_x: model.x_scale == XScale::Log10,
-            log_x_refusal: log_x_refusal(model),
-        }),
+        legend_row: control_row(host.session(), options),
     };
     let header = host.pane_header(ui, model, pane, input);
-    if header.toggle_log_x {
-        toggle_x_scale(host.session_mut(), model);
-    }
-    edits.maximize |= header.maximize;
-    edits.fit |= header.fit;
-    edits.add_expression |= header.add_expression;
-    // The expression editor opens under the bar whose + Expression opens it.
-    if bar && carries_bar {
-        host.edit_expression(ui, model);
-    }
     if let Some(strips) = header.arrange {
         super::strip_drag::arrange(host, model, Ok(strips));
     }
@@ -2609,6 +2577,7 @@ fn show_unit_pane(
         pane,
         (&response.response, drawn.context.as_ref()),
         (options.pane_chrome, window),
+        (log_y, log_y_available),
     );
     // The first axis names its unit on its top label; with curves of
     // several colours, their swatches stand beside it.
@@ -2726,6 +2695,15 @@ fn show_unit_pane(
         session.stepping_cursor = cursor;
     }
 
+    // The pane's Y scale turns from its plot's menu, its Y axis' included,
+    // and the automatic fit is read again on the other scale.
+    if plot_choice == Some(super::plot_menu::PlotChoice::LogY) {
+        host.session_mut()
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, model.analysis_key, pane.slot)
+            .y = None;
+        set_pane_log_y(host.session_mut(), model, pane, !log_y);
+        ui.ctx().request_repaint();
+    }
     let fit = plot_choice == Some(super::plot_menu::PlotChoice::Fit);
     if let Some(choice) = plot_choice.filter(|_| !fit) {
         act_on_plot_choice(ui, host, model, pane, choice);
@@ -2770,6 +2748,7 @@ fn plot_menu(
     pane: &UnitPane,
     (plot, context): (&egui::Response, Option<&pane_view::PlotContext<'_>>),
     (chrome, window): (bool, (f64, f64)),
+    log_y: (bool, bool),
 ) -> Option<super::plot_menu::PlotChoice> {
     use super::plot_menu::{MenuOffers, MenuPlace};
     let place_id = plot.id.with("plot-menu-place");
@@ -2799,6 +2778,7 @@ fn plot_menu(
     let offers = MenuOffers {
         notes: host.offers_notes(model),
         cursors: host.session().any_cursor_placed(),
+        log_y: Some(log_y),
         against: against.as_ref().map(|menu| {
             (
                 menu,

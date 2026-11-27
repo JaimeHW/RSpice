@@ -1023,7 +1023,9 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
         .without_x_axis_chrome();
     spec.left_margin = frame.gutter.width();
     if log_y {
-        spec = spec.with_log_y();
+        spec = spec
+            .with_log_y()
+            .with_y_caption_note(rspice_ui_kit::plot::LOG_CAPTION_NOTE);
     }
     spec.minor_grid = host.session().show_minor_grid;
     // The plot takes the strip above its ruler, which takes the share the

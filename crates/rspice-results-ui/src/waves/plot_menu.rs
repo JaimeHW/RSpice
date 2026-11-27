@@ -1,9 +1,9 @@
-//! The menu a right click on a strip's plot opens, as ViVA's graph menu
-//! and ADS's plot menu offer theirs: a cursor, a marker or a note at the
-//! point clicked, a fit, the values the readout reads there, the curve
-//! nearest the point for the calculator, and a plot of the strip's curves
-//! against something else. Shift+F10 opens it from the keyboard, acting on
-//! the middle of the window.
+//! The menu a right click on a strip's plot or its Y axis opens, as ViVA's
+//! graph menu and ADS's plot menu offer theirs: a cursor, a marker or a note
+//! at the point clicked, a fit, the pane's Y scale, the values the readout
+//! reads there, the curve nearest the point for the calculator, and a plot of
+//! the strip's curves against something else. Shift+F10 opens it from the
+//! keyboard, acting on the middle of the window.
 
 use egui::Ui;
 use rspice_results::visualization_document::Abscissa;
@@ -38,6 +38,8 @@ pub(crate) enum PlotChoice {
     Note(Option<usize>),
     /// Fit every axis of the strip, and the shared X, to the curves again.
     Fit,
+    /// Turn the pane's Y axis between linear and logarithmic.
+    LogY,
     /// Copy what the readout reads at the X clicked.
     CopyValues,
     /// Hand this curve to the calculator.
@@ -52,6 +54,9 @@ pub(crate) struct MenuOffers<'a> {
     pub notes: bool,
     /// Whether any cursor stands for "Remove cursors" to take off.
     pub cursors: bool,
+    /// Whether the pane's Y axis is logarithmic, and whether it could be:
+    /// none of its values positive, it cannot.
+    pub log_y: Option<(bool, bool)>,
     /// What the strip's curves may be plotted against, with the strip's
     /// unit and the id the menu keeps a typed expression under.
     pub against: Option<(&'a AbscissaMenu, &'a str, egui::Id)>,
@@ -104,6 +109,17 @@ pub(crate) fn show(
         .button("Fit")
         .on_hover_text("Fit the shared X and every axis of the strip to its curves");
     pick(ui, &response, PlotChoice::Fit, &mut chosen);
+    if let Some((on, available)) = offers.log_y {
+        let mut checked = on;
+        let response = ui
+            .add_enabled(available, egui::Checkbox::new(&mut checked, LOG_Y_ITEM))
+            .on_hover_text("Draw this pane's Y axis in decades")
+            .on_disabled_hover_text("Logarithmic Y needs a positive value to draw");
+        if response.changed() {
+            chosen = Some(PlotChoice::LogY);
+            ui.close();
+        }
+    }
     let copy = ui
         .add_enabled(!place.values.is_empty(), egui::Button::new("Copy values"))
         .on_hover_text("Copy what the readout reads at the point clicked")
@@ -128,6 +144,9 @@ pub(crate) fn show(
     }
     chosen
 }
+
+/// What the menu's entry turning the pane's Y scale reads.
+pub(crate) const LOG_Y_ITEM: &str = "Log Y axis";
 
 /// Take `choice` when `response` was clicked, and close the menu.
 fn pick(ui: &Ui, response: &egui::Response, choice: PlotChoice, chosen: &mut Option<PlotChoice>) {

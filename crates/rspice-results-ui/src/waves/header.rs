@@ -117,28 +117,10 @@ pub struct PaneHeader {
     /// The strip's axes there is no room to draw beside its plot, each
     /// named by its unit and its curves: the trace list names them.
     pub folded_axes: Vec<String>,
-    /// Whether the strip stands in a document pane, whose strip is one bar
-    /// over each of its panes: the row draws no fit icon of its own, and its
-    /// log Y stands in the bar's column.
-    pub one_bar: bool,
-    /// The strip's own controls, which the first pane's row carries when the
-    /// strip is one bar.
-    pub strip: Option<StripBar>,
-}
-
-/// The strip's controls on its first pane's row, in a document pane where
-/// the strip is one bar: its analysis tag starts the row, and + Expression,
-/// log X and the one maximize stand beside the pane's log Y at its end.
-#[derive(Debug, Clone, Default)]
-pub struct StripBar {
-    /// Whether the strip fills the sheet.
-    pub maximized: bool,
-    /// Whether the reader zoomed or panned the strip, which Fit undoes.
-    pub zoomed: bool,
-    /// Whether the strip's X axis is logarithmic.
-    pub log_x: bool,
-    /// Why the X axis cannot be logarithmic, where it cannot.
-    pub log_x_refusal: Option<String>,
+    /// Whether the row is the pane's legend alone, under the strip's control
+    /// row: the legend has the row's whole width, and the pane's Y scale is
+    /// on its plot's menu rather than on a button of the row.
+    pub legend_row: bool,
 }
 
 /// What a unit pane's curves may be plotted against: one of the strip's
@@ -238,86 +220,6 @@ pub struct UnitPaneHeaderResponse {
     /// The strips a strip or curve menu entry the reader chose arranges the
     /// stack into.
     pub arrange: Option<Vec<Strip>>,
-    /// The one bar's maximize was pressed.
-    pub maximize: bool,
-    /// The one bar's + Expression was pressed.
-    pub add_expression: bool,
-    /// The one bar's log X was toggled.
-    pub toggle_log_x: bool,
-    /// The one bar's Fit was pressed.
-    pub fit: bool,
-}
-
-/// Where a pane's legend runs when it cannot share the one bar with the
-/// strip's tag and controls and drops to a row of its own under it: when
-/// the bar leaves it less than this.
-const LEGEND_LEAST_WIDTH: f32 = 120.0;
-
-/// The plot a pane keeps under its bar and a legend dropped under it.
-const LEGEND_ROW_PLOT_FLOOR: f32 = 40.0;
-
-/// Where a one-bar row spanning `rect` stands its controls, from the rule
-/// every row of strip chrome ends on leftwards: maximize in the rightmost
-/// window place, log Y the gap left of it, then log X, + Expression and,
-/// while the strip is zoomed, Fit. A pane under the bar keeps its log Y
-/// alone, in the bar's column.
-struct BarPlaces {
-    maximize: Option<egui::Rect>,
-    log_y: egui::Rect,
-    log_x: Option<egui::Rect>,
-    expression: Option<egui::Rect>,
-    fit: Option<egui::Rect>,
-    /// Where the leftmost control starts.
-    left: f32,
-}
-
-fn bar_places(ui: &mut Ui, rect: egui::Rect, bar: Option<&StripBar>) -> BarPlaces {
-    // Each place spans the band above the row's rule; what stands in it is
-    // centred there.
-    let band = strip::header_band(rect);
-    let centred = |right: f32, width: f32| {
-        egui::Rect::from_min_max(
-            egui::pos2(right - width, band.top()),
-            egui::pos2(right, band.bottom()),
-        )
-    };
-    let window = strip::window_control_rect(band, 0);
-    let log_y = centred(
-        strip::scale_chip_right(rect, 1),
-        header_button_width(ui, "log Y"),
-    );
-    let Some(bar) = bar else {
-        return BarPlaces {
-            maximize: None,
-            log_y,
-            log_x: None,
-            expression: None,
-            fit: None,
-            left: log_y.left(),
-        };
-    };
-    let log_x = centred(
-        log_y.left() - strip::WINDOW_CONTROL_GAP,
-        header_button_width(ui, strip::X_SCALE_LABEL),
-    );
-    let expression = centred(
-        log_x.left() - strip::WINDOW_CONTROL_GAP,
-        header_button_width(ui, strip::EXPRESSION_ACTION_LABEL),
-    );
-    let fit = bar.zoomed.then(|| {
-        centred(
-            expression.left() - strip::WINDOW_CONTROL_GAP,
-            header_button_width(ui, strip::FIT_LABEL),
-        )
-    });
-    BarPlaces {
-        maximize: Some(centred(window.right(), window.width())),
-        log_y,
-        log_x: Some(log_x),
-        expression: Some(expression),
-        left: fit.map_or(expression.left(), |fit| fit.left()),
-        fit,
-    }
 }
 
 /// Where the legend runs in a pane header spanning `rect` whose trailing
@@ -329,12 +231,7 @@ fn bar_places(ui: &mut Ui, rect: egui::Rect, bar: Option<&StripBar>) -> BarPlace
 /// edges. A function can be asserted about without standing up a strip, a
 /// host and a projection.
 fn legend_region(rect: egui::Rect, action_width: f32) -> egui::Rect {
-    legend_region_from(rect.left() + HEADER_PADDING_X, rect, action_width)
-}
-
-/// [`legend_region`], starting at `start`: after the analysis tag on a one
-/// bar.
-fn legend_region_from(start: f32, rect: egui::Rect, action_width: f32) -> egui::Rect {
+    let start = rect.left() + HEADER_PADDING_X;
     // The inset is a floor as well as a start: a pane narrower than its two
     // insets must not hand the legend a rectangle whose right edge is left
     // of its left one, which clips to nothing and reads as a widget that
@@ -369,8 +266,7 @@ pub fn show_header(
         window_slots,
         arrange,
         folded_axes,
-        one_bar,
-        strip: bar,
+        legend_row,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -429,14 +325,9 @@ pub fn show_header(
     // The right-hand controls are laid out first and take the width they
     // need, so the legend is measured against what is left of the row and no
     // chip of it runs under them.
-    let action_width = if one_bar {
-        bar_controls(
-            ui,
-            model,
-            rect,
-            (bar.as_ref(), plotted, log_y, log_y_available),
-            &mut output,
-        )
+    let action_width = if legend_row {
+        // Under the strip's control row the row is the legend's alone.
+        0.0
     } else if plotted {
         // The row ends as the strip header above it does: the fit icon in
         // the place of the strip's maximize control, and the axis' scale
@@ -488,52 +379,14 @@ pub fn show_header(
         // has the row.
         0.0
     };
-    // The one bar starts with the strip's analysis tag, and the legend runs
-    // after it; where the bar leaves the legend too little room, it drops
-    // to a row of its own under the bar, and the controls stay on the bar.
-    let legend_start = match bar {
-        Some(_) => {
-            strip::analysis_tag(
-                ui,
-                rect,
-                band.id.with("analysis-tag"),
-                &model.kind_tag,
-                model.incomplete,
-            ) + 8.0
-        }
-        // A pane under the bar starts its legend level with the bar's.
-        None if one_bar => {
-            rect.left()
-                + HEADER_PADDING_X
-                + strip::analysis_tag_width(ui, &model.kind_tag, model.incomplete)
-                + 8.0
-        }
-        None => rect.left() + HEADER_PADDING_X,
-    };
-    let bar_legend = legend_region_from(legend_start, strip::header_band(rect), action_width);
-    let drops = bar.is_some()
-        && bar_legend.width() < LEGEND_LEAST_WIDTH
-        && ui.available_height() >= WAVE_PANE_HEADER_HEIGHT + LEGEND_ROW_PLOT_FLOOR;
-    let legend_rect = if drops {
-        let (row, _) = ui.allocate_exact_size(
-            egui::vec2(rect.width(), WAVE_PANE_HEADER_HEIGHT),
-            egui::Sense::hover(),
-        );
-        ui.painter().rect_filled(row, 0.0, c.bg_panel);
-        ui.painter().hline(
-            row.x_range(),
-            row.bottom() - 0.5,
-            egui::Stroke::new(1.0, c.border),
-        );
-        legend_region(strip::header_band(row), 0.0)
-    } else {
-        ui.painter().hline(
-            rect.x_range(),
-            rect.bottom() - 0.5,
-            egui::Stroke::new(1.0, c.border),
-        );
-        bar_legend
-    };
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
+    // The legend starts at the row's inset, where the strip's control row
+    // starts its analysis tag, and runs to the row's controls or its end.
+    let legend_rect = legend_region(strip::header_band(rect), action_width);
 
     // The row names exactly what the pane draws, the same traces its fit
     // and its curves read, and offers the hidden signals of its unit. A
@@ -731,83 +584,6 @@ pub fn show_header(
         }
     }
     output
-}
-
-/// Draw a one-bar row's controls in their [`bar_places`], and say what the
-/// reader did with them; returns the width they take from the row's end.
-fn bar_controls(
-    ui: &mut Ui,
-    model: &StripModel,
-    rect: egui::Rect,
-    (bar, plotted, log_y, log_y_available): (Option<&StripBar>, bool, bool, bool),
-    output: &mut UnitPaneHeaderResponse,
-) -> f32 {
-    let places = bar_places(ui, rect, bar);
-    let place = |ui: &mut Ui, at: egui::Rect, salt: &str| {
-        ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt(salt)
-                .max_rect(at)
-                .layout(egui::Layout::right_to_left(egui::Align::Center)),
-        )
-    };
-    // A pane with nothing plotted has no Y axis to scale.
-    if plotted {
-        let log = log_y_button(
-            &mut place(ui, places.log_y, "pane-log-y"),
-            log_y,
-            log_y_available,
-        );
-        if log.clicked() {
-            output.toggle_log_y = true;
-        }
-    }
-    let Some(bar) = bar else {
-        return (rect.right() - HEADER_PADDING_X) - places.left;
-    };
-    if let Some(at) = places.maximize {
-        let tip = if bar.maximized {
-            "Restore strips"
-        } else {
-            "Maximize strip"
-        };
-        if IconButton::new(Icon::ZoomFit)
-            .side(strip::header_control_side(ui))
-            .on(bar.maximized)
-            .tooltip(tip)
-            .show(&mut place(ui, at, "strip-maximize"))
-            .clicked()
-        {
-            output.maximize = true;
-        }
-    }
-    if let Some(at) = places.log_x
-        && strip::x_scale_chip(
-            ui,
-            egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
-            at,
-            (bar.log_x, bar.log_x_refusal.as_deref()),
-        )
-    {
-        output.toggle_log_x = true;
-    }
-    if let Some(at) = places.expression
-        && header_button(strip::EXPRESSION_ACTION_LABEL)
-            .show(&mut place(ui, at, "strip-expression"))
-            .on_hover_text(strip::EXPRESSION_ACTION_TIP)
-            .clicked()
-    {
-        output.add_expression = true;
-    }
-    if let Some(at) = places.fit
-        && header_button(strip::FIT_LABEL)
-            .show(&mut place(ui, at, "strip-fit"))
-            .on_hover_text(strip::FIT_TIP)
-            .clicked()
-    {
-        output.fit = true;
-    }
-    (rect.right() - HEADER_PADDING_X) - places.left
 }
 
 /// A pane's Y scale toggle: the header's button reading "log Y", lit while

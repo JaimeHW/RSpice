@@ -401,95 +401,6 @@ fn tag_ink(tokens: &Tokens, mark: Option<bool>) -> egui::Color32 {
     }
 }
 
-/// The width [`analysis_tag`] takes for `kind`, its warning mark included:
-/// where the legend of a pane under the bar starts, level with the bar's.
-pub(crate) fn analysis_tag_width(ui: &Ui, kind: &str, incomplete: Option<&str>) -> f32 {
-    let text = ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(
-                kind.to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Medium),
-                egui::Color32::WHITE,
-            )
-            .size()
-            .x
-    });
-    let mark_room = if incomplete.is_some() {
-        KIND_MARK_GAP + KIND_MARK_SIDE
-    } else {
-        0.0
-    };
-    text + mark_room
-}
-
-/// The analysis tag a waveform pane's one bar starts with, at the left of
-/// `row`: the strip's kind in mono medium, in the ink its pane's mark gives
-/// it, and an incomplete result's warning mark after it, with the reason on
-/// hover. It names the bar to assistive technology and reports the pane a
-/// reader works in as selected; presses fall through it to the bar. Returns
-/// where it ends.
-pub(crate) fn analysis_tag(
-    ui: &mut Ui,
-    row: Rect,
-    id: egui::Id,
-    kind: &str,
-    incomplete: Option<&str>,
-) -> f32 {
-    let t = Tokens::get(ui.ctx());
-    let mark = header_row_mark(ui.ctx(), row);
-    let galley = ui.fonts_mut(|fonts| {
-        fonts.layout_no_wrap(
-            kind.to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            tag_ink(&t, mark),
-        )
-    });
-    // The tag takes presses over the whole row, as the row it stands in
-    // does, and its words stand centred on the band above the rule.
-    let band = header_band(row);
-    let left = row.left() + HEADER_PADDING_X;
-    let rect = Rect::from_min_max(
-        egui::pos2(left, row.top()),
-        egui::pos2(
-            (left + analysis_tag_width(ui, kind, incomplete)).min(row.right()),
-            row.bottom(),
-        ),
-    );
-    let tag = ui.interact(rect, id, Sense::hover());
-    tag.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), kind));
-    if mark == Some(true) {
-        ui.ctx()
-            .accesskit_node_builder(tag.id, |node| node.set_selected(true));
-    }
-    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let text_left = rect.left();
-    let width = galley.size().x;
-    painter.galley(
-        egui::pos2(text_left, band.center().y - galley.size().y * 0.5),
-        galley,
-        tag_ink(&t, mark),
-    );
-    if incomplete.is_some() {
-        paint_problem_mark(
-            &painter,
-            Rect::from_center_size(
-                egui::pos2(
-                    text_left + width + KIND_MARK_GAP + KIND_MARK_SIDE * 0.5,
-                    band.center().y,
-                ),
-                egui::Vec2::splat(KIND_MARK_SIDE),
-            ),
-            Problem::Warning,
-        );
-    }
-    let hover = match incomplete {
-        Some(reason) => format!("{kind} \u{b7} {reason}"),
-        None => kind.to_owned(),
-    };
-    tag.on_hover_text(hover);
-    rect.right()
-}
-
 /// The rows of the strip headers drawn this pass within `within`, each with
 /// what the reader did to it: where whatever holds the strips gives their
 /// rows a menu of its own. A row answers behind its chips and actions, so a
@@ -583,15 +494,15 @@ impl<'a> StripHeader<'a> {
         }
     }
 
-    /// How tall the row stands: a document pane's header stands as tall as
-    /// the one bar of its neighbours.
+    /// How tall the row stands: a strip's control row over its panes'
+    /// legend rows stands as tall as they do.
     pub(crate) fn height(mut self, height: f32) -> Self {
         self.height = height;
         self
     }
 
     /// Stand "+ Expression" at the row's end, left of the scale chip, as a
-    /// document pane's one bar stands it, rather than after the legend.
+    /// strip's control row stands it, rather than after the legend.
     pub(crate) fn expr_trailing(mut self, on: bool) -> Self {
         self.expr_trailing = on;
         self
@@ -1015,12 +926,16 @@ impl<'a> StripHeader<'a> {
             // FIT's place is made whether or not the view is zoomed: a child
             // made only now and then would renumber every widget after it,
             // and a drag on the ruler below would lose its widget midway.
+            // Beside the row's other buttons it keeps their gap; it stands
+            // at the group's left end, so nothing moves when it comes.
+            let fit_gap = if trailing_expr {
+                WINDOW_CONTROL_GAP
+            } else {
+                HEADER_ACTION_ITEM_GAP + 4.0
+            };
             let fit = Rect::from_min_max(
                 egui::pos2(actions_rect.left(), inner.top()),
-                egui::pos2(
-                    (left - HEADER_ACTION_ITEM_GAP - 4.0).max(actions_rect.left()),
-                    inner.bottom(),
-                ),
+                egui::pos2((left - fit_gap).max(actions_rect.left()), inner.bottom()),
             );
             let mut fit_ui = ui.new_child(
                 egui::UiBuilder::new()
