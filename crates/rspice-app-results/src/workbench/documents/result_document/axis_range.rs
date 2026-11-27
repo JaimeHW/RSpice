@@ -82,9 +82,32 @@ pub(crate) fn shorter_axis_ranges(range: (f64, f64), unit: &str) -> Vec<String> 
     }
     offer(written(range, unit, MIN_SHORTER_DIGITS).replace(" \u{2026} ", "\u{2026}"));
     if !unit.is_empty() {
+        offer(compact((range.0, range.1), unit, MIN_SHORTER_DIGITS));
         offer(written(range, "", MIN_SHORTER_DIGITS));
     }
     shorter
+}
+
+/// `(minimum, maximum)` with each end's prefix on its number and the unit
+/// once after both, `−16.97k … 16.97k rad/s`: shorter than each end
+/// carrying its prefixed unit, where a bar or a field has room for the
+/// interval but not for the unit twice.
+pub(crate) fn compact_axis_range(range: (f64, f64), unit: &str) -> String {
+    compact(range, unit, SIGNIFICANT_DIGITS)
+}
+
+fn compact((minimum, maximum): (f64, f64), unit: &str, digits: i32) -> String {
+    let width = (maximum - minimum).abs();
+    let end = |value: f64| {
+        let value = AxisValue::of(value, width, unit, digits);
+        typographic_minus(&format!("{}{}", value.mantissa, value.prefix))
+    };
+    let ends = format!("{} \u{2026} {}", end(minimum), end(maximum));
+    if unit.is_empty() {
+        ends
+    } else {
+        format!("{ends} {unit}")
+    }
 }
 
 /// `(minimum, maximum)` to `digits` significant digits of the interval's
@@ -493,6 +516,22 @@ mod tests {
             parse_axis_range("\u{2212}0.5 \u{2026} 0.25 dB", "dB"),
             Some((-0.5, 0.25))
         );
+    }
+
+    /// A pole-zero plane's σ range lost its rad/s in the Inspector's field:
+    /// too narrow for `−17 krad/s…17 krad/s`, the field dropped the unit.
+    /// Before it does, each end keeps its prefix on its number and the unit
+    /// follows both once, and that reads back.
+    #[test]
+    fn a_range_too_narrow_for_its_unit_twice_states_it_once() {
+        let shorter = shorter_axis_ranges((-16_970.0, 16_970.0), "rad/s");
+        assert!(
+            shorter.contains(&"\u{2212}17k \u{2026} 17k rad/s".to_owned()),
+            "{shorter:?}"
+        );
+        let (low, high) =
+            parse_axis_range("\u{2212}17k \u{2026} 17k rad/s", "rad/s").expect("reads back");
+        assert!((low + 17_000.0).abs() < 1.0 && (high - 17_000.0).abs() < 1.0);
     }
 
     /// A phase-noise sheet's level range read `−143 … −… dBc/Hz` in the

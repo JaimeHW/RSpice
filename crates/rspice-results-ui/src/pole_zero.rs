@@ -480,7 +480,13 @@ pub fn show(
         x1: 0.0_f64.clamp(ranges.0.0, ranges.0.1),
     }];
 
-    let response = plot::show(&mut plot_ui, &spec, cache, None, None);
+    let mut response = plot::show(&mut plot_ui, &spec, cache, None, None);
+    // The linear plane's ordinate is in rad/s as its abscissa is; its
+    // caption says so rather than its ticks, so the plot reports the unit
+    // for the range field to write.
+    if plane == Plane::Linear {
+        response.units.1 = "rad/s".to_owned();
+    }
     if response.view.any() {
         let change = crate::presentation::equal_scale_view_change(
             ranges.0,
