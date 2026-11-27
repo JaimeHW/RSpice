@@ -354,7 +354,7 @@ fn active_result_pane(
     };
     let pane_label = analysis.label.clone();
     // The unit names the pane in a unit-scoped stack; the viewer name is
-    // already on the sheet tab above.
+    // already on the sheet tab above, so a pane with no unit carries no tag.
     let tokens = Tokens::get(ui.ctx());
     let facts = crate::workbench::documents::result_document::active_pane_facts(&tokens, state);
     // A unit-scoped pane names its unit on a row of its own: on the

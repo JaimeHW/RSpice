@@ -2485,7 +2485,7 @@ impl ResultArtifactKind {
     pub(super) const fn glyph(self) -> &'static str {
         match self {
             Self::Scalar => "#",
-            Self::Array => "[]",
+            Self::Array => "A",
             Self::EventStream => ">",
             Self::Contribution => "S",
         }
