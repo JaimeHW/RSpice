@@ -16,6 +16,9 @@
 
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
+use rspice_results::number_format::{
+    fmt_register_change, fmt_register_reading, with_explicit_sign,
+};
 use rspice_results::renderability::{
     PolarQuantitySource, polar_quantity_source, polar_reference_impedances,
 };
@@ -1272,7 +1275,8 @@ fn register_rows(
     let dash = || "\u{2014}".to_owned();
     let at = |sample: Option<usize>, read: &dyn Fn(usize) -> String| sample.map_or_else(dash, read);
     let frequency = |index: usize| frequency_readout(policy, locus.x[index], digits);
-    let magnitude = |index: usize| fmt_column_reading(locus.magnitude(index), &locus.unit, digits);
+    let magnitude =
+        |index: usize| fmt_register_reading(locus.magnitude(index), &locus.unit, digits);
     let decibels = |index: usize| {
         let value = locus.magnitude(index);
         if value > 0.0 {
@@ -1290,8 +1294,8 @@ fn register_rows(
         group_delay_at(locus, index)
             .map_or_else(dash, |value| fmt_column_reading(value, "s", digits))
     };
-    let real = |index: usize| fmt_column_reading(locus.real[index], "", digits);
-    let imaginary = |index: usize| fmt_column_reading(locus.imag[index], "", digits);
+    let real = |index: usize| fmt_register_reading(locus.real[index], "", digits);
+    let imaginary = |index: usize| fmt_register_reading(locus.imag[index], "", digits);
 
     let pair = samples.a.zip(samples.b);
     let decades = pair.map_or_else(dash, |(a, b)| {
@@ -1302,11 +1306,9 @@ fn register_rows(
             dash()
         }
     });
-    // A change reads on the SI ladder: two magnitudes a hair apart differ
-    // by `−2.663 n`, not `−2.663e−9`.
-    let change = |value: f64, unit: &str| {
-        rspice_results::number_format::fmt_change_reading(value, unit, digits)
-    };
+    // A change carries its sign and reads as its row's cells do: two
+    // magnitudes a hair apart differ by `−2.663 n`, not `−2.663e−9`.
+    let change = |value: f64, unit: &str| fmt_register_change(value, unit, digits);
     let magnitude_delta = pair.map_or_else(dash, |(a, b)| {
         change(locus.magnitude(b) - locus.magnitude(a), &locus.unit)
     });
@@ -1322,7 +1324,8 @@ fn register_rows(
         }
     });
     let phase_delta = pair.map_or_else(dash, |(a, b)| {
-        angle_readout(policy, unwrapped_phase_delta(locus, a, b), digits)
+        let delta = unwrapped_phase_delta(locus, a, b);
+        with_explicit_sign(delta, angle_readout(policy, delta, digits))
     });
     let group_delay = pair.map_or_else(dash, |(a, b)| {
         group_delay_seconds(locus, a, b)

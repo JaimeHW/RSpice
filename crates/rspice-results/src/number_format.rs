@@ -293,23 +293,48 @@ pub fn fmt_column_reading(value: f64, unit: &str, significant_digits: usize) -> 
     joined(&number, prefix, unit)
 }
 
-/// A change between two readings on the SI ladder, even with no unit: two
-/// magnitudes a hair apart differ by `−2.663 n`, not `−2.663e−9`. A unit
-/// that takes no prefix reads as [`fmt_column_reading`] reads it.
+/// A register cell: [`fmt_column_reading`], except that a bare number past
+/// the plain band takes an SI prefix rather than an exponent. A reflection
+/// reads `0.4286` beside two magnitudes a hair apart that differ by
+/// `−2.663 n`, not `−2.663e−9`.
 #[must_use]
-pub fn fmt_change_reading(value: f64, unit: &str, significant_digits: usize) -> String {
-    if !unit.is_empty() && !unit_takes_prefix(unit) {
+pub fn fmt_register_reading(value: f64, unit: &str, significant_digits: usize) -> String {
+    let plain = !unit.is_empty()
+        || !value.is_finite()
+        || value == 0.0
+        || placed_significant(
+            value.abs(),
+            significant_digits.clamp(1, 17),
+            false,
+            Zeros::Keep,
+        )
+        .1 == 0;
+    if plain {
         return fmt_column_reading(value, unit, significant_digits);
     }
     let (number, prefix) = significant_number(value, significant_digits, true, Zeros::Keep);
     joined(&number, prefix, unit)
 }
 
+/// [`fmt_register_reading`] with an explicit sign on a positive value, for
+/// a register's Δ column: `+0.5702`, `−2.663 n`, and zero unsigned.
+#[must_use]
+pub fn fmt_register_change(value: f64, unit: &str, significant_digits: usize) -> String {
+    with_explicit_sign(value, fmt_register_reading(value, unit, significant_digits))
+}
+
 /// [`fmt_column_reading`] with an explicit sign on a positive value, for a
 /// change or a margin: `+1.50 dB`, `−600.0 µV`, and zero unsigned.
 #[must_use]
 pub fn fmt_signed_reading(value: f64, unit: &str, significant_digits: usize) -> String {
-    let text = fmt_column_reading(value, unit, significant_digits);
+    with_explicit_sign(value, fmt_column_reading(value, unit, significant_digits))
+}
+
+/// `text`, the reading of `value`, with a `+` before it when `value` is
+/// positive and the reading shows a digit other than zero: a change that
+/// rounds to nothing stays unsigned.
+#[must_use]
+pub fn with_explicit_sign(value: f64, text: String) -> String {
     if value > 0.0 && text.chars().any(|digit| matches!(digit, '1'..='9')) {
         format!("+{text}")
     } else {
@@ -1490,14 +1515,18 @@ mod tests {
     }
 
     #[test]
-    fn a_change_reads_on_the_si_ladder_with_or_without_a_unit() {
-        assert_eq!(fmt_change_reading(-2.663e-9, "", 4), "\u{2212}2.663 n");
-        assert_eq!(fmt_change_reading(0.04774, "", 4), "47.74 m");
-        assert_eq!(fmt_change_reading(1.5e-3, "V", 4), "1.500 mV");
+    fn a_bare_register_reading_takes_a_prefix_only_past_the_plain_band() {
+        assert_eq!(fmt_register_reading(0.4286, "", 4), "0.4286");
+        assert_eq!(fmt_register_reading(-2.663e-9, "", 4), "\u{2212}2.663 n");
+        assert_eq!(fmt_register_reading(2.5e7, "", 4), "25.00 M");
+        assert_eq!(fmt_register_reading(1.5e-3, "V", 4), "1.500 mV");
         assert_eq!(
-            fmt_change_reading(-2.5, "dB", 4),
+            fmt_register_reading(-2.5, "dB", 4),
             fmt_column_reading(-2.5, "dB", 4)
         );
+        assert_eq!(fmt_register_change(0.5702, "", 4), "+0.5702");
+        assert_eq!(fmt_register_change(-2.663e-9, "", 4), "\u{2212}2.663 n");
+        assert_eq!(fmt_register_change(0.0, "", 4), "0");
     }
 
     /// A statistic far below its samples' spread is their rounding, read as
