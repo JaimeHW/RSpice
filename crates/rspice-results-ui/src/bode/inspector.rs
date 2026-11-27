@@ -15,7 +15,7 @@ use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 /// The selected response and the evidence its inspector may display.
 pub enum BodeInspector<'a> {
-    Response(BodeResponse<'a>),
+    Response(Box<BodeResponse<'a>>),
     NoResponse,
     AnalysisFailed(Option<&'a str>),
     Qpac(Option<&'a QpacAnalysisResult>),
@@ -172,7 +172,7 @@ pub fn right_panel(
         // The distortion sheet's whole panel was one implementation sentence.
         BodeInspector::Distortion => None,
         BodeInspector::Response(response) => {
-            response_card(ui, response, quantity_policy, significant_digits)
+            response_card(ui, *response, quantity_policy, significant_digits)
         }
         BodeInspector::NoResponse => {
             section_header(ui, "Response", None);

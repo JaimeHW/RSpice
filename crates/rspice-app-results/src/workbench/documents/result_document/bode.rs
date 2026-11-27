@@ -408,7 +408,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         .filter(|model| !model.loop_gain)
         .and_then(|model| family_responses(ui, state.results_reads(), model));
     let inspector = match &model {
-        Ok(model) => BodeInspector::Response(BodeResponse {
+        Ok(model) => BodeInspector::Response(Box::new(BodeResponse {
             metrics: model.margins.metrics,
             phase_available: model.phase_available,
             signal: &model.signal,
@@ -417,7 +417,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             family: family
                 .as_deref()
                 .map(|(quantity, members)| (quantity.as_str(), members.as_slice())),
-        }),
+        })),
         Err(NoMargins::NoResponse) => BodeInspector::NoResponse,
         Err(NoMargins::AnalysisFailed(reason)) => BodeInspector::AnalysisFailed(reason.as_deref()),
     };
