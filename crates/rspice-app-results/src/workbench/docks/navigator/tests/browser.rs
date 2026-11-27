@@ -285,7 +285,7 @@ fn the_roots_the_pole_zero_plane_draws_are_a_ticked_row() {
         ),
     );
     host.model.simulation.view.active_analysis_idx = Some(0);
-    host.results.session.viewer = crate::workbench::ResultViewer::PoleZero;
+    host.results.results.session.viewer = crate::workbench::ResultViewer::PoleZero;
     let mut browser = Browser::new(host);
     browser.frame(Vec::new());
     let nodes = browser.frame(Vec::new());
@@ -298,7 +298,7 @@ fn the_roots_the_pole_zero_plane_draws_are_a_ticked_row() {
     };
     assert!(row(&nodes).ticked, "the plane draws the roots");
     assert!(find(&nodes, "1 ticked").is_some(), "{:?}", labels(&nodes));
-    browser.host.results.session.viewer = crate::workbench::ResultViewer::Table;
+    browser.host.results.results.session.viewer = crate::workbench::ResultViewer::Table;
     browser.frame(Vec::new());
     let nodes = browser.frame(Vec::new());
     assert!(!row(&nodes).ticked, "a table draws no roots");
