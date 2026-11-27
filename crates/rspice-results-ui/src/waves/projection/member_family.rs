@@ -32,7 +32,6 @@ use rspice_results::analysis_type::AnalysisType;
 use rspice_results::family_projection::FamilyColorStyle;
 use rspice_results::provenance::AnalysisResultFamilyMember;
 use rspice_results::sweep_table::{point_axes, point_name};
-use rspice_results::visualization_document::AccessibleColorPalette;
 use rspice_results::waveform::RetainedTrace;
 
 use super::{FamilyTraceStyle, FamilyTraceVisibilityKey, ProjectionContext, StripTrace, TraceKind};
@@ -222,14 +221,7 @@ fn swept_styles(points: &[&AnalysisResult<RetainedTrace>]) -> Vec<(FamilyTraceSt
         .map(|row| {
             let level = |axis: usize| axes.get(axis).and_then(|axis| axis.level_of(row));
             let style = FamilyTraceStyle {
-                color: axes
-                    .first()
-                    .zip(level(0))
-                    .map(|(axis, ordinal)| FamilyColorStyle {
-                        palette: AccessibleColorPalette::TolBrightCategorical,
-                        ordinal,
-                        category_count: axis.levels().len(),
-                    }),
+                color: level(0).map(|ordinal| FamilyColorStyle { ordinal }),
                 dash_ordinal: level(1),
                 marker_ordinal: level(2),
                 width_points: None,
@@ -497,7 +489,7 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 name: format!("{} · {}", trace.base_name, member.label),
                 unit: trace.unit.clone(),
                 signal_color: trace.signal_color,
-                color: super::family_color(member.style, trace.signal_color),
+                color: super::family_color(member.style, trace.signal_color, context.traces),
                 palette_slot: trace.palette_slot,
                 x,
                 y,

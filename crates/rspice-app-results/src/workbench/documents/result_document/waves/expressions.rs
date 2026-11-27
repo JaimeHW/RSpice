@@ -318,7 +318,9 @@ pub(super) fn resolve_strip_exprs(
                 shape,
                 y_extremes,
                 y,
-                color: family_style.map_or(base_color, |style| family_color(style, base_color)),
+                color: family_style.map_or(base_color, |style| {
+                    family_color(style, base_color, &tokens.color.traces)
+                }),
                 cache_key,
                 label: group.map_or_else(
                     || base_label.clone(),

@@ -392,6 +392,7 @@ fn curves_made_on_threads_are_the_ones_made_one_at_a_time() {
     let hidden = HashSet::new();
     let context = ProjectionContext {
         analysis_key: AnalysisPresentationKey::new(run.dataset_id, analysis),
+        traces: &Tokens::default().color.traces,
         run_id: run.id,
         selection_key: 0,
         sample_selection: None,

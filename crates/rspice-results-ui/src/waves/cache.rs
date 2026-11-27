@@ -737,7 +737,7 @@ fn rank_palette_slots(
             )
         };
         trace.color = trace.family_style.map_or(trace.signal_color, |style| {
-            super::projection::family_color(style, trace.signal_color)
+            super::projection::family_color(style, trace.signal_color, palette)
         });
         merged.insert(
             (trace.source_waveform_name.clone(), trace.name.clone()),

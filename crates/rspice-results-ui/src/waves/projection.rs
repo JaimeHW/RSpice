@@ -20,7 +20,6 @@ use rspice_results::family_projection::{
 };
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 use rspice_results::run::SimulationRun;
-use rspice_results::visualization_document::AccessibleColorPalette;
 use rspice_results::waveform::RetainedTrace;
 use rspice_ui_kit::tokens::Tokens;
 use std::collections::{HashMap, HashSet};
@@ -154,53 +153,20 @@ fn projected_family_series<'a>(
         .unwrap_or_default()
 }
 
-pub fn family_color(style: FamilyTraceStyle, fallback: egui::Color32) -> egui::Color32 {
-    let Some(color) = style.color else {
-        return fallback;
-    };
-    let palette: &[[u8; 3]] = match color.palette {
-        AccessibleColorPalette::OkabeItoCategorical => &[
-            [0x00, 0x72, 0xB2],
-            [0xE6, 0x9F, 0x00],
-            [0x00, 0x9E, 0x73],
-            [0xD5, 0x5E, 0x00],
-            [0x56, 0xB4, 0xE9],
-            [0xCC, 0x79, 0xA7],
-        ],
-        AccessibleColorPalette::TolBrightCategorical => &[
-            [0x44, 0x77, 0xAA],
-            [0xEE, 0x66, 0x77],
-            [0x22, 0x88, 0x33],
-            [0xCC, 0xBB, 0x44],
-            [0x66, 0xCC, 0xEE],
-            [0xAA, 0x33, 0x77],
-            [0xBB, 0xBB, 0xBB],
-        ],
-        AccessibleColorPalette::CividisSequential => &[
-            [0x00, 0x20, 0x4C],
-            [0x41, 0x4D, 0x6B],
-            [0x7C, 0x7B, 0x78],
-            [0xBA, 0xA8, 0x63],
-            [0xFF, 0xE9, 0x45],
-        ],
-        AccessibleColorPalette::ViridisSequential => &[
-            [0x44, 0x01, 0x54],
-            [0x3B, 0x52, 0x8B],
-            [0x21, 0x91, 0x8C],
-            [0x5E, 0xC9, 0x62],
-            [0xFD, 0xE7, 0x25],
-        ],
-    };
-    let index = match color.palette {
-        AccessibleColorPalette::CividisSequential | AccessibleColorPalette::ViridisSequential
-            if color.category_count > 1 =>
-        {
-            color.ordinal.saturating_mul(palette.len() - 1) / (color.category_count - 1)
-        }
-        _ => color.ordinal % palette.len(),
-    };
-    let [red, green, blue] = palette[index.min(palette.len() - 1)];
-    egui::Color32::from_rgb(red, green, blue)
+/// The colour a family's policy gives one of its curves: the theme's trace
+/// hue in its category's place, in order, so the one palette that colours
+/// every other curve colours a family's members too, colour-safe and light
+/// themes included. `fallback`, the signal's own colour, when the policy
+/// colours by no dimension.
+pub fn family_color(
+    style: FamilyTraceStyle,
+    fallback: egui::Color32,
+    traces: &[egui::Color32],
+) -> egui::Color32 {
+    match style.color {
+        Some(color) if !traces.is_empty() => traces[color.ordinal % traces.len()],
+        _ => fallback,
+    }
 }
 
 /// What one DC-sweep analysis actually swept, named and given its unit.
@@ -270,6 +236,8 @@ fn dc_card_source(deck: &str) -> Option<String> {
 
 struct ProjectionContext<'a> {
     analysis_key: AnalysisPresentationKey,
+    /// The theme's trace hues, which a family's members are coloured from.
+    traces: &'a [egui::Color32],
     run_id: u64,
     selection_key: u64,
     sample_selection: Option<&'a SourceSampleSelection>,
@@ -381,7 +349,9 @@ fn projected_trace(
         name,
         unit: source_unit.map(str::to_owned),
         signal_color,
-        color: family_style.map_or(signal_color, |style| family_color(style, signal_color)),
+        color: family_style.map_or(signal_color, |style| {
+            family_color(style, signal_color, context.traces)
+        }),
         palette_slot: palette_slot
             .filter(|_| family_style.is_none_or(|style| style.color.is_none())),
         x,
@@ -780,6 +750,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
             .rotate_left(17);
         let projection = ProjectionContext {
             analysis_key,
+            traces: &tokens.color.traces,
             run_id: run.id,
             selection_key,
             sample_selection,

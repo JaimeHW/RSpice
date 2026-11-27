@@ -5,7 +5,6 @@
 //! policy, and a copied cursor value must carry its explicit numeric policy.
 
 use super::*;
-use rspice_results::visualization_document::AccessibleColorPalette;
 
 mod branches;
 mod conversion;
@@ -100,7 +99,6 @@ fn family_policy() -> FamilyPresentationPolicy {
         encodings: vec![
             FamilyEncodingMap::Color {
                 dimension: process.clone(),
-                palette: AccessibleColorPalette::OkabeItoCategorical,
             },
             FamilyEncodingMap::Dash {
                 dimension: process.clone(),
@@ -1097,6 +1095,17 @@ fn family_policy_expands_stable_styles_and_preserves_overlay_sources() {
     assert_eq!(model.x_label, "RGAIN");
     assert_eq!(model.x_unit, "kOhm");
     assert_eq!(model.x_scale, XScale::Linear);
+    // A policy colours its groups in the theme's trace hues, the one palette
+    // every curve is coloured from.
+    let hues = Tokens::default().color.traces;
+    assert!(
+        model
+            .traces
+            .iter()
+            .filter(|trace| !trace.overlay)
+            .all(|trace| hues.contains(&trace.color)),
+        "a family group draws outside the trace palette"
+    );
     let ss = model
         .traces
         .iter()

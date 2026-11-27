@@ -1193,7 +1193,6 @@ fn family_policy() -> FamilyPresentationPolicy {
         encodings: vec![
             FamilyEncodingMap::Color {
                 dimension: process.clone(),
-                palette: AccessibleColorPalette::OkabeItoCategorical,
             },
             FamilyEncodingMap::Label {
                 dimension: process.clone(),
@@ -2303,7 +2302,6 @@ fn pane_family_policy_roundtrips_typed_dimensions_and_accessible_encodings() {
     let serialized = serde_json::to_string_pretty(&document).unwrap();
     let restored: VisualizationDocument = serde_json::from_str(&serialized).unwrap();
     assert_eq!(restored, document);
-    assert!(serialized.contains("okabe-ito-categorical"));
     assert!(serialized.contains("preserve-as-not-run"));
 }
 

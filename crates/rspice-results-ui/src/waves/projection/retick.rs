@@ -109,6 +109,7 @@ pub fn retick<A: AsRef<AnalysisResult<RetainedTrace>>>(
         added.dedup();
         let context = ProjectionContext {
             analysis_key: model.analysis_key,
+            traces: with.palette,
             run_id: with.run.id,
             selection_key: 0,
             sample_selection: None,

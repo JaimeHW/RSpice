@@ -250,15 +250,6 @@ pub enum MissingPointPolicy {
     ExcludeWithOmissionRecord,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AccessibleColorPalette {
-    OkabeItoCategorical,
-    TolBrightCategorical,
-    CividisSequential,
-    ViridisSequential,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FacetDirection {
@@ -289,15 +280,14 @@ pub struct FamilyFacetLayout {
 }
 
 /// One deterministic mapping from a declared family dimension to a visual
-/// channel. Color palettes are restricted to accessibility-reviewed choices,
-/// and policy validation requires a redundant non-color cue for every color
-/// mapping.
+/// channel. Colour draws each category in the theme's trace hues, in order,
+/// the one palette every curve takes its colour from, and policy validation
+/// requires a redundant non-color cue for every color mapping.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "channel")]
 pub enum FamilyEncodingMap {
     Color {
         dimension: FamilyDimension,
-        palette: AccessibleColorPalette,
     },
     Dash {
         dimension: FamilyDimension,

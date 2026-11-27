@@ -7,8 +7,8 @@ use super::{
 use crate::analysis_type::AnalysisType;
 use crate::family_metadata::AnalysisResultFamilyMetadata;
 use crate::visualization_document::{
-    AccessibleColorPalette, FamilyAggregationMethod, FamilyDimension as DocumentFamilyDimension,
-    FamilyEncodingMap, FamilyPresentationPolicy, FamilyXOrdering,
+    FamilyAggregationMethod, FamilyDimension as DocumentFamilyDimension, FamilyEncodingMap,
+    FamilyPresentationPolicy, FamilyXOrdering,
 };
 use rspice_vocabulary::product::DatasetId;
 use std::cmp::Ordering;
@@ -246,12 +246,8 @@ impl FamilyRenderPlan {
                     .binary_search(&canonical)
                     .map_err(|_| "family category is absent from its stable table".to_owned())?;
                 match encoding {
-                    FamilyEncodingMap::Color { palette, .. } => {
-                        style.color = Some(FamilyColorStyle {
-                            palette: *palette,
-                            ordinal,
-                            category_count: categories.len(),
-                        });
+                    FamilyEncodingMap::Color { .. } => {
+                        style.color = Some(FamilyColorStyle { ordinal });
                     }
                     FamilyEncodingMap::Dash { .. } => style.dash_ordinal = Some(ordinal),
                     FamilyEncodingMap::Marker { .. } => style.marker_ordinal = Some(ordinal),
@@ -466,9 +462,7 @@ impl FamilyTraceStyle {
     fn hash_into(self, hash: &mut StableHash) {
         if let Some(color) = self.color {
             hash.byte(1);
-            hash.byte(palette_tag(color.palette));
             hash.bytes(&color.ordinal.to_le_bytes());
-            hash.bytes(&color.category_count.to_le_bytes());
         } else {
             hash.byte(0);
         }
@@ -490,11 +484,11 @@ impl FamilyTraceStyle {
     }
 }
 
+/// The colour a family's policy gives a member: its category's place among
+/// the dimension's values, which picks the theme's trace hue in that place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FamilyColorStyle {
-    pub palette: AccessibleColorPalette,
     pub ordinal: usize,
-    pub category_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -672,15 +666,6 @@ fn stable_group_key(
         }
     }
     hash.finish()
-}
-
-const fn palette_tag(palette: AccessibleColorPalette) -> u8 {
-    match palette {
-        AccessibleColorPalette::OkabeItoCategorical => 0,
-        AccessibleColorPalette::TolBrightCategorical => 1,
-        AccessibleColorPalette::CividisSequential => 2,
-        AccessibleColorPalette::ViridisSequential => 3,
-    }
 }
 
 struct StableHash(u64);

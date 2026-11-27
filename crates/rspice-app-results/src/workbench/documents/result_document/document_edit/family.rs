@@ -11,7 +11,7 @@ use rspice_results_ui::document_dialogs::family::{FamilyChoices, FamilyDraft};
 
 use super::*;
 use crate::results::visualization_document::{
-    AccessibleColorPalette, ColumnRole, FamilyAggregationMethod, FamilyAggregationPolicy,
+    ColumnRole, FamilyAggregationMethod, FamilyAggregationPolicy,
     FamilyDimension as DocumentFamilyDimension, FamilyEncodingMap, FamilyPresentationPolicy,
     FamilyXDimension, FamilyXOrdering, MissingPointPolicy, Pane, ValueType,
 };
@@ -446,7 +446,6 @@ fn policy(
     if !draft.color.is_empty() {
         encodings.push(FamilyEncodingMap::Color {
             dimension: document_dimension(manifest, &draft.color)?,
-            palette: AccessibleColorPalette::OkabeItoCategorical,
         });
     }
     if !draft.dash.is_empty() {

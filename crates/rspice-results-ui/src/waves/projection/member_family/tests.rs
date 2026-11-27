@@ -36,11 +36,19 @@ fn models(
     run: &SimulationRun<AnalysisResult<RetainedTrace>>,
     hidden: &HashSet<FamilyTraceVisibilityKey>,
 ) -> Vec<StripModel> {
+    models_in(run, hidden, &Tokens::default())
+}
+
+fn models_in(
+    run: &SimulationRun<AnalysisResult<RetainedTrace>>,
+    hidden: &HashSet<FamilyTraceVisibilityKey>,
+    tokens: &Tokens,
+) -> Vec<StripModel> {
     build_models(
         &[run],
         &ExecutedDeckArchive::default(),
         &mut DerivedSeries::default(),
-        &Tokens::default(),
+        tokens,
         ProjectionOptions {
             phase_continuous: false,
             complex_display: Default::default(),
@@ -325,6 +333,54 @@ fn runs_no_log_names_are_numbered_from_one_as_their_points() {
 /// A stepped family's members are told apart on the strip as ADS sequences
 /// a swept dataset: each value of the swept quantity its own colour, and
 /// the legend names each by its point. A trial keeps its signal's hue.
+/// A family's members take their colours from the theme's trace hues, in
+/// order, the one palette every curve is coloured from: no member draws in
+/// a hue of its own, in any theme, however many members there are.
+#[test]
+fn every_member_draws_in_a_hue_of_the_themes_trace_palette() {
+    use rspice_ui_kit::tokens::{Density, Direction, Mode};
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    // More stepped values than the palette has hues, then a population.
+    for index in 0..9 {
+        run.analyses.push(point(
+            index as u64 + 1,
+            AnalysisType::Ac,
+            index,
+            (index + 1) as f64 * 1e-9,
+            vec![
+                RetainedTrace::new("|V(out)|", vec![1.0, 1e3], vec![1.0, 0.5], ""),
+                RetainedTrace::new("phase(V(out))", vec![1.0, 1e3], vec![0.0, -45.0], "°"),
+            ],
+        ));
+    }
+    for index in 0..4 {
+        run.analyses.push(trial(
+            index as u64 + 20,
+            index,
+            vec![0.0, 1.0],
+            vec![0.0, index as f64],
+        ));
+    }
+    for mode in [Mode::Dark, Mode::Light, Mode::HighContrast] {
+        let tokens = Tokens::new(Direction::default(), mode, Density::default());
+        let built = models_in(&run, &HashSet::new(), &tokens);
+        let members: Vec<_> = built
+            .iter()
+            .flat_map(|strip| &strip.traces)
+            .filter(|trace| trace.family_group_ordinal.is_some())
+            .collect();
+        assert_eq!(members.len(), 9 * 2 + 4, "every member drawn in {mode:?}");
+        for trace in members {
+            assert!(
+                tokens.color.traces.contains(&trace.color),
+                "{} draws in {:?}, outside the {mode:?} trace palette",
+                trace.name,
+                trace.color
+            );
+        }
+    }
+}
+
 #[test]
 fn each_stepped_value_draws_in_its_own_colour() {
     let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);

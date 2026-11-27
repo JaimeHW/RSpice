@@ -3,9 +3,9 @@
 use super::*;
 use crate::family_metadata::MonteCarloVariableMetadata;
 use crate::visualization_document::{
-    AccessibleColorPalette, FamilyAggregationMethod, FamilyAggregationPolicy,
-    FamilyDimension as DocumentFamilyDimension, FamilyEncodingMap, FamilyPresentationPolicy,
-    FamilyXDimension, FamilyXOrdering, MissingPointPolicy,
+    FamilyAggregationMethod, FamilyAggregationPolicy, FamilyDimension as DocumentFamilyDimension,
+    FamilyEncodingMap, FamilyPresentationPolicy, FamilyXDimension, FamilyXOrdering,
+    MissingPointPolicy,
 };
 use rspice_vocabulary::product::DatasetId;
 
@@ -39,7 +39,6 @@ fn process_policy() -> FamilyPresentationPolicy {
         encodings: vec![
             FamilyEncodingMap::Color {
                 dimension: process.clone(),
-                palette: AccessibleColorPalette::OkabeItoCategorical,
             },
             FamilyEncodingMap::Dash { dimension: process },
         ],
