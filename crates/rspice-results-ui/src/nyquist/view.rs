@@ -161,7 +161,13 @@ fn criterion_note(count: EncirclementCount) -> String {
     }
     let z = super::closed_loop_rhp_poles(n, 0);
     let verdict = if z == 0 { "stable" } else { "unstable" };
-    format!("N = {n:+}: {verdict} if the open loop has no right-half-plane poles.")
+    // No winding is no count to sign: `N = 0`, as the Encirclements row reads.
+    let n = if n == 0 {
+        "0".to_owned()
+    } else {
+        format!("{n:+}")
+    };
+    format!("N = {n}: {verdict} if the open loop has no right-half-plane poles.")
 }
 
 /// Viewer-scoped base for this sheet's entries in the workspace-wide derived
