@@ -121,8 +121,8 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
             ui.spacing_mut().item_spacing.y = 3.0;
-            hub::marked_line(ui, Problem::Warning, &headline);
-            hub::announced(
+            page_chrome::marked_line(ui, Problem::Warning, &headline);
+            page_chrome::announced(
                 ui,
                 RichText::new(&digests)
                     .small()
@@ -130,12 +130,12 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
                     .color(t.color.text),
                 &digests,
             );
-            hub::announced(
+            page_chrome::announced(
                 ui,
                 RichText::new(&detected).small().color(t.color.text_faint),
                 &detected,
             );
-            hub::announced(
+            page_chrome::announced(
                 ui,
                 RichText::new(DRIFT_EFFECT).small().color(t.color.text_dim),
                 DRIFT_EFFECT,

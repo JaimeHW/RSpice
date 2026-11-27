@@ -337,7 +337,7 @@ fn fail_closed_note(ui: &mut Ui, unresolved: usize) {
                     let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
                     paint_problem_mark(ui.painter(), mark, Problem::Warning);
                 }
-                super::hub::announced(
+                super::page_chrome::announced(
                     ui,
                     RichText::new(prose).small().color(t.color.text_dim),
                     prose,
@@ -565,7 +565,7 @@ fn section_source_pane(
         };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            super::hub::announced(
+            super::page_chrome::announced(
                 ui,
                 RichText::new(&title)
                     .monospace()
@@ -587,7 +587,7 @@ fn section_source_pane(
                     "read-only · {}",
                     row.source_digest.as_deref().unwrap_or("not pinned")
                 );
-                super::hub::announced(
+                super::page_chrome::announced(
                     ui,
                     RichText::new(&identity)
                         .small()
@@ -596,7 +596,7 @@ fn section_source_pane(
                     &identity,
                 );
                 let bound = format!("bound by {}", row.corner.name.to_uppercase());
-                super::hub::announced(
+                super::page_chrome::announced(
                     ui,
                     RichText::new(&bound).small().color(t.color.text_dim),
                     &bound,
@@ -610,7 +610,7 @@ fn section_source_pane(
                 ui.horizontal_wrapped(|ui| {
                     let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
                     paint_problem_mark(ui.painter(), mark, Problem::Warning);
-                    super::hub::announced(
+                    super::page_chrome::announced(
                         ui,
                         RichText::new(error).small().color(t.color.text_dim),
                         error,
@@ -698,7 +698,7 @@ fn paint_section_lines(ui: &mut Ui, excerpt: &SectionExcerpt, height: f32) {
         " · sections are addressed by name inside one file, never a file per corner; the run \
          set selects the section per PVT point and nothing here is copied into the deck.",
     );
-    super::hub::announced_widget(
+    super::page_chrome::announced_widget(
         ui,
         egui::Label::new(RichText::new(&foot).small().color(t.color.text_faint)),
         &foot,
@@ -745,7 +745,7 @@ fn statistical_and_aging_card(ui: &mut Ui, app: &ManagerRenderContext<'_>, row: 
                         row.corner.name.to_uppercase()
                     )
                 };
-                super::hub::announced(
+                super::page_chrome::announced(
                     ui,
                     RichText::new(&line)
                         .small()
@@ -799,7 +799,7 @@ fn statistical_and_aging_card(ui: &mut Ui, app: &ManagerRenderContext<'_>, row: 
             );
             let note = "Distributions, σ and correlation groups for these sections are owned \
                         by the model editor's statistics view.";
-            super::hub::announced(
+            super::page_chrome::announced(
                 ui,
                 RichText::new(note)
                     .small()
@@ -920,7 +920,7 @@ fn temperature_validity_findings(
                 ui.horizontal_wrapped(|ui| {
                     let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
                     paint_problem_mark(ui.painter(), mark, Problem::Warning);
-                    super::hub::announced(
+                    super::page_chrome::announced(
                         ui,
                         RichText::new(&line).small().color(t.color.text_dim),
                         &line,
@@ -937,7 +937,7 @@ fn temperature_validity_findings(
                         "s"
                     }
                 );
-                super::hub::announced(
+                super::page_chrome::announced(
                     ui,
                     RichText::new(&more).small().color(t.color.text_faint),
                     &more,

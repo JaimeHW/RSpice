@@ -19,6 +19,7 @@ mod held_catalog;
 mod held_parts;
 mod hub;
 pub(super) mod include;
+mod page_chrome;
 mod paint;
 mod place;
 mod shelf;
@@ -291,7 +292,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     let packs_view = page == ModelsPage::Models
         && cx.state.models_view.catalog_scope == ModelsCatalogScope::InstalledPacks;
     if !packs_view {
-        hub::page_refusal(ui, cx.state);
+        page_chrome::page_refusal(ui, cx.state);
     }
     let include_diagnostics = (page == ModelsPage::Include)
         .then(|| closure_facts(cx.model.model_library_manager.libraries_sorted()));

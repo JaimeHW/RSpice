@@ -31,7 +31,8 @@ use crate::state::model_hub::{PartFact, PartStanding, ReleaseDiff};
 use crate::state::model_library::PackPartPin;
 use crate::workbench::models::pdk_workflow::ModelHubRequest;
 
-use super::hub::{HubCatalog, HubLedgerRow, announced, announced_widget, plain_list, selected_row};
+use super::hub::{HubCatalog, HubLedgerRow, plain_list, selected_row};
+use super::page_chrome::{announced, announced_widget};
 
 /// Recomputes the selected pack's "what changed" projection when — and only
 /// when — the question changed.

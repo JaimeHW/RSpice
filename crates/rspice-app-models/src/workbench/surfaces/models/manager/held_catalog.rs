@@ -205,7 +205,7 @@ fn contract(ui: &mut Ui, hub: &hub::HubCatalog) {
             ),
             ("Nothing local changes on a refusal.", refusal.as_str()),
         ] {
-            hub::announced(
+            page_chrome::announced(
                 ui,
                 RichText::new(headline).small().strong().color(t.color.text),
                 headline,
