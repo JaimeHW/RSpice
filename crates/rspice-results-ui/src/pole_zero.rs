@@ -110,7 +110,8 @@ impl Plane {
             return Axis::linear(min, max, "rad/s").with_label(label);
         };
         // A tick where each decade's circle crosses the axis, labelled with
-        // the value there, which on an axis is |s| signed.
+        // the value there, which on an axis is |s| signed, in the linear
+        // plane's tick grammar, `10k`.
         let reach = min.abs().max(max.abs()).ceil().max(1.0) as i64;
         let step = (reach / 4).max(1);
         let mut axis = Axis::linear(min, max, "rad/s").with_label(label);
@@ -122,10 +123,8 @@ impl Plane {
                 let text = if k == 0.0 {
                     "0".to_owned()
                 } else {
-                    rspice_results::number_format::si_tick_label(
+                    rspice_results::number_format::tick_label(
                         k.signum() * floor * 10f64.powf(k.abs() - 1.0),
-                        "",
-                        3,
                     )
                 };
                 (k, text)
@@ -854,7 +853,7 @@ mod tests {
         assert_eq!(Plane::of(&data, false).place(3.0, 4.0), (3.0, 4.0));
         let ticks = plane.axis(-7.0, 7.0, "σ").ticks;
         assert!(
-            ticks.contains(&(-6.0, "\u{2212}100 M".to_owned())),
+            ticks.contains(&(-6.0, "\u{2212}100M".to_owned())),
             "{ticks:?}"
         );
     }
