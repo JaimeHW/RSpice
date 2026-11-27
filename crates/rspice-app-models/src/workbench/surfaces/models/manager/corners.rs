@@ -1431,11 +1431,9 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
                 },
                 "model schema",
             );
-            // No "Aging evidence" row: the one this replaces read
-            // `model_qualification.evidence` — reviewer evidence for whatever a
-            // suite qualified — and printed it under an aging label. Nothing in
-            // this project owns aging data yet, so the aging column above
-            // states the binding fact and this pane states nothing at all.
+            // No "Aging evidence" row: nothing in this project owns aging
+            // data yet, so the aging column above states the binding fact and
+            // this pane states nothing at all.
             property(
                 ui,
                 "Binding policy",

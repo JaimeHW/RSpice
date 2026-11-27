@@ -145,7 +145,7 @@ fn pdk_model_name(library: usize, model: usize) -> String {
 }
 
 /// A project-owned library whose every model resolves through the retained
-/// closure — the path the qualification page and the model editor take.
+/// closure — the path the model editor takes.
 fn project_owned_library(index: usize) -> ModelLibrary {
     let name = format!("owned{index}");
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
@@ -411,8 +411,8 @@ fn every_page_builds_a_screenful_not_a_corpus() {
 #[test]
 fn a_frame_authenticates_each_retained_closure_at_most_once() {
     // Authenticating digests every retained byte. Resolving models one at a
-    // time re-authenticates per model, which made the qualification page cost
-    // one hash of the library per model in it.
+    // time re-authenticates per model, which made a page cost one hash of the
+    // library per model in it.
     let mut app = large_corpus_app();
     for page in ModelsPage::ALL {
         let report = render_page(&mut app, page, egui::vec2(1600.0, 1000.0));

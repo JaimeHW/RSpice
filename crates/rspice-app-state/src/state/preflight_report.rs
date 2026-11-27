@@ -14,17 +14,15 @@ pub enum ModelsPage {
     Corners,
     Bins,
     Include,
-    Qualification,
 }
 
 impl ModelsPage {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::Models,
         Self::Symbols,
         Self::Corners,
         Self::Bins,
         Self::Include,
-        Self::Qualification,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -34,7 +32,6 @@ impl ModelsPage {
             Self::Corners => "Corners & sections",
             Self::Bins => "Bins & geometry",
             Self::Include => "Include graph",
-            Self::Qualification => "Qualification",
         }
     }
 }

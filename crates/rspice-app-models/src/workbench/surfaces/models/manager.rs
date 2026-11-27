@@ -1,7 +1,7 @@
 //! Mounted Models & PDKs manager composition.
 //!
 //! The legacy surface remains in the parent module only as reusable rendering
-//! and qualification code. This module owns the current six-page workbench,
+//! code. This module owns the current five-page workbench,
 //! corpus scopes, guarded source/pack actions, and model detail composition.
 
 mod adoption;
@@ -21,7 +21,6 @@ mod hub;
 pub(super) mod include;
 mod paint;
 mod place;
-mod qualification_page;
 mod shelf;
 mod symbol_contracts;
 mod symbols;
@@ -288,11 +287,10 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
 
     let page = cx.state.models_page;
     // A refused action is stated on the page it was taken from. The packs view
-    // raises its own banner, with the operation and its retry; Qualification
-    // reports its own actions, not through this receipt.
+    // raises its own banner, with the operation and its retry.
     let packs_view = page == ModelsPage::Models
         && cx.state.models_view.catalog_scope == ModelsCatalogScope::InstalledPacks;
-    if page != ModelsPage::Qualification && !packs_view {
+    if !packs_view {
         hub::page_refusal(ui, cx.state);
     }
     let include_diagnostics = (page == ModelsPage::Include)
@@ -311,38 +309,33 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     {
         pending_actions.push(ManagerAction::ModelHub(request));
     }
-    if page == ModelsPage::Qualification {
-        qualification_page::show(ui, cx);
-    } else {
-        // The releases this machine holds, read beside the session's own state
-        // rather than cloned into it: the shelf offers parts of an installed
-        // pack the project has not adopted, and copying a manifest per frame
-        // would be most of what the page costs.
-        let installed = cx
-            .handles
-            .model_hub
-            .hub()
-            .map_or::<&[crate::state::model_hub::InstalledPack], _>(&[], |hub| hub.installed());
-        let mut render = ManagerRenderContext {
-            state: &mut *cx.state,
-            model: &mut *cx.model,
-            wb: &mut *cx.wb,
-            pending_actions: &mut pending_actions,
-        };
-        match page {
-            ModelsPage::Models => catalog_page(ui, &mut render, &hub_catalog, installed),
-            ModelsPage::Symbols => symbols::symbols_page(ui, &mut render),
-            ModelsPage::Corners => corners::corners_page(ui, &mut render),
-            ModelsPage::Bins => bins::bins_page(ui, &mut render),
-            ModelsPage::Include => include::include_page(
-                ui,
-                &mut render,
-                include_diagnostics
-                    .as_ref()
-                    .expect("include diagnostics are prepared for the include page"),
-            ),
-            ModelsPage::Qualification => unreachable!("qualification renders above"),
-        }
+    // The releases this machine holds, read beside the session's own state
+    // rather than cloned into it: the shelf offers parts of an installed
+    // pack the project has not adopted, and copying a manifest per frame
+    // would be most of what the page costs.
+    let installed = cx
+        .handles
+        .model_hub
+        .hub()
+        .map_or::<&[crate::state::model_hub::InstalledPack], _>(&[], |hub| hub.installed());
+    let mut render = ManagerRenderContext {
+        state: &mut *cx.state,
+        model: &mut *cx.model,
+        wb: &mut *cx.wb,
+        pending_actions: &mut pending_actions,
+    };
+    match page {
+        ModelsPage::Models => catalog_page(ui, &mut render, &hub_catalog, installed),
+        ModelsPage::Symbols => symbols::symbols_page(ui, &mut render),
+        ModelsPage::Corners => corners::corners_page(ui, &mut render),
+        ModelsPage::Bins => bins::bins_page(ui, &mut render),
+        ModelsPage::Include => include::include_page(
+            ui,
+            &mut render,
+            include_diagnostics
+                .as_ref()
+                .expect("include diagnostics are prepared for the include page"),
+        ),
     }
     divide_document_remainder(ui);
 
@@ -849,7 +842,6 @@ struct ProjectModelRow {
     /// not naming. Counted in the scan that took the first one: asking the
     /// consumer index again while painting would be a second read per row.
     usage_count: usize,
-    vectors: usize,
 }
 
 impl ProjectModelRow {
@@ -876,12 +868,12 @@ impl ProjectModelRow {
 }
 
 /// How much of the catalog row the source column takes, and where it ends.
-const SOURCE_COLUMN_FRACTION: f32 = 0.22;
-const SOURCE_COLUMN_END: f32 = 0.20 + 0.17 + SOURCE_COLUMN_FRACTION;
+const SOURCE_COLUMN_FRACTION: f32 = 0.26;
+const SOURCE_COLUMN_END: f32 = 0.22 + 0.17 + SOURCE_COLUMN_FRACTION;
 
 /// Where the status column begins, as a fraction of the catalog row: the sum
-/// of the five fractions the header above declares before it.
-const STATUS_COLUMN_START: f32 = 0.20 + 0.17 + 0.22 + 0.16 + 0.10;
+/// of the four fractions the header above declares before it.
+const STATUS_COLUMN_START: f32 = 0.22 + 0.17 + 0.26 + 0.20;
 
 /// One frame's worth of catalog derivation, kept together so every part of the
 /// page reads the same pass over the design.
@@ -996,7 +988,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
         // gutter out of their width whenever they overflow it. The header spans
         // the same track, so each heading stands over its own values; across
         // the whole width it drifted right column by column, and a model's
-        // vector count sat under the gap before "Vectors".
+        // status sat under the gap before "Status".
         let gutter = if rows.len() as f32 * ROW_H > table_h {
             ui.spacing().scroll.allocated_width()
         } else {
@@ -1008,11 +1000,10 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
                 ui,
                 "models-project-catalog-sort",
                 &[
-                    sort_column("Model", 0.20, ModelsCatalogSortKey::Model),
+                    sort_column("Model", 0.22, ModelsCatalogSortKey::Model),
                     sort_column("Family", 0.17, ModelsCatalogSortKey::Family),
-                    sort_column("Source", 0.22, ModelsCatalogSortKey::Source),
-                    sort_column("Used by", 0.16, ModelsCatalogSortKey::UsedBy),
-                    sort_column("Vectors", 0.10, ModelsCatalogSortKey::Vectors),
+                    sort_column("Source", 0.26, ModelsCatalogSortKey::Source),
+                    sort_column("Used by", 0.20, ModelsCatalogSortKey::UsedBy),
                     sort_column("Status", 0.15, ModelsCatalogSortKey::Status),
                 ],
                 sort.key,
@@ -1188,11 +1179,10 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
         ui,
         rect,
         &[
-            (&model, 0.20, true),
+            (&model, 0.22, true),
             (row.family, 0.17, false),
             (&source, SOURCE_COLUMN_FRACTION, false),
-            (&used_by, 0.16, true),
-            (&row.vectors.to_string(), 0.10, true),
+            (&used_by, 0.20, true),
             // The status cell is painted below, in its own tone.
             ("", 0.15, true),
         ],

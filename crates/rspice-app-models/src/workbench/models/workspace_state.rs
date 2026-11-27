@@ -66,7 +66,6 @@ pub enum ModelsCatalogSortKey {
     Family,
     Source,
     UsedBy,
-    Vectors,
     Status,
 }
 

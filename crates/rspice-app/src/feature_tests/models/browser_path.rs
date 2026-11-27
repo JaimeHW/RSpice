@@ -1,4 +1,4 @@
-//! The Models workspace along the browser model-qualification job's path,
+//! The Models workspace along the browser qualification's Models path,
 //! replayed through whole frames of the application: the palette's Library
 //! manager, the catalog's rows pressed where their announcements say they
 //! are and walked with the arrow keys, and the packs view of a build that

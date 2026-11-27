@@ -4,8 +4,8 @@
 //! most a screenful of parameter rows. It used to obtain them by cloning the
 //! selected model *and its whole library* out of the catalog, to get out from
 //! under the borrow the surrounding page holds — and a model library carries
-//! the retained bytes of its entire include closure, both namespace maps, every
-//! section's cards and the qualification state, so a megabyte-scale foundry
+//! the retained bytes of its entire include closure, both namespace maps and every
+//! section's cards, so a megabyte-scale foundry
 //! import was copied on every frame. Nothing made that conditional: the catalog
 //! force-selects a row whenever it is not empty.
 //!
@@ -63,7 +63,6 @@ struct SelectedModelDetail<'a> {
     /// authoring metadata for this model.
     typed_schema_fields: Option<usize>,
     envelope: DeclaredEnvelope,
-    qualification: Option<QualificationCounts>,
     /// The instances bound to this model, borrowed from the catalog page's one
     /// consumer index rather than copied out of it — or, for a family, its
     /// consumers and its bins' gathered together.
@@ -103,15 +102,6 @@ impl DeclaredEnvelope {
             && self.width == (None, None)
             && self.level.is_none()
     }
-}
-
-/// Retained qualification evidence, counted.
-struct QualificationCounts {
-    suites: usize,
-    vectors: usize,
-    evidence: usize,
-    releases: usize,
-    open_dispositions: usize,
 }
 
 /// Project the selected model, or say why there is nothing to paint.
@@ -252,23 +242,6 @@ fn project_selection<'a>(
             width: (model.w_min, model.w_max),
             level: model.spice_level.zip(model.model_version),
         },
-        qualification: library.model_qualification.get(&model.name).map(|state| {
-            QualificationCounts {
-                suites: state.suites.len(),
-                vectors: state
-                    .suites
-                    .iter()
-                    .map(|suite| suite.vectors.len())
-                    .sum::<usize>(),
-                evidence: state.evidence.len(),
-                releases: state.releases.len(),
-                open_dispositions: state
-                    .vector_dispositions
-                    .iter()
-                    .filter(|disposition| disposition.is_open())
-                    .count(),
-            }
-        }),
         usages,
         selected_component,
         binding_block_reason,
@@ -328,10 +301,7 @@ pub(super) fn selected_model_detail(
                     .color(t.color.text_dim),
                 );
                 // The band's own state, beside the identity it qualifies. Each
-                // word is a fact this pane already holds; nothing here is a
-                // verdict the release gate has not published — that page owns
-                // "qualified", and repeating it from weaker evidence is how two
-                // surfaces come to disagree about one model.
+                // word is a fact this pane already holds.
                 // "engine-owned" is gone: the SOURCE cell beside it reads
                 // "RSpice built-in" on exactly the same rows. So is "drift":
                 // it is shown on exactly the rows whose banner is painted
@@ -396,9 +366,6 @@ pub(super) fn selected_model_detail(
                     {
                         app.queue_model_binding(component_id, &detail.library, &detail.binding);
                     }
-                    if Button::new("Qualification").show(ui).clicked() {
-                        app.state.models_page = ModelsPage::Qualification;
-                    }
                     if Button::new(if detail.project_owned {
                         "Model editor…"
                     } else {
@@ -461,11 +428,10 @@ pub(super) fn selected_model_detail(
         // One row of equal columns filling the region: no outer scroll, so the
         // panes reach the panel's bottom edge and each one scrolls its own
         // rows. Anything less leaves the surface ending in dead space.
-        ui.columns(4, |columns| {
+        ui.columns(3, |columns| {
             parameter_card(&mut columns[0], &detail, region_h);
             declaration_card(&mut columns[1], &detail, app, region_h);
-            qualification_card(&mut columns[2], &detail, app, region_h);
-            usage_card(&mut columns[3], &detail, app, region_h);
+            usage_card(&mut columns[2], &detail, app, region_h);
         });
     } else if detail_width > 650.0 {
         let row_h = (region_h * 0.5).max(DETAIL_PANE_MIN_H);
@@ -477,10 +443,7 @@ pub(super) fn selected_model_detail(
                     parameter_card(&mut columns[0], &detail, row_h);
                     declaration_card(&mut columns[1], &detail, app, row_h);
                 });
-                ui.columns(2, |columns| {
-                    qualification_card(&mut columns[0], &detail, app, row_h);
-                    usage_card(&mut columns[1], &detail, app, row_h);
-                });
+                usage_card(ui, &detail, app, row_h);
             });
     } else {
         ScrollArea::vertical()
@@ -489,7 +452,6 @@ pub(super) fn selected_model_detail(
             .show(ui, |ui| {
                 parameter_card(ui, &detail, DETAIL_PANE_MIN_H);
                 declaration_card(ui, &detail, app, DETAIL_PANE_MIN_H);
-                qualification_card(ui, &detail, app, DETAIL_PANE_MIN_H);
                 usage_card(ui, &detail, app, DETAIL_PANE_MIN_H);
             });
     }
@@ -648,61 +610,6 @@ fn origin_property(ui: &mut Ui, name: &str, value: &str, origin: &str, reference
         theme::mono(tokens::FS_MICRO, FontWeight::Regular),
         t.color.text_faint,
     );
-}
-
-/// A counted row that opens the page the count is kept on.
-///
-/// The qualification column states five numbers a reader cannot act on where
-/// they are shown; the page that owns them is one route away and the card had
-/// no way in. Each row is that one route rather than five new controls — the
-/// action bar's "Qualification" button is the same destination, and this is
-/// the count itself being the way there.
-///
-/// Painted rather than built from links: this is a data row, and a column of
-/// five link widgets in a four-pane detail region reads as a form. The node it
-/// publishes carries the count, because nothing else painted here reaches a
-/// reader who cannot see it.
-fn routed_count(ui: &mut Ui, name: &str, value: &str, note: &str) -> egui::Response {
-    const INSET: f32 = 3.0;
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::click());
-    let announcement = format!("{name}: {value} · open Qualification");
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &announcement)
-    });
-    if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    theme::paint_focus_ring(ui, &response, rect);
-    let name_width = rect.width() * 0.30;
-    let value_width = rect.width() * 0.34;
-    let note_width = (rect.width() - name_width - value_width).max(1.0);
-    ui.painter().text(
-        egui::pos2(rect.left() + INSET, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        elide(ui, name, (name_width - INSET * 2.0).max(1.0), false),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    // The row's hover fill carries the affordance; accent in this product
-    // means the active item, not "this is clickable".
-    ui.painter().text(
-        egui::pos2(rect.left() + name_width + INSET, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        elide(ui, value, (value_width - INSET * 2.0).max(1.0), true),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text,
-    );
-    ui.painter().text(
-        egui::pos2(rect.right() - INSET, rect.center().y),
-        egui::Align2::RIGHT_CENTER,
-        elide(ui, note, (note_width - INSET * 2.0).max(1.0), false),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
-    response
 }
 
 fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
@@ -958,55 +865,6 @@ fn characteristic_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f3
                         "Bin ranges, threshold and supply are read from the card; nothing is inferred.",
                     );
                 }
-            }
-        },
-    );
-}
-
-fn qualification_card(
-    ui: &mut Ui,
-    detail: &SelectedModelDetail<'_>,
-    app: &mut ManagerRenderContext<'_>,
-    height: f32,
-) {
-    filled_detail_pane(
-        ui,
-        "Qualification",
-        Some("saved with the model source"),
-        height,
-        "models-detail-qualification",
-        |ui| {
-            if let Some(counts) = &detail.qualification {
-                // Every count is a way into the page that holds it — the same
-                // route the action bar's "Qualification" button takes, reached
-                // from the number a reader is already looking at.
-                let mut routed = false;
-                for (name, value, note) in [
-                    ("Suites", counts.suites, "retained"),
-                    ("Vectors", counts.vectors, "declared"),
-                    ("Runs", counts.evidence, "recorded"),
-                    ("Releases", counts.releases, "promoted"),
-                    (
-                        "Open dispositions",
-                        counts.open_dispositions,
-                        if counts.open_dispositions == 0 {
-                            "clean"
-                        } else {
-                            "review required"
-                        },
-                    ),
-                ] {
-                    routed |= routed_count(ui, name, &value.to_string(), note).clicked();
-                }
-                if routed {
-                    app.state.models_page = ModelsPage::Qualification;
-                }
-            } else {
-                empty_state(
-                    ui,
-                    "This model has no qualification suite.",
-                    "Qualification stays empty until a suite is saved and run against this source.",
-                );
             }
         },
     );

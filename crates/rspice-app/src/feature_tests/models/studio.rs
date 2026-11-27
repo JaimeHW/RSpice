@@ -13,9 +13,7 @@ use rspice_app_models::workbench::models::tests::painted_text;
 use rspice_app_models::workbench::models::workspace_state::{
     ModelsCatalogScope, ModelsOperationalState,
 };
-use rspice_app_state::state::model_library::{
-    DeviceModel, ModelLibrary, ModelQualificationState, ModelType,
-};
+use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use rspice_app_state::state::{Component, ComponentType, ModelsPage, Point};
 
 mod binned_family;
@@ -161,9 +159,6 @@ fn one_model_project() -> RSpiceApp {
     model.source_line = Some(41);
     model.parameters.insert("vto".to_owned(), 0.7);
     library.add_model(model);
-    library
-        .model_qualification
-        .insert("nch".to_owned(), ModelQualificationState::default());
     app.state.model.model_library_manager.add_library(library);
     rspice_app_models::workbench::models::workspace_state::select_library_or_prompt(
         &mut app.state.model,
@@ -274,28 +269,6 @@ fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
     assert!(!studio.announces(|label| label == ModelsOperationalState::Ready.consequence()));
 }
 
-/// A qualification count is a way into the page that holds it.
-///
-/// The card stated five numbers a reader could not act on where they were
-/// shown, beside an action bar whose "Qualification" button went exactly
-/// there. The counts are that same route rather than five new controls.
-#[test]
-fn a_qualification_count_opens_the_page_that_holds_it() {
-    let mut studio = ModelsStudio::open(one_model_project());
-    assert_eq!(
-        studio.app.state.models.models_page,
-        ModelsPage::Models,
-        "the studio opens on the catalog"
-    );
-
-    studio.click(|label| label.starts_with("Suites:"));
-
-    assert_eq!(
-        studio.app.state.models.models_page,
-        ModelsPage::Qualification
-    );
-}
-
 /// A parameter states where the card that declares it is written.
 ///
 /// "source card" alone is a claim a reader has no way to check; the file and
@@ -317,7 +290,7 @@ fn a_parameter_states_where_its_card_is_written() {
 /// The rows are laid out inside a scroll area, which takes its bar's gutter
 /// out of their width once they overflow it, while the header spanned the
 /// whole pane: each heading drifted right of its column by a share of the
-/// gutter, and a model's vector count sat under the gap before "Vectors".
+/// gutter, and a model's status sat under the gap before "Status".
 #[test]
 fn the_catalog_headings_stand_over_their_columns_while_the_rows_scroll() {
     let mut app = RSpiceApp::test_instance();

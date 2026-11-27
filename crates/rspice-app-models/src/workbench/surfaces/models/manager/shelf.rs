@@ -673,9 +673,6 @@ fn selected_part_detail(
                 part_name: hit.name.clone(),
             });
         }
-        if Button::new("Open qualification").show(ui).clicked() {
-            app.state.models_page = ModelsPage::Qualification;
-        }
         // Refused rather than merely greyed. On a browser build the source is
         // never readable, so this control was permanently disabled with no
         // tooltip and no node description — visible, dead, and silent about

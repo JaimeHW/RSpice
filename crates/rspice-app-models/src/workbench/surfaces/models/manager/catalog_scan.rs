@@ -91,14 +91,6 @@ pub(super) fn project_catalog_scan(
                     .first()
                     .map(|consumer| bindings::consumer_designator(consumer).to_owned()),
                 usage_count: usages.len(),
-                // Qualification is kept per card, so a family's vectors are
-                // its bins' together.
-                vectors: cards
-                    .iter()
-                    .filter_map(|card| library.model_qualification.get(&card.name))
-                    .flat_map(|qualification| &qualification.suites)
-                    .map(|suite| suite.vectors.len())
-                    .sum(),
             });
         }
     }
@@ -130,7 +122,6 @@ pub(super) fn sort_catalog_rows(rows: &mut [ProjectModelRow], sort: ModelsTableS
                 left.usage.as_deref().unwrap_or(""),
                 right.usage.as_deref().unwrap_or(""),
             ),
-            ModelsCatalogSortKey::Vectors => left.vectors.cmp(&right.vectors),
             ModelsCatalogSortKey::Status => catalog_status(left)
                 .label()
                 .cmp(catalog_status(right).label()),

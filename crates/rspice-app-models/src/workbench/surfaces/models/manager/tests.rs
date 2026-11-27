@@ -216,7 +216,7 @@ fn the_pin_action_names_whichever_reason_actually_blocks_it() {
 /// shuffling within its ties.
 #[test]
 fn ordering_the_catalog_is_total_under_every_column_and_reverses_whole() {
-    fn row(model: &str, library: &str, family: &'static str, vectors: usize) -> ProjectModelRow {
+    fn row(model: &str, library: &str, family: &'static str) -> ProjectModelRow {
         ProjectModelRow {
             library: library.to_owned(),
             model: model.to_owned(),
@@ -228,15 +228,14 @@ fn ordering_the_catalog_is_total_under_every_column_and_reverses_whole() {
             drifted: false,
             usage: None,
             usage_count: 0,
-            vectors,
         }
     }
 
     let original = || {
         vec![
-            row("nch", "beta", "NMOS", 4),
-            row("pch", "alpha", "PMOS", 1),
-            row("Nch", "alpha", "NMOS", 9),
+            row("nch", "beta", "NMOS"),
+            row("pch", "alpha", "PMOS"),
+            row("Nch", "alpha", "NMOS"),
         ]
     };
     let names = |rows: &[ProjectModelRow]| {
@@ -262,20 +261,6 @@ fn ordering_the_catalog_is_total_under_every_column_and_reverses_whole() {
     let mut expected = names(&rows);
     expected.reverse();
     assert_eq!(names(&reversed), expected);
-
-    // A numeric column orders by the number, not by its printed form.
-    let mut by_vectors = original();
-    sort_catalog_rows(
-        &mut by_vectors,
-        ModelsTableSort {
-            key: ModelsCatalogSortKey::Vectors,
-            descending: false,
-        },
-    );
-    assert_eq!(
-        by_vectors.iter().map(|row| row.vectors).collect::<Vec<_>>(),
-        [1, 4, 9]
-    );
 
     // A column whose cells are all equal still produces one order, and it is
     // the identity order.
@@ -304,7 +289,6 @@ fn the_status_column_orders_by_exactly_what_the_cell_says() {
         drifted: false,
         usage: None,
         usage_count: 0,
-        vectors: 0,
     };
     assert_eq!(catalog_status(&row).label(), "");
     row.pinned = true;
@@ -347,7 +331,6 @@ fn the_used_by_cell_names_one_consumer_and_counts_the_others() {
         drifted: false,
         usage: None,
         usage_count: 0,
-        vectors: 0,
     };
     assert_eq!(used_by_cell(&row), "");
     row.usage = Some("M1".to_owned());
