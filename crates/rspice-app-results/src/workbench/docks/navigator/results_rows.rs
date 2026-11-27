@@ -317,7 +317,7 @@ pub fn retained_result_artifacts(
                 gain,
             } => (
                 "payload/pole-zero",
-                "Poles, zeros, gain, and qualification",
+                "Poles and zeros",
                 ResultArtifactKind::Array,
                 poles.len() + zeros.len() + 3,
                 Some(format!(

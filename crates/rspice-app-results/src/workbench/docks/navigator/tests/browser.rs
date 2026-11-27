@@ -292,7 +292,7 @@ fn the_roots_the_pole_zero_plane_draws_are_a_ticked_row() {
     let row = |nodes: &[Node]| {
         nodes
             .iter()
-            .find(|node| node.label.starts_with("Select Poles, zeros"))
+            .find(|node| node.label.starts_with("Select Poles and zeros"))
             .cloned()
             .unwrap_or_else(|| panic!("no tick box for the roots: {:?}", labels(nodes)))
     };
