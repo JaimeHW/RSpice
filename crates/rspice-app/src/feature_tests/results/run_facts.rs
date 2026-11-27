@@ -116,10 +116,6 @@ fn run_details_shown_keeping(run: SimulationRun, deck: Option<&str>) -> Shown {
     }
 }
 
-fn run_details_rows(run: SimulationRun) -> Vec<(String, String)> {
-    run_details_shown(run).rows
-}
-
 fn names_a_row(shown: &Shown, name: &str) {
     assert!(
         shown.words.iter().any(|words| words == name),
@@ -211,6 +207,15 @@ fn temperature_sweep_run() -> SimulationRun {
         &["125", "-40", "27"],
         1,
     )];
+    run_generated_batch(state, SimulationRunLifecycle::Completed)
+}
+
+/// The divider's plan run across two supplies and two temperatures.
+fn pvt_run() -> SimulationRun {
+    let state = pvt::run_set_divider(
+        AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
+        &["-40", "125"],
+    );
     run_generated_batch(state, SimulationRunLifecycle::Completed)
 }
 
@@ -320,16 +325,27 @@ fn a_manual_deck_shows_what_its_deck_set() {
         ".end\n",
     ));
 
-    let rows = run_details_rows(run);
-    shows(&rows, "Temperature", "50 \u{b0}C");
-    shows(&rows, "rtop", "3k");
-    shows(&rows, "gain", "2");
-    shows(&rows, "RELTOL", "1e-4");
-    shows(&rows, "ABSTOL", "1e-10");
-    assert!(value(&rows, "Simulator").starts_with("RSpice "), "{rows:?}");
+    let shown = run_details_shown(run);
+    let rows = &shown.rows;
+    shows(rows, "Temperature", "50 \u{b0}C");
+    // Its `.temp` is the one temperature the summary states, and not a
+    // sweep of one point among its analyses.
+    assert!(
+        !shown
+            .words
+            .iter()
+            .any(|words| words.starts_with("Parametric Sweep")),
+        "{:?}",
+        shown.words
+    );
+    shows(rows, "rtop", "3k");
+    shows(rows, "gain", "2");
+    shows(rows, "RELTOL", "1e-4");
+    shows(rows, "ABSTOL", "1e-10");
+    assert!(value(rows, "Simulator").starts_with("RSpice "), "{rows:?}");
     // A deck no plan produced says what it was, and has no Plan row.
-    shows(&rows, "Source", "Manual deck");
-    shows_no(&rows, "Plan");
+    shows(rows, "Source", "Manual deck");
+    shows_no(rows, "Plan");
 }
 
 #[test]
@@ -364,4 +380,27 @@ R2 out 0 1k
         "{:?}",
         shown.rows
     );
+}
+
+#[test]
+fn a_pvt_run_states_its_supplies_and_names_each_row_by_its_point() {
+    let run = pvt_run();
+    let facts = run.facts.as_ref().expect("the run records what it set");
+    assert_eq!(facts.supplies, [1.62, 1.8]);
+
+    let shown = run_details_shown(run);
+    shows(&shown.rows, "Supply", "1.62 V to 1.8 V, 2 supplies");
+    // One corner is no range of corners.
+    shows_no(&shown.rows, "Process");
+    for point in [
+        "1.62 V, \u{2212}40",
+        "1.62 V, 125",
+        "1.8 V, \u{2212}40",
+        "1.8 V, 125",
+    ] {
+        names_a_row(
+            &shown,
+            &format!("DC Operating Point \u{b7} {point} \u{b0}C"),
+        );
+    }
 }

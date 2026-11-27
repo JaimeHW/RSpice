@@ -43,7 +43,8 @@ use crate::workbench::documents::result_document::operational_state::run_state_w
 use rspice_results::number_format::fmt_si_significant;
 use rspice_ui_kit::panels::Problem;
 use rspice_ui_kit::widgets::table::{
-    CELL_PAD, Cell, Column, DataTable, RowKey, TABLE_EDGE_INSET, TableState, fitted_width,
+    CELL_PAD, Cell, Column, DataTable, RowKey, TABLE_EDGE_INSET, TableState, fitted_plain_width,
+    fitted_width,
 };
 
 /// The run Run details… is open on, with its manifest taken once when the
@@ -497,6 +498,16 @@ fn summary(
         "Temperature",
         temperature_words(run.facts.as_ref()),
     ));
+    // The supply and the corners its points took, where the run set them:
+    // a deck's run left its own supply and models standing.
+    if let Some(facts) = run.facts.as_ref() {
+        if let Some(supply) = supply_words(&facts.supplies) {
+            lines.push(Line::new("Supply", supply));
+        }
+        if facts.processes.len() > 1 {
+            lines.push(Line::new("Process", facts.processes.join(", ")));
+        }
+    }
     // Stated only for a run whose checks reported something: a run that
     // checked nothing has not passed anything.
     if let Some(verdict) = run.check_verdict() {
@@ -526,6 +537,22 @@ fn temperature_words(facts: Option<&rspice_results::run_facts::RunFacts>) -> Str
             spice_coordinate(*last, "\u{b0}C"),
             temperatures.len()
         ),
+    }
+}
+
+/// The supply the run's points were set to: the one, or the range they
+/// stepped across; `None` for a run that set none.
+fn supply_words(supplies: &[f64]) -> Option<String> {
+    use rspice_results::number_format::reading_coordinate;
+    match supplies {
+        [] => None,
+        [only] => Some(reading_coordinate(*only, "V")),
+        [first, .., last] => Some(format!(
+            "{} to {}, {} supplies",
+            reading_coordinate(*first, "V"),
+            reading_coordinate(*last, "V"),
+            supplies.len()
+        )),
     }
 }
 
@@ -973,6 +1000,18 @@ fn analysis_words(
     }
 }
 
+/// Whether the run's `index`th analysis is a temperature "sweep" of one
+/// point, as a deck's `.temp 50` makes: the summary's Temperature row
+/// states that temperature, and the inventory does not list it again.
+fn states_one_temperature(run: &crate::state::SimulationRun, index: usize) -> bool {
+    use rspice_results::family_metadata::AnalysisResultFamilyMetadata as Family;
+    matches!(
+        run.analyses.get(index).and_then(|analysis| analysis.family_metadata.as_ref()),
+        Some(Family::Parametric { target, sweep_values, .. })
+            if sweep_values.len() == 1 && target.eq_ignore_ascii_case("temp")
+    )
+}
+
 /// The point `analysis` solved at, in the words that tell it from `run`'s
 /// other points: the sweep member it is, then its corner, supply,
 /// temperature and swept values where the run took more than one of each.
@@ -1038,6 +1077,9 @@ fn inventory_table(
         .collect();
     let mut lines = Vec::new();
     for index in 0..words.len() {
+        if rows_are_analyses && states_one_temperature(run, index) {
+            continue;
+        }
         lines.push(InventoryLine::Analysis(index));
         if open.contains(&index) {
             lines.extend(
@@ -1103,9 +1145,9 @@ fn inventory_table(
         Some((measured, widths)) if measured == shape => widths,
         _ => {
             let rows: Vec<Vec<Cell>> = (0..lines.len()).map(cells).collect();
-            // A tree draws no heads, so only the rows' words size a column.
+            // Plain rows draw no heads, so only the rows' words size a column.
             let widths = std::array::from_fn(|column| {
-                fitted_width(ui, "", rows.iter().filter_map(|row| row.get(column)))
+                fitted_plain_width(ui, rows.iter().filter_map(|row| row.get(column)))
             });
             ui.data_mut(|data| data.insert_temp(widths_id, (shape, widths)));
             widths
@@ -1128,6 +1170,7 @@ fn inventory_table(
         lines.len(),
     )
     .tree()
+    .plain_rows()
     .state(&mut state)
     .keys(&keys)
     .show(ui, cells);
