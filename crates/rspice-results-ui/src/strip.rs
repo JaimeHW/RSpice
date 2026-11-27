@@ -816,6 +816,10 @@ impl<'a> StripHeader<'a> {
             .auto_shrink([false, true])
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(&mut legend_ui, |ui| {
+                // A horizontal row is as tall as the interact height, and
+                // centres what it holds in that: the row's own height, so
+                // the chips and the action stand centred in the header.
+                ui.spacing_mut().interact_size.y = legend_rect.height();
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     for (index, chip) in legend.iter().enumerate() {
@@ -1028,7 +1032,10 @@ fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> (egui::Response, egui::Res
     let galley =
         ui.fonts_mut(|f| f.layout_no_wrap(chip.name.to_owned(), legend_chip_font(), c.text_dim));
     let (rect, allocation) = ui.allocate_exact_size(
-        vec2(legend_chip_width(galley.size().x), 20.0),
+        vec2(
+            legend_chip_width(galley.size().x),
+            rspice_ui_kit::widgets::compact_height(&t.metrics),
+        ),
         Sense::hover(),
     );
     let selection_rect = Rect::from_min_max(
