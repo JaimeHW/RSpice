@@ -11,7 +11,7 @@ use rspice_core::config::HdlPoint;
 use rspice_core::netlist::{AssertAnalysis, AssertLevel};
 use rspice_results::verification::{AssertionCheck, Check, CheckRow, SoaCheck};
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::{section_header, section_header_words};
 
 use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{card_well, property_row};
@@ -47,7 +47,7 @@ pub(super) fn check(ui: &mut Ui, model: &Model, session: &VerificationSessionSta
             at,
             origin,
         } => {
-            section_header(ui, severity_task(*severity), Some(status_word(row.status)));
+            section_header_words(ui, severity_task(*severity), Some(status_word(row.status)));
             property_row(ui, "Severity", severity.label());
             property_row(ui, "Text", text.trim());
             property_row(ui, "Time", &hdl_time(*at));
@@ -59,7 +59,7 @@ pub(super) fn check(ui: &mut Ui, model: &Model, session: &VerificationSessionSta
             }
         }
         Check::Finish(finish) => {
-            section_header(ui, finish.task.name(), Some(status_word(row.status)));
+            section_header_words(ui, finish.task.name(), Some(status_word(row.status)));
             property_row(ui, "Instance", &finish.instance);
             property_row(ui, "Model", &finish.model);
             property_row(ui, "Time", &finish_time(finish.point));
@@ -99,7 +99,7 @@ fn analysis_of<'m>(model: &'m Model, row: &CheckRow) -> Option<&'m crate::state:
 
 fn soa_rule(ui: &mut Ui, model: &Model, row: &CheckRow, soa: &SoaCheck) {
     let title = format!("{} {}", soa.device, soa_parameter_display(soa.parameter));
-    section_header(ui, &title, Some(status_word(row.status)));
+    section_header_words(ui, &title, Some(status_word(row.status)));
     // A rule's description is stated when it says more than its title.
     if !soa.description.is_empty() && !soa.description.eq_ignore_ascii_case(&title) {
         property_row(ui, "Rule", &soa.description);
@@ -181,7 +181,7 @@ fn soa_rule(ui: &mut Ui, model: &Model, row: &CheckRow, soa: &SoaCheck) {
 }
 
 fn assertion_card(ui: &mut Ui, model: &Model, row: &CheckRow, assertion: &AssertionCheck) {
-    section_header(ui, &assertion.name, Some(status_word(row.status)));
+    section_header_words(ui, &assertion.name, Some(status_word(row.status)));
     let report =
         analysis_of(model, row).and_then(|analysis| {
             analysis.checks.assertions.iter().find(|report| {

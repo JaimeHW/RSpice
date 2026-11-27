@@ -20,7 +20,7 @@ use egui::{Response, ScrollArea, Ui};
 
 use crate::state::OutlineEntry;
 use crate::state::{OutlineRow, OutlineSection, OutlineSectionKind};
-use crate::ui::panels::{WorkbenchIcon, section_header};
+use crate::ui::panels::{WorkbenchIcon, section_header, section_header_words};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::documents::netlist_document::{NetlistDocumentState, NetlistRoot};
@@ -291,7 +291,7 @@ pub(in crate::workbench) fn netlist(
             if !projection.include_rows.is_empty() {
                 let dependency_status = netlist_dependency_status(parts.model, parts.netlist)
                     .map(|id| messages.text(id));
-                section_header(
+                section_header_words(
                     ui,
                     &messages.text(MessageId::NetlistNavigatorIncludes),
                     dependency_status.as_deref(),

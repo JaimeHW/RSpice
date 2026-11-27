@@ -5,7 +5,7 @@
 //! keys act.
 
 use egui::{Key, TextEdit, Ui};
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::{section_header, section_header_words};
 
 use crate::state::{ConfigurationPlatform, ConfigurationSetDefinition};
 use crate::ui::theme::{self, FontWeight};
@@ -296,7 +296,7 @@ fn instance(
     let exact = instance_binding(definition, path);
     let own_views = exact.filter(|binding| !binding.executable_views.is_empty());
     let (inherited, inherited_stop) = inherited_views(definition, path, (library, cell));
-    section_header(
+    section_header_words(
         ui,
         "Binding",
         Some(if own_views.is_some() {
@@ -397,7 +397,7 @@ fn cell_facts(
     }
     let own_views = binding.filter(|binding| !binding.executable_views.is_empty());
     let inherited = definition.executable_view_policy.clone();
-    section_header(
+    section_header_words(
         ui,
         "Binding",
         Some(if own_views.is_some() {

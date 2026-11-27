@@ -602,8 +602,8 @@ fn settings_section(
     label_width: f32,
 ) {
     match lines {
-        None => section_header_words(ui, title, "Not recorded"),
-        Some([]) => section_header_words(ui, title, empty),
+        None => section_header_words(ui, title, Some("Not recorded")),
+        Some([]) => section_header_words(ui, title, Some(empty)),
         Some(lines) if lines.len() > OPEN_SETTINGS => {
             let fold = section_header_action(
                 ui,

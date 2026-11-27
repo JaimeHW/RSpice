@@ -20,8 +20,8 @@ mod format;
 use egui::Ui;
 
 use super::super::shared::{
-    action_stack, checks_status, count_label, findings_problem, sheet_floating_net_findings,
-    sheet_open_pin_findings,
+    action_stack, checks_current, checks_status, count_label, findings_problem,
+    sheet_floating_net_findings, sheet_open_pin_findings,
 };
 use crate::io::file_exchange::{self, FileKind};
 use crate::state::policy_labels::grid_pitch_label;
@@ -51,6 +51,7 @@ use rspice_schematic_editor::view::drawing_sheet::{ActiveDrawingSheet, decode_ow
 use rspice_ui_kit::panels::{
     PropertyRowAction, WorkbenchIcon, property_row_input_action_with_default,
     property_row_input_action_with_hint, section_header, section_header_explained,
+    section_header_words,
 };
 
 /// The sheet's inspector section over the parts it reads and writes: the
@@ -1077,7 +1078,14 @@ fn checks_section(ui: &mut Ui, model: &Model) {
     if open_pins.is_empty() && floating_nets.is_empty() {
         return;
     }
-    section_header(ui, "Checks", checks_status(model).as_deref());
+    // A current check's status is its count of errors; any other says why
+    // there is none to count, "not run" or "stale".
+    let status = checks_status(model);
+    if checks_current(model) {
+        section_header(ui, "Checks", status.as_deref());
+    } else {
+        section_header_words(ui, "Checks", status.as_deref());
+    }
     if !open_pins.is_empty() {
         property_row_problem(
             ui,

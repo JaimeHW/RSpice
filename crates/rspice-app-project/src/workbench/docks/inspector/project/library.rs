@@ -6,7 +6,7 @@
 
 use egui::Ui;
 use rspice_app_state::veriloga_library::BuiltinVerilogAModel;
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::{section_header, section_header_words};
 
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::DesignCheckStatus;
@@ -133,7 +133,7 @@ pub fn project_library(
     let read_only = library.is_some_and(|item| item.read_only);
     let refusal = description_refusal(model, read_only);
     let mut asked = None;
-    section_header(ui, "Selection", read_only.then_some("read-only"));
+    section_header_words(ui, "Selection", read_only.then_some("read-only"));
     // The view named whole, a name to a row as a property sheet names a
     // cell view, so a dock at its usual width holds each one; then the
     // cell's description and the file the view is kept in.
@@ -217,7 +217,7 @@ pub fn project_library(
     // the section is left out rather than shown empty.
     let usage = usage.filter(|usage| !usage.is_empty());
     if checks_meta.is_some() || checks.is_some() || usage.is_some() {
-        section_header(ui, "Validation", checks_meta);
+        section_header_words(ui, "Validation", checks_meta);
     }
     if let Some(checks) = &checks {
         property_row(ui, "Checks", checks);

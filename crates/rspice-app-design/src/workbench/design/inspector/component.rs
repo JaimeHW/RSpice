@@ -687,7 +687,7 @@ pub fn parameters_section(
     evidence: &ComponentModelEvidence,
 ) {
     let editable = !cx.model.schematic_edit_read_only();
-    section_header(ui, "Parameters", (!editable).then_some("read-only"));
+    section_header_words(ui, "Parameters", (!editable).then_some("read-only"));
     source_function_row(ui, cx, component, editable);
     // Every parameter the component editor offers is present, in its groups,
     // even on a freshly placed instance whose parameter string is still

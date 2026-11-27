@@ -2,7 +2,7 @@
 
 use egui::Ui;
 use rspice_results::noise::NoiseFigureEvidence;
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::section_header_words;
 use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::widgets::measurement_table;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ const STANDARD_REFERENCE_KELVIN: f64 = 290.0;
 /// second 190 px copy of it beside the rows, and the exact samples belong to
 /// the table viewer and the CSV export.
 pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, digits: usize) {
-    section_header(ui, "Noise figure", Some("SSB · dB"));
+    section_header_words(ui, "Noise figure", Some("SSB · dB"));
     let mut rows = vec![
         ("Input generator", figure.input_source.clone()),
         ("Source resistor", figure.source_resistor.clone()),

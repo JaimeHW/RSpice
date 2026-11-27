@@ -18,7 +18,7 @@ use rspice_design_model::{
 use rspice_ui_kit::panels::{
     PANEL_INSET, Problem, WorkbenchIcon, labeled_icon_button, panel_bleed, panel_inset,
     property_row, property_row_combo, property_row_combo_showing, property_row_input,
-    property_row_problem, section_block_gap, section_header,
+    property_row_problem, section_block_gap, section_header, section_header_words,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -493,7 +493,7 @@ fn pin_section(
 
     // The meta carries the unit the coordinate row below has no room to
     // state, in place of a port count the Netlist order row already gives.
-    section_header(ui, "Selected pin", Some(COORDINATE_UNIT));
+    section_header_words(ui, "Selected pin", Some(COORDINATE_UNIT));
 
     let mut changed = false;
     if let Some(new_name) = text_row(
@@ -823,7 +823,7 @@ fn shape_section(
         return false;
     };
     let before = document.clone();
-    section_header(
+    section_header_words(
         ui,
         "Selected shape",
         Some(&format!("{} · {COORDINATE_UNIT}", shape_kind(&shape))),
@@ -1091,7 +1091,7 @@ fn attribute_section(
     };
     let before = document.clone();
     let mut changed = false;
-    section_header(
+    section_header_words(
         ui,
         "Selected attribute",
         Some(&format!("{} · {COORDINATE_UNIT}", kind.key())),

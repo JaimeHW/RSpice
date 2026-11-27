@@ -73,26 +73,29 @@ pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
 }
 
 /// [`section_header`] whose metadata is words, not a figure — what a section
-/// with no rows holds, "None", or why it has none, "Not recorded" — in the
-/// UI's own face, as words are everywhere else on the panel.
-pub fn section_header_words(ui: &mut Ui, title: &str, words: &str) {
+/// with no rows holds, "None", what state it is in, "read-only", or why it
+/// has none, "Not recorded" — in the UI's own face, as words are everywhere
+/// else on the panel.
+pub fn section_header_words(ui: &mut Ui, title: &str, words: Option<&str>) {
     let _ = header(
         ui,
         Header {
-            meta: Some(words),
+            meta: words,
             meta_face: MetaFace::Words,
             ..Header::titled(title)
         },
     );
 }
 
-/// [`section_header`] whose metadata needs a sentence to be read correctly:
-/// `explanation` is the header's hover text in place of its own words.
-pub fn section_header_explained(ui: &mut Ui, title: &str, meta: &str, explanation: &str) {
+/// [`section_header_words`] whose words need a sentence to be read
+/// correctly, "All sheets" or "stale, rerun": `explanation` is the header's
+/// hover text in place of its own words.
+pub fn section_header_explained(ui: &mut Ui, title: &str, words: &str, explanation: &str) {
     let _ = header(
         ui,
         Header {
-            meta: Some(meta),
+            meta: Some(words),
+            meta_face: MetaFace::Words,
             explanation: Some(explanation),
             ..Header::titled(title)
         },

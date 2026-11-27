@@ -3,7 +3,7 @@
 use egui::Ui;
 use rspice_results::noise::NoiseSummary;
 pub use rspice_results::visualization_document::PinnedContributor;
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::{section_header, section_header_words};
 use rspice_ui_kit::plot::fmt_column_reading;
 use rspice_ui_kit::widgets::measurement_table;
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -145,7 +145,7 @@ pub fn right_panel(
         );
         return ContributorResponse::default();
     }
-    section_header(ui, "Contributors", Some("band-integrated"));
+    section_header_words(ui, "Contributors", Some("band-integrated"));
     let lines: Vec<ContributorLine<'_>> = summary
         .rows
         .iter()

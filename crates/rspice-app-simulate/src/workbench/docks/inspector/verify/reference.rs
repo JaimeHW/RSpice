@@ -3,7 +3,7 @@
 
 use egui::Ui;
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
-use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::panels::section_header_words;
 
 use crate::workbench::design_system::property_row;
 use crate::workbench::state::VerificationSessionState;
@@ -14,7 +14,11 @@ pub(super) fn reference(ui: &mut Ui, session: &VerificationSessionState) {
         muted_inspector_copy(ui, "No check selected");
         return;
     };
-    section_header(ui, &facts.title, Some(facts.result));
+    section_header_words(
+        ui,
+        &facts.title,
+        (!facts.result.is_empty()).then_some(facts.result),
+    );
     for (label, value) in &facts.rows {
         property_row(ui, label, value);
     }
