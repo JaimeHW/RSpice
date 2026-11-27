@@ -717,6 +717,8 @@ pub struct DataTable<'a> {
     reveal: bool,
     /// The revision of the rows' contents, when the page keeps one.
     revision: Option<u64>,
+    /// What follows the table draws a rule along its bottom edge.
+    ends_on_rule: bool,
 }
 
 /// A row dragged out of a table: the table, by the name it was built with,
@@ -992,7 +994,17 @@ impl<'a> DataTable<'a> {
             drops: false,
             reveal: false,
             revision: None,
+            ends_on_rule: false,
         }
+    }
+
+    /// The table ends on a rule of what follows it, as a dialog's body ends
+    /// on its footer's: a row whose bottom meets the body's bottom edge
+    /// leaves its own rule off, so the two do not stand as one line twice as
+    /// thick.
+    pub fn ends_on_rule(mut self) -> Self {
+        self.ends_on_rule = true;
+        self
     }
 
     /// The cell open for entry, painted as a field in its place.
@@ -1676,6 +1688,7 @@ impl<'a> DataTable<'a> {
                                     selected: marked.is_some() || chosen.contains(&index),
                                     selected_column: marked.and_then(|selection| selection.column),
                                     stateful: state.is_some(),
+                                    bottom: top + viewport.max.y,
                                 },
                                 cells,
                                 open,

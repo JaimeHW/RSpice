@@ -95,6 +95,8 @@ pub(super) struct RowPlace<'g> {
     pub(super) selected_column: Option<usize>,
     /// The table has state: it, not each row, holds the keyboard.
     pub(super) stateful: bool,
+    /// Where the body ends in view, in screen points.
+    pub(super) bottom: f32,
 }
 
 /// What one row reported back.
@@ -175,6 +177,7 @@ impl DataTable<'_> {
             selected,
             selected_column,
             stateful,
+            bottom,
         } = place;
         // A coarse pointer: the touch composition, or a finger the platform
         // reports under any other.
@@ -619,11 +622,15 @@ impl DataTable<'_> {
                 name,
             );
         }
-        ui.painter().hline(
-            rect.x_range(),
-            rect.bottom() - 0.5,
-            egui::Stroke::new(1.0, t.color.border),
-        );
+        // A row ending on the body's edge leaves its rule to what the table
+        // ends on, when that draws one.
+        if !(self.ends_on_rule && rect.bottom() >= bottom - 0.5) {
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom() - 0.5,
+                egui::Stroke::new(1.0, t.color.border),
+            );
+        }
         if !stateful && theme::focus_is_visible(ui.ctx(), &response) {
             theme::paint_focus_ring(ui, &response, rect);
         }

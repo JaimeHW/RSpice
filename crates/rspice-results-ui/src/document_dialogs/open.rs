@@ -113,12 +113,12 @@ pub fn show(ctx: &Context, draft: &mut OpenDraft, rows: &[OpenRow]) -> DialogCho
         .initial_focus(DialogInitialFocus::Control(filter))
         .primary_enabled(draft.chosen().is_some())
         .show_with_initial_body_focus(ctx, |ui| {
-            // The filter keeps the body's inset; the list under it runs to
-            // the form's two edges and down to its footer, with no frame of
-            // its own.
+            // The filter starts where the list's words do; the list under
+            // it runs to the form's two edges and down to its footer, with
+            // no frame of its own.
             ui.add_space(DIALOG_BODY_INSET);
             egui::Frame::NONE
-                .inner_margin(egui::Margin::symmetric(DIALOG_BODY_INSET as i8, 0))
+                .inner_margin(egui::Margin::symmetric(TABLE_EDGE_INSET as i8, 0))
                 .show(ui, |ui| filter_field(ui, filter, &mut draft.filter));
             ui.add_space(DIALOG_BODY_INSET);
             let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
@@ -153,6 +153,7 @@ pub fn show(ctx: &Context, draft: &mut OpenDraft, rows: &[OpenRow]) -> DialogCho
                         .state(&mut draft.table)
                         .keys(&keys)
                         .max_height(height)
+                        .ends_on_rule()
                         .show(ui, |index| {
                             let row = shown[index];
                             vec![
