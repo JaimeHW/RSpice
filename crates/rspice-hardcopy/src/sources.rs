@@ -32,13 +32,10 @@ pub use geometry::{
     authored_sheet_bounds, clipped_plot_paths, compact_display, map_plot_point, schematic_bounds,
     semantic_is_empty, source_set_member_from_resolved, union_bounds,
 };
-use geometry::{
-    canonical_annotation_semantics, canonical_cursor_semantics, canonical_marker_semantics,
-    form_layer_mapping, layer_mapping, mapping_entry, symbol_bounds,
-};
+use geometry::{form_layer_mapping, layer_mapping, mapping_entry, symbol_bounds};
 use mapping::default_print_mapping;
 pub(crate) use mapping::{SYMBOL_PRINT_INK, TRACE_PRINT_INKS, WIRE_PRINT_INK};
-pub use plots::{resolve_plot_source, resolve_visualization_pane_source};
+pub use plots::resolve_visualization_pane_source;
 pub use prepared::{PreparedRetainedHardcopyResolution, RetainedHardcopySourceInput};
 pub(crate) use quick_plot::PlotArea;
 pub(crate) use quick_plot::print_read;
@@ -77,11 +74,9 @@ use rspice_results::report_document::{
 };
 use rspice_results::result_presentation::ResultViewer;
 use rspice_results::visualization_document::{
-    AnnotationAnchor, AxisScale, PageId, PaneId, TypedValue, VisualizationDocument,
+    AxisScale, PageId, PaneId, VisualizationDocument,
 };
-use rspice_results::visualization_raster::{
-    ResolvedCartesianLineScene, VisualizationRasterError, resolve_cartesian_line_scene,
-};
+use rspice_results::visualization_raster::VisualizationRasterError;
 use rspice_vocabulary::product::ContentDigest;
 pub use schematic::{
     SchematicHardcopySelection, SchematicHardcopySource, SchematicSheetSetHardcopySource,
@@ -91,6 +86,7 @@ pub use semantic::*;
 use sha2::{Digest as _, Sha256};
 pub use visualization::{
     resolve_visualization_document_source, visualization_document_pane_source_key,
+    visualization_pane_title,
 };
 
 /// Natural physical scale for schematic coordinates.
@@ -124,13 +120,6 @@ pub(crate) const SYMBOL_VIEW_PIN_NAME_OFFSET_UM: (i64, i64) = (1_000, -800);
 /// The height of the sans face a symbol printed alone letters pin names in.
 pub(crate) const SYMBOL_VIEW_PIN_NAME_SIZE_UM: u64 = 2_300;
 pub const PLOT_INSET_UM: i64 = 12_700;
-
-pub struct PlotHardcopySource<'a> {
-    pub source_key: String,
-    pub display_name: String,
-    pub scene: &'a ResolvedCartesianLineScene,
-    pub scope: HardcopyScope,
-}
 
 /// Active result-document pane together with the immutable reference
 /// manifest that names its exact document revision and retained datasets.

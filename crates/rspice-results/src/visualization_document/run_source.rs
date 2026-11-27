@@ -212,6 +212,13 @@ pub struct RunSeriesSamples {
     /// An unavailable sample is written as `null`.
     #[serde(with = "unavailable_as_null")]
     y: Vec<f64>,
+    /// The unit the run states the values in; absent where it states none.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_unit_string"
+    )]
+    unit: Option<String>,
 }
 
 impl RunSeriesSamples {
@@ -229,7 +236,15 @@ impl RunSeriesSamples {
             component,
             x,
             y,
+            unit: None,
         }
+    }
+
+    /// The same samples, stated in `unit` (none for `None`).
+    #[must_use]
+    pub fn with_unit(mut self, unit: Option<String>) -> Self {
+        self.unit = unit;
+        self
     }
 
     #[must_use]
@@ -241,6 +256,12 @@ impl RunSeriesSamples {
     #[must_use]
     pub fn y(&self) -> &[f64] {
         &self.y
+    }
+
+    /// The unit the run states the values in, when it states one.
+    #[must_use]
+    pub fn unit(&self) -> Option<&str> {
+        self.unit.as_deref()
     }
 
     fn selects(&self, series: &SeriesKey) -> bool {
@@ -310,6 +331,12 @@ pub trait SourceSamples {
         range: Option<(f64, f64)>,
         columns: usize,
     ) -> Result<Option<FigurePoints>, RunNotHeld>;
+
+    /// The unit the run `binding` names states one series in; `None` where
+    /// it states none or the reader does not hold the run.
+    fn series_unit(&self, _binding: DatasetBinding, _series: &SeriesKey) -> Option<String> {
+        None
+    }
 }
 
 /// The points a figure draws of a tile over x in `x0 ..= x1`: a sample tile's rows with the
@@ -803,13 +830,16 @@ impl VisualizationDocument {
                     },
                 )?;
                 if let Some((x, y)) = read {
-                    embedded.push(RunSeriesSamples::new(
-                        key.analysis,
-                        key.name,
-                        key.component,
-                        x,
-                        y,
-                    ));
+                    // The unit travels with the samples, so a printed figure
+                    // reads each series in the unit the run states it in.
+                    let unit = match run.figure_samples(&key) {
+                        Some(carried) => carried.unit.clone(),
+                        None => samples.series_unit(binding, &key),
+                    };
+                    embedded.push(
+                        RunSeriesSamples::new(key.analysis, key.name, key.component, x, y)
+                            .with_unit(unit),
+                    );
                 }
             }
             run.set_figure_samples(embedded);
@@ -894,19 +924,7 @@ where
         columns: usize,
     ) -> Result<Option<FigurePoints>, RunNotHeld> {
         let run = self.run(binding).ok_or(RunNotHeld)?;
-        let Some(analysis) = run.analyses.iter().map(AsRef::as_ref).find(|analysis| {
-            crate::result_presentation::AnalysisPresentationKey::new(run.dataset_id, analysis)
-                .retained_instance_id()
-                == series.analysis
-        }) else {
-            return Ok(None);
-        };
-        let Some(waveform) = analysis
-            .waveforms
-            .iter()
-            .map(AsRef::as_ref)
-            .find(|waveform| waveform.name == series.name)
-        else {
+        let Some(waveform) = Self::waveform(run, series) else {
             return Ok(None);
         };
         let values = match series.component {
@@ -915,5 +933,39 @@ where
             SignalComponent::Imag => waveform.complex.as_ref().map(|complex| &complex.imag),
         };
         Ok(values.and_then(|values| figure_points(&waveform.x, values, range, columns)))
+    }
+
+    fn series_unit(&self, binding: DatasetBinding, series: &SeriesKey) -> Option<String> {
+        Self::waveform(self.run(binding)?, series)?.unit.clone()
+    }
+}
+
+#[cfg(feature = "engine-evidence")]
+impl<R, A, W> RetainedRunSamples<'_, R, A, W>
+where
+    R: AsRef<crate::run::SimulationRun<A>>,
+    A: AsRef<crate::analysis_result::AnalysisResult<W>>,
+    W: AsRef<crate::waveform::RetainedWaveform>,
+{
+    /// The retained waveform of `run` that `series` names, by its analysis
+    /// and its name.
+    fn waveform<'r>(
+        run: &'r crate::run::SimulationRun<A>,
+        series: &SeriesKey,
+    ) -> Option<&'r crate::waveform::RetainedWaveform>
+    where
+        A: 'r,
+        W: 'r,
+    {
+        let analysis = run.analyses.iter().map(AsRef::as_ref).find(|analysis| {
+            crate::result_presentation::AnalysisPresentationKey::new(run.dataset_id, analysis)
+                .retained_instance_id()
+                == series.analysis
+        })?;
+        analysis
+            .waveforms
+            .iter()
+            .map(AsRef::as_ref)
+            .find(|waveform| waveform.name == series.name)
     }
 }

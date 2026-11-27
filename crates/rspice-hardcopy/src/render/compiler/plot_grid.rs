@@ -1,11 +1,9 @@
 //! How a printed plot's grid is ruled.
 //!
-//! A plot that declares its gridlines gets those, captions and all: a
-//! logarithmic sweep is ruled at its decades, with the eight interior mantissas
-//! of each, because that is what its axis has. A plot that declares none keeps
-//! the frame's ten even divisions, which is what a linear sweep deserves — and
-//! what every plot used to get, including the frequency responses that have no
-//! even divisions to rule.
+//! A plot is ruled at the gridlines it declares, captions and all: a
+//! logarithmic sweep at its decades, with the eight interior mantissas of
+//! each, because that is what its axis has, and a linear one at the values
+//! its axis names. A plane is ruled by its own guides instead.
 
 use super::*;
 use crate::sources::report_layout::set_width;
@@ -24,14 +22,7 @@ const VALUE_DROP_UM: u64 = 700;
 const VALUE_ASCENT_UM: u64 = 950;
 
 impl SemanticSceneCompiler<'_> {
-    /// Rule the plot's grid.
-    ///
-    /// A plot that declares its gridlines gets those, captions and all: a
-    /// logarithmic sweep is ruled at its decades, with the eight interior
-    /// mantissas of each, because that is what its axis has. A plot that declares
-    /// none keeps the frame's ten even divisions, which is what a linear
-    /// sweep deserves and what every plot used to get — including the
-    /// frequency responses that have no even divisions to rule.
+    /// Rule the plot's grid at the gridlines and guides it declares.
     pub(super) fn plot_grid(
         &mut self,
         plot: &SemanticPlot,
@@ -45,21 +36,6 @@ impl SemanticSceneCompiler<'_> {
                 None,
             )
         };
-        // A plane ruled by its own guides, as a Smith chart is, has no even
-        // divisions to rule.
-        if plot.axis_ticks.is_empty() && plot.guides.is_empty() {
-            let bottom =
-                Length::from_micrometres(frame.y.micrometres() + frame.height.micrometres());
-            for division in 1..10_u64 {
-                let x = Length::from_micrometres(self.extent.width().micrometres() * division / 10);
-                self.primitives.push(ScenePrimitive::Line {
-                    from: ScenePoint::new(x, frame.y),
-                    to: ScenePoint::new(x, bottom),
-                    stroke: rule(120)?,
-                });
-            }
-            return Ok(());
-        }
         for guide in &plot.guides {
             let stroke = if guide.major {
                 StrokeStyle::try_new(

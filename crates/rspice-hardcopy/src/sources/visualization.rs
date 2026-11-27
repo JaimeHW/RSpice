@@ -2,6 +2,7 @@
 
 use super::*;
 use rspice_results::report_document::ReportSourceId;
+use rspice_results::visualization_document::{Page, Pane};
 use rspice_vocabulary::product::{ProjectId, ResultDocumentId};
 
 pub fn resolve_visualization_document_source(
@@ -15,9 +16,23 @@ pub fn resolve_visualization_document_source(
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
     let reference = visualization_document_reference(document)?;
     if !all_panes {
+        let (page, pane) = document
+            .panes()
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .and_then(|pane| {
+                let page = document.pages().iter().find(|page| page.id == pane.page_id)?;
+                Some((page, pane))
+            })
+            .ok_or_else(|| {
+                HardcopySourceError::UnretainedResult(format!(
+                    "pane {} is not present in the selected document revision",
+                    pane_id.get()
+                ))
+            })?;
         return resolve_visualization_pane_source(VisualizationPaneHardcopySource {
             source_key,
-            display_name: document.title().to_owned(),
+            display_name: visualization_pane_title(document, page, pane),
             document,
             reference: &reference,
             page_id,
@@ -52,7 +67,7 @@ pub fn resolve_visualization_document_source(
                     document.id(),
                     pane.id,
                 ),
-                display_name: format!("{} · {} · {}", document.title(), page.title, pane.title),
+                display_name: visualization_pane_title(document, page, pane),
                 document,
                 reference: &reference,
                 page_id: page.id,
@@ -88,6 +103,17 @@ pub fn resolve_visualization_document_source(
     })?;
     resolved = resolved.with_source_key(source_key)?;
     Ok(resolved)
+}
+
+/// What a printed pane is called: its document and the pane, with the page
+/// between them where the document has more than one.
+pub fn visualization_pane_title(document: &VisualizationDocument, page: &Page, pane: &Pane) -> String {
+    let mut parts = vec![document.title()];
+    if document.pages().len() > 1 {
+        parts.push(&page.title);
+    }
+    parts.push(&pane.title);
+    compact_display(&parts.join(" · "), "Result document pane")
 }
 
 pub fn visualization_document_pane_source_key(

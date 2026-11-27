@@ -340,7 +340,7 @@ pub(super) fn resolved_overlay_geometry(
     viewer: ResultViewer,
     overlay: &RetainedQuickViewOverlay,
     series: &[QuickResultSeries],
-    (x_scale, y_scale): (AxisScale, AxisScale),
+    (x_scale, y_scales): (AxisScale, &[AxisScale]),
     frames: &[PlotFrame],
     strip_of: &[usize],
     place: impl Fn(usize, SemanticPoint) -> SemanticPoint,
@@ -404,7 +404,10 @@ pub(super) fn resolved_overlay_geometry(
         let strip = strip_of.get(index).copied().unwrap_or(0);
         let frame = &frames[strip.min(last)];
         let source_y = overlay.marker_y(&source.points, marker.x);
-        let (Some(x), Some(y)) = (project(x_scale, marker.x), project(y_scale, source_y)) else {
+        let (Some(x), Some(y)) = (
+            project(x_scale, marker.x),
+            project(y_scales[strip.min(last)], source_y),
+        ) else {
             continue;
         };
         if x < frame.x_minimum || x > frame.x_maximum || y < frame.y_minimum || y > frame.y_maximum
@@ -503,7 +506,7 @@ mod tests {
             ResultViewer::Bode,
             &anchored_marker("V(out)"),
             &series,
-            (AxisScale::Linear, AxisScale::Linear),
+            (AxisScale::Linear, &[AxisScale::Linear]),
             &[frame()],
             &[0],
             |_, point| point,
@@ -541,7 +544,7 @@ mod tests {
             ResultViewer::Bode,
             &anchored_marker("V(in)"),
             &series,
-            (AxisScale::Linear, AxisScale::Linear),
+            (AxisScale::Linear, &[AxisScale::Linear]),
             &[frame()],
             &[0],
             |_, point| point,
@@ -565,7 +568,7 @@ mod tests {
             ResultViewer::Waves,
             &anchored_marker("V(out)"),
             &series,
-            (AxisScale::Linear, AxisScale::Linear),
+            (AxisScale::Linear, &[AxisScale::Linear]),
             &[frame()],
             &[0],
             |_, point| point,

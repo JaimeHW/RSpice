@@ -1,9 +1,26 @@
-//! Cartesian source projection from canonical retained visualization documents.
+//! A saved result document's pane, printed as its sheet prints.
+//!
+//! The pane is laid out by the builder that lays out a run's sheet: a strip
+//! for each unit under one abscissa, each ruled and valued, the abscissa
+//! named with its unit, the traces keyed in the sheet's colours, and the
+//! pane's cursors and markers standing on them. A pane the reader zoomed
+//! prints the window they pinned, and a strip they set logarithmic is ruled
+//! by its decades.
 
+use super::quick_plot::quick_plot_in;
+use super::result_view::{drawn_bounds, keyed_as_the_sheet, series_unit};
 use super::*;
+use rspice_results::analysis_type::AnalysisType;
+use rspice_results::bode::retained::response_signal;
+use rspice_results::nyquist::LOOP_PHASE_TRACE;
+use rspice_results::pane_figure::{PaneFigure, PaneFigureTrace, resolve_pane_figure};
+use rspice_results::result_presentation::{MarkerKind, MarkerOffset};
+use rspice_results::visualization_document::PlotMarkerKind;
 
-pub fn resolve_plot_source(
-    source: PlotHardcopySource<'_>,
+/// Resolve an active result-document pane without depending on a window,
+/// screenshot, framebuffer, or transient viewer cache.
+pub fn resolve_visualization_pane_source(
+    source: VisualizationPaneHardcopySource<'_>,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
     validate_label("source key", &source.source_key, SOURCE_KEY_LIMIT)?;
     validate_label("display name", &source.display_name, DISPLAY_NAME_LIMIT)?;
@@ -13,157 +30,254 @@ pub fn resolve_plot_source(
     ) {
         return Err(HardcopySourceError::UnsupportedScope(source.scope));
     }
-    // A pane printed as a page is mapped linearly; a logarithmic pane
-    // prints as a report figure, ruled by its decades.
-    source
-        .scene
-        .require_linear_axes()
-        .map_err(map_visualization_error)?;
-    if source.scene.traces().is_empty() {
-        return Err(HardcopySourceError::UnretainedResult(
-            "the active pane has no retained visible trace samples".to_owned(),
-        ));
-    }
-    let plot_width = PLOT_WIDTH_UM - 2 * PLOT_INSET_UM;
-    let plot_height = PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM;
-    let x_range = source.scene.x_range();
-    let y_range = source.scene.y_range();
-    let x_span = x_range.maximum - x_range.minimum;
-    let y_span = y_range.maximum - y_range.minimum;
-    if !x_span.is_finite() || !y_span.is_finite() || x_span <= 0.0 || y_span <= 0.0 {
-        return Err(HardcopySourceError::InvalidResultRange);
-    }
-    let mut traces = Vec::with_capacity(source.scene.traces().len());
-    for trace in source.scene.traces() {
-        if trace.points().is_empty() {
-            return Err(HardcopySourceError::UnretainedResult(format!(
-                "visible trace `{}` has no retained samples",
-                trace.label()
-            )));
-        }
-        let source_points = trace
-            .points()
-            .iter()
-            .map(|point| (point.x(), point.y()))
-            .collect::<Vec<_>>();
-        let paths = clipped_plot_paths(
-            &source_points,
-            x_range.minimum,
-            x_range.maximum,
-            y_range.minimum,
-            y_range.maximum,
-            plot_width,
-            plot_height,
-        )?;
-        traces.push(SemanticPlotTrace {
-            trace_id: trace.trace_id().get(),
-            label: trace.label().to_owned(),
-            paths,
-            source_samples: source_points
-                .iter()
-                .map(|(x, y)| (x.to_bits(), y.to_bits()))
-                .collect(),
-            companion: false,
-            palette_slot: None,
-            key: None,
-        });
-    }
-    let semantic = SemanticPlot {
-        viewer: ResultViewer::Waves,
-        page_id: source.scene.page_id().get(),
-        pane_id: source.scene.pane_id().get(),
-        // Refused above unless both axes are linear.
-        x_scale: AxisScale::Linear,
-        y_scale: AxisScale::Linear,
-        axis_ticks: Vec::new(),
-        traces,
-        cursors: source
-            .scene
-            .cursors()
-            .iter()
-            .filter_map(|cursor| canonical_cursor_semantics(source.scene, cursor))
-            .collect(),
-        markers: Vec::new(),
-        annotations: Vec::new(),
-        captions: Vec::new(),
-        frames: Vec::new(),
-        guides: Vec::new(),
-    };
-    let identity = HardcopySourceIdentity::try_new(
-        source.source_key,
-        HardcopyDocumentId::try_from_uuid(source.scene.document_id().as_uuid())
-            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        source.scene.revision(),
-        source.display_name,
-    )?;
-    finish_resolved(
-        identity,
-        source.scene.source_digest(),
-        HardcopyDocumentKind::PlotOrWorksheet,
-        source.scope,
-        HardcopySemanticDocument::Plot(semantic),
-        SemanticBounds::try_new(
-            SemanticPoint::new(0, 0),
-            SemanticPoint::new(PLOT_WIDTH_UM, PLOT_HEIGHT_UM),
-        )?,
-    )
-}
-
-/// Resolve an active result-document pane without depending on a window,
-/// screenshot, framebuffer, or transient viewer cache.
-pub fn resolve_visualization_pane_source(
-    source: VisualizationPaneHardcopySource<'_>,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let scene = resolve_cartesian_line_scene(
+    let figure = resolve_pane_figure(
         source.document,
         source.reference,
         source.page_id,
         source.pane_id,
     )
     .map_err(map_visualization_error)?;
-    let mut resolved = resolve_plot_source(PlotHardcopySource {
-        source_key: source.source_key,
-        display_name: source.display_name,
-        scene: &scene,
-        scope: source.scope,
-    })?;
-    let HardcopySemanticDocument::Plot(plot) = &mut resolved.semantic_document else {
-        unreachable!("plot source resolver always returns plot semantics")
-    };
-    plot.markers = source
-        .document
-        .markers()
-        .iter()
-        .filter(|marker| marker.pane_id == source.pane_id)
-        .map(|marker| canonical_marker_semantics(&scene, marker))
-        .collect();
-    plot.annotations = source
-        .document
-        .annotations()
-        .iter()
-        .filter(|annotation| annotation.pane_id == source.pane_id)
-        .map(|annotation| canonical_annotation_semantics(&scene, annotation))
-        .collect();
-    let content_digest = canonical_digest(
-        b"rspice-hardcopy-visualization-pane-v2",
-        &(scene.source_digest(), &resolved.semantic_document),
+    let plot = pane_plot(&figure, source.page_id, source.pane_id)?;
+    // Its strips take the page, as a sheet's do.
+    let bounds = drawn_bounds(&plot)?;
+    let semantic_document = HardcopySemanticDocument::Plot(plot);
+    let digest = canonical_digest(
+        b"rspice-hardcopy-visualization-pane-v3",
+        &(source.reference.content_digest, &semantic_document),
     )?;
-    let document_id = resolved.authority.document_id();
-    let revision = resolved.authority.revision();
-    let display_name = resolved.authority.display_name().to_owned();
-    let document_kind = resolved.authority.document_kind();
-    let scope = resolved.authority.scope().clone();
-    resolved.authority = ActiveHardcopySource::try_new(
-        document_id,
-        revision,
-        content_digest,
-        display_name,
-        document_kind,
-        scope,
+    let identity = HardcopySourceIdentity::try_new(
+        source.source_key,
+        HardcopyDocumentId::try_from_uuid(source.document.id().as_uuid())
+            .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
+        source.document.revision(),
+        source.display_name,
+    )?;
+    resolve_semantic_source(
+        identity,
+        digest,
+        HardcopyDocumentKind::PlotOrWorksheet,
+        source.scope,
+        semantic_document,
+        bounds,
     )
-    .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?;
-    resolved.default_print_mapping = default_print_mapping(&resolved.semantic_document)?;
-    Ok(resolved)
+}
+
+/// The page `figure` prints as: the page its sheet prints for the run.
+fn pane_plot(
+    figure: &PaneFigure,
+    page_id: PageId,
+    pane_id: PaneId,
+) -> Result<SemanticPlot, HardcopySourceError> {
+    let bode = figure.viewer_id == "viewer-bode";
+    let viewer = if bode {
+        ResultViewer::Bode
+    } else {
+        ResultViewer::Waves
+    };
+    let (series, keys): (Vec<_>, Vec<_>) = figure
+        .traces
+        .iter()
+        .map(|trace| printed_series(figure, trace, bode))
+        .unzip();
+    let overlay = pane_overlay(figure, &series)?;
+    let abscissa = match figure.analysis {
+        // A pane of a run states its abscissa as the run's sheet does.
+        Some(analysis) => {
+            let (quantity, unit, _, _) = analysis.axis_info();
+            QuickAbscissa::new(
+                quantity,
+                figure.x_axis.unit.as_deref().unwrap_or(unit),
+                figure.x_axis.scale,
+            )
+        }
+        None => QuickAbscissa::new(
+            figure.x_axis.label.clone(),
+            figure.x_axis.unit.clone().unwrap_or_default(),
+            figure.x_axis.scale,
+        ),
+    };
+    // A strip is logarithmic when the axis its traces read against is, or
+    // when the pane keeps its unit on a logarithmic axis, as the sheet keeps
+    // the scale of each unit pane. A plain number's pane is kept as "1".
+    let logarithmic = |axis: &rspice_results::visualization_document::Axis| {
+        axis.scale == AxisScale::Logarithmic
+    };
+    let log_units = figure
+        .traces
+        .iter()
+        .zip(&series)
+        .filter(|(trace, series)| {
+            let kept = if series.unit.is_empty() {
+                "1"
+            } else {
+                &series.unit
+            };
+            logarithmic(&trace.y_axis)
+                || figure
+                    .y_axes
+                    .iter()
+                    .any(|axis| axis.unit.as_deref() == Some(kept) && logarithmic(axis))
+        })
+        .map(|(_, series)| series.unit.clone())
+        .collect::<Vec<_>>();
+    let mut plot = quick_plot_in(
+        PlotArea::PAGE,
+        viewer,
+        &format!("result-document-page-{}", page_id.get()),
+        pane_id.get(),
+        series,
+        Some(&overlay),
+        &abscissa,
+        |unit| {
+            if log_units.iter().any(|log| log == unit) {
+                AxisScale::Logarithmic
+            } else {
+                AxisScale::Linear
+            }
+        },
+    )?;
+    keyed_as_the_sheet(&mut plot, &keys.into_iter().flatten().collect::<Vec<_>>());
+    Ok(plot)
+}
+
+/// One trace as its sheet prints it, and the name its key gives it where
+/// that is not its label. A Bode sheet draws a response's magnitude in
+/// decibels and its phase in degrees, each keyed without the unit its axis
+/// states.
+fn printed_series(
+    figure: &PaneFigure,
+    trace: &PaneFigureTrace,
+    bode: bool,
+) -> (QuickResultSeries, Option<(String, String)>) {
+    let identity = format!("{}:{}", trace.trace_id.get(), trace.signal);
+    let analysis = figure.analysis;
+    let response = bode
+        .then(|| analysis.and_then(|analysis| response_signal(analysis, &trace.signal)))
+        .flatten();
+    if let Some(signal) = response {
+        // A stability analysis retains its loop gain in decibels; every
+        // other response retains a linear magnitude, which has no decibels
+        // at zero.
+        let decibels = analysis == Some(AnalysisType::Stb);
+        let label = format!("|{signal}| (dB)");
+        let key = (label.clone(), format!("|{signal}|"));
+        let points = trace
+            .points
+            .iter()
+            .map(|&(frequency, gain)| match gain {
+                _ if decibels => (frequency, gain),
+                gain if gain > 0.0 => (frequency, 20.0 * gain.log10()),
+                _ => (frequency, f64::NAN),
+            })
+            .collect();
+        let series = QuickResultSeries {
+            identity,
+            label,
+            unit: "dB".to_owned(),
+            points,
+        };
+        return (series, Some(key));
+    }
+    if bode && (trace.signal.starts_with("phase(") || trace.signal.starts_with(LOOP_PHASE_TRACE)) {
+        let label = format!("{} (\u{b0})", trace.signal);
+        let key = (label.clone(), trace.signal.clone());
+        let series = QuickResultSeries {
+            identity,
+            label,
+            unit: "\u{b0}".to_owned(),
+            points: trace.points.clone(),
+        };
+        return (series, Some(key));
+    }
+    let series = QuickResultSeries {
+        identity,
+        label: trace.label.clone(),
+        unit: series_unit(
+            &trace.signal,
+            trace.unit.as_deref(),
+            trace.y_axis.unit.as_deref(),
+            analysis,
+        ),
+        points: trace.points.clone(),
+    };
+    (series, None)
+}
+
+/// The pane's cursors and markers as the reading a sheet's print carries,
+/// and the window the reader pinned it to.
+fn pane_overlay(
+    figure: &PaneFigure,
+    series: &[QuickResultSeries],
+) -> Result<RetainedQuickViewOverlay, HardcopySourceError> {
+    // A cursor is a full-height line at its abscissa, named as the pane
+    // names it: a marker that rides no trace.
+    let cursors = figure.cursors.iter().map(|cursor| RetainedQuickMarker {
+        label: match cursor.label.trim() {
+            "" => "Cursor".to_owned(),
+            label => label.to_owned(),
+        },
+        kind: MarkerKind::Note,
+        x: cursor.x,
+        trace_name: None,
+    });
+    // A marker is tagged as the sheet tags it, by its id and the reader's
+    // note, and rides the series of its trace; a limit stands across the
+    // strip, since it constrains the axis rather than one curve.
+    let markers = figure.markers.iter().filter_map(|marker| {
+        let index = figure
+            .traces
+            .iter()
+            .position(|trace| trace.trace_id == marker.trace_id)?;
+        let kind = marker_kind(marker.kind);
+        let id = format!("M{}", marker.marker_id.get());
+        let note = marker.label.trim();
+        let label = if note.is_empty() || note == figure.traces[index].label {
+            id
+        } else {
+            format!("{id} \u{b7} {note}")
+        };
+        Some(RetainedQuickMarker {
+            label,
+            kind,
+            x: marker.x,
+            trace_name: (kind != MarkerKind::Spec).then(|| series[index].label.clone()),
+        })
+    });
+    // A pinned ordinate names one axis's window, so it holds only where
+    // every trace reads against that axis.
+    let y = match figure.traces.as_slice() {
+        [first, rest @ ..] if rest.iter().all(|trace| trace.y_axis.id == first.y_axis.id) => {
+            first.y_axis.range
+        }
+        _ => None,
+    };
+    RetainedQuickViewOverlay::try_new(
+        None,
+        None,
+        None,
+        cursors.chain(markers).collect(),
+        RetainedCursorInterpolation::Linear,
+        Some(RetainedQuickViewport {
+            x: figure
+                .x_axis
+                .range
+                .map(|range| (range.minimum, range.maximum)),
+            y: y.map(|range| (range.minimum, range.maximum)),
+        }),
+    )
+}
+
+/// What a retained marker is on the sheet.
+const fn marker_kind(kind: PlotMarkerKind) -> MarkerKind {
+    match kind {
+        PlotMarkerKind::PointNote | PlotMarkerKind::MeasurementAnchor => MarkerKind::Note,
+        PlotMarkerKind::Peak { size } => MarkerKind::Peak(size),
+        PlotMarkerKind::Valley { size } => MarkerKind::Valley(size),
+        PlotMarkerKind::Crossing { level } => MarkerKind::Crossing(level),
+        PlotMarkerKind::SpecificationLine => MarkerKind::Spec,
+        PlotMarkerKind::VerticalLine => MarkerKind::Vertical,
+        PlotMarkerKind::Offset { from, by } => MarkerKind::Offset(MarkerOffset { from, by }),
+    }
 }
 
 fn map_visualization_error(error: VisualizationRasterError) -> HardcopySourceError {

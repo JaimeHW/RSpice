@@ -299,7 +299,7 @@ fn fact_row(figures: &[(String, String)]) -> Option<String> {
 /// What a plot draws, so that its strips take the page: from its left edge,
 /// where its values stand, to just past its frames and every word beside
 /// them. A plot of no frames, a plane, keeps its whole square box.
-fn drawn_bounds(plot: &SemanticPlot) -> Result<SemanticBounds, HardcopySourceError> {
+pub(super) fn drawn_bounds(plot: &SemanticPlot) -> Result<SemanticBounds, HardcopySourceError> {
     if plot.frames.is_empty() {
         return SemanticBounds::try_new(
             SemanticPoint::new(0, 0),
@@ -381,19 +381,30 @@ fn analysis_abscissa<W>(analysis: &AnalysisResult<W>, scale: AxisScale) -> Quick
     )
 }
 
-/// The unit a retained series reads in, as the sheet names it: the unit the
-/// producer stated, else the unit its name's accessor reads (`I(R1)` is
-/// amperes, `phase(V(out))` degrees, however wrapped), else the analysis's
-/// own quantity.
+/// The unit a retained series reads in, as the sheet names it.
 fn printed_unit(waveform: &RetainedWaveform, analysis: AnalysisType) -> String {
-    if let Some(unit) = &waveform.unit {
-        return unit.clone();
+    series_unit(&waveform.name, waveform.unit.as_deref(), None, Some(analysis))
+}
+
+/// The unit a series named `name` reads in, as the sheet names it: the unit
+/// its source `stated`, else the unit its name's accessor reads (`I(R1)` is
+/// amperes, `phase(V(out))` degrees, however wrapped), else the unit of the
+/// `axis` it reads against, else the quantity of the `analysis` it belongs
+/// to.
+pub(super) fn series_unit(
+    name: &str,
+    stated: Option<&str>,
+    axis: Option<&str>,
+    analysis: Option<AnalysisType>,
+) -> String {
+    if let Some(unit) = stated {
+        return unit.to_owned();
     }
     let accessor = |name: &str, accessor: &str| {
         name.get(..accessor.len())
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case(accessor))
     };
-    let mut name = waveform.name.trim_start();
+    let mut name = name.trim_start();
     if accessor(name, "phase(") {
         return "°".to_owned();
     }
@@ -404,22 +415,20 @@ fn printed_unit(waveform: &RetainedWaveform, analysis: AnalysisType) -> String {
     }
     let name = name.strip_prefix('|').unwrap_or(name);
     if accessor(name, "i(") {
-        "A"
+        return "A".to_owned();
     } else if accessor(name, "v(") {
-        "V"
+        return "V".to_owned();
     } else if accessor(name, "p(") {
-        "W"
-    } else if analysis == AnalysisType::Pstb {
-        ""
-    } else if analysis.is_bode_response() {
-        "dB"
-    } else if matches!(
-        analysis,
-        AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise
-    ) {
-        "V^2/Hz"
-    } else {
-        "V"
+        return "W".to_owned();
+    }
+    if let Some(unit) = axis {
+        return unit.to_owned();
+    }
+    match analysis {
+        None | Some(AnalysisType::Pstb) => "",
+        Some(analysis) if analysis.is_bode_response() => "dB",
+        Some(AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise) => "V^2/Hz",
+        Some(_) => "V",
     }
     .to_owned()
 }
@@ -600,7 +609,7 @@ fn quick_bode_plot<W: AsRef<RetainedWaveform>>(
 
 /// Name each trace in the key as the sheet's legend names it, the unit
 /// left to the axis: `keys` pairs a trace's label with its key.
-fn keyed_as_the_sheet(plot: &mut SemanticPlot, keys: &[(String, String)]) {
+pub(super) fn keyed_as_the_sheet(plot: &mut SemanticPlot, keys: &[(String, String)]) {
     for trace in &mut plot.traces {
         trace.key = keys
             .iter()

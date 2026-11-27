@@ -105,12 +105,13 @@ pub fn quick_plot_from_scaled_series(
         series,
         overlay,
         abscissa,
-        y_scale,
+        |_| y_scale,
     )
 }
 
 /// The same plot, its frames standing in `area`: a page of their own, or
-/// the box a report gives a figure.
+/// the box a report gives a figure. `y_scale` says how the strip of each
+/// unit maps its ordinate, as a sheet keeps a scale for each unit pane.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn quick_plot_in(
     area: PlotArea,
@@ -120,7 +121,7 @@ pub(crate) fn quick_plot_in(
     series: Vec<QuickResultSeries>,
     overlay: Option<&RetainedQuickViewOverlay>,
     abscissa: &QuickAbscissa,
-    y_scale: AxisScale,
+    y_scale: impl Fn(&str) -> AxisScale,
 ) -> Result<SemanticPlot, HardcopySourceError> {
     let x_scale = abscissa.scale;
     if series.is_empty() {
@@ -144,37 +145,6 @@ pub(crate) fn quick_plot_in(
     if let Some(overlay) = overlay {
         overlay.validate()?;
     }
-    // A logarithmic axis has no position for a non-positive value, so those
-    // samples are dropped rather than clamped — exactly as the sheet drops
-    // them. A series that is entirely non-positive on a log axis has nothing
-    // the page can show. Each projected point keeps the index of the sample
-    // it came from.
-    let projected = series
-        .iter()
-        .map(|series| {
-            series
-                .points
-                .iter()
-                .enumerate()
-                .filter_map(|(index, &(x, y))| {
-                    let y = if y.is_nan() {
-                        f64::NAN
-                    } else {
-                        project(y_scale, y)?
-                    };
-                    Some((index, (project(x_scale, x)?, y)))
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    if projected
-        .iter()
-        .any(|points| points.iter().all(|(_, (_, y))| y.is_nan()))
-    {
-        return Err(HardcopySourceError::InvalidRetainedWaveform(
-            "active viewer series has no sample its axis can place".to_owned(),
-        ));
-    }
     // One strip per unit, in the order the units first appear.
     let mut units: Vec<&str> = Vec::new();
     let strip_of = series
@@ -189,6 +159,39 @@ pub(crate) fn quick_plot_in(
                 })
         })
         .collect::<Vec<_>>();
+    let scales = units.iter().map(|unit| y_scale(unit)).collect::<Vec<_>>();
+    // A logarithmic axis has no position for a non-positive value, so those
+    // samples are dropped rather than clamped — exactly as the sheet drops
+    // them. A series that is entirely non-positive on a log axis has nothing
+    // the page can show. Each projected point keeps the index of the sample
+    // it came from.
+    let projected = series
+        .iter()
+        .zip(&strip_of)
+        .map(|(series, &strip)| {
+            series
+                .points
+                .iter()
+                .enumerate()
+                .filter_map(|(index, &(x, y))| {
+                    let y = if y.is_nan() {
+                        f64::NAN
+                    } else {
+                        project(scales[strip], y)?
+                    };
+                    Some((index, (project(x_scale, x)?, y)))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    if projected
+        .iter()
+        .any(|points| points.iter().all(|(_, (_, y))| y.is_nan()))
+    {
+        return Err(HardcopySourceError::InvalidRetainedWaveform(
+            "active viewer series has no sample its axis can place".to_owned(),
+        ));
+    }
     let (x_minimum, x_maximum) = available_range(
         projected
             .iter()
@@ -206,9 +209,10 @@ pub(crate) fn quick_plot_in(
     // reader pinned its window, as the sheet rules it.
     let lattices = units
         .iter()
-        .map(|unit| {
+        .zip(&scales)
+        .map(|(unit, scale)| {
             *unit == "\u{b0}"
-                && y_scale != AxisScale::Logarithmic
+                && *scale != AxisScale::Logarithmic
                 && !(units.len() == 1 && overlay.is_some_and(|overlay| overlay.pins_y()))
         })
         .collect::<Vec<_>>();
@@ -230,7 +234,7 @@ pub(crate) fn quick_plot_in(
                     let (low, high, _) = rspice_results::plot_axis::degree_lattice(fitted, 0);
                     (low, high)
                 }
-                Some(overlay) if units.len() == 1 => overlay.framed_y(y_scale, fitted),
+                Some(overlay) if units.len() == 1 => overlay.framed_y(scales[0], fitted),
                 _ => fitted,
             };
             let (y_minimum, y_maximum) = nondegenerate_range(y_minimum, y_maximum);
@@ -266,7 +270,7 @@ pub(crate) fn quick_plot_in(
         &rects,
         (&units, &lattices),
         abscissa,
-        y_scale,
+        &scales,
     )?;
     let (cursors, markers) = overlay.map_or_else(
         || Ok((Vec::new(), Vec::new())),
@@ -275,7 +279,7 @@ pub(crate) fn quick_plot_in(
                 viewer,
                 overlay,
                 &series,
-                (x_scale, y_scale),
+                (x_scale, &scales),
                 &frames,
                 &strip_of,
                 |strip, point| rects[strip].place(point),
@@ -332,7 +336,12 @@ pub(crate) fn quick_plot_in(
         page_id: stable_page_id(page),
         pane_id,
         x_scale,
-        y_scale,
+        // The scale every strip shares; strips that differ are each ruled
+        // on their own.
+        y_scale: match scales.as_slice() {
+            [first, rest @ ..] if rest.iter().all(|scale| scale == first) => *first,
+            _ => AxisScale::Linear,
+        },
         axis_ticks,
         traces,
         cursors,
@@ -373,7 +382,7 @@ fn strip_axes(
     rects: &[StripRect],
     (units, lattices): (&[&str], &[bool]),
     abscissa: &QuickAbscissa,
-    y_scale: AxisScale,
+    scales: &[AxisScale],
 ) -> Result<(Vec<SemanticAxisTick>, Vec<SemanticPlotCaption>), HardcopySourceError> {
     let mut ticks = Vec::new();
     let mut captions = Vec::new();
@@ -408,13 +417,19 @@ fn strip_axes(
             SemanticPoint::new(PLOT_INSET_UM, area.bottom() - 1_500),
         ));
     }
-    for (((frame, rect), unit), lattice) in frames.iter().zip(rects).zip(units).zip(lattices) {
+    for ((((frame, rect), unit), lattice), scale) in frames
+        .iter()
+        .zip(rects)
+        .zip(units)
+        .zip(lattices)
+        .zip(scales)
+    {
         let (mut horizontals, anchor) = if *lattice {
             let (_, _, values) =
                 rspice_results::plot_axis::degree_lattice((frame.y_minimum, frame.y_maximum), 0);
             (ruled_at(SemanticAxisKind::Vertical, frame, &values)?, None)
         } else {
-            ruled_axis(SemanticAxisKind::Vertical, y_scale, frame, unit)?
+            ruled_axis(SemanticAxisKind::Vertical, *scale, frame, unit)?
         };
         // The unit stands on the top value, where the sheet writes it.
         if let Some(top) = horizontals

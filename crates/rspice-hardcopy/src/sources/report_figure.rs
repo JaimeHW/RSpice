@@ -78,6 +78,6 @@ pub(crate) fn report_figure_plot(
         series,
         Some(&overlay),
         &abscissa,
-        figure.y_axis.scale,
+        |_| figure.y_axis.scale,
     )
 }

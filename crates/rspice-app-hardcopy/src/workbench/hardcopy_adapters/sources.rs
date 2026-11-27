@@ -323,10 +323,7 @@ pub fn enumerate_retained_hardcopy_sources(
     {
         descriptors.push(RetainedHardcopySourceDescriptor {
             source_key: visualization_document_pane_source_key(project_id, document.id(), pane.id),
-            display_name: compact_display(
-                &format!("{} · {} · {}", document.title(), page.title, pane.title),
-                "Result document pane",
-            ),
+            display_name: visualization_pane_title(document, page, pane),
             document_kind: HardcopyDocumentKind::PlotOrWorksheet,
             allowed_scopes: vec![
                 HardcopyScope::ActivePlotDocument,
@@ -1147,7 +1144,7 @@ fn visualization_document_pane_availability(
         return unavailable("the selected result pane is not bound to a run");
     }
     if pane.kind != crate::results::visualization_document::PaneKind::Cartesian
-        || pane.viewer_id != "viewer-waveform"
+        || !rspice_results::pane_figure::LINE_VIEWERS.contains(&pane.viewer_id.as_str())
     {
         return unavailable("the selected result pane has no semantic figure writer");
     }
