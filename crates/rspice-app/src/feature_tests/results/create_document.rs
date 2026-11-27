@@ -701,7 +701,7 @@ fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
     // document over a dataset's viewer and to add a pane over a document, and
     // the toolbar's tracking control exists only for a document. No plan
     // produced this run, so the control reads Historical.
-    const DATASET_STAGE: &str = "Create a dataset-bound result document";
+    const DATASET_STAGE: &str = "New result document…";
     const DOCUMENT_STAGE: &str = "Add a pane to this result document";
     const DOCUMENT_TOOLBAR: &str = "Historical";
 

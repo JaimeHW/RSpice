@@ -85,8 +85,8 @@ pub fn document_bar(
                     actions.create_document = viewer_picker(
                         ui,
                         WorkbenchIcon::Add,
-                        "Create result document…",
-                        "Create a dataset-bound result document",
+                        "New result document…",
+                        "New result document…",
                     );
                 }
                 DocumentBarSource::Document { .. } => {
@@ -145,8 +145,7 @@ pub fn viewer_tabs(
 
     // The strip lists only the sheets this dataset can feed. With 22 viewers
     // and a typical run feeding a handful, a full row of disabled tabs would
-    // bury the ones that work; the Create Result Document viewer list is
-    // where every viewer and its requirements are published.
+    // bury the ones that work.
     for viewer in available {
         if viewer_tab(ui, viewer, current == viewer) {
             clicked = Some(viewer);

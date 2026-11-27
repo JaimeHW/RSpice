@@ -25,7 +25,7 @@ closure.
 | `chrome`, `strip`, `presentation` | Results tab strips, viewer picker, instrument controls and export menu; the strip header every plot wears; shared plot navigation, readout cards and notes |
 | `table`, `virtual_rows` | The retained samples of one analysis as rows, and viewport-bounded row plans for the evidence tables |
 | `operational`, `manifest` | Operational status over host-classified evidence; dataset manifest tables and provenance readouts |
-| `create_document`, `document_dialogs`, `report` | The Create Result Document form; the forms opened over a result document (add pane, compare, family, measurement, properties); the report composer, inspector, preview and dialogs over a borrowed `ReportDocument` |
+| `create_document`, `document_dialogs`, `report` | The New result document form; the forms opened over a result document (add pane, compare, family, measurement, properties); the report composer, inspector, preview and dialogs over a borrowed `ReportDocument` |
 | `bode`, `nyquist`, `pole_zero`, `transfer_function` | Frequency-response, Nyquist, pole-zero and transfer-function viewers and inspectors |
 | `fft`, `harmonic_balance`, `phase_noise`, `noise_contrib`, `qpnoise` | The FFT viewer; retained coefficient spectra for HB, Fourier, recorded FFT and QPSS; phase noise; noise contributors and noise figure; QPNOISE integrals and rankings |
 | `smith_chart`, `polar`, `network_matrix` | Smith chart and polar views of retained S-parameter and complex responses; network-matrix cells |

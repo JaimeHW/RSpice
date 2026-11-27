@@ -556,7 +556,7 @@ pub(super) fn result_signal_context_menu(
         }
         let create = ui.add_enabled(
             exact_available,
-            egui::Button::new("Create result document..."),
+            egui::Button::new("New result document…"),
         );
         if let Some(error) = exact_error.as_deref() {
             create.clone().on_disabled_hover_text(error);
