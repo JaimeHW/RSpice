@@ -731,7 +731,7 @@ fn render_pane(
 ) -> Option<u64> {
     let is_active = pane.id.get() == active_pane_id;
     let viewer = pane_viewer(is_active, active_viewer, &pane.viewer_id);
-    persistent::pane_frame(ui, pane.id, is_active, |ui| {
+    persistent::pane_frame(ui, pane.id, |ui| {
         let activated_pane_id = pane_header(ui, state, pane, viewer, is_active);
         let digits = state
             .model

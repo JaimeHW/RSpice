@@ -108,26 +108,17 @@ fn bounded_inset(rect: Rect, requested: f32) -> Rect {
 }
 
 /// Draw a pane frame around host-composed controls and its qualified viewer.
-pub fn pane_frame<R>(
-    ui: &mut Ui,
-    pane_id: PaneId,
-    is_active: bool,
-    add_contents: impl FnOnce(&mut Ui) -> R,
-) -> R {
+///
+/// Every pane has the same hairline frame. The active pane is told apart by
+/// its header's title alone; an accent frame round the plot fought the traces.
+pub fn pane_frame<R>(ui: &mut Ui, pane_id: PaneId, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
     let rect = ui.available_rect_before_wrap();
     ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
     ui.painter().rect_stroke(
         rect,
         0.0,
-        egui::Stroke::new(
-            if is_active { 2.0 } else { 1.0 },
-            if is_active {
-                t.color.accent
-            } else {
-                t.color.border
-            },
-        ),
+        egui::Stroke::new(1.0, t.color.border),
         egui::StrokeKind::Inside,
     );
     ui.scope_builder(
@@ -356,12 +347,9 @@ pub fn pane_header(
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 25.0), Sense::click());
     // The header is interface chrome on the canvas-filled pane: an opaque
-    // panel, with the active pane's accent wash over it. The wash alone let
-    // the canvas through, and the interface's text sat dark on dark.
+    // panel, the same for every pane. The active pane's title reads in full
+    // text and the others' dim, which is mark enough without a wash.
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-    if is_active {
-        ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
-    }
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
@@ -377,14 +365,18 @@ pub fn pane_header(
                 ui,
                 RichText::new(display_title)
                     .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                    .color(t.color.text),
+                    .color(if is_active {
+                        t.color.text
+                    } else {
+                        t.color.text_dim
+                    }),
                 egui::TextWrapMode::Extend,
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 painted_label(
                     ui,
-                    // Secondary text: the tertiary tone fell to 4.04:1 on the
-                    // active pane's wash in the dark interface.
+                    // Secondary text: the tertiary tone reads too faint on
+                    // the header panel in the dark interface.
                     RichText::new(viewer_title)
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_dim),
