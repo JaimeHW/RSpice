@@ -53,6 +53,49 @@ pub fn x_axis_caption(quantity: &str, unit: &str) -> String {
     }
 }
 
+/// The height of the line under a row's values that a caption too long for
+/// the gutter reads on (see [`x_caption_fits_gutter`]).
+pub const X_CAPTION_BELOW_HEIGHT: f32 = 12.0;
+
+/// Whether `caption` reads on one line in the gutter between a row's left
+/// edge `row_left` and its plot's left edge `plot_left`. One that does not
+/// stands under the row's values instead ([`paint_x_caption_below`]), whole,
+/// rather than cut to the gutter's width.
+pub fn x_caption_fits_gutter(
+    painter: &Painter,
+    caption: &str,
+    row_left: f32,
+    plot_left: f32,
+) -> bool {
+    let column = plot_left - X_CAPTION_GAP - row_left - CAPTION_EDGE;
+    let gutter_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    painter
+        .layout_no_wrap(caption.to_owned(), gutter_font, Color32::PLACEHOLDER)
+        .size()
+        .x
+        <= column
+}
+
+/// Paint `caption` on the line under the values of the row `row`, centred
+/// under the plot spanning `plot`: where a caption too long for the gutter
+/// reads in full. Returns where it stands.
+pub fn paint_x_caption_below(
+    painter: &Painter,
+    row: Rect,
+    plot: Rangef,
+    caption: &str,
+    t: &Tokens,
+) -> Rect {
+    let gutter_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    let galley = painter.layout_no_wrap(caption.to_owned(), gutter_font, t.color.text_faint);
+    let left = (plot.center() - galley.size().x * 0.5).max(row.left() + CAPTION_EDGE);
+    let top = row.top() + X_AXIS_ROW_HEIGHT + (X_CAPTION_BELOW_HEIGHT - galley.size().y) * 0.5;
+    let at = pos2(left, top);
+    let placed = Rect::from_min_size(at, galley.size());
+    painter.galley(at, galley, t.color.text_faint);
+    placed
+}
+
 /// An abscissa as its row draws it.
 pub struct XAxisRow<'a> {
     /// The ticks of the range the plot above shows.

@@ -61,6 +61,7 @@ pub use spec::{
     padded_fit, trace_cache_key,
 };
 pub use x_row::{
-    X_AXIS_ROW_HEIGHT, X_CAPTION_GAP, XAxisRow, paint_x_axis_band, paint_x_axis_row,
-    x_axis_caption, x_axis_value_spans,
+    X_AXIS_ROW_HEIGHT, X_CAPTION_BELOW_HEIGHT, X_CAPTION_GAP, XAxisRow, paint_x_axis_band,
+    paint_x_axis_row, paint_x_caption_below, x_axis_caption, x_axis_value_spans,
+    x_caption_fits_gutter,
 };

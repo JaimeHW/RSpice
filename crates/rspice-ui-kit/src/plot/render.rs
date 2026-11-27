@@ -115,10 +115,40 @@ pub type ReadoutRow = (String, String);
 /// space — for callers that pre-bake size-dependent resources (textures)
 /// before handing the spec over.
 pub fn plot_rect(ui: &Ui, spec: &PlotSpec<'_>) -> Rect {
+    let rect = ui.available_rect_before_wrap();
+    let left = left_margin(ui, spec);
     on_whole_rows(
-        inner_rect(ui.available_rect_before_wrap(), spec, left_margin(ui, spec)),
+        framed_rect(rect, spec, left, x_caption_below(ui, spec, rect, left)),
         ui.pixels_per_point(),
     )
+}
+
+/// What the X row's gutter says ([`super::x_axis_caption`]).
+fn x_caption(spec: &PlotSpec<'_>) -> String {
+    super::x_axis_caption(spec.x.label.as_deref().unwrap_or(""), &spec.x.unit)
+}
+
+/// Whether the X row's caption stands under its values: an X row is drawn
+/// and its caption is too long for the gutter of a plot in `rect` whose
+/// left margin is `left`.
+fn x_caption_below(ui: &Ui, spec: &PlotSpec<'_>, rect: Rect, left: f32) -> bool {
+    spec.x_axis_chrome
+        && !super::x_caption_fits_gutter(
+            ui.painter(),
+            &x_caption(spec),
+            rect.left(),
+            rect.left() + left,
+        )
+}
+
+/// [`inner_rect`], with room under the X row for its caption when it
+/// stands there.
+fn framed_rect(rect: Rect, spec: &PlotSpec<'_>, left: f32, caption_below: bool) -> Rect {
+    let mut inner = inner_rect(rect, spec, left);
+    if caption_below {
+        inner.max.y -= super::X_CAPTION_BELOW_HEIGHT;
+    }
+    inner
 }
 
 /// The unit `axis` states a data-space value in: its own, unless its ticks
@@ -1233,8 +1263,10 @@ pub fn show(
         node.set_role(egui::accesskit::Role::GraphicsDocument);
     });
     let labels = label_margin(ui, spec);
+    let left = spec.left_margin.max(labels);
+    let caption_below = x_caption_below(ui, spec, rect, left);
     let plot_rect = on_whole_rows(
-        inner_rect(rect, spec, spec.left_margin.max(labels)),
+        framed_rect(rect, spec, left, caption_below),
         ui.pixels_per_point(),
     );
 
@@ -1409,21 +1441,24 @@ pub fn show(
     if spec.x_axis_chrome {
         let row = Rect::from_min_max(pos2(rect.left(), plot_rect.bottom()), rect.right_bottom());
         super::paint_x_axis_band(&painter, row, &t);
-        out.x_label_rect = Some(super::paint_x_axis_row(
+        let caption = x_caption(spec);
+        let in_gutter = super::paint_x_axis_row(
             &painter,
             row,
             super::XAxisRow {
                 axis: &spec.x,
                 scale: spec.x_scale,
                 plot: plot_rect.x_range(),
-                caption: &super::x_axis_caption(
-                    spec.x.label.as_deref().unwrap_or(""),
-                    &spec.x.unit,
-                ),
+                caption: if caption_below { "" } else { &caption },
                 keep_clear: &[],
             },
             &t,
-        ));
+        );
+        out.x_label_rect = Some(if caption_below {
+            super::paint_x_caption_below(&painter, row, plot_rect.x_range(), &caption, &t)
+        } else {
+            in_gutter
+        });
     }
     // ---- reference lines
     let ref_stroke = Stroke::new(hair, c.canvas_text_faint);
