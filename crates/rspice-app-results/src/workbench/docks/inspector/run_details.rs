@@ -27,7 +27,7 @@ use egui::{Context, Ui};
 use super::super::super::design_system::{
     FACT_MARK_ROOM, Fact, fact_label_width, fact_rows_on, panel_bleed, panel_body,
     property_row_wrapped, section_block_gap, section_header, section_header_action,
-    subsection_header,
+    section_header_words, subsection_header,
 };
 use super::result_authority::forced_lte_acceptances;
 use crate::state::{SimulationRunLifecycle, SimulationState};
@@ -602,8 +602,8 @@ fn settings_section(
     label_width: f32,
 ) {
     match lines {
-        None => section_header(ui, title, Some("Not recorded")),
-        Some([]) => section_header(ui, title, Some(empty)),
+        None => section_header_words(ui, title, "Not recorded"),
+        Some([]) => section_header_words(ui, title, empty),
         Some(lines) if lines.len() > OPEN_SETTINGS => {
             let fold = section_header_action(
                 ui,
@@ -649,21 +649,23 @@ fn inputs(
     match &manifest.authority {
         Some(authority) => {
             lines.push(Line::new("Source", sentence(&authority.source_domain)));
-            let plan_line = match (&authority.simulation_plan_id, plan_block) {
-                (None, _) => Line::new("Plan", "None, a manual deck"),
-                (Some(_), Some(None)) => {
-                    plan = Some(lines.len());
-                    Line::new("Plan", "Simulation plan").linked(
-                        "Opens the Analyses page of the plan that produced this run, with the \
-                         producing analysis selected",
-                    )
-                }
-                (Some(_), Some(Some(reason))) => {
-                    Line::new("Plan", "Simulation plan").whole(sentence(reason))
-                }
-                (Some(_), None) => Line::new("Plan", "Simulation plan"),
-            };
-            lines.push(plan_line);
+            if let Some(id) = run
+                .prepared_receipt()
+                .and_then(|receipt| receipt.simulation_plan_id())
+            {
+                let name = plan_name(model, run, id);
+                lines.push(match plan_block {
+                    Some(None) => {
+                        plan = Some(lines.len());
+                        Line::new("Plan", name).linked(
+                            "Opens the Analyses page of the plan that produced this run, with \
+                             the producing analysis selected",
+                        )
+                    }
+                    Some(Some(reason)) => Line::new("Plan", name).whole(sentence(reason)),
+                    None => Line::new("Plan", name),
+                });
+            }
             // The design the run elaborated, by the name it ran under; its
             // identity and revision are with the identifiers.
             if let Some(recorded) = run
@@ -684,10 +686,50 @@ fn inputs(
             ));
             lines.push(Line::new("Source check", sentence(&authority.source_check)));
         }
-        None => lines.push(Line::new("Inputs", "Not recorded for this run")),
+        None => {
+            // An imported dataset carries no receipt; the files it was read
+            // from say where it came from.
+            let mut files: Vec<&str> = Vec::new();
+            for analysis in &run.analyses {
+                if let Some(source) = &analysis.import_source
+                    && !files.contains(&source.source_name.as_str())
+                {
+                    files.push(&source.source_name);
+                }
+            }
+            if files.is_empty() {
+                lines.push(Line::new("Inputs", "Not recorded for this run"));
+            } else {
+                lines.push(Line::new("Source", "Imported dataset"));
+                lines.push(Line::new(
+                    if files.len() == 1 { "File" } else { "Files" },
+                    files.join(", "),
+                ));
+            }
+        }
     }
     let deck = executed_deck::lines(&mut lines, executed);
     Inputs { lines, plan, deck }
+}
+
+/// The name of the plan `id` that produced `run`: the name it had when the
+/// run started, else the name the project gives it now.
+fn plan_name(
+    model: &Model,
+    run: &crate::state::SimulationRun,
+    id: crate::product::SimulationPlanId,
+) -> String {
+    run.facts
+        .as_ref()
+        .map(|facts| facts.plan.clone())
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            model
+                .sim_setup
+                .plan_name(id)
+                .map(|name| name.as_str().to_owned())
+        })
+        .unwrap_or_else(|| "Not recorded".to_owned())
 }
 
 /// `words` with a capital first letter.
@@ -874,6 +916,12 @@ fn analysis_words(
         ),
         _ => (kind.to_owned(), None),
     };
+    // A run of several points names each row by its point, as a sweep's
+    // member is named everywhere: `DC Operating Point \u{b7} 125 \u{b0}C`.
+    let name = match point_words(run, analysis) {
+        Some(point) => format!("{name} \u{b7} {point}"),
+        None => name,
+    };
     let kept = match (analysis.waveforms.len(), &analysis.dc_op) {
         (0, Some(op)) => Some(format!(
             "{} node voltages, {} currents",
@@ -908,6 +956,28 @@ fn analysis_words(
         state,
         problem,
         why,
+    }
+}
+
+/// The point `analysis` solved at, in the words that tell it from `run`'s
+/// other points: the sweep member it is, then its corner, supply,
+/// temperature and swept values where the run took more than one of each.
+/// `None` for a run of one point.
+fn point_words(
+    run: &crate::state::SimulationRun,
+    analysis: &crate::state::AnalysisResult,
+) -> Option<String> {
+    let member = analysis
+        .family_member()
+        .map(rspice_results::provenance::AnalysisResultFamilyMember::label);
+    let point = run
+        .facts
+        .as_ref()
+        .zip(analysis.provenance().and_then(|provenance| provenance.pvt_point()))
+        .and_then(|(facts, point)| facts.point_words(point));
+    match (member, point) {
+        (Some(member), Some(point)) => Some(format!("{member}, {point}")),
+        (member, point) => member.or(point),
     }
 }
 
