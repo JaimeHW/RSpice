@@ -855,7 +855,7 @@ pub fn show(
     // Deferred state mutations (collected while iterating immutably).
     let mut toggle_maximize: Option<AnalysisPresentationKey> = None;
     let mut close_strip: Option<AnalysisPresentationKey> = None;
-    let mut fit_strip: Option<AnalysisPresentationKey> = None;
+
     let mut toggle_expr: Option<(AnalysisPresentationKey, usize)> = None;
     let mut remove_expr: Option<(AnalysisPresentationKey, usize)> = None;
     let mut open_editor: Option<AnalysisPresentationKey> = None;
@@ -995,15 +995,11 @@ pub fn show(
                         // add an expression. Every curve, an expression's as
                         // a signal's, is named once: in the legend of the
                         // pane that draws it, or as the lane it draws.
-                        let zoomed = host
-                            .session()
-                            .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
                         let header = StripHeader::new(&model.kind_tag, strip_subtitle(model), &[])
                             .id_salt(model.analysis_key)
                             .incomplete(model.incomplete)
                             .maximized(maximized)
                             .closable(closable)
-                            .zoomed(zoomed)
                             .expr_action(pane_chrome)
                             .expr_trailing(control_row)
                             .height(if control_row {
@@ -1034,9 +1030,6 @@ pub fn show(
                         }
                         if header.close_clicked {
                             close_strip = Some(model.analysis_key);
-                        }
-                        if header.fit_clicked {
-                            fit_strip = Some(model.analysis_key);
                         }
                         if header.add_expr_clicked {
                             open_editor = Some(model.analysis_key);
@@ -1102,9 +1095,6 @@ pub fn show(
         {
             results.clear_cursors();
         }
-    }
-    if let Some(key) = fit_strip {
-        results.reset_analysis_plot_view(ResultViewer::Waves, key);
     }
     if let Some((analysis, index)) = toggle_expr
         && let Some(expr) = results

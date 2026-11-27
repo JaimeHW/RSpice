@@ -1444,58 +1444,6 @@ fn a_panes_plot_menu_turns_its_own_y_axis_logarithmic_and_its_unit_says_so() {
     );
 }
 
-/// Fit joins a document pane's control row only while its strip is zoomed,
-/// at the group's left end with the gap the row's buttons keep, so no other
-/// control moves; pressed, it goes again.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn fit_joins_the_control_row_at_its_left_end_only_while_the_strip_is_zoomed() {
-    use egui::accesskit::Role;
-    let mut window = ResultsWindow::new();
-    window.create("Transient review").expect("document commits");
-    let nodes = window.settled_frames();
-    assert!(
-        labelled(&nodes, Role::Button, "Fit").is_none(),
-        "an unzoomed strip offers no Fit"
-    );
-    let (_, expression) =
-        labelled(&nodes, Role::Button, "+ Expression").expect("the row's + Expression");
-    let plot = nodes
-        .iter()
-        .filter(|(_, node)| {
-            node.role() == Role::GraphicsDocument
-                && node
-                    .label()
-                    .is_some_and(|label| label.starts_with("Waveform plot"))
-        })
-        .find_map(|(_, node)| node_rect(node))
-        .expect("the top pane's plot");
-    window.frames(vec![
-        egui::Event::PointerMoved(plot.center()),
-        egui::Event::Zoom(2.0),
-    ]);
-    let nodes = window.settled_frames();
-    let (fit, at) = labelled(&nodes, Role::Button, "Fit").expect("a zoomed strip offers Fit");
-    let (_, moved) =
-        labelled(&nodes, Role::Button, "+ Expression").expect("the row's + Expression");
-    assert!(
-        (moved.left() - expression.left()).abs() <= 0.5,
-        "+ Expression stays where it stood: {expression:?} {moved:?}"
-    );
-    let (_, log_x) = labelled(&nodes, Role::Button, "Logarithmic X axis").expect("the row's log X");
-    let gap = log_x.left() - moved.right();
-    assert!(
-        at.right() <= moved.left() && ((moved.left() - at.right()) - gap).abs() <= 0.5,
-        "Fit stands left of + Expression at the row's gap: {at:?} {moved:?} {log_x:?}"
-    );
-    window.click(fit);
-    let nodes = window.settled_frames();
-    assert!(
-        labelled(&nodes, Role::Button, "Fit").is_none(),
-        "Fit goes once the view is fitted"
-    );
-}
-
 /// The bar's Zoom in magnifies a document pane's strip, as a pinch on its
 /// plot does: the document keeps the X window it narrowed to through the
 /// frames after it, and the bar's Fit lets the window go again.
