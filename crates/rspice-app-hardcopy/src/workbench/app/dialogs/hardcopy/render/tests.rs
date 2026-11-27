@@ -32,7 +32,7 @@ fn the_sheet_summary_only_reports_a_decision_there_is_one_to_make() {
     // No resolved document: nothing crosses a sheet that does not exist.
     assert_eq!(
         section_detail(&draft, HardcopySection::DrawingSheet),
-        "authored · undecided"
+        "sheet · undecided"
     );
     draft.schematic_extent = SchematicHardcopyExtent::CompleteSchematicContent;
     assert_eq!(

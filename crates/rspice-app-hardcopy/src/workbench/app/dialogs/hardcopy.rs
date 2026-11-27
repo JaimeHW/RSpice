@@ -114,23 +114,13 @@ impl HardcopySection {
         Self::Identity,
     ];
 
-    pub(crate) const fn number(self) -> &'static str {
-        match self {
-            Self::Source => "01",
-            Self::Page => "02",
-            Self::DrawingSheet => "03",
-            Self::Output => "04",
-            Self::Identity => "05",
-        }
-    }
-
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Source => "Source and scope",
-            Self::Page => "Page and pagination",
+            Self::Source => "Document",
+            Self::Page => "Page",
             Self::DrawingSheet => "Drawing sheet",
             Self::Output => "Output",
-            Self::Identity => "Identity",
+            Self::Identity => "Page marks",
         }
     }
 }

@@ -24,7 +24,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
         row.narrow(|ui| {
             field(ui, "Document type", |ui| {
                 crate::ui::widgets::Combo::from_id_salt("hardcopy-document-type")
-                    .selected_text(active_kind.map_or("No active type", document_kind_label))
+                    .selected_text(active_kind.map_or("Nothing to print", document_kind_label))
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
                         for kind in [
@@ -53,7 +53,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                                 action = BodyAction::SelectSource { source_key, scope };
                             } else if candidate.is_none() {
                                 response.on_disabled_hover_text(
-                                    "No document of this type is available.",
+                                    "No document of this kind is open.",
                                 );
                             }
                         }
@@ -68,15 +68,15 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                     .iter()
                     .find(|candidate| candidate.source_key == key)
             });
-            field(ui, "Scope", |ui| {
-                let selected = active_scope.map_or("No active extent", scope_label);
+            field(ui, "How much", |ui| {
+                let selected = active_scope.map_or("Nothing to print", scope_label);
                 crate::ui::widgets::Combo::from_id_salt("hardcopy-scope")
                     .selected_text(selected)
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
                         let choices = [
                             (
-                                active_scope.map_or("Active document", scope_label),
+                                active_scope.map_or("This document", scope_label),
                                 source_choice_for_active_extent(
                                     &draft.source_candidates,
                                     active_candidate,
@@ -91,7 +91,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                                 ),
                             ),
                             (
-                                "All sheets / panes",
+                                "Every sheet or pane",
                                 source_choice_for_scope(
                                     &draft.source_candidates,
                                     active_candidate,
@@ -115,7 +115,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                                 action = BodyAction::SelectSource { source_key, scope };
                             } else if choice.is_none() {
                                 response.on_disabled_hover_text(
-                                    "This document family does not retain that publication extent.",
+                                    "This kind of document cannot be printed that way.",
                                 );
                             }
                         }
@@ -124,10 +124,10 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                         if named_sets.is_empty() {
                             ui.add_enabled(
                                 false,
-                                egui::Button::selectable(false, "Named print set"),
+                                egui::Button::selectable(false, "Print set"),
                             )
                             .on_disabled_hover_text(
-                                "No validated project-owned named print set is configured.",
+                                "This project has no print sets.",
                             );
                         } else {
                             for (source_key, scope, name) in named_sets {
@@ -136,7 +136,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                                 if ui
                                     .add(egui::Button::selectable(
                                         active,
-                                        format!("Named print set · {name}"),
+                                        format!("Print set · {name}"),
                                     ))
                                     .clicked()
                                     && !active
@@ -153,7 +153,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
     fact_list(
         ui,
         &draft.source.as_ref().map_or_else(
-            || vec![("Document", "no active publication source".to_owned())],
+            || vec![("Document", "nothing to print".to_owned())],
             |source| {
                 vec![
                     ("Document", source.display_name().to_owned()),
@@ -191,7 +191,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                                 ui.selectable_value(
                                     &mut draft.paper,
                                     PaperDraft::MatchAuthoredSheets,
-                                    "Match each authored sheet",
+                                    "Match each drawing sheet",
                                 )
                                 .on_hover_text(
                                     "Use each schematic sheet's own size and orientation. A set of mixed sheets keeps each page's own paper size.",
@@ -282,7 +282,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
         });
         row.wide(|ui| {
             let mut tiling_kind = tiling_key(draft.tiling);
-            field(ui, "Tiled pages", |ui| {
+            field(ui, "Pages", |ui| {
                 let automatic = draft.preview_plan.as_ref().map_or_else(
                     || "Automatic".to_owned(),
                     |plan| {
@@ -294,7 +294,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                             )
                         } else {
                             format!(
-                                "Automatic · {} section-aware pages",
+                                "Automatic · {} pages, split between sections",
                                 plan.pagination().pages().len()
                             )
                         }
@@ -312,11 +312,11 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                         ui.selectable_value(&mut tiling_kind, 0, automatic);
                         ui.selectable_value(&mut tiling_kind, 1, "Single page")
                             .on_hover_text(
-                                "Refuse to publish rather than spread this drawing over more than one sheet. Choose the fit-to-printable-area scale to make it fit.",
+                                "Print on one page or not at all. Choose Fit to printable area to make the drawing fit.",
                             );
                         ui.selectable_value(&mut tiling_kind, 2, "Manual rows and columns")
                             .on_hover_text(
-                                "Publish on exactly this grid. Asking for more sheets than the drawing needs widens every seam past the tile overlap below.",
+                                "Print on exactly this many pages. Asking for more than the drawing needs widens every overlap between pages.",
                             );
                         if tiling_kind == 2 {
                             ui.separator();
@@ -371,12 +371,12 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
     } else if draft.printer_area_unstated() {
         panel_note(
             ui,
-            "This printer does not state the area it can print, so a 1:1 page cannot be checked against it.",
+            "This printer does not say how near its edge it prints, so a 1:1 page cannot be checked against it.",
         );
     }
     form_row(ui, |row| {
         row.narrow(|ui| {
-            length_field(ui, "Tile overlap", &mut draft.overlap, draft.display_unit);
+            length_field(ui, "Page overlap", &mut draft.overlap, draft.display_unit);
         });
         row.wide(|ui| {
             let row_height = ui.spacing().interact_size.y * 2.0 + 5.0;
@@ -468,7 +468,7 @@ pub(super) fn drawing_sheet_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) 
     };
     panel_note(
         ui,
-        "These controls affect Print and Export only. They never rewrite the authored drawing sheet.",
+        "These settings change only what is printed, never the drawing sheet itself.",
     );
     ui.add_space(9.0);
 
@@ -553,22 +553,22 @@ pub(super) fn drawing_sheet_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) 
     let status = if has_outside_content {
         match draft.schematic_extent {
             SchematicHardcopyExtent::CompleteSchematicContent => {
-                "Outside content is included by the complete-content extent."
+                "Everything drawn is printed, past the sheet edge or not."
             }
             SchematicHardcopyExtent::AuthoredDrawingSheet => match draft.outside_sheet_content {
                 OutsideSheetContentPolicy::Ask => {
-                    "Outside content is present. Choose Clip to publish only the authored sheet, or Extend to retain every resolved object."
+                    "Some of the drawing lies past the sheet edge. Clip it at the edge, or extend the page to keep it."
                 }
                 OutsideSheetContentPolicy::ClipToAuthoredSheet => {
-                    "Outside content is clipped exactly at the authored drawing-sheet boundary."
+                    "Anything past the sheet edge is cut off at the edge."
                 }
                 OutsideSheetContentPolicy::ExtendOutput => {
-                    "The output extent expands to retain every resolved object."
+                    "The page grows to keep everything drawn."
                 }
             },
         }
     } else {
-        "All resolved schematic content is within the authored drawing sheet."
+        "Everything drawn fits on the sheet."
     };
     ui.add_space(10.0);
     panel_note(ui, status);
@@ -619,7 +619,7 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                             (ColorMapping::ScreenColors, "Screen colors", true),
                             (
                                 ColorMapping::GrayscaleWithDashMarkerRedundancy,
-                                "Grayscale with dash/marker redundancy",
+                                "Grayscale, told apart by dashes and markers",
                                 false,
                             ),
                             (ColorMapping::Monochrome, "Monochrome", false),
@@ -632,7 +632,7 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                                 draft.color_mapping = value;
                             } else if needs_color && !color_supported {
                                 response.on_disabled_hover_text(
-                                    "The selected printer reports monochrome output only.",
+                                    "This printer prints in black and white only.",
                                 );
                             }
                         }
@@ -655,14 +655,14 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                             transparent_available,
                             egui::Button::selectable(
                                 draft.background == BackgroundMode::Transparent,
-                                "Transparent · vector export",
+                                "Transparent · PDF or SVG",
                             ),
                         );
                         if transparent.clicked() {
                             draft.background = BackgroundMode::Transparent;
                         } else if !transparent_available {
                             transparent.on_disabled_hover_text(
-                                "Transparent background requires a vector artifact target.",
+                                "Only a PDF or SVG file can have a transparent background.",
                             );
                         }
                         ui.selectable_value(
@@ -725,7 +725,7 @@ fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
     let output_label = if draft.workflow == HardcopyWorkflow::Export {
         "Output format"
     } else {
-        "Printer / target"
+        "Print to"
     };
     field(ui, output_label, |ui| {
         crate::ui::widgets::Combo::from_id_salt("hardcopy-output")
@@ -758,7 +758,7 @@ fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                     ui.selectable_value(
                         &mut draft.format,
                         OutputFormat::BrowserPrintDocument,
-                        "Print-ready document handoff",
+                        "Print-ready document",
                     );
                 }
                 // The raster entries carry whatever resolution is currently in
@@ -787,15 +787,15 @@ fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
 pub(super) fn identity_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) {
     ui.checkbox(
         &mut draft.include_legends,
-        "Include trace, layer, net, and marker legends",
+        "Legend of traces, layers, nets and markers",
     );
     ui.checkbox(
         &mut draft.include_header,
-        "Project, revision, sheet, date, and page header",
+        "Header with project, revision, sheet, date and page",
     );
     ui.checkbox(
         &mut draft.include_provenance,
-        "Result manifest, model digest, and run provenance footer",
+        "Footer saying which run and models made the results",
     );
     let mut watermark = !matches!(draft.watermark, Watermark::None);
     if ui
@@ -822,10 +822,10 @@ pub(super) fn identity_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) {
             egui::Checkbox::new(&mut draft.embed_fonts, "Embed fonts"),
         );
         if !vector {
-            embed.on_disabled_hover_text("A raster target carries no typeface to embed.");
+            embed.on_disabled_hover_text("A printer page or an image carries no fonts.");
         } else if archival {
             embed.on_disabled_hover_text(
-                "PDF/A refuses an artifact whose typefaces are not inside it.",
+                "A PDF/A file always carries its fonts.",
             );
         }
         let searchable = columns[1].add_enabled(

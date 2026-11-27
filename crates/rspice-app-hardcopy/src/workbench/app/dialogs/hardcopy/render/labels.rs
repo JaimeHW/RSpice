@@ -16,25 +16,25 @@ pub(super) fn document_kind_label(kind: HardcopyDocumentKind) -> &'static str {
 pub(super) fn scope_label(scope: &HardcopyScope) -> &'static str {
     match scope {
         HardcopyScope::Selection => "Selection",
-        HardcopyScope::CurrentSheet => "Current sheet",
+        HardcopyScope::CurrentSheet => "This sheet",
         HardcopyScope::VisibleHierarchy => "Visible hierarchy",
-        HardcopyScope::ActivePlotDocument => "Active plot document",
-        HardcopyScope::CompleteReport => "Complete report",
-        HardcopyScope::ActiveDocument => "Active document",
-        HardcopyScope::AllSheetsOrPanes => "All sheets / panes",
-        HardcopyScope::NamedPrintSet(_) => "Named print set",
+        HardcopyScope::ActivePlotDocument => "This plot",
+        HardcopyScope::CompleteReport => "Whole report",
+        HardcopyScope::ActiveDocument => "This document",
+        HardcopyScope::AllSheetsOrPanes => "Every sheet or pane",
+        HardcopyScope::NamedPrintSet(_) => "Print set",
     }
 }
 
 pub(super) fn detailed_scope_label(scope: &HardcopyScope) -> &str {
     match scope {
         HardcopyScope::Selection => "Selection",
-        HardcopyScope::CurrentSheet => "Current sheet",
+        HardcopyScope::CurrentSheet => "This sheet",
         HardcopyScope::VisibleHierarchy => "Visible hierarchy",
-        HardcopyScope::ActivePlotDocument => "Active plot document",
-        HardcopyScope::CompleteReport => "Complete report",
-        HardcopyScope::ActiveDocument => "Active document",
-        HardcopyScope::AllSheetsOrPanes => "All sheets / panes",
+        HardcopyScope::ActivePlotDocument => "This plot",
+        HardcopyScope::CompleteReport => "Whole report",
+        HardcopyScope::ActiveDocument => "This document",
+        HardcopyScope::AllSheetsOrPanes => "Every sheet or pane",
         HardcopyScope::NamedPrintSet(name) => name,
     }
 }
@@ -42,7 +42,7 @@ pub(super) fn detailed_scope_label(scope: &HardcopyScope) -> &str {
 pub(super) fn paper_label(paper: &PaperDraft) -> String {
     match paper {
         PaperDraft::Standard(paper) => standard_paper_label(*paper).to_owned(),
-        PaperDraft::MatchAuthoredSheets => "Match each authored sheet".to_owned(),
+        PaperDraft::MatchAuthoredSheets => "Match each drawing sheet".to_owned(),
         PaperDraft::Custom { name, .. } => format!("Custom · {name}"),
     }
 }
@@ -80,7 +80,7 @@ pub(super) fn format_label(format: OutputFormat) -> &'static str {
             if cfg!(target_arch = "wasm32") {
                 "Browser print dialog"
             } else {
-                "Print-ready document handoff"
+                "Print-ready document"
             }
         }
         OutputFormat::PdfVector => "PDF · vector",
@@ -97,7 +97,7 @@ pub(super) fn format_label(format: OutputFormat) -> &'static str {
 pub(super) fn background_label(background: BackgroundMode) -> &'static str {
     match background {
         BackgroundMode::White => "White",
-        BackgroundMode::Transparent => "Transparent · vector export",
+        BackgroundMode::Transparent => "Transparent · PDF or SVG",
         BackgroundMode::WorkspaceBackground => "Workspace background",
     }
 }
@@ -106,7 +106,7 @@ pub(super) fn color_mapping_label(mapping: ColorMapping) -> &'static str {
     match mapping {
         ColorMapping::PrintSafeEngineeringPalette => "Print-safe engineering palette",
         ColorMapping::ScreenColors => "Screen colors",
-        ColorMapping::GrayscaleWithDashMarkerRedundancy => "Grayscale with dash/marker redundancy",
+        ColorMapping::GrayscaleWithDashMarkerRedundancy => "Grayscale, told apart by dashes and markers",
         ColorMapping::Monochrome => "Monochrome",
     }
 }

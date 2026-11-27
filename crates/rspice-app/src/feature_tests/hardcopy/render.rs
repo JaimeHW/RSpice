@@ -299,7 +299,7 @@ fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
         let blocked = render_studio(&ctx, &mut app, viewport);
         let controls = dialog_controls(&blocked);
 
-        let marked = control_rect(&controls, "Page and pagination · blocked")
+        let marked = control_rect(&controls, "Page · blocked")
             .expect("the rail entry names the section that holds the refused field");
         // The entry sets its title as text inside itself as well. What has to
         // carry the mark is the row a keyboard or screen reader lands on, which
@@ -346,7 +346,7 @@ fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
         assert!(
             controls
                 .iter()
-                .any(|(label, _)| label == "Blocked in Page and pagination"),
+                .any(|(label, _)| label == "Blocked in Page"),
             "the transaction strip names the section holding the primary"
         );
     }
@@ -372,6 +372,6 @@ fn the_narrow_strip_marks_the_blocked_section_too() {
     let _ = render_studio(&ctx, &mut app, viewport);
     let controls = dialog_controls(&render_studio(&ctx, &mut app, viewport));
 
-    assert!(control_rect(&controls, "02  Page and pagination · blocked").is_some());
-    assert!(control_rect(&controls, "01  Source and scope").is_some());
+    assert!(control_rect(&controls, "02  Page · blocked").is_some());
+    assert!(control_rect(&controls, "01  Document").is_some());
 }

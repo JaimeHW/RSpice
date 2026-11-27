@@ -89,7 +89,7 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
                 vec2(width, height),
                 Layout::centered_and_justified(egui::Direction::LeftToRight),
                 |ui| {
-                    ui.add(egui::Label::new("Complete the setup to render a page preview.").wrap());
+                    ui.add(egui::Label::new("Finish the setup to see the page.").wrap());
                 },
             );
             return;
@@ -263,7 +263,7 @@ fn preview_facts(draft: &HardcopyDialogState) -> Vec<(&'static str, String)> {
         let arrangement = if pagination.sections().is_empty() {
             format!(" · {} × {} tiles", pagination.columns(), pagination.rows())
         } else {
-            " · section-aware".to_owned()
+            " · split between sections".to_owned()
         };
         format!(
             "{count} page{}{arrangement}",

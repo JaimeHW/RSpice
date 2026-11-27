@@ -291,7 +291,7 @@ fn a_resolution_published_by_a_click_spanning_two_passes_publishes_what_it_shows
 fn a_resolution_left_behind_by_the_rail_is_still_the_one_published() {
     let mut studio = Studio::wide();
     studio.type_resolution("300");
-    let rail = studio.control(Role::Button, "Identity");
+    let rail = studio.control(Role::Button, "Page marks");
     let _ = studio.pass(click(rail.center()));
     assert_eq!(
         studio.app.state.hardcopy.hardcopy.section,

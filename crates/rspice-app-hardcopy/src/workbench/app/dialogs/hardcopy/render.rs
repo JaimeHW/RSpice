@@ -209,16 +209,16 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
     let plan_valid = parts.dialog.preview_plan.is_some();
     let description = match page {
         HardcopyDialogPage::Main => {
-            "Choose the source document, page, styling, and output target before previewing or publishing."
+            "Choose what to print, its page, and where it goes."
         }
         HardcopyDialogPage::PrinterProperties => {
-            "Review and apply the capabilities reported by the selected physical printer."
+            "Check the paper, resolution and options the selected printer offers."
         }
         HardcopyDialogPage::CustomPaperMargins => {
-            "Define a custom physical page and safe printable margins for this hardcopy operation."
+            "Set a paper size and margins of your own."
         }
         HardcopyDialogPage::PrintMapping => {
-            "Map schematic layers, traces, and markers to accessible hardcopy styles."
+            "Choose how layers, traces and markers look on paper."
         }
     };
     let mut body_scroll_offset = parts.dialog.body_scroll_offset;
@@ -264,7 +264,7 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
                 .error_section
                 .filter(|_| page == HardcopyDialogPage::Main)
                 .map_or_else(
-                    || "Hardcopy configuration blocked".to_owned(),
+                    || "Cannot print with these settings".to_owned(),
                     |section| format!("Blocked in {}", section.label()),
                 ),
             sentence_case(error),
@@ -808,6 +808,12 @@ pub(super) fn schematic_sheet_relationship(draft: &HardcopyDialogState) -> Optio
     })
 }
 
+/// A step's number among the steps shown: a step a document has no use
+/// for is left out of the count, not left as a gap in it.
+fn step_number(index: usize) -> String {
+    format!("{:02}", index + 1)
+}
+
 fn section_navigation(
     ui: &mut Ui,
     draft: &mut HardcopyDialogState,
@@ -825,7 +831,7 @@ fn section_navigation(
         ui.spacing_mut().item_spacing.y = 0.0;
         let blocked_by = draft.error_section;
         let blocking_message = draft.error.clone();
-        for section in sections.iter().copied() {
+        for (index, section) in sections.iter().copied().enumerate() {
             let selected = draft.section == section;
             let blocked = blocked_by == Some(section);
             let detail = section_detail(draft, section);
@@ -847,7 +853,7 @@ fn section_navigation(
                         |ui| {
                             ui.set_min_width(width);
                             ui.label(
-                                egui::RichText::new(section.number())
+                                egui::RichText::new(step_number(index))
                                     .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
                                     .color(if selected {
                                         t.color.accent
@@ -973,7 +979,7 @@ fn section_navigation(
                                             draft
                                                 .source
                                                 .as_ref()
-                                                .map_or("No active publication source", |source| {
+                                                .map_or("Nothing to print", |source| {
                                                     source.display_name()
                                                 }),
                                         )
@@ -1147,10 +1153,10 @@ fn section_detail(draft: &HardcopyDialogState, section: HardcopySection) -> Stri
             SchematicHardcopyExtent::AuthoredDrawingSheet
                 if schematic_sheet_relationship(draft) == Some(false) =>
             {
-                "authored sheet".to_owned()
+                "drawing sheet".to_owned()
             }
             SchematicHardcopyExtent::AuthoredDrawingSheet => format!(
-                "authored · {}",
+                "sheet · {}",
                 match draft.outside_sheet_content {
                     OutsideSheetContentPolicy::Ask => "undecided",
                     OutsideSheetContentPolicy::ClipToAuthoredSheet => "clipped",
@@ -1182,7 +1188,7 @@ fn short_paper_label(paper: &PaperDraft) -> String {
             StandardPaper::A0 => "A0",
         }
         .to_owned(),
-        PaperDraft::MatchAuthoredSheets => "per authored sheet".to_owned(),
+        PaperDraft::MatchAuthoredSheets => "per drawing sheet".to_owned(),
         PaperDraft::Custom { name, .. } => name.clone(),
     }
 }
@@ -1218,7 +1224,7 @@ pub fn output_summary(format: OutputFormat) -> String {
 /// fixed track there would strand the preview a screen below the form.
 /// A refusal as the strip states it, in sentence case. The errors behind it
 /// are written as Rust errors are, in lower case, and the strip read
-/// "select a printer and resolve its current capabilities before printing".
+/// "choose a printer to print to".
 fn sentence_case(text: &str) -> String {
     let mut chars = text.chars();
     chars.next().map_or_else(String::new, |first| {
@@ -1277,19 +1283,19 @@ fn editor_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
 fn section_panel_header(ui: &mut Ui, section: HardcopySection) {
     let description = match section {
         HardcopySection::Source => {
-            "Choose the retained document and the extent of it this hardcopy publishes."
+            "Choose what to print and how much of it."
         }
         HardcopySection::Page => {
-            "Physical media, scale and tiling for the output. None of it rewrites the authored drawing sheet."
+            "Paper, scale, and how a drawing too large for one page is split. None of this changes the drawing sheet itself."
         }
         HardcopySection::DrawingSheet => {
-            "Decide how much of the authored sheet is drawn, and what becomes of content that crosses it."
+            "How much of the drawing sheet to print, and what to do with anything drawn past its edge."
         }
         HardcopySection::Output => {
-            "Format, resolution and color. Each option is bounded by what this host can actually produce."
+            "Where the pages go, in what format and color. What this computer or printer cannot produce is turned off."
         }
         HardcopySection::Identity => {
-            "Legends, headers, provenance and watermark carried on every published page."
+            "The legend, header, footer and watermark on every page, and whether its words stay text."
         }
     };
     panel_header(ui, section.label(), description);
@@ -1453,13 +1459,13 @@ fn section_tab_strip(
                 let blocked_by = draft.error_section;
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                    for section in sections.iter().copied() {
+                    for (index, section) in sections.iter().copied().enumerate() {
                         // A chip carries its mark in its own text: it has no
                         // room beside it for a glyph, and the text is what a
                         // screen reader is given either way.
                         let label = format!(
                             "{}  {}",
-                            section.number(),
+                            step_number(index),
                             section_entry_name(section, blocked_by == Some(section))
                         );
                         if ui
