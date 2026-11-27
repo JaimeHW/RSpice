@@ -760,6 +760,7 @@ pub fn project_strips<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulati
         let mut added_overlays: Vec<StripTrace> = Vec::new();
         let mut made: Vec<&StripMember> = Vec::new();
         let mut projected: Vec<Projectable<'_>> = Vec::new();
+        let mut places: Vec<((usize, TraceKind), usize)> = Vec::new();
         for &member in &listed {
             if drawn.contains(member) || made.contains(&member) {
                 continue;
@@ -792,6 +793,13 @@ pub fn project_strips<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulati
             if curves.is_empty() {
                 continue;
             }
+            // A curve shown in another form keeps the palette place of the
+            // one it replaces, so the strip keeps its hues.
+            if let Some(curve) = curves.iter().find(|curve| !curve.overlay)
+                && let Some(&place) = model.dataset_ranks.get(&(form.waveform_index, form.kind))
+            {
+                places.push(((curve.waveform_index, curve.kind), place));
+            }
             for curve in curves {
                 if curve.overlay {
                     added_overlays.push(curve);
@@ -804,6 +812,9 @@ pub fn project_strips<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulati
         }
         if added.is_empty() && added_overlays.is_empty() {
             continue;
+        }
+        for (key, place) in places {
+            model.dataset_ranks.entry(key).or_insert(place);
         }
         let signal_count = model.signal_trace_count;
         let mut signals = 0;

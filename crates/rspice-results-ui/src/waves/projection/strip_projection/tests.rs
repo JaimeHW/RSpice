@@ -95,6 +95,14 @@ fn stepped_delay_lines(
 
 /// The strips of `runs`, the active run first and its overlays after it.
 fn models_of(runs: &[&SimulationRun<AnalysisResult<RetainedTrace>>]) -> Vec<StripModel> {
+    models_under(runs, None)
+}
+
+/// The strips of `runs` drawn under the sample selection `selection`.
+fn models_under(
+    runs: &[&SimulationRun<AnalysisResult<RetainedTrace>>],
+    selection: Option<&SourceSampleSelection>,
+) -> Vec<StripModel> {
     crate::waves::build_models(
         runs,
         &ExecutedDeckArchive::default(),
@@ -104,7 +112,7 @@ fn models_of(runs: &[&SimulationRun<AnalysisResult<RetainedTrace>>]) -> Vec<Stri
             phase_continuous: false,
             complex_display: Default::default(),
             ac: Default::default(),
-            selection: None,
+            selection,
             hidden_family_traces: &HashSet::new(),
             waveform_visibility: &Default::default(),
             signals: None,
@@ -329,6 +337,32 @@ fn a_stepped_runs_group_delay_strip_draws_every_member_and_overlay() {
         drawn_projection(model, 0),
         Some(StripProjection::GroupDelay)
     );
+}
+
+/// Under a sample selection the strip draws the selected rows, and a
+/// projection made for it reads those rows alone: the delay line's group
+/// delay at every other frequency is still its delay, at each of them.
+#[test]
+fn a_projection_under_a_sample_selection_reads_the_selected_rows() {
+    let run = delay_line();
+    let rows: Vec<usize> = (0..61).step_by(2).collect();
+    let selection = SourceSampleSelection::new(run.dataset_id, run.analyses[0].id, rows.clone())
+        .expect("ascending rows");
+    let mut models = models_under(&[&run], Some(&selection));
+    assert_eq!(models[0].traces[0].x.len(), rows.len());
+    let strips = set_projection(&models[0], 0, StripProjection::GroupDelay).expect("a delay strip");
+    let arranged = HashMap::from([(models[0].analysis_key, strips)]);
+    project_strips(&mut models, &[&run], &arranged, Some(&selection));
+    let delay = models[0]
+        .traces
+        .iter()
+        .find(|trace| trace.kind == TraceKind::GroupDelay)
+        .expect("a delay curve");
+    let samples = whole(&delay.y).expect("the delay's samples");
+    assert_eq!(samples.len(), rows.len());
+    for sample in samples {
+        assert!((sample / DELAY - 1.0).abs() < 1.0e-9, "{sample}");
+    }
 }
 
 /// A noise run's output spectrum, `onoise`, retained as a power density in
