@@ -2166,6 +2166,74 @@ mod tests {
         }
     }
 
+    /// A binary rawfile of `rows` points of time and V(out), its header
+    /// declaring `declared`.
+    fn rawfile(declared: usize, rows: usize) -> Vec<u8> {
+        let mut bytes = format!(
+            "Title: generated\nDate: generated\nPlotname: Transient Analysis\n\
+             Flags: real forward double\nNo. Variables: 2\nNo. Points: {declared}\n\
+             Variables:\n\t0\ttime\ttime\n\t1\tV(out)\tvoltage\nBinary:\n"
+        )
+        .into_bytes();
+        for row in 0..rows {
+            bytes.extend_from_slice(&(row as f64 * 1.0e-9).to_le_bytes());
+            bytes.extend_from_slice(&(row as f64).to_le_bytes());
+        }
+        bytes
+    }
+
+    /// A whole import reads complete, as the data browser and the Details
+    /// mark the shown run. An import records no lifecycle, as RSpice did not
+    /// run it, and it read "Partial result", as a run of an older project
+    /// that never said how it ended still does. A rawfile cut short of the
+    /// rows it declares is refused and keeps nothing, so an import that is
+    /// kept is never part of its source.
+    #[test]
+    fn a_whole_import_reads_complete_and_a_cut_rawfile_keeps_nothing() {
+        use crate::workbench::docks::navigator::results::shown_run_reads_as;
+        use rspice_results_ui::operational::ResultOperationalState;
+
+        let mut state = ResultsTestHost::default();
+        let cut = stage_imported_result_dataset(
+            &mut state.results_parts(),
+            "cut.raw",
+            &rawfile(400, 300),
+        );
+        assert!(cut.is_err(), "a rawfile cut short is refused: {cut:?}");
+        assert!(!state.results_parts().result_import.open);
+        assert!(state.model.simulation.retained.runs.is_empty());
+
+        stage_imported_result_dataset(&mut state.results_parts(), "whole.raw", &rawfile(400, 400))
+            .expect("the whole rawfile stages");
+        commit_result_import_draft(&mut state.results_parts()).expect("the import commits");
+        let run = state
+            .model
+            .simulation
+            .active_run()
+            .expect("the import is shown");
+        assert_eq!(run.lifecycle, SimulationRunLifecycle::LegacyUnknown);
+        assert_eq!(
+            run.analyses[0].waveforms[0].y.read_whole().unwrap().len(),
+            400
+        );
+        assert_eq!(
+            shown_run_reads_as(state.results_reads()),
+            None,
+            "a whole import reads complete"
+        );
+
+        // The same rows in a run that is not an import, which never said how
+        // it ended, still read partial.
+        let run = state.model.simulation.active_run_mut().unwrap();
+        for analysis in &mut run.analyses {
+            analysis.import_source = None;
+        }
+        assert_eq!(
+            shown_run_reads_as(state.results_reads()),
+            Some(ResultOperationalState::Partial)
+        );
+    }
+
     /// The values of one signal of a parsed table, in row order.
     fn column(parsed: &ParsedResultDataset, index: usize) -> Vec<f64> {
         parsed.waveforms[index].y.read_whole().unwrap().into_owned()

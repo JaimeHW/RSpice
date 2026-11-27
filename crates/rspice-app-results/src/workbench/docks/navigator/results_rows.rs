@@ -1796,6 +1796,14 @@ pub(super) fn result_analysis_completeness(
             ResultCompletenessClass::Complete
         }
         SimulationRunLifecycle::Aborted => ResultCompletenessClass::Cancelled,
+        // An import records no lifecycle, as RSpice did not run it, but it is
+        // whole: it keeps every row its source holds, and a source cut short
+        // of the rows it declares is refused.
+        SimulationRunLifecycle::LegacyUnknown
+            if analysis.success && analysis.import_source.is_some() =>
+        {
+            ResultCompletenessClass::Complete
+        }
         SimulationRunLifecycle::LegacyUnknown if analysis.success => {
             ResultCompletenessClass::Partial
         }
