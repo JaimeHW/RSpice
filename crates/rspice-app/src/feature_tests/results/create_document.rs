@@ -586,6 +586,27 @@ impl ResultsWindow {
         nodes
     }
 
+    /// Frames until no pane is still preparing what it derives from the
+    /// transient, which the spectrum and the eye work out off the frame; the
+    /// last one's nodes.
+    fn settled_frames(&mut self) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+        let preparing = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]| {
+            nodes.iter().any(|(_, node)| {
+                node.label()
+                    .is_some_and(|label| label.starts_with("Preparing derived data"))
+            })
+        };
+        let mut nodes = self.frames(Vec::new());
+        for _ in 0..1_000 {
+            if !preparing(&nodes) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            nodes = self.frames(Vec::new());
+        }
+        nodes
+    }
+
     /// Create a two-pane waveform document named `name` over the run, the
     /// way the New result document form commits it.
     fn create(
@@ -1197,6 +1218,57 @@ fn shown_items(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> us
             .count()
 }
 
+/// That a document of `sheet` in `panes` panes drew the run's data: an item
+/// per pane at least. The eye folds a transient at a bit period, so for a
+/// run that is no bit stream it draws its own reason, as the quick view
+/// does.
+#[cfg(not(target_arch = "wasm32"))]
+fn assert_drawn(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+    sheet: &str,
+    panes: usize,
+    combination: &str,
+) {
+    let shown = shown_items(nodes);
+    let eye_refused = sheet == "eye-viewer"
+        && nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Status
+                && node
+                    .label()
+                    .is_some_and(|label| label.contains("usable source"))
+        });
+    assert!(
+        shown >= panes || eye_refused,
+        "{combination}: {shown} items drawn over {panes} panes"
+    );
+}
+
+/// The traces each pane of `document_id` plots, by pane and label.
+#[cfg(not(target_arch = "wasm32"))]
+fn plotted_traces(
+    state: &crate::workbench::app_state::AppState,
+    document_id: rspice_app_state::product::ResultDocumentId,
+) -> Vec<(usize, String, bool)> {
+    let document = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("the project owns the document");
+    document
+        .traces()
+        .iter()
+        .map(|trace| {
+            let pane = document
+                .panes()
+                .iter()
+                .position(|pane| pane.id == trace.pane_id)
+                .expect("a trace sits in a pane of its document");
+            (pane, trace.label.clone(), trace.visible)
+        })
+        .collect()
+}
+
 /// Every sheet the form offers for every analysis of a solved run, in every
 /// layout, makes a document Results draws with the run's data in each pane,
 /// and the project brings each one back, drawn, after a save and a reopen.
@@ -1250,24 +1322,16 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
                     window.app.state.results.create_result_document = form;
                     let document_id = commit(&mut window.app.state.results_parts())
                         .unwrap_or_else(|error| panic!("{combination}: {error}"));
-                    let nodes = window.frames(Vec::new());
-                    let shown = shown_items(&nodes);
-                    // The eye folds the transient at a bit period; a run
-                    // that is no bit stream draws the eye's own reason, as
-                    // the quick view does.
-                    let eye_refused = sheet == "eye-viewer"
-                        && nodes.iter().any(|(_, node)| {
-                            node.role() == egui::accesskit::Role::Status
-                                && node
-                                    .label()
-                                    .is_some_and(|label| label.contains("usable source"))
-                        });
-                    assert!(
-                        shown >= layout.pane_count() || eye_refused,
-                        "{combination}: {shown} items drawn over {} panes",
-                        layout.pane_count()
-                    );
-                    made.push((document_id, combination, layout.pane_count(), shown));
+                    let nodes = window.settled_frames();
+                    assert_drawn(&nodes, sheet, layout.pane_count(), &combination);
+                    let plotted = plotted_traces(&window.app.state, document_id);
+                    made.push((
+                        document_id,
+                        combination,
+                        sheet,
+                        layout.pane_count(),
+                        plotted,
+                    ));
                 }
             }
         }
@@ -1292,7 +1356,7 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
             "the project reopens"
         );
         reopened.app.state.workbench.activate(Workspace::Results);
-        for (document_id, combination, panes, shown) in made {
+        for (document_id, combination, sheet, panes, plotted) in made {
             let document = reopened
                 .app
                 .state
@@ -1311,12 +1375,13 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
                 ),
                 "{combination}: the reopened document shows"
             );
-            let nodes = reopened.frames(Vec::new());
             assert_eq!(
-                shown_items(&nodes),
-                shown,
-                "{combination}: the reopened document draws what it drew"
+                plotted_traces(&reopened.app.state, document_id),
+                plotted,
+                "{combination}: the reopened document plots what it plotted"
             );
+            let nodes = reopened.settled_frames();
+            assert_drawn(&nodes, sheet, panes, &combination);
         }
         let _ = std::fs::remove_dir_all(&root);
     }
