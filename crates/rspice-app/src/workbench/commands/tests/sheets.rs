@@ -2,14 +2,17 @@
 //!
 //! Page Up and Page Down are the only unmodified chords this lane claims, so
 //! the one-owner check is the point of the first case: the document strip's
-//! browser alternates are the modified `Ctrl+Alt` pair, and nothing else may
-//! bind either key on its own.
+//! browser alternates are the modified `Ctrl+Alt` pair, and nothing live on a
+//! schematic may bind either key on its own. A context that never shares the
+//! screen with a schematic (Results steps its runs on the same keys) is not a
+//! second owner.
 
 use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
 use rspice_app_state::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
+use rspice_app_state::state::shortcuts::shortcut_contexts_overlap;
 use rspice_app_state::state::{SheetDefinition, SheetPortPolicy};
 use rspice_app_workbench::workbench::framework::command_registry::CommandFlags;
 
@@ -33,19 +36,25 @@ fn default_shortcut_label(command: SheetsCommand, platform: CommandPlatform) -> 
         .map_or("", |binding| binding.chord.label)
 }
 
-/// Every registered command that binds any chord `command` binds.
+/// Every registered command that binds any chord `command` binds where both
+/// can be live at once.
 fn chord_owners(command: SheetsCommand) -> Vec<CommandKey> {
     let chords = shortcut_bindings(command)
         .iter()
         .map(|binding| binding.chord)
         .collect::<Vec<_>>();
+    let context = command_registry()
+        .spec(command.key())
+        .expect("a sheet command is declared")
+        .context;
     command_registry()
         .ordered()
         .filter(|candidate| {
-            candidate
-                .bindings
-                .iter()
-                .any(|binding| chords.contains(&binding.chord))
+            shortcut_contexts_overlap(context, candidate.context)
+                && candidate
+                    .bindings
+                    .iter()
+                    .any(|binding| chords.contains(&binding.chord))
         })
         .map(|candidate| candidate.key)
         .collect()
