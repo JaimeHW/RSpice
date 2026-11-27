@@ -279,6 +279,8 @@ struct BarControl {
     /// What a lettered control is called to assistive technology, where its
     /// letters alone ("log X") would not say it.
     accessible: Option<&'static str>,
+    /// Why the control cannot act, which it says on hover while it is off.
+    unavailable: String,
     on: bool,
     enabled: bool,
     action: fn() -> Option<InstrumentAction>,
@@ -287,6 +289,31 @@ struct BarControl {
 impl BarControl {
     fn action(&self) -> Option<InstrumentAction> {
         (self.action)()
+    }
+
+    /// The control, saying `reason` on hover while it cannot act.
+    fn unavailable(mut self, reason: String) -> Self {
+        self.unavailable = reason;
+        self
+    }
+
+    /// `response`, saying why the control cannot act while it is off.
+    fn explained(&self, response: egui::Response) -> egui::Response {
+        if self.unavailable.is_empty() {
+            response
+        } else {
+            response.on_disabled_hover_text(&self.unavailable)
+        }
+    }
+
+    /// What the control says on hover while it is off: why it cannot act,
+    /// or else what it does.
+    fn disabled_hover(&self) -> &str {
+        if self.unavailable.is_empty() {
+            &self.tooltip
+        } else {
+            &self.unavailable
+        }
     }
 
     /// The width the control takes in the bar, its gap included.
@@ -319,20 +346,20 @@ impl BarControl {
                 }
                 .show(ui)
                 .on_hover_text(&self.tooltip)
-                .on_disabled_hover_text(&self.tooltip)
+                .on_disabled_hover_text(self.disabled_hover())
             }
             ControlKind::Action(label) => Button::new(label)
                 .enabled(self.enabled)
                 .show(ui)
                 .on_hover_text(&self.tooltip)
-                .on_disabled_hover_text(&self.tooltip),
-            ControlKind::Segment(label) => {
+                .on_disabled_hover_text(self.disabled_hover()),
+            ControlKind::Segment(label) => self.explained(
                 ui.add_enabled_ui(self.enabled, |ui| {
                     instrument_control(ui, label, self.on, &self.tooltip)
                 })
-                .inner
-            }
-            ControlKind::Glyph(icon) => {
+                .inner,
+            ),
+            ControlKind::Glyph(icon) => self.explained(
                 ui.add_enabled_ui(self.enabled, |ui| {
                     IconButton::new(*icon)
                         .side(ResultBarMetrics::of(ui).instrument_control)
@@ -340,9 +367,9 @@ impl BarControl {
                         .tooltip(&self.tooltip)
                         .show(ui)
                 })
-                .inner
-            }
-            ControlKind::Latch(icon) => {
+                .inner,
+            ),
+            ControlKind::Latch(icon) => self.explained(
                 ui.add_enabled_ui(self.enabled, |ui| {
                     IconButton::new(*icon)
                         .side(ResultBarMetrics::of(ui).instrument_control)
@@ -351,17 +378,19 @@ impl BarControl {
                         .tooltip(&self.tooltip)
                         .show(ui)
                 })
-                .inner
-            }
+                .inner,
+            ),
         }
     }
 
     fn show_in_menu(&self, ui: &mut Ui) -> egui::Response {
-        ui.add_enabled(
-            self.enabled,
-            egui::Button::selectable(self.on, self.name.as_str()),
-        )
-        .on_hover_text(&self.tooltip)
+        let response = ui
+            .add_enabled(
+                self.enabled,
+                egui::Button::selectable(self.on, self.name.as_str()),
+            )
+            .on_hover_text(&self.tooltip);
+        self.explained(response)
     }
 }
 
@@ -381,6 +410,7 @@ fn bar_controls(
         name: name.to_owned(),
         tooltip: tooltip.to_owned(),
         accessible: None,
+        unavailable: String::new(),
         on,
         enabled,
         action,
@@ -459,7 +489,10 @@ fn bar_controls(
             controls.show_spec_limits,
             availability.limits_available,
             || Some(InstrumentAction::ToggleLimits),
-        ),
+        )
+        .unavailable(format!(
+            "No project specification limit applies to the signals and units of {strip}"
+        )),
         control(
             3,
             ControlKind::Toggle("Envelope".to_owned()),
@@ -468,7 +501,11 @@ fn bar_controls(
             controls.show_family_envelope,
             availability.envelope_available,
             || Some(InstrumentAction::ToggleEnvelope),
-        ),
+        )
+        .unavailable(format!(
+            "{} draws no stepped or Monte Carlo family to bound",
+            capitalized(&strip)
+        )),
         control(
             3,
             ControlKind::Toggle("Grid".to_owned()),
@@ -480,13 +517,14 @@ fn bar_controls(
         ),
         control(
             3,
-            ControlKind::Action("+M".to_owned()),
+            ControlKind::Action("Marker".to_owned()),
             "Drop marker",
-            "Drop marker at cursor A on selected or nearest visible trace",
+            "Drop a marker at cursor A on the selected or nearest visible trace (Shift+M)",
             false,
             availability.marker_available,
             || Some(InstrumentAction::DropMarker),
-        ),
+        )
+        .unavailable("Place cursor A on a trace to drop a marker there".to_owned()),
     ];
     // The active strip's own tools: what its row carried before the bar
     // took them. They act on the active strip, as zoom and fit do.
@@ -545,6 +583,15 @@ fn bar_controls(
         ));
     }
     bar
+}
+
+/// `text` with its first letter a capital, as a sentence opens.
+fn capitalized(text: &str) -> String {
+    let mut letters = text.chars();
+    letters
+        .next()
+        .map(|first| first.to_uppercase().chain(letters).collect())
+        .unwrap_or_default()
 }
 
 /// How many of `controls` the bar draws in `width`, and whether the rest
