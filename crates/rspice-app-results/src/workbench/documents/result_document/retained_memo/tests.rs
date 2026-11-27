@@ -188,7 +188,7 @@ fn retained_memo_restored_history_invalidates_an_older_resolved_view() {
         "an old resolved view accepted changed retained content"
     );
     let current = view_context::resolve_displayed_result_view(state.results_reads()).unwrap();
-    assert_ne!(current.dataset_digest, old.dataset_digest);
+    assert_ne!(current.source, old.source);
     assert!(current.run(state.results_reads()).is_some());
 }
 

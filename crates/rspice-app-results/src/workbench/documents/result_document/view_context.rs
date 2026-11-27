@@ -6,9 +6,9 @@
 //! and a persistent pane owns an immutable dataset/analysis binding of its
 //! own. This module resolves those cases once into stable project identities.
 
-use crate::product::{ContentDigest, DatasetId, ResultDocumentId};
+use crate::product::{DatasetId, ResultDocumentId};
 use crate::results::visualization_document::{PageId, PaneId};
-use crate::state::{AnalysisResult, SimulationRun};
+use crate::state::{AnalysisResult, RunHistoryRevision, SimulationRun};
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
 use super::{AnalysisPresentationKey, ResultViewer, ResultsReads};
@@ -36,7 +36,12 @@ pub enum ResultViewOwner {
 pub struct ResolvedResultView {
     pub owner: ResultViewOwner,
     pub dataset_id: DatasetId,
-    pub dataset_digest: ContentDigest,
+    /// The retained runs as they stood when the view was resolved: any change
+    /// to them since, a restored history included, leaves the view resolving
+    /// no run. Held rather than the run's content digest, which reads every
+    /// sample of the run: a frame resolves the view, and digesting a run held
+    /// in memory took most of a second on it.
+    pub source: RunHistoryRevision,
     pub run_index: usize,
     pub viewer: ResultViewer,
     pub analysis_indices: Vec<usize>,
@@ -55,7 +60,7 @@ impl ResolvedResultView {
             .get(self.run_index)
             .filter(|run| {
                 run.dataset_id == self.dataset_id
-                    && super::retained_dataset_digest(reads, run) == self.dataset_digest
+                    && reads.model.simulation.retained.runs.revision() == self.source
             })
     }
 
@@ -141,7 +146,7 @@ fn resolve_dataset_view(
     Ok(ResolvedResultView {
         owner: ResultViewOwner::Dataset,
         dataset_id,
-        dataset_digest: super::retained_dataset_digest(reads, run),
+        source: reads.model.simulation.retained.runs.revision(),
         run_index,
         viewer,
         analysis_indices,
@@ -247,7 +252,7 @@ fn resolve_visualization_pane(
             pane_id: pane.id,
         },
         dataset_id: run.dataset_id,
-        dataset_digest: super::retained_dataset_digest(reads, run),
+        source: reads.model.simulation.retained.runs.revision(),
         run_index,
         viewer,
         analysis_indices: vec![analysis_index],
