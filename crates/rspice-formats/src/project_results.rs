@@ -353,6 +353,10 @@ pub struct ProjectSimulationRun {
     /// dataset digest: the rows it kept are the result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub results_storage_stop: Option<rspice_results::run::ResultsStorageStop>,
+    /// What the run set the engine to as it started. Outside the dataset
+    /// digest: it says what ran, and the results are what it made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facts: Option<rspice_results::run_facts::RunFacts>,
 }
 
 impl ProjectSimulationRun {
@@ -488,6 +492,7 @@ impl ProjectSimulationRun {
         run.log = self.log;
         run.note = self.note;
         run.results_storage_stop = self.results_storage_stop;
+        run.facts = self.facts;
         run.set_retention(self.retention);
         run.success = !was_active && self.success;
         run.restore_campaign_membership(campaign_membership)?;
@@ -832,6 +837,7 @@ impl ProjectSimulationRun {
             log: run.log.clone(),
             note: run.note.clone(),
             results_storage_stop: run.results_storage_stop.clone(),
+            facts: run.facts.clone(),
         }
     }
 }

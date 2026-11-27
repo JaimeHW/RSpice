@@ -73,6 +73,7 @@ pub mod result_import;
 pub mod result_presentation;
 #[cfg(feature = "engine-evidence")]
 pub mod run;
+pub mod run_facts;
 #[cfg(feature = "engine-evidence")]
 pub mod run_history;
 #[cfg(feature = "engine-evidence")]

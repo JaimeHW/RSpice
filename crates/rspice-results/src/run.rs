@@ -277,6 +277,10 @@ pub struct SimulationRun<A = AnalysisResult> {
     /// budget, and the run kept the rows it had written. Saved with the run,
     /// so it reopens saying so. Not result content: no digest reads it.
     pub results_storage_stop: Option<ResultsStorageStop>,
+    /// What the run set the engine to, recorded as it started: its
+    /// temperatures, design variables, options and simulator. `None` for a
+    /// run that recorded none. Not result content: no digest reads it.
+    pub facts: Option<crate::run_facts::RunFacts>,
 }
 
 /// A transient its results storage stopped: the volume holding the run's results store filled,
@@ -366,6 +370,7 @@ impl<A> SimulationRun<A> {
             log,
             note,
             results_storage_stop,
+            facts,
         } = self;
         SimulationRun {
             job_id,
@@ -386,6 +391,7 @@ impl<A> SimulationRun<A> {
             log,
             note,
             results_storage_stop,
+            facts,
         }
     }
 
@@ -418,6 +424,7 @@ impl<A> SimulationRun<A> {
             log: RunLog::default(),
             note: String::new(),
             results_storage_stop: None,
+            facts: None,
         }
     }
 
@@ -461,6 +468,7 @@ impl<A> SimulationRun<A> {
             log: RunLog::default(),
             note: String::new(),
             results_storage_stop: None,
+            facts: None,
         }
     }
 

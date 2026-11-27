@@ -631,6 +631,12 @@ impl SimulationController {
             run.set_campaign_membership(membership.clone())
                 .expect("campaign membership was validated before run creation");
         }
+        // What the run sets the engine to, read where it was prepared, and
+        // the simulator that runs it.
+        run.facts = dispatch.facts().cloned().map(|mut facts| {
+            facts.simulator = run_lines::product_version();
+            facts
+        });
         let run_id = run.id;
         let execution_identity = run
             .execution_identity()

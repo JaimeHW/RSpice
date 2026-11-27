@@ -485,6 +485,12 @@ where
         inputs.added_lines,
     )
     .map_err(|refused| PreparationError::new(PreparationStage::Netlist, refused.to_string()))?;
+    // What the design states, before its libraries are read into it: the
+    // plan's variables and the sheet's own cards, then the plan's options.
+    let stated = super::snapshot::stated_facts(&[
+        &generated_netlist,
+        &inputs.analysis.sim_setup.options.to_spice_options(),
+    ]);
 
     PreparationError::check_abort(abort)?;
     let model_execution_plan = sealed_models
@@ -662,6 +668,7 @@ where
         tasks.iter().map(PreparedTask::queued_analysis),
         root_schematic.current_file(),
     )?;
+    let deck_temperature = hierarchy.parsed.options.temp;
 
     PreparedRunSnapshot::new_with_hierarchy(
         SnapshotParts {
@@ -763,6 +770,7 @@ where
         abort,
         progress,
     )
+    .map(|snapshot| snapshot.with_facts(stated, deck_temperature))
 }
 
 /// The configuration `projection` was elaborated under, named as `catalog`
@@ -1177,6 +1185,10 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         tasks.iter().map(PreparedTask::queued_analysis),
         origin,
     )?;
+    // What the deck its author wrote states, and the temperature its parse
+    // read, which a `.temp` card or an option may set.
+    let stated = super::snapshot::stated_facts(&[source]);
+    let deck_temperature = hierarchy.parsed.options.temp;
 
     PreparedRunSnapshot::new_with_hierarchy(
         SnapshotParts {
@@ -1223,7 +1235,9 @@ pub fn build_prepared_manual_deck_with_abort<R, A>(
         &|_| {},
     )
     .map(|snapshot| {
-        let snapshot = snapshot.with_deck_outputs(deck_outputs);
+        let snapshot = snapshot
+            .with_deck_outputs(deck_outputs)
+            .with_facts(stated, deck_temperature);
         match source_lines {
             Some((lines, expansion)) => snapshot.with_source_lines(&expansion, Some(lines)),
             None => snapshot,

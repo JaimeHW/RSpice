@@ -56,6 +56,8 @@ use crate::monte_carlo_checkpoint::preparation::PreparedMonteCarloResume;
 use crate::monte_carlo_checkpoint::preparation::digest_with_resumes;
 mod participation;
 mod pvt_preparation;
+mod run_facts;
+pub(crate) use run_facts::stated_facts;
 mod run_receipt;
 mod saved_outputs;
 
@@ -668,6 +670,8 @@ pub struct AuthorizedRunDispatch {
     cross_probe: Option<CrossProbeSnapshot>,
     hierarchy_map: SealedHierarchyMap,
     configuration: Option<rspice_results::run_receipt::RunConfiguration>,
+    /// What the run sets the engine to, as its run records it.
+    facts: Option<rspice_results::run_facts::RunFacts>,
 }
 
 /// Opaque task/netlist pair accepted by the runner's sole production start.
@@ -772,6 +776,13 @@ impl AuthorizedRunDispatch {
 
     pub fn take_cross_probe(&mut self) -> Option<CrossProbeSnapshot> {
         self.cross_probe.take()
+    }
+
+    /// What the run sets the engine to: the temperatures its tasks solve at,
+    /// what its points step, and the design variables and options its deck
+    /// states. `None` for a run whose preparation read none.
+    pub fn facts(&self) -> Option<&rspice_results::run_facts::RunFacts> {
+        self.facts.as_ref()
     }
 }
 
@@ -1085,6 +1096,9 @@ pub struct PreparedRunSnapshot {
     /// needs more than is free and fits what is installed. Not sealed: it
     /// says what the machine had as the run was prepared, not what runs.
     memory_warning: Option<super::run_memory::MemoryWarning>,
+    /// What the run sets the engine to, once its preparation has read it.
+    /// Not sealed: it is read from what is sealed.
+    facts: Option<rspice_results::run_facts::RunFacts>,
 }
 
 impl std::fmt::Debug for PreparedRunSnapshot {
@@ -1885,6 +1899,7 @@ impl PreparedRunSnapshot {
             configuration: parts.configuration,
             source_lines: None,
             memory_warning,
+            facts: None,
         };
 
         // Preflight/dispatch parity, enforced where every caller passes.
@@ -2080,6 +2095,7 @@ impl PreparedRunSnapshot {
             cross_probe: self.cross_probe,
             hierarchy_map,
             configuration: self.configuration,
+            facts: self.facts,
         })
     }
 }
