@@ -370,8 +370,8 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
     // The lane band owns the overview gestures and everything above it
     // belongs to the flags, so a flag grab never fights a resize handle.
     let lane_band = egui::Rangef::new(track.top() - 4.0, track.bottom() + 4.0);
-    // Whether the panes show less than the whole record: the thumb takes the
-    // accent and the cursors get their notches only then.
+    // Whether the panes show less than the whole record: the thumb takes its
+    // wash and the cursors get their notches only then.
     let (shown_start, shown_end) = shared_axis_viewport_fraction(scale, full_domain, current);
     let zoomed = shown_start > 1.0e-9 || shown_end < 1.0 - 1.0e-9;
     let mut viewport = egui::Rect::NOTHING;
@@ -384,6 +384,30 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
             egui::Stroke::new(1.0, c.border),
             egui::StrokeKind::Inside,
         );
+        let window_left = track.left() + track.width() * shown_start as f32;
+        viewport = egui::Rect::from_min_max(
+            egui::pos2(window_left, track.top()),
+            egui::pos2(
+                (track.left() + track.width() * shown_end as f32).max(window_left + 6.0),
+                track.bottom(),
+            ),
+        );
+        // The thumb is a window with two ends to pull at full view too, as
+        // a range slider at full range is. It stands inside the plot pane,
+        // so it is drawn in the neutral inks and never in the accent: a
+        // frame in the strong border, the pressed wash while zoomed in, and
+        // the hover fill while the pointer is over the track at full view,
+        // where a wash across the whole track would say nothing and no
+        // thumb at all hid that its ends pull in to zoom. Both washes go
+        // down before the miniature, which they would otherwise cover.
+        let lane_hovered = response
+            .hover_pos()
+            .is_some_and(|pointer| lane_band.contains(pointer.y));
+        if zoomed {
+            painter.rect_filled(viewport, 0.0, c.bg_active);
+        } else if lane_hovered {
+            painter.rect_filled(viewport, 0.0, c.bg_hover);
+        }
         if let Some(Overview { derived, model }) = overview
             && let Some(trace) = model
                 .traces
@@ -440,37 +464,17 @@ pub(crate) fn show_ruler(ui: &mut Ui, ruler: Ruler<'_>, input: SharedXAxis) -> S
             }
         }
 
-        let window_left = track.left() + track.width() * shown_start as f32;
-        viewport = egui::Rect::from_min_max(
-            egui::pos2(window_left, track.top()),
-            egui::pos2(
-                (track.left() + track.width() * shown_end as f32).max(window_left + 6.0),
-                track.bottom(),
-            ),
-        );
-        // The thumb is a window with two ends to pull at full view too, as
-        // a range slider at full range is. Zoomed in, it takes the accent.
-        // At full view it is a 1 px frame in the secondary text ink, whose
-        // handles take the accent while the pointer is over the track: an
-        // amber thumb across the whole track would say nothing, and no
-        // thumb at all hid that its ends pull in to zoom.
-        let lane_hovered = response
-            .hover_pos()
-            .is_some_and(|pointer| lane_band.contains(pointer.y));
-        let (frame_ink, handle_ink) = if zoomed {
-            (c.accent, c.accent)
-        } else if lane_hovered {
-            (c.text_dim, c.accent)
+        // The handles take the full ink while the thumb is in use, zoomed
+        // in or under the pointer, and the secondary ink at rest.
+        let handle_ink = if zoomed || lane_hovered {
+            c.text
         } else {
-            (c.text_dim, c.text_dim)
+            c.text_dim
         };
-        if zoomed {
-            painter.rect_filled(viewport, 0.0, c.accent.gamma_multiply(0.14));
-        }
         painter.rect_stroke(
             viewport,
             0.0,
-            egui::Stroke::new(1.0, frame_ink),
+            egui::Stroke::new(1.0, c.border_strong),
             egui::StrokeKind::Inside,
         );
         // A grab handle at each end resizes the visible span in place: drag
