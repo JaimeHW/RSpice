@@ -243,12 +243,14 @@ const RESULT_IMPORT_PURPOSE: &str = "Review the detected structure and mapping b
 /// Every word the review's primary takes, one per step, which it is held as
 /// wide as, so the footer's buttons stand where they stood on the step before.
 const RESULT_IMPORT_PRIMARIES: [&str; 3] = ["Map signals", "Validate import", "Import"];
-/// The review's height on every step: its tallest page, Map's, whole, under
-/// the kit's header and over its footer. Map holds the mapping's two rows,
+/// The review's height on every step: its tallest pages whole, under the
+/// kit's header and over its footer. Map holds the mapping's two rows,
 /// [`RESULT_IMPORT_SIGNAL_ROWS`] signals and the preview's
-/// [`RESULT_IMPORT_PREVIEW_ROWS`] rows. One height, so no step on a screen
-/// that holds it scrolls, and the footer never moves from step to step.
-const RESULT_IMPORT_HEIGHT: f32 = 700.0;
+/// [`RESULT_IMPORT_PREVIEW_ROWS`] rows; Validate a source's facts and a note
+/// over the same preview, and is the taller by a few rows. One height, so a
+/// step on a screen that holds it scrolls only for a source with more to say
+/// than one analysis, and the footer never moves from step to step.
+const RESULT_IMPORT_HEIGHT: f32 = 720.0;
 /// How many signals the Map step lists before its list scrolls.
 const RESULT_IMPORT_SIGNAL_ROWS: f32 = 5.0;
 /// The kit's margin round a transaction dialog, which a screen too short for
@@ -1462,7 +1464,7 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
     facts.extend([
         (
             "Inferred domain",
-            analysis_domain_label(draft.analysis_type).to_owned(),
+            result_import_domain_name(draft.analysis_type).to_owned(),
         ),
         ("Coordinate", draft.coordinate_name.clone()),
         (
@@ -1512,6 +1514,14 @@ const RESULT_IMPORT_DOMAINS: [(AnalysisType, &str); 3] = [
     (AnalysisType::DcSweep, "DC sweep"),
 ];
 
+/// A domain as the review names it, in the words the Map step offers it in.
+fn result_import_domain_name(analysis_type: AnalysisType) -> &'static str {
+    RESULT_IMPORT_DOMAINS
+        .iter()
+        .find(|(domain, _)| *domain == analysis_type)
+        .map_or_else(|| analysis_domain_label(analysis_type), |(_, label)| label)
+}
+
 fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState, digits: usize) {
     band_header(ui, "Map engineering data", None);
     result_import_inset(ui, |ui| {
@@ -1538,24 +1548,17 @@ fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState
             // and is read as nothing else.
             rows.value(
                 "Analysis domain",
-                analysis_domain_label(draft.analysis_type),
+                result_import_domain_name(draft.analysis_type),
             );
         } else {
             let options = RESULT_IMPORT_DOMAINS
                 .iter()
                 .map(|(_, label)| (*label).to_owned())
                 .collect::<Vec<_>>();
-            let shown = RESULT_IMPORT_DOMAINS
-                .iter()
-                .find(|(domain, _)| *domain == draft.analysis_type)
-                .map_or_else(
-                    || analysis_domain_label(draft.analysis_type),
-                    |(_, label)| label,
-                );
             if let Some(index) = rows.select(
                 "Analysis domain",
                 "rspice.result-import.domain",
-                shown,
+                result_import_domain_name(draft.analysis_type),
                 &options,
             ) {
                 draft.analysis_type = RESULT_IMPORT_DOMAINS[index].0;
@@ -1633,7 +1636,7 @@ fn result_import_validate_page(
         ("Format", draft.source_format_id.clone()),
         (
             "Domain",
-            analysis_domain_label(draft.analysis_type).to_owned(),
+            result_import_domain_name(draft.analysis_type).to_owned(),
         ),
         ("Coordinate", draft.coordinate_name.clone()),
         (
