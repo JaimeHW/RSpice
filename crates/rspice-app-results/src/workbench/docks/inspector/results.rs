@@ -29,6 +29,19 @@ pub(in crate::workbench) fn results(
     state: &mut ResultsParts<'_>,
     run_details: &mut Option<Box<RunDetailsDialogState>>,
 ) {
+    // One label column down the whole inspector, as wide as its labels: the
+    // values start at one x, and a field holding an axis range keeps the
+    // readout's digits in the room the labels leave.
+    rspice_ui_kit::panels::fitted_label_column(ui, "rspice.inspector.results", |ui| {
+        results_rows(ui, state, run_details);
+    });
+}
+
+fn results_rows(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    run_details: &mut Option<Box<RunDetailsDialogState>>,
+) {
     let selected_trace = state
         .results
         .valid_selected_trace(&state.model.simulation)

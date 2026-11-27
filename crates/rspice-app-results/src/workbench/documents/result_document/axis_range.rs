@@ -60,14 +60,15 @@ pub(crate) fn format_axis_range(range: (f64, f64), unit: &str) -> String {
     written(range, unit, SIGNIFICANT_DIGITS)
 }
 
-/// `(minimum, maximum)` to fewer digits of the interval's width, finest
-/// first, each one shorter than the last: what a field too narrow for
-/// [`format_axis_range`]'s spelling shows at rest, `−1.76 … 1.76Meg` for
-/// `−1.763 … 1.763Meg`, rather than cutting the interval through its own
-/// ellipsis. Past the fewest digits the ellipsis closes up, `−143…−57
-/// dBc/Hz`, and then the unit, which the axis's own ticks state, goes,
-/// `−143 … −57`: a narrow field keeps every digit it shows. The field still
-/// edits, and reads on hover, the full spelling.
+/// Shorter spellings of `(minimum, maximum)`, each shorter than the last:
+/// what a field too narrow for [`format_axis_range`]'s spelling shows at
+/// rest, rather than cutting the interval through its own ellipsis. The
+/// readout's digits go last: at each count of digits, finest first, each
+/// end keeps its prefix on its number and the unit follows both once,
+/// `−16.97k … 16.97k rad/s`, and then the ellipsis closes up,
+/// `−1.763Meg…1.763Meg`, before a digit goes. Past the fewest digits the
+/// unit, which the axis's own ticks state, goes, `−143 … −57`. The field
+/// still edits, and reads on hover, the full spelling.
 pub(crate) fn shorter_axis_ranges(range: (f64, f64), unit: &str) -> Vec<String> {
     let mut shorter: Vec<String> = Vec::new();
     let mut last = format_axis_range(range, unit);
@@ -77,12 +78,14 @@ pub(crate) fn shorter_axis_ranges(range: (f64, f64), unit: &str) -> Vec<String> 
             shorter.push(text);
         }
     };
-    for digits in (MIN_SHORTER_DIGITS..SIGNIFICANT_DIGITS).rev() {
+    let closed = |text: String| text.replace(" \u{2026} ", "\u{2026}");
+    for digits in (MIN_SHORTER_DIGITS..=SIGNIFICANT_DIGITS).rev() {
         offer(written(range, unit, digits));
+        offer(compact(range, unit, digits));
+        offer(closed(written(range, unit, digits)));
+        offer(closed(compact(range, unit, digits)));
     }
-    offer(written(range, unit, MIN_SHORTER_DIGITS).replace(" \u{2026} ", "\u{2026}"));
     if !unit.is_empty() {
-        offer(compact((range.0, range.1), unit, MIN_SHORTER_DIGITS));
         offer(written(range, "", MIN_SHORTER_DIGITS));
     }
     shorter
@@ -398,16 +401,16 @@ mod tests {
 
     /// A pole-zero plane's range read `−1.763 ……763Meg` in a field a few
     /// pixels too narrow: the field cut the interval through its own
-    /// ellipsis. The interval offers shorter spellings instead, to fewer
-    /// digits, each shorter than the last and each read back as nearly the
-    /// same interval.
+    /// ellipsis. The interval offers shorter spellings instead, closed up
+    /// before it gives a digit away, each shorter than the last and each read
+    /// back as nearly the same interval.
     #[test]
     fn a_range_too_wide_for_its_field_offers_shorter_spellings() {
         let range = (-1.763e6, 1.763e6);
         assert_eq!(format_axis_range(range, ""), "−1.763Meg … 1.763Meg");
         assert_eq!(
             shorter_axis_ranges(range, ""),
-            ["−1.76Meg … 1.76Meg", "−1.8Meg … 1.8Meg", "−1.8Meg…1.8Meg"]
+            ["−1.763Meg…1.763Meg", "−1.76Meg…1.76Meg", "−1.8Meg…1.8Meg"]
         );
         // What already reads at its fewest digits only closes up.
         assert_eq!(shorter_axis_ranges((4.0, 6.0), "V"), ["4…6 V"]);
@@ -544,7 +547,12 @@ mod tests {
         assert_eq!(format_axis_range(range, "dBc/Hz"), "−143.2 … −56.8 dBc/Hz");
         assert_eq!(
             shorter_axis_ranges(range, "dBc/Hz"),
-            ["−143 … −57 dBc/Hz", "−143…−57 dBc/Hz", "−143 … −57"]
+            [
+                "−143.2…−56.8 dBc/Hz",
+                "−143 … −57 dBc/Hz",
+                "−143…−57 dBc/Hz",
+                "−143 … −57"
+            ]
         );
         for text in shorter_axis_ranges(range, "dBc/Hz") {
             let (low, high) = parse_axis_range(&text, "dBc/Hz").expect("reads back");

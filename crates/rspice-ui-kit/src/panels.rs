@@ -1470,8 +1470,84 @@ struct RowColumns {
     value: f32,
 }
 
+/// The labels of a block of rows drawn in [`fitted_label_column`]: the
+/// column the block states for its rows, and the widest label drawn in it
+/// so far this frame.
+#[derive(Debug, Clone, Copy, Default)]
+struct FittedLabels {
+    stated: Option<f32>,
+    widest: f32,
+}
+
+fn fitted_labels_id() -> egui::Id {
+    egui::Id::new("rspice.kit.fitted-label-column")
+}
+
+/// Draw `add`'s property rows on one label column as wide as their widest
+/// label, not two fifths of the row: every value in the block starts at one
+/// x, and a field that holds a long value, an axis range, gets the room the
+/// labels leave. The width is the widest label the block drew the frame
+/// before, so a block's first frame takes the proportional column and the
+/// next settles; a row that states its own label width keeps it.
+pub fn fitted_label_column<R>(
+    ui: &mut Ui,
+    id: impl std::hash::Hash,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let key = fitted_labels_id().with(id);
+    let stated = ui.data(|data| data.get_temp::<f32>(key));
+    let outer = ui.data(|data| data.get_temp::<FittedLabels>(fitted_labels_id()));
+    ui.data_mut(|data| {
+        data.insert_temp(
+            fitted_labels_id(),
+            FittedLabels {
+                stated,
+                widest: 0.0,
+            },
+        );
+    });
+    let inner = add(ui);
+    let drawn = ui.data_mut(|data| {
+        let drawn = data.get_temp::<FittedLabels>(fitted_labels_id());
+        match outer {
+            Some(outer) => data.insert_temp(fitted_labels_id(), outer),
+            None => data.remove::<FittedLabels>(fitted_labels_id()),
+        }
+        drawn
+    });
+    if let Some(drawn) = drawn.filter(|drawn| drawn.widest > 0.0) {
+        let widest = drawn.widest.ceil();
+        if stated != Some(widest) {
+            ui.data_mut(|data| data.insert_temp(key, widest));
+            ui.ctx().request_repaint();
+        }
+    }
+    inner
+}
+
+/// Inside [`fitted_label_column`], count `label` in the width the block's
+/// labels need.
+fn fit_label(ui: &Ui, label: &str, font: &egui::FontId) {
+    let Some(mut fitted) = ui.data(|data| data.get_temp::<FittedLabels>(fitted_labels_id())) else {
+        return;
+    };
+    let width = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font.clone(), egui::Color32::WHITE)
+        .size()
+        .x;
+    if width > fitted.widest {
+        fitted.widest = width;
+        ui.data_mut(|data| data.insert_temp(fitted_labels_id(), fitted));
+    }
+}
+
 impl RowColumns {
     fn of(ui: &Ui, label_width: Option<f32>) -> Self {
+        let label_width = label_width.or_else(|| {
+            ui.data(|data| data.get_temp::<FittedLabels>(fitted_labels_id()))
+                .and_then(|fitted| fitted.stated)
+        });
         let pad = panel_inset(ui);
         let width = ui.available_width().max(1.0);
         let (label, gap, value) = property_row_columns_with(width - 2.0 * pad, label_width);
@@ -1565,6 +1641,7 @@ pub fn property_row_wrapped(ui: &mut Ui, label: &str, text: &str) -> Response {
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let value_font = theme::field_sans();
     let columns = RowColumns::of(ui, None);
+    fit_label(ui, label, &label_font);
     let label_galley = ui.painter().layout_no_wrap(
         elide_text(ui, label, &label_font, columns.label),
         label_font,
@@ -1619,6 +1696,7 @@ pub fn property_row_whole(ui: &mut Ui, label: &str, value: &str) -> Response {
 pub(crate) fn row_label(ui: &Ui, column: Rect, label: &str) {
     let t = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    fit_label(ui, label, &font);
     let shown = elide_text(ui, label, &font, column.width());
     ui.painter().with_clip_rect(column).text(
         Pos2::new(column.left(), column.center().y),
