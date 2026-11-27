@@ -35,7 +35,7 @@ pub fn incomplete_history_sentence<W>(analysis: &AnalysisResult<W>) -> Option<St
         return None;
     };
     Some(format!(
-        "FFT history is incomplete — the transient retained {} … {}; the transform needs \
+        "FFT history is incomplete — the transient kept {} … {}; the transform needs \
          samples through {}",
         fmt_si_significant(available_start_s, "s", 4),
         fmt_si_significant(available_stop_s, "s", 4),

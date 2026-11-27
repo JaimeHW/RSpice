@@ -145,7 +145,7 @@ fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option
                     quantity: value.name.clone(),
                     value: format!("{:.17e}", value.value),
                     unit: value.unit.clone(),
-                    status: "retained".to_owned(),
+                    status: "solved".to_owned(),
                 });
             }
             index -= values.len();
@@ -170,7 +170,7 @@ fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option
                     quantity: name.to_owned(),
                     value: format!("{value:.17e}"),
                     unit: String::new(),
-                    status: "retained".to_owned(),
+                    status: "solved".to_owned(),
                 });
             }
             index -= device.params.len();
@@ -196,7 +196,7 @@ fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option
             quantity: "Temperature".to_owned(),
             value: format!("{temperature_celsius:.17e}"),
             unit: "°C".to_owned(),
-            status: "retained".to_owned(),
+            status: "as run".to_owned(),
         });
     }
     index -= 1;
@@ -280,7 +280,7 @@ fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option
         quantity,
         value: format!("{:.17e}", mna_solution[index]),
         unit: String::new(),
-        status: "retained solver state".to_owned(),
+        status: "solver state".to_owned(),
     })
 }
 
@@ -344,7 +344,7 @@ pub fn printed_operating_point(analysis: &AnalysisResult) -> Option<PrintedTable
 /// its exact records numbered from one.
 pub fn printed_artifact(text: &str, lines: &[(usize, usize)]) -> PrintedTable {
     (
-        vec!["Line".to_owned(), "Evidence".to_owned()],
+        vec!["Line".to_owned(), "Text".to_owned()],
         lines
             .iter()
             .enumerate()
@@ -454,7 +454,7 @@ pub fn show_artifact(
         ui,
         &[
             ("Line", Align::Right, true),
-            ("Evidence", Align::Left, true),
+            ("Text", Align::Left, true),
         ],
         &sizing,
     );
@@ -474,7 +474,7 @@ pub fn show_artifact(
             }
             ui.close();
         }
-        if ui.button("Copy all exact evidence").clicked() {
+        if ui.button("Copy all lines").clicked() {
             ui.ctx().copy_text(exact.clone());
             ui.close();
         }
@@ -944,7 +944,7 @@ pub fn show_samples(
 
     let rows = selected_rows(model, view, cursor, &mut on_scan);
     if rows.is_empty() {
-        well_hint(ui, "This analysis retained no samples");
+        well_hint(ui, "This analysis kept no samples");
         return None;
     }
 
@@ -1103,7 +1103,7 @@ pub fn inline_actions(
     let response = rspice_ui_kit::widgets::Button::new(&format!("1/{stride}"))
         .selected(stride > 1)
         .show(ui)
-        .on_hover_text("Row stride — show every Nth retained sample");
+        .on_hover_text("Row stride — show every Nth sample");
     if response.clicked() {
         view.cycle_stride();
     }
@@ -1243,7 +1243,7 @@ pub fn operating_point_controls(ui: &mut Ui) {
 }
 
 fn status_line(shown: usize, retained: usize, view: &TableView, cursor: Option<f64>) -> String {
-    let mut parts = vec![format!("{shown} of {retained} retained rows")];
+    let mut parts = vec![format!("{shown} of {retained} rows")];
     if view.stride > 1 {
         parts.push(format!("stride {}", view.stride));
     }
@@ -1721,7 +1721,7 @@ mod tests {
             ..TableView::default()
         };
         let line = status_line(200, 24_019, &view, None);
-        assert!(line.contains("200 of 24019 retained rows"), "{line}");
+        assert!(line.contains("200 of 24019 rows"), "{line}");
         assert!(line.contains("stride 10"), "{line}");
     }
 
@@ -1742,7 +1742,7 @@ mod tests {
             ..TableView::default()
         };
         let line = status_line(41, 100, &view, Some(0.0));
-        assert!(line.contains("41 of 100 retained rows"), "{line}");
+        assert!(line.contains("41 of 100 rows"), "{line}");
         assert!(line.contains("window around A"), "{line}");
         assert!(!line.contains("±40"), "{line}");
     }

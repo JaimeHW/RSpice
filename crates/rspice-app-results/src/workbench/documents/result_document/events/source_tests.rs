@@ -983,7 +983,7 @@ fn the_event_tables_state_their_numbers_at_the_readers_digits() {
     let texts = painted(&output);
     let has = |wanted: &str| texts.iter().any(|(text, _)| text == wanted);
     for wanted in [
-        "Retained interval: 0 s to 100 ns",
+        "Recorded interval: 0 s to 100 ns",
         "12.35 ns",
         "\u{2212}2.500 fC",
         "40.00 ns",

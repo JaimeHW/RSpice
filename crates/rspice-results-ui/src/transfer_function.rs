@@ -42,7 +42,7 @@ pub fn show(ui: &mut Ui, view: Option<TransferFunctionView<'_>>, significant_dig
     let Some(view) = view else {
         well_hint(
             ui,
-            "Select an analysis with a retained transfer-function result",
+            "Pick a transfer-function analysis in the data browser",
         );
         return;
     };

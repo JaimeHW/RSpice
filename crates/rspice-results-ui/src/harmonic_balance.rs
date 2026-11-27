@@ -98,7 +98,7 @@ pub fn show_absent(ui: &mut Ui, reason: SpectrumAbsence<'_>) {
         SpectrumAbsence::IncompleteHistory(sentence) => well_hint(ui, &sentence),
         SpectrumAbsence::Unavailable => well_hint(
             ui,
-            "No retained complex coefficient spectrum for the selected analysis",
+            "This analysis kept no complex coefficient spectrum",
         ),
     }
 }
@@ -210,7 +210,7 @@ fn show_recorded(
     let header = strip::StripHeader::new(
         "SPECTRUM",
         &format!(
-            "{} · {} retained spectral samples",
+            "{} · {} spectral samples",
             model.label, model.retained_frequency_count
         ),
         &legend,
@@ -223,17 +223,17 @@ fn show_recorded(
     };
 
     let Some((auto_x0, auto_x1)) = automatic_x_range(model) else {
-        well_hint(ui, "Retained HB frequency axis is degenerate");
+        well_hint(ui, "The HB frequency axis spans no range");
         return requested;
     };
     let Some((auto_y0, auto_y1)) = automatic_y_range(model) else {
-        well_hint(ui, "Retained HB magnitudes are degenerate");
+        well_hint(ui, "The HB magnitudes span no range");
         return requested;
     };
     let (x0, x1) = view.x.unwrap_or((auto_x0, auto_x1));
     let (y0, y1) = view.y.unwrap_or((auto_y0, auto_y1));
     if !(x0 < x1 && y0 < y1) {
-        well_hint(ui, "Retained HB plot range is invalid");
+        well_hint(ui, "The HB plot range is invalid");
         return requested;
     }
 
@@ -256,9 +256,9 @@ fn show_recorded(
             .clone()
             .unwrap_or_else(|| Axis::linear_with(y0, y1, "", 7).with_label("magnitude")),
     )
-    .accessible_name("Retained complex coefficient spectrum")
+    .accessible_name("Complex coefficient spectrum")
     .accessible_detail(
-        "Exact retained magnitude coefficients. Solver tone configuration, harmonic order, convergence iterations, fundamental, and THD are shown only when retained.",
+        "Exact magnitude coefficients. Solver tone configuration, harmonic order, convergence iterations, fundamental, and THD are shown only when the run kept them.",
     );
     if decades.is_some() {
         spec = spec.with_log_y();

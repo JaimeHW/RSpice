@@ -259,7 +259,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     evaluations.retain(|rule| rule.device_id != "M0000");
     violations.retain(|event| event.device_id != "M0000");
     let removed = paint(&mut state, true);
-    assert!(removed.contains("no longer retained"), "{removed}");
+    assert!(removed.contains("no longer in this run"), "{removed}");
     assert!(state.results.results.session.selected_soa_rule.is_none());
 }
 

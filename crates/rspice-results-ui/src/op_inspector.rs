@@ -67,9 +67,9 @@ const DEVICE_FAMILY_ORDER: [&str; 3] = ["MOSFET", "BJT", "DIODE"];
 const MODULE_SECTION_RANK: usize = DEVICE_FAMILY_ORDER.len() + 1;
 const NON_FINITE: &str = "non-finite";
 const NODE_NOT_ON_SCHEMATIC: &str =
-    "This retained node has no current, unambiguous schematic mapping.";
+    "This node no longer maps to one net on the schematic.";
 const DEVICE_NOT_ON_SCHEMATIC: &str =
-    "This retained device has no current, exact schematic identity.";
+    "This device no longer matches a part on the schematic.";
 const SCHEMATIC_CHANGED: &str = "Schematic changed since this run; cross-probing is off.";
 
 #[derive(Clone)]
@@ -195,7 +195,7 @@ pub fn show_absent(ui: &mut Ui, absence: OpAbsence) {
             OpAbsence::Missing => "No operating-point analysis is selected.",
             OpAbsence::OtherAnalysis => "The selected analysis is not a DC operating-point result.",
             OpAbsence::NoValues => {
-                "The selected operating-point analysis retained no node, branch, or device values."
+                "This operating-point analysis kept no node, branch, or device values."
             }
         },
     );
@@ -552,8 +552,8 @@ const NODES: ScalarSection = ScalarSection {
     title: "Node voltages",
     name_header: "Node",
     value_header: "Voltage",
-    not_retained: "Node-voltage evidence was not retained for this analysis.",
-    empty: "The retained DC solution contains no node-voltage rows.",
+    not_retained: "This analysis kept no node voltages.",
+    empty: "The DC solution has no node voltages.",
 };
 
 const BRANCHES: ScalarSection = ScalarSection {
@@ -561,8 +561,8 @@ const BRANCHES: ScalarSection = ScalarSection {
     title: "Branch currents",
     name_header: "Branch",
     value_header: "Current",
-    not_retained: "Branch-current evidence was not retained for this analysis.",
-    empty: "The retained DC solution contains no branch-current rows.",
+    not_retained: "This analysis kept no branch currents.",
+    empty: "The DC solution has no branch currents.",
 };
 
 struct PlanBuilder<'a> {
@@ -722,13 +722,13 @@ impl PlanBuilder<'_> {
             let note = if detail
                 .is_some_and(|detail| detail.policy == OperatingPointDeviceDetailEvidence::None)
             {
-                "The executed save policy explicitly retained no per-device operating-point detail."
+                "The run's save settings kept no per-device operating-point detail."
             } else if devices.is_none() {
-                "Per-device operating-point quantities were not retained for this analysis."
+                "This analysis kept no per-device operating-point quantities."
             } else if devices.is_some_and(|report| report.entries.is_empty()) {
-                "The retained per-device report contains no device rows."
+                "The per-device report has no device rows."
             } else {
-                "No device row satisfies the retained device-detail scope."
+                "No device falls within the run's device-detail scope."
             };
             self.add_note(OpRowKind::Device, DEVICES_TITLE, note);
             return;

@@ -521,7 +521,7 @@ fn history_spec<'s>(ui: &Ui, strip: &HistoryStrip<'s>, accessible_name: &'s str)
         Axis::linear_with(strip.y.0, strip.y.1, strip.unit, 5).with_label(strip.name),
     )
     .accessible_name(accessible_name)
-    .accessible_detail("Exact retained value at each evaluated candidate.");
+    .accessible_detail("Exact value at each evaluated candidate.");
     if strip.values.len() == strip.iterations.len() {
         spec.traces.push(
             Trace::new(strip.iterations, strip.values, strip.color).cache_key(strip.cache_key),

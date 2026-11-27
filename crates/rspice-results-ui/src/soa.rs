@@ -176,7 +176,7 @@ impl SoaWorstInterval {
         };
         match self {
             Self::Passed { .. } => None,
-            Self::NotRetained { .. } => Some(("Interval", "not retained".to_owned())),
+            Self::NotRetained { .. } => Some(("Interval", "not kept".to_owned())),
             Self::NotReproduced { .. } => Some(("Interval", "not reproduced".to_owned())),
             Self::Excursion {
                 qualified,
@@ -211,10 +211,10 @@ impl SoaWorstInterval {
         match self {
             Self::Passed { .. } => "Not applicable (rule passed)".to_owned(),
             Self::NotRetained { .. } => {
-                "Complete interval was not retained; rerun the analysis".to_owned()
+                "This run kept only part of the interval; run the analysis again".to_owned()
             }
             Self::NotReproduced { .. } => {
-                "Retained history does not reproduce the rule verdict".to_owned()
+                "The saved stress history does not reproduce the rule verdict".to_owned()
             }
             Self::Excursion {
                 qualified,
@@ -408,9 +408,9 @@ pub fn selection_note(ui: &mut Ui, reason: SoaSelectionAbsence) {
         match reason {
             SoaSelectionAbsence::Unselected => "Select a rule.",
             SoaSelectionAbsence::Unavailable => {
-                "Select the rule's analysis with valid, successful SOA evidence to inspect it."
+                "To inspect this rule, pick its SOA analysis from a successful run."
             }
-            SoaSelectionAbsence::Removed => "The selected SOA rule is no longer retained.",
+            SoaSelectionAbsence::Removed => "The selected SOA rule is no longer in this run.",
         },
     );
 }
@@ -736,7 +736,7 @@ pub fn show(
                 egui::Button::new("Locate in schematic"),
             )
             .on_disabled_hover_text(
-                "The result is stale or the retained device has no exact identity in the active schematic.",
+                "The result is out of date, or this device no longer matches a part on the schematic.",
             );
             if schematic.clicked() {
                 let selection = selection_of(evaluation);
@@ -760,7 +760,7 @@ pub fn show(
             }
         });
         if visible_rules.is_empty() {
-            well_hint(ui, "No retained SOA rules match the selected filter");
+            well_hint(ui, "No SOA rules match the selected filter");
         }
     };
     let mut table_ui = ui.new_child(
@@ -906,7 +906,7 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
         let response = ui
             .add_enabled(trace_available, egui::Button::new("Open stress trace"))
             .on_disabled_hover_text(
-                "This legacy dataset does not retain the complete SOA stress history; run it again.",
+                "This older run kept only part of the SOA stress history; run it again.",
             );
         open_trace = response.clicked();
         let response = ui
@@ -915,7 +915,7 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
                 egui::Button::new("Locate in schematic"),
             )
             .on_disabled_hover_text(
-                "The result is stale or the retained device has no exact identity in the active schematic.",
+                "The result is out of date, or this device no longer matches a part on the schematic.",
             );
         locate_device = response.clicked();
     });
@@ -1159,7 +1159,7 @@ fn legacy_stress_history_note(ui: &mut Ui) {
         .show(ui, |ui| {
             ui.label(RichText::new("Stress history unavailable").strong());
             ui.label(
-                "This legacy dataset retains the exact worst point but not the complete rule history. Run the SOA analysis again to enable the linked trace.",
+                "This older run kept the exact worst point but not the full rule history. Run the SOA analysis again to open the linked trace.",
             );
         });
 }
@@ -1229,7 +1229,7 @@ fn stress_trace_card(
                 parameter_label(evaluation.parameter)
             );
             let detail = format!(
-                "Exact retained stress samples; limit at the worst point is {}. Worst point {} at {}. A varying limit uses its retained trace at each time.",
+                "Exact stress samples; limit at the worst point is {}. Worst point {} at {}. A varying limit uses its own trace at each time.",
                 numbers.said(evaluation.limit_value, unit),
                 numbers.said(evaluation.worst_actual_value, unit),
                 numbers.said(evaluation.worst_time_s, "s")

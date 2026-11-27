@@ -428,11 +428,11 @@ fn a_section_the_save_did_not_keep_is_a_title_and_one_line() {
     );
     assert_eq!(
         plan.sections[0].note.as_deref(),
-        Some("Node-voltage evidence was not retained for this analysis.")
+        Some("This analysis kept no node voltages.")
     );
     assert_eq!(
         plan.sections[2].note.as_deref(),
-        Some("Per-device operating-point quantities were not retained for this analysis.")
+        Some("This analysis kept no per-device operating-point quantities.")
     );
     let notes = plan
         .rows

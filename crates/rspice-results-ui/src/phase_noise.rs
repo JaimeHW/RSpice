@@ -100,9 +100,9 @@ pub fn show_absent(ui: &mut Ui, selected_periodic_noise_without_phase_trace: boo
     well_hint(
         ui,
         if selected_periodic_noise_without_phase_trace {
-            "The selected PNOISE result retains no trace explicitly identified as phase noise"
+            "This PNOISE result kept no trace marked as phase noise"
         } else {
-            "No retained phase-noise spectrum in the active dataset"
+            "This run kept no phase-noise spectrum"
         },
     );
 }
@@ -337,13 +337,13 @@ pub fn show(
     };
 
     let Some((x0, x1)) = sweep.filter(|(x0, x1)| x1 > x0) else {
-        well_hint(ui, "Degenerate retained offset-frequency axis");
+        well_hint(ui, "The offset-frequency axis spans no range");
         return requested;
     };
     let Some((level_min, level_max)) = level_range else {
         well_hint(
             ui,
-            "The retained phase-noise trace contains no finite levels",
+            "The phase-noise trace has no finite levels",
         );
         return requested;
     };
@@ -368,7 +368,7 @@ pub fn show(
         .collect();
     let mut spec = PlotSpec::new(x_axis, XScale::Log10, y_axis)
         .accessible_name("Phase-noise plot")
-        .accessible_detail("Retained phase-noise traces shown as L(f) in dBc/Hz.");
+        .accessible_detail("Phase-noise traces shown as L(f) in dBc/Hz.");
     if let Some(band) = sweep.and_then(|sweep| settings.band_within(sweep)) {
         spec.bands.push(plot::Band {
             x0: band.0,

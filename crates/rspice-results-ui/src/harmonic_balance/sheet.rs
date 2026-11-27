@@ -178,7 +178,7 @@ pub(super) fn show(
     if strips.is_empty() {
         well_hint(
             ui,
-            "No retained complex coefficient spectrum for the selected analysis",
+            "This analysis kept no complex coefficient spectrum",
         );
         return response;
     }
@@ -248,7 +248,7 @@ fn show_strip(
         .maximizable(false)
         .show(ui);
     let Some((lo, hi)) = extent(&curves) else {
-        well_hint(ui, "The retained lines have no finite level to draw");
+        well_hint(ui, "The spectral lines have no finite level to draw");
         return (header.fit_clicked, None);
     };
     let x_max = curves
@@ -270,7 +270,7 @@ fn show_strip(
         _ => (lo.min(0.0), if hi > 0.0 { hi * 1.08 } else { 1.0 }),
     });
     if !(x0 < x1 && y0 < y1) {
-        well_hint(ui, "The retained lines span no range to draw");
+        well_hint(ui, "The spectral lines span no range to draw");
         return (header.fit_clicked, None);
     }
     let x_axis = if form == SignalForm::Value {

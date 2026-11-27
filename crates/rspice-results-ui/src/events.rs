@@ -243,9 +243,9 @@ pub fn show_absent(ui: &mut Ui, absence: EventAbsence) {
     well_hint(
         ui,
         match absence {
-            EventAbsence::NoDataset => "Select a dataset with retained event traces",
-            EventAbsence::NoEvents => "The active analysis has no valid retained event traces",
-            EventAbsence::InvalidEvidence => "The retained event evidence is invalid",
+            EventAbsence::NoDataset => "Pick a run with event traces in the data browser",
+            EventAbsence::NoEvents => "This analysis kept no valid event traces",
+            EventAbsence::InvalidEvidence => "This analysis's event data is invalid",
         },
     );
 }
@@ -570,7 +570,7 @@ fn show_current_impulses(
     mono(
         ui,
         &format!(
-            "Retained interval: {} to {}",
+            "Recorded interval: {} to {}",
             numbers.said(history.start_time_s, "s"),
             numbers.said(history.stop_time_s, "s")
         ),
@@ -583,7 +583,7 @@ fn show_current_impulses(
     if !history.delivery_complete {
         panel_note(
             ui,
-            "This preview did not retain the complete impulse history.",
+            "This preview kept only part of the impulse history.",
         );
     }
     show_current_impulse_tables(ui, history, order, numbers);
@@ -627,9 +627,9 @@ fn show_current_impulse_tables(
         panel_note(
             ui,
             if history.traces.is_empty() {
-                "No current coverage was retained. Absence of events does not establish zero impulse charge."
+                "This run kept no current histories, so the lack of events does not mean zero impulse charge."
             } else {
-                "No charge events were retained in this time window. See Current coverage for the currents whose histories are complete."
+                "No charge events in this time window. Current coverage lists the currents whose histories are complete."
             },
         );
         return;
@@ -739,7 +739,7 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
     let total = cache.rows().len() + cache.current_rows().len();
     let shown = kept.rows.len() + cache.current_rows().len();
     let noun = if exact {
-        "retained events"
+        "events"
     } else {
         "projected changes"
     };
@@ -1259,14 +1259,14 @@ fn time_field(ui: &mut Ui, id: &str, value: Option<f64>) -> Option<Option<f64>> 
 
 const EVENT_SELECTION_NO_DATASET: &str = "No dataset is open, so the selected event has nothing to resolve against. \
      Open the dataset it was taken from, or select an event row here.";
-const EVENT_SELECTION_UNRETAINED_ANALYSIS: &str = "The analysis this event was selected from is no longer retained in the \
-     active dataset. Select an event row again.";
+const EVENT_SELECTION_UNRETAINED_ANALYSIS: &str =
+    "The analysis this event came from is no longer in this run. Select an event row again.";
 const EVENT_SELECTION_OTHER_ANALYSIS: &str = "Select an event row in the active analysis.";
 const EVENT_SELECTION_UNRETAINED_ROW: &str =
-    "The selected event has changed or is no longer retained. Select an event row again.";
+    "The selected event has changed or is gone. Select an event row again.";
 const EVENT_SELECTION_OTHER_DATASET: &str =
     "Open the dataset this event was selected from, or select an event in the current dataset.";
-const EVENT_SELECTION_INVALID_EVIDENCE: &str = "The selected analysis does not contain valid, available event evidence. Repair or replace the results to inspect this event.";
+const EVENT_SELECTION_INVALID_EVIDENCE: &str = "This analysis has no valid event data. Run it again to inspect this event.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionAbsence {

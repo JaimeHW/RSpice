@@ -152,13 +152,13 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
     let view = match source {
         ActiveMismatch::Ready(view) => view,
         ActiveMismatch::Missing => {
-            well_hint(ui, "Select an analysis with a retained DC mismatch result");
+            well_hint(ui, "Pick a DC mismatch analysis in the data browser");
             return;
         }
         ActiveMismatch::Invalid => {
             well_hint(
                 ui,
-                "The retained DC mismatch result is invalid and cannot be displayed",
+                "This DC mismatch result is invalid and cannot be displayed",
             );
             return;
         }
@@ -168,14 +168,14 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
     if evidence.contributors.is_empty() {
         well_hint(
             ui,
-            "The retained DC mismatch result lists no contributors above its own threshold",
+            "This DC mismatch result lists no contributors above its own threshold",
         );
         return;
     }
     let Some(plan) = plan else {
         well_hint(
             ui,
-            "The retained DC mismatch result is invalid and cannot be displayed",
+            "This DC mismatch result is invalid and cannot be displayed",
         );
         return;
     };
@@ -548,12 +548,12 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&Mismat
         ActiveMismatch::Ready(view) => view,
         ActiveMismatch::Missing => {
             section_header(ui, "DC mismatch", None);
-            panel_note(ui, "Select an analysis with retained DC mismatch data.");
+            panel_note(ui, "Pick a DC mismatch analysis in the data browser.");
             return;
         }
         ActiveMismatch::Invalid => {
             section_header(ui, "DC mismatch", None);
-            panel_note(ui, "The retained DC mismatch payload is invalid.");
+            panel_note(ui, "This DC mismatch result is invalid.");
             return;
         }
     };

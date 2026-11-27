@@ -384,13 +384,13 @@ pub fn show(
     let view = match source {
         ActiveStudy::Ready(view) => view,
         ActiveStudy::Missing => {
-            well_hint(ui, "Select an analysis with a retained sensitivity result");
+            well_hint(ui, "Pick a sensitivity analysis in the data browser");
             return;
         }
         ActiveStudy::Invalid => {
             well_hint(
                 ui,
-                "The retained sensitivity result is invalid and cannot be displayed",
+                "This sensitivity result is invalid and cannot be displayed",
             );
             return;
         }
@@ -398,14 +398,14 @@ pub fn show(
     if view.evidence.rows.is_empty() {
         well_hint(
             ui,
-            "The retained sensitivity result has no parameter sensitivities",
+            "This sensitivity result has no parameter sensitivities",
         );
         return;
     }
     let Some(plan) = plan else {
         well_hint(
             ui,
-            "The retained sensitivity result is invalid and cannot be displayed",
+            "This sensitivity result is invalid and cannot be displayed",
         );
         return;
     };
@@ -415,7 +415,7 @@ pub fn show(
     if !max_magnitude.is_finite() {
         well_hint(
             ui,
-            "The retained sensitivity result is invalid and cannot be displayed",
+            "This sensitivity result is invalid and cannot be displayed",
         );
         return;
     }
@@ -711,12 +711,12 @@ pub fn right_panel(
         ActiveStudy::Ready(view) => view,
         ActiveStudy::Missing => {
             section_header(ui, "Sensitivity", None);
-            panel_note(ui, "Select an analysis with retained sensitivity data.");
+            panel_note(ui, "Pick a sensitivity analysis in the data browser.");
             return;
         }
         ActiveStudy::Invalid => {
             section_header(ui, "Sensitivity", None);
-            panel_note(ui, "The retained sensitivity payload is invalid.");
+            panel_note(ui, "This sensitivity result is invalid.");
             return;
         }
     };
