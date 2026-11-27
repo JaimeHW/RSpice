@@ -7,6 +7,9 @@ use super::*;
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
+/// NumPy .npy: one array, so one analysis.
+const NPY: usize = 6;
+
 /// The picker's list is the stored choice's numbering, and its "one
 /// analysis" flags agree with the formats the export refuses on a
 /// multi-analysis view.
@@ -24,13 +27,14 @@ fn the_picker_offers_every_format_the_export_writes_in_stored_order() {
             .preferences
             .result_presentation_policy()
             .engineering_export();
-        let tabular = matches!(
+        let holds_one = matches!(
             format,
-            EngineeringExportFormat::Csv
-                | EngineeringExportFormat::Tsv
-                | EngineeringExportFormat::TouchstoneWhereCompatible
+            EngineeringExportFormat::TouchstoneWhereCompatible
+                | EngineeringExportFormat::ValueChangeDump
+                | EngineeringExportFormat::NumpyArray
+                | EngineeringExportFormat::SpicePwl
         );
-        assert_eq!(*one_analysis, !tabular, "format {index} disagrees");
+        assert_eq!(*one_analysis, holds_one, "format {index} disagrees");
     }
     assert!(
         state
@@ -192,7 +196,7 @@ fn spoken(
 #[test]
 fn a_view_of_two_strips_asks_which_analysis_and_offers_the_active_one() {
     let mut state = two_strip_state();
-    open_form(&mut state, RAW_BINARY);
+    open_form(&mut state, NPY);
     let nodes = form_nodes(&mut state);
     let analysis = nodes
         .values()
@@ -230,22 +234,23 @@ fn a_view_of_one_analysis_asks_no_analysis_question() {
     assert!(words.iter().any(|word| word == "Plotted (1)"), "{words:?}");
 }
 
-/// The analysis written is the one chosen: the active strip's by default,
-/// another when the reader picks it, and every displayed one for a table
-/// format left on "Every displayed analysis".
+/// The analysis written is the one chosen: for a one-analysis format the
+/// active strip's by default, another when the reader picks it, and every
+/// displayed one for a format left on "Every displayed analysis".
 #[test]
 fn the_choice_names_the_analysis_the_reader_picked() {
     let mut state = two_strip_state();
-    open_form(&mut state, RAW_BINARY);
+    open_form(&mut state, NPY);
     let form = state.results.dataset_export_form.as_mut().unwrap();
+    assert_eq!(form.choice(NPY).analysis, Some(1), "the active strip");
+    assert_eq!(form.choice(0).analysis, None, "CSV writes the stack");
     assert_eq!(
         form.choice(RAW_BINARY).analysis,
-        Some(1),
-        "the active strip"
+        None,
+        "raw writes a plot of each"
     );
-    assert_eq!(form.choice(0).analysis, None, "CSV writes the stack");
     form.analysis = Some(0);
-    assert_eq!(form.choice(RAW_BINARY).analysis, Some(0));
+    assert_eq!(form.choice(NPY).analysis, Some(0));
     assert_eq!(form.choice(0).analysis, Some(0), "CSV of one strip");
 }
 

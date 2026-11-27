@@ -158,8 +158,8 @@ fn pwl_names_stay_distinct_and_a_pin_current_is_a_current_source() {
 }
 
 /// A sample that repeats its predecessor exactly is dropped; two values at
-/// one instant cannot be a PWL source and are refused at that instant,
-/// before a destination is asked for.
+/// one instant cannot be a PWL source and are refused at that instant as
+/// the file is written.
 #[test]
 fn a_repeated_sample_is_dropped_and_two_values_at_one_time_are_refused() {
     let mut state = state_with_typed_result(
@@ -193,8 +193,10 @@ fn a_repeated_sample_is_dropped_and_two_values_at_one_time_are_refused() {
             ..DatasetExportChoice::default()
         },
     );
-    assert!(io.dialog_titles.borrow().is_empty());
-    let message = refusal(&state);
+    // Every sample is checked as the file is written, off the frame: the trace that cannot be
+    // a source writes nothing and says why.
+    assert!(io.byte_files.borrow().is_empty());
+    let message = last_log_message(&state);
     assert!(message.contains("two values at t = 1e-9 s"), "{message}");
 }
 

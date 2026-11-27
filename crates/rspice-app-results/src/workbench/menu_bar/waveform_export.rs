@@ -5,6 +5,7 @@ mod format_picker;
 mod hdf5;
 mod job;
 mod matlab;
+mod members;
 mod noise_stack;
 mod numpy;
 mod pwl;
@@ -17,9 +18,7 @@ use crate::workbench::EngineeringExportFormat;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 use rspice_formats::table::sectioned_csv_to_tsv;
-use rspice_formats::waveform_io::result::{
-    WaveformProjectionError, project_waveforms as prepare_single_analysis_dataset,
-};
+use rspice_formats::waveform_io::result::project_waveforms as prepare_single_analysis_dataset;
 use rspice_results_ui::eye_diagram::EyeTimebaseProvenance;
 use typed_csv::prepare_typed_result_csv;
 
@@ -48,6 +47,11 @@ const RESULTS_SHEET_TOUCHSTONE_REFUSAL: &str =
 const TYPED_RESULT_TOUCHSTONE_REFUSAL: &str =
     "Touchstone export is not compatible with the active typed result; select CSV export.";
 const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one analysis; choose it in Export result dataset\u{2026} or select CSV export.";
+
+/// Why a format that holds one analysis refuses a view of several.
+const ONE_ANALYSIS_REFUSAL: &str = "This format holds one analysis, and this view shows several. \
+     Choose the analysis in Export result dataset\u{2026}, or choose CSV, TSV, HDF5, MATLAB, \
+     NumPy .npz, SPICE raw or an RSpice bundle to export every one.";
 
 /// A finished export. The Console keeps `message`, and the status bar shows
 /// it to the reader who just chose the file.
@@ -284,28 +288,27 @@ pub fn action_export_dataset_with_io(
         state.prompt(error);
         return None;
     }
-    // These encoders currently publish one retained analysis. Enforce that
-    // before any route selects the primary analysis and discards other strips.
+    // A dump, one array and one PWL source each hold one analysis: the member the form chose.
+    // Every other format writes every displayed analysis, each member of a family its own
+    // plot, group, structure or dataset. Enforce that before any route selects the primary
+    // analysis and discards other strips.
     let single_analysis_export = match export_format {
+        EngineeringExportFormat::ValueChangeDump
+        | EngineeringExportFormat::NumpyArray
+        | EngineeringExportFormat::SpicePwl => true,
         EngineeringExportFormat::Csv
         | EngineeringExportFormat::Tsv
-        | EngineeringExportFormat::TouchstoneWhereCompatible => false,
-        EngineeringExportFormat::RSpiceResultBundle
+        | EngineeringExportFormat::TouchstoneWhereCompatible
+        | EngineeringExportFormat::RSpiceResultBundle
         | EngineeringExportFormat::RSpiceDatasetBundle
-        | EngineeringExportFormat::ValueChangeDump
-        | EngineeringExportFormat::NumpyArray
         | EngineeringExportFormat::NumpyArchive
         | EngineeringExportFormat::Hdf5EngineeringDataset
         | EngineeringExportFormat::MatlabV5File
         | EngineeringExportFormat::SpiceRawBinary
-        | EngineeringExportFormat::SpiceRawAscii
-        | EngineeringExportFormat::SpicePwl => true,
+        | EngineeringExportFormat::SpiceRawAscii => false,
     };
     if single_analysis_export && displayed.analysis_indices.len() > 1 {
-        state.prompt(
-            "This export supports one analysis, and this view shows several. Choose the \
-             analysis in Export result dataset\u{2026}, or choose CSV/TSV to export the displayed stack.",
-        );
+        state.prompt(ONE_ANALYSIS_REFUSAL);
         return None;
     }
     if let Some(kind) = match export_format {
@@ -321,7 +324,7 @@ pub fn action_export_dataset_with_io(
         // must not quietly substitute that source for a derived or tabular
         // sheet that the reader is currently looking at.
         let owns_non_waveform_view =
-            prepare_displayed_table(state.results_reads(), &displayed, signals).is_some();
+            prepare_displayed_table(state.results_reads(), &displayed).is_some();
         if owns_non_waveform_view {
             state.prompt(
                 "RSpice bundles export one waveform analysis with a shared x-axis. Select a \
@@ -329,8 +332,7 @@ pub fn action_export_dataset_with_io(
             );
             return None;
         }
-        export_native_result_bundle(state, io, &displayed, kind, signals);
-        return None;
+        return export_native_result_bundle(state, io, &displayed, kind, signals);
     }
     // Binary payloads of the retained analysis, each publishing its own bytes
     // and returning here. A dump is the transient's event schedule, which no
@@ -342,24 +344,19 @@ pub fn action_export_dataset_with_io(
     // that narrowing is exhaustive, so a new variant cannot be lost here.
     match export_format {
         EngineeringExportFormat::ValueChangeDump => {
-            vcd::export_vcd(state, io, &displayed);
-            return None;
+            return vcd::export_vcd(state, io, &displayed);
         }
         EngineeringExportFormat::NumpyArray => {
-            numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Array, signals);
-            return None;
+            return numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Array, signals);
         }
         EngineeringExportFormat::NumpyArchive => {
-            numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Archive, signals);
-            return None;
+            return numpy::export_numpy(state, io, &displayed, numpy::NumpyKind::Archive, signals);
         }
         EngineeringExportFormat::Hdf5EngineeringDataset => {
-            hdf5::export_hdf5(state, io, &displayed, signals);
-            return None;
+            return hdf5::export_hdf5(state, io, &displayed, signals);
         }
         EngineeringExportFormat::MatlabV5File => {
-            matlab::export_matlab(state, io, &displayed, signals);
-            return None;
+            return matlab::export_matlab(state, io, &displayed, signals);
         }
         EngineeringExportFormat::SpiceRawBinary => {
             return raw::export_raw(
@@ -371,8 +368,7 @@ pub fn action_export_dataset_with_io(
             );
         }
         EngineeringExportFormat::SpicePwl => {
-            pwl::export_pwl(state, io, &displayed, choice.trace.as_deref());
-            return None;
+            return pwl::export_pwl(state, io, &displayed, choice.trace.as_deref());
         }
         EngineeringExportFormat::SpiceRawAscii => {
             return raw::export_raw(
@@ -413,7 +409,7 @@ pub fn action_export_dataset_with_io(
     // reading a retained vector, so routing on the payload alone handed back
     // the transient samples the spectrum was computed from and called it the
     // result.
-    if let Some(table) = prepare_displayed_table(state.results_reads(), &displayed, signals) {
+    if let Some(table) = prepare_displayed_table(state.results_reads(), &displayed) {
         match table {
             Ok((prepared, touchstone_refusal)) => {
                 export_prepared_table(state, io, export_format, &prepared, touchstone_refusal);
@@ -424,6 +420,30 @@ pub fn action_export_dataset_with_io(
             Err(reason) => state.prompt(reason),
         }
         return None;
+    }
+    // A view of several analyses is one long-form table of them, every member of a family
+    // stating its parameter values, written as its samples are read.
+    if displayed.analysis_indices.len() > 1 {
+        return match export_format {
+            TabularExportFormat::Csv => export_displayed_stack(
+                state,
+                io,
+                &displayed,
+                rspice_formats::result_csv::StackDelimiter::Comma,
+                signals,
+            ),
+            TabularExportFormat::Tsv => export_displayed_stack(
+                state,
+                io,
+                &displayed,
+                rspice_formats::result_csv::StackDelimiter::Tab,
+                signals,
+            ),
+            TabularExportFormat::TouchstoneWhereCompatible => {
+                state.prompt(ANALYSIS_STACK_TOUCHSTONE_REFUSAL);
+                None
+            }
+        };
     }
 
     // Where this process writes the file, a table of the traces is written
@@ -480,8 +500,20 @@ pub(crate) fn active_sheet_values(state: ResultsReads<'_>) -> Result<String, Str
         return crate::workbench::documents::result_document::network_matrix_exact_values(state)
             .ok_or_else(|| "The network matrix has no complete sample to copy yet".to_owned());
     }
-    if let Some(table) = prepare_displayed_table(state, &displayed, ExportedSignals::Plotted) {
+    if let Some(table) = prepare_displayed_table(state, &displayed) {
         return sectioned_csv_to_tsv(&table?.0.contents).map_err(|error| error.to_string());
+    }
+    if displayed.analysis_indices.len() > 1 {
+        let members = members::exported_members(state, &displayed, ExportedSignals::Plotted)?;
+        let mut bytes = Vec::new();
+        rspice_formats::result_csv::write_analysis_stack(
+            displayed.dataset_id,
+            &stacked(&members),
+            rspice_formats::result_csv::StackDelimiter::Tab,
+            &mut bytes,
+        )
+        .map_err(|error| error.to_string())?;
+        return String::from_utf8(bytes).map_err(|error| error.to_string());
     }
     let dataset = prepare_waveform_dataset(state, &displayed, false, ExportedSignals::Plotted)?;
     crate::io::WaveformWriter::new(crate::io::WaveformFormat::Tsv)
@@ -495,10 +527,12 @@ pub(crate) fn active_sheet_values(state: ResultsReads<'_>) -> Result<String, Str
 /// `None` means no view owns the export and the waveform payload below
 /// answers for it. `Some(Err)` means a view owns it and cannot produce it,
 /// which is a refusal rather than a reason to keep looking down the list.
+///
+/// A view of several analyses owns no sheet table: its long-form stack is
+/// written as its samples are read, by [`export_displayed_stack`].
 fn prepare_displayed_table(
     state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
-    signals: ExportedSignals,
 ) -> Option<Result<(PreparedTypedResultCsv, &'static str), String>> {
     if let Some(derived) = prepare_active_derived_view_csv(state, displayed) {
         return Some(derived.map(|derived| (derived, DERIVED_VIEWER_TOUCHSTONE_REFUSAL)));
@@ -507,10 +541,7 @@ fn prepare_displayed_table(
         return Some(sheet.map(|sheet| (sheet, RESULTS_SHEET_TOUCHSTONE_REFUSAL)));
     }
     if displayed.analysis_indices.len() > 1 {
-        return Some(
-            prepare_displayed_analysis_stack_csv(state, displayed, signals)
-                .map(|prepared| (prepared, ANALYSIS_STACK_TOUCHSTONE_REFUSAL)),
-        );
+        return None;
     }
     if let Some(typed) = displayed
         .primary_analysis(state)
@@ -876,119 +907,80 @@ fn export_native_result_bundle(
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
     kind: rspice_formats::native_bundle::NativeBundleKind,
     signals: ExportedSignals,
-) {
-    use rspice_formats::native_bundle::encode_native_bundle;
-    use rspice_formats::native_bundle::result::project_native_bundle;
-
-    let analysis = match displayed.primary_analysis(state.results_reads()) {
-        Some(analysis) => analysis,
-        None => {
-            state.prompt(NO_ACTIVE_ANALYSIS_MESSAGE);
-            return;
-        }
+) -> Option<ResultExportJob> {
+    use rspice_formats::native_bundle::result::{
+        check_native_bundle, native_domain, write_native_bundle,
     };
-    let native_analysis = match analysis.analysis_type {
-        crate::state::AnalysisType::Transient => rspice_formats::WaveformDomain::Transient,
-        crate::state::AnalysisType::Ac => rspice_formats::WaveformDomain::Ac,
-        crate::state::AnalysisType::DcSweep => rspice_formats::WaveformDomain::DcSweep,
-        other => {
-            state.prompt(format!(
+
+    let refusal = displayed
+        .analyses(state.results_reads())
+        .find(|analysis| native_domain(analysis.analysis_type).is_none())
+        .map(|other| {
+            format!(
                 "{} export carries transient, AC and DC sweep results; it cannot carry the \
                  active {} analysis.",
                 kind.display_name(),
-                other.short_label(),
-            ));
-            return;
-        }
-    };
-    let waveforms = exported_waveforms(
-        state.results_reads(),
-        displayed.dataset_id,
-        analysis,
-        signals,
-    );
-    if waveforms.is_empty() {
-        state.prompt(if analysis.waveforms.is_empty() {
-            NO_SAMPLES_MESSAGE
-        } else {
-            ALL_TRACES_HIDDEN_MESSAGE
+                other.analysis_type.short_label(),
+            )
         });
-        return;
+    if let Some(refusal) = refusal {
+        state.prompt(refusal);
+        return None;
     }
-    let native_dataset = match project_native_bundle(analysis, &waveforms, native_analysis) {
-        Ok(dataset) => dataset,
-        Err(WaveformProjectionError::NoSamples) => {
-            state.prompt(NO_SAMPLES_MESSAGE);
-            return;
-        }
-        Err(error) => {
-            state.report_failure(
-                format!("{} export failed", kind.display_name()),
-                error.to_string(),
-            );
-            return;
+    let members = match members::exported_members(state.results_reads(), displayed, signals) {
+        Ok(members) => members,
+        Err(message) => {
+            state.prompt(message);
+            return None;
         }
     };
-    let bytes = match encode_native_bundle(kind, &native_dataset, u64::MAX) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            state.report_failure(
-                format!("{} export failed", kind.display_name()),
-                error.to_string(),
-            );
-            return;
-        }
-    };
-    let exported_signal_count = native_dataset.signals.len();
-    let exported_point_count = native_dataset.coordinate.len();
-    drop(native_dataset);
-    drop(waveforms);
+    // A refused export never asks the reader for a destination it cannot fill.
+    if let Err(error) = check_native_bundle(&members::export_members(&members)) {
+        state.report_failure(
+            format!("{} export failed", kind.display_name()),
+            error.to_string(),
+        );
+        return None;
+    }
+    let bytes = members::estimated_bytes(&members, 25);
+    let owned = members::OwnedMembers::of(&members);
     let extension = kind.extension();
-    let default_name = format!("waveforms.{extension}");
-    let filter_extensions = [extension];
-    let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
-        title: match kind {
-            rspice_formats::native_bundle::NativeBundleKind::Result => {
-                "Export RSpice Result Bundle"
-            }
-            rspice_formats::native_bundle::NativeBundleKind::Dataset => {
-                "Export RSpice Dataset Bundle"
-            }
+    members::publish_export(
+        state,
+        io,
+        members::ExportFile {
+            label: kind.display_name(),
+            title: match kind {
+                rspice_formats::native_bundle::NativeBundleKind::Result => {
+                    "Export RSpice Result Bundle"
+                }
+                rspice_formats::native_bundle::NativeBundleKind::Dataset => {
+                    "Export RSpice Dataset Bundle"
+                }
+            },
+            default_name: format!("waveforms.{extension}"),
+            filter_name: kind.display_name(),
+            extension,
+            mime_type: kind.media_type(),
+            text: false,
         },
-        default_name: &default_name,
-        filter_name: kind.display_name(),
-        filter_extensions: &filter_extensions,
-    }) {
-        Ok(Some(mut path)) => {
-            crate::io::file_exchange::ensure_file_extension(&mut path, extension);
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_bytes_file_observed(&destination, &bytes, kind.media_type())
-            });
-            (path, export)
-        }
-        Ok(None) => return,
-        Err(error) => (std::path::PathBuf::from(default_name), Err(error)),
-    };
-    match export {
-        Ok(()) => {
-            let detail = format!("{exported_signal_count} signals, {exported_point_count} points");
-            note_result_export_success(
-                state,
-                crate::workbench::workflows::export_workflow::export_completion_message(
-                    kind.display_name(),
-                    &published_path,
-                    Some(detail),
-                    io,
-                ),
-            );
-        }
-        Err(error) => {
-            state.report_failure(
-                format!("{} export failed", kind.display_name()),
-                error.to_string(),
-            );
-        }
-    }
+        bytes,
+        move |out| {
+            write_native_bundle(kind, &owned.members(), out)
+                .map(|facts| {
+                    if facts.members > 1 {
+                        format!(
+                            "{} members, each a dataset naming its parameter values; the first \
+                             {} signals, {} points",
+                            facts.members, facts.signals, facts.points
+                        )
+                    } else {
+                        format!("{} signals, {} points", facts.signals, facts.points)
+                    }
+                })
+                .map_err(|error| error.to_string())
+        },
+    )
 }
 
 fn export_csv(
@@ -1290,70 +1282,104 @@ fn prepare_waveform_dataset(
         .map_err(|error| error.to_string())
 }
 
+/// The displayed analyses as the long-form table takes them.
+fn stacked<'a>(
+    members: &'a [members::Member<'a>],
+) -> Vec<rspice_formats::result_csv::StackAnalysis<'a, crate::state::RetainedTrace>> {
+    members
+        .iter()
+        .map(|(analysis, waveforms)| rspice_formats::result_csv::StackAnalysis {
+            analysis,
+            waveforms: waveforms.clone(),
+        })
+        .collect()
+}
+
 /// Long-form export for a viewer that is displaying more than one analysis.
-/// Each row carries its immutable dataset and run-local analysis identity, so
-/// different coordinate grids and trace counts remain exact without padding,
-/// truncation, or an invented shared axis.
-fn prepare_displayed_analysis_stack_csv(
-    state: ResultsReads<'_>,
+/// Each row carries its immutable dataset and run-local analysis identity, and
+/// a member of a family its parameter values, so different coordinate grids
+/// and trace counts remain exact without padding, truncation, or an invented
+/// shared axis. Written as its samples are read, on a job where this process
+/// writes the file.
+fn export_displayed_stack(
+    state: &mut ResultsParts<'_>,
+    io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+    delimiter: rspice_formats::result_csv::StackDelimiter,
     signals: ExportedSignals,
-) -> Result<PreparedTypedResultCsv, String> {
-    let analyses = displayed.analyses(state).collect::<Vec<_>>();
-    if analyses.is_empty() {
-        return Err(NO_SAMPLES_MESSAGE.to_owned());
-    }
-    let mut csv = rspice_formats::result_csv::AnalysisStackCsv::new();
-    let mut traces = 0_usize;
-    for analysis in analyses {
-        for waveform in exported_waveforms(state, displayed.dataset_id, analysis, signals) {
-            csv.append_component(
-                displayed.dataset_id,
-                analysis,
-                &waveform.name,
-                "display",
-                &waveform.x.read_whole().map_err(|error| error.to_string())?,
-                &waveform.y.read_whole().map_err(|error| error.to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
-            traces += 1;
-            if let Some(complex) = &waveform.complex {
-                csv.append_component(
-                    displayed.dataset_id,
-                    analysis,
-                    &complex.source_name,
-                    "real",
-                    &waveform.x.read_whole().map_err(|error| error.to_string())?,
-                    &complex
-                        .real
-                        .read_whole()
-                        .map_err(|error| error.to_string())?,
-                )
-                .map_err(|error| error.to_string())?;
-                csv.append_component(
-                    displayed.dataset_id,
-                    analysis,
-                    &complex.source_name,
-                    "imaginary",
-                    &waveform.x.read_whole().map_err(|error| error.to_string())?,
-                    &complex
-                        .imag
-                        .read_whole()
-                        .map_err(|error| error.to_string())?,
-                )
-                .map_err(|error| error.to_string())?;
-            }
+) -> Option<ResultExportJob> {
+    use rspice_formats::result_csv::{StackDelimiter, check_analysis_stack, write_analysis_stack};
+
+    let members = match members::exported_members(state.results_reads(), displayed, signals) {
+        Ok(members) => members,
+        Err(message) => {
+            state.prompt(message);
+            return None;
         }
+    };
+    // A refused export never asks the reader for a destination it cannot fill.
+    if let Err(error) = check_analysis_stack(&stacked(&members)) {
+        state.prompt(error.to_string());
+        return None;
     }
-    let rows = csv.row_count();
-    if rows == 0 {
-        return Err(NO_SAMPLES_MESSAGE.to_owned());
-    }
-    Ok(PreparedTypedResultCsv {
-        default_name: "rspice-displayed-results.csv",
-        contents: csv.into_string(),
-        detail: format!("{traces} visible traces, {rows} exported samples"),
-    })
+    let bytes = members::estimated_bytes(&members, 120);
+    let owned = members::OwnedMembers::of(&members);
+    let dataset_id = displayed.dataset_id;
+    let (label, extension, title, filter_name, mime_type) = match delimiter {
+        StackDelimiter::Comma => (
+            "CSV",
+            "csv",
+            "Export Waveform CSV",
+            "CSV Files",
+            "text/csv;charset=utf-8",
+        ),
+        StackDelimiter::Tab => (
+            "TSV",
+            "tsv",
+            "Export Waveform TSV",
+            "TSV Files",
+            "text/tab-separated-values;charset=utf-8",
+        ),
+    };
+    members::publish_export(
+        state,
+        io,
+        members::ExportFile {
+            label,
+            title,
+            default_name: format!("rspice-displayed-results.{extension}"),
+            filter_name,
+            extension,
+            mime_type,
+            text: true,
+        },
+        bytes,
+        move |out| {
+            let members = owned.members();
+            let stacked = members
+                .iter()
+                .map(|member| rspice_formats::result_csv::StackAnalysis {
+                    analysis: member.analysis,
+                    waveforms: member.waveforms.clone(),
+                })
+                .collect::<Vec<_>>();
+            write_analysis_stack(dataset_id, &stacked, delimiter, out)
+                .map(|facts| {
+                    let mut detail = format!(
+                        "{} visible traces, {} exported samples",
+                        facts.traces, facts.rows
+                    );
+                    if !facts.parameters.is_empty() {
+                        detail.push_str(&format!(
+                            "; each member's {} in a column of its own",
+                            facts.parameters.join(", ")
+                        ));
+                    }
+                    detail
+                })
+                .map_err(|error| error.to_string())
+        },
+    )
 }
 
 #[cfg(test)]

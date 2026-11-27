@@ -1945,7 +1945,7 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
         assert!(io.byte_files.borrow().is_empty());
         let message = refusal(&state);
         assert!(
-            message.contains("one") && message.contains("CSV/TSV"),
+            message.contains("holds one analysis") && message.contains("export every one"),
             "{message}"
         );
         let run = state.model.simulation.active_run().unwrap();
@@ -1982,12 +1982,12 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
     }
 }
 
-/// NumPy (6, 7), VCD (5), HDF5 and MATLAB (8, 9) and the native formats
-/// (3, 4) each refuse a stacked export rather than omit the other analyses,
-/// and offer the one displayed analysis instead.
+/// One NumPy array (6) and a dump (5) hold one analysis: each refuses a
+/// stacked export rather than omit the other analyses, and offers the one
+/// displayed analysis instead.
 #[test]
 fn stacked_binary_export_is_never_silently_truncated() {
-    assert_stacked_binary_export_is_not_silently_truncated(&[6, 7, 5, 8, 9, 3, 4]);
+    assert_stacked_binary_export_is_not_silently_truncated(&[6, 5]);
 }
 
 #[test]

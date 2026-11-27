@@ -91,6 +91,7 @@ pub(super) fn parse_native_bundle(
     let NativeBundleRead {
         dataset,
         member,
+        family,
         unread_members,
     } = read_native_bundle(
         bytes,
@@ -119,17 +120,44 @@ pub(super) fn parse_native_bundle(
         ));
     }
     // A bundle of one member of a `.step` sweep or Monte Carlo study reads back as that member,
-    // titled the way every route titles one: `Transient · r=2k`.
-    if let Some(member) = member.map(|member| member.into_family_member()) {
-        let analysis = match parsed.analysis_type {
-            AnalysisType::Ac => "AC",
-            AnalysisType::DcSweep => "DC sweep",
-            _ => "Transient",
-        };
+    // titled the way every route titles one: `Transient · r=2k`; a bundle of every member reads
+    // back as each of them, in family order, drawn as one family.
+    let analysis_title = |analysis_type: AnalysisType| match analysis_type {
+        AnalysisType::Ac => "AC",
+        AnalysisType::DcSweep => "DC sweep",
+        _ => "Transient",
+    };
+    let title = |member: Option<&rspice_results::provenance::AnalysisResultFamilyMember>,
+                 analysis_type: AnalysisType| {
+        let analysis = analysis_title(analysis_type);
+        member.map_or_else(|| analysis.to_owned(), |member| member.titled(analysis))
+    };
+    let member = member.map(|member| member.into_family_member());
+    let several = !family.is_empty();
+    let mut further = Vec::with_capacity(family.len());
+    for (position, read) in family.into_iter().enumerate() {
+        let family_member = read.member.map(|member| member.into_family_member());
+        let plot = finish_numeric_dataset(format, read.dataset).map_err(|error| {
+            format!("member {} of the bundle: {error}", position + 2)
+        })?;
+        further.push(
+            crate::workbench::documents::result_document::import::ResultImportPlot {
+                name: title(family_member.as_ref(), plot.analysis_type),
+                family_member,
+                analysis_type: plot.analysis_type,
+                coordinate_name: plot.coordinate_name,
+                coordinate_unit: plot.coordinate_unit,
+                sample_count: plot.sample_count,
+                waveforms: plot.waveforms,
+                event_payload: None,
+            },
+        );
+    }
+    if member.is_some() || several {
         parsed.plots = Some(Arc::new(ResultImportPlots {
-            reviewed: member.titled(analysis),
-            reviewed_member: Some(member),
-            further: Vec::new(),
+            reviewed: title(member.as_ref(), parsed.analysis_type),
+            reviewed_member: member,
+            further,
         }));
     }
     Ok(parsed)

@@ -75,7 +75,6 @@ mod tests {
         let (export, _) = super::super::prepare_displayed_table(
             state.results_reads(),
             &displayed,
-            super::super::ExportedSignals::Plotted,
         )
         .unwrap()
         .unwrap();

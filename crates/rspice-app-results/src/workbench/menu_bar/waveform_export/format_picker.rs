@@ -6,8 +6,12 @@
 //! offers the format used last time, and remembers the one chosen.
 //!
 //! It also asks what to write. A view of several analyses offers each of
-//! them, the active strip's chosen until the reader picks another, so a
-//! one-analysis format no longer sends the reader off to maximize a strip;
+//! them and every one at once, which each format writes as it holds a
+//! family: one long-form table, a plot, group, structure or dataset per
+//! member. A format that holds one analysis (a dump, one array, a network,
+//! a PWL source) says so under the question and writes the active strip's
+//! until the reader picks another, so it no longer sends the reader off to
+//! maximize a strip;
 //! the reader chooses between the signals on the plot and every signal the
 //! analysis retains; and a PWL source asks which trace it is written from.
 
@@ -79,6 +83,8 @@ pub struct DatasetExportForm {
     /// The view is a sheet that owns its own table (an operating point, a
     /// spectrum, a report), which every format writes whole.
     owns_table: bool,
+    /// The displayed analyses are members of one `.step` sweep or Monte Carlo study.
+    family: bool,
     /// Position in `analyses` of the one chosen; `None` for every one.
     analysis: Option<usize>,
     signals: ExportedSignals,
@@ -90,17 +96,17 @@ pub struct DatasetExportForm {
 /// them, and whether it can hold only one analysis.
 const FORMATS: [(&str, bool); 13] = [
     ("CSV", false),
-    ("Touchstone where compatible", false),
+    ("Touchstone where compatible", true),
     ("TSV", false),
-    ("RSpice result bundle", true),
-    ("RSpice dataset bundle", true),
+    ("RSpice result bundle", false),
+    ("RSpice dataset bundle", false),
     ("VCD \u{00b7} event timelines", true),
     ("NumPy .npy \u{00b7} one array, column order stated", true),
-    ("NumPy .npz \u{00b7} one named array per signal", true),
-    ("HDF5 \u{00b7} names and units carried", true),
-    ("MATLAB v5 \u{00b7} column vectors, complex for AC", true),
-    ("SPICE raw \u{00b7} binary, for ngspice and LTspice", true),
-    ("SPICE raw \u{00b7} ASCII values", true),
+    ("NumPy .npz \u{00b7} one named array per signal", false),
+    ("HDF5 \u{00b7} names and units carried", false),
+    ("MATLAB v5 \u{00b7} column vectors, complex for AC", false),
+    ("SPICE raw \u{00b7} binary, for ngspice and LTspice", false),
+    ("SPICE raw \u{00b7} ASCII values", false),
     ("SPICE PWL \u{00b7} one trace as a source", true),
 ];
 
@@ -111,9 +117,14 @@ const RAW_ASCII: usize = 11;
 const PWL: usize = 12;
 
 /// The first entry of the analysis list, which a table format writes as one
-/// long-form file and a one-analysis format cannot hold.
+/// long-form file, every other format each analysis in a part of its own, and
+/// a one-analysis format cannot hold.
 const EVERY_ANALYSIS: &str = "Every displayed analysis";
+/// The same entry over the members of one `.step` sweep or Monte Carlo study.
+const ALL_MEMBERS: &str = "All members";
 const ONE_ANALYSIS_REASON: &str = "This format holds one analysis.";
+const ONE_MEMBER_NOTE: &str = "This format holds one member: it writes the one chosen.";
+const ONE_ANALYSIS_NOTE: &str = "This format holds one analysis: it writes the one chosen.";
 
 /// The picker for the view that is showing, open on the format used last.
 /// The error says why no view can be exported.
@@ -198,9 +209,14 @@ pub fn dataset_export_form(state: ResultsReads<'_>) -> DatasetExportForm {
     // view of several always has the long-form stack to offer.
     let mut single = displayed.clone();
     single.analysis_indices = single.primary_analysis_index.into_iter().collect();
+    let family = displayed.analysis_indices.len() > 1
+        && displayed
+            .analyses(state)
+            .all(|analysis| analysis.family_member().is_some());
     DatasetExportForm {
-        owns_table: super::prepare_displayed_table(state, &single, ExportedSignals::Plotted)
+        owns_table: super::prepare_displayed_table(state, &single)
             .is_some(),
+        family,
         analysis: if analyses.len() > 1 { None } else { active },
         analyses,
         active,
@@ -379,12 +395,17 @@ fn show_analysis_row(
     if one_analysis && draft.analysis.is_none() {
         draft.analysis = draft.active;
     }
-    let options = std::iter::once(EVERY_ANALYSIS.to_owned())
+    let every = if draft.family {
+        ALL_MEMBERS
+    } else {
+        EVERY_ANALYSIS
+    };
+    let options = std::iter::once(every.to_owned())
         .chain(draft.analyses.iter().map(|offered| offered.label.clone()))
         .collect::<Vec<_>>();
     let selected = draft
         .analysis
-        .map_or(EVERY_ANALYSIS, |position| &draft.analyses[position].label);
+        .map_or(every, |position| &draft.analyses[position].label);
     let disabled: &[(usize, &'static str)] = if one_analysis {
         &[(0, ONE_ANALYSIS_REASON)]
     } else {
@@ -401,6 +422,13 @@ fn show_analysis_row(
         .picked;
     if let Some(index) = picked {
         draft.analysis = index.checked_sub(1);
+    }
+    if one_analysis {
+        rows.derived(if draft.family {
+            ONE_MEMBER_NOTE
+        } else {
+            ONE_ANALYSIS_NOTE
+        });
     }
 }
 

@@ -36,16 +36,15 @@
 
 use rspice_formats::matlab as writer;
 
-use super::{
-    ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
-    note_result_export_success,
+use super::job::ResultExportJob;
+use super::members::{
+    ExportFile, OwnedMembers, estimated_bytes, export_members, exported_members, publish_export,
 };
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use crate::workbench::workflows::result_import_workflow::exported_waveform_limits;
-use writer::result::{MatlabExport, prepare_matlab};
-use writer::write_mat_v5;
+use writer::result::{MatlabFacts, check_matlab, write_matlab};
 
 /// The media type the result-data contract states for `matlab-v5`.
 const MATLAB_MIME_TYPE: &str = "application/x-matlab-data";
@@ -71,102 +70,70 @@ fn event_only_refusal(analysis: &crate::state::AnalysisResult) -> Option<String>
     })
 }
 
-/// The bytes of a prepared file.
-pub(super) fn encode_matlab(export: &MatlabExport) -> Result<Vec<u8>, String> {
-    write_mat_v5(&export.header_text, &export.variables)
-        .map_err(|error| format!("the MATLAB v5 file could not be written: {error}"))
-}
-
 pub(super) fn export_matlab(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
     signals: super::ExportedSignals,
-) {
-    let prepared = match displayed.primary_analysis(state.results_reads()) {
-        Some(analysis) => {
-            let waveforms = exported_waveforms(
-                state.results_reads(),
-                displayed.dataset_id,
-                analysis,
-                signals,
-            );
-            if waveforms.is_empty() {
-                Err(event_only_refusal(analysis).unwrap_or_else(|| {
-                    if analysis.waveforms.is_empty() {
-                        NO_SAMPLES_MESSAGE.to_owned()
-                    } else {
-                        ALL_TRACES_HIDDEN_MESSAGE.to_owned()
-                    }
-                }))
-            } else {
-                prepare_matlab(analysis, &waveforms, exported_waveform_limits())
-                    .map_err(|error| error.to_string())
-            }
-        }
-        None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
-    };
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
+) -> Option<ResultExportJob> {
+    let reads = state.results_reads();
+    let members = match exported_members(reads, displayed, signals) {
+        Ok(members) => members,
         Err(message) => {
-            state.prompt(message);
-            return;
+            let refusal = displayed
+                .analyses(reads)
+                .find(|analysis| analysis.waveforms.is_empty())
+                .and_then(event_only_refusal);
+            state.prompt(refusal.unwrap_or(message));
+            return None;
         }
     };
-    // Encode before the picker opens: a refused export never asks the reader
-    // for a destination it cannot fill.
-    let bytes = match encode_matlab(&prepared) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            state.report_failure(format!("{LABEL} export failed"), error.to_string());
-            return;
-        }
-    };
-
-    let default_name = format!("waveforms.{EXTENSION}");
-    let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
-        title: "Export MATLAB v5 File",
-        default_name: &default_name,
-        filter_name: "MATLAB v5 File",
-        filter_extensions: &[EXTENSION],
-    }) {
-        Ok(Some(mut path)) => {
-            crate::io::file_exchange::ensure_file_extension(&mut path, EXTENSION);
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_bytes_file_observed(&destination, &bytes, MATLAB_MIME_TYPE)
-            });
-            (path, export)
-        }
-        Ok(None) => return,
-        Err(error) => (std::path::PathBuf::from(default_name), Err(error)),
-    };
-    match export {
-        Ok(()) => {
-            note_result_export_success(
-                state,
-                crate::workbench::workflows::export_workflow::export_completion_message(
-                    LABEL,
-                    &published_path,
-                    Some(completion_detail(&prepared)),
-                    io,
-                ),
-            );
-        }
-        Err(error) => {
-            state.report_failure(format!("{LABEL} export failed"), error.to_string());
-        }
+    // A refused export never asks the reader for a destination it cannot fill.
+    if let Err(error) = check_matlab(&export_members(&members), exported_waveform_limits()) {
+        state.prompt(error.to_string());
+        return None;
     }
+    let bytes = estimated_bytes(&members, 8);
+    let owned = OwnedMembers::of(&members);
+    publish_export(
+        state,
+        io,
+        ExportFile {
+            label: LABEL,
+            title: "Export MATLAB v5 File",
+            default_name: format!("waveforms.{EXTENSION}"),
+            filter_name: "MATLAB v5 File",
+            extension: EXTENSION,
+            mime_type: MATLAB_MIME_TYPE,
+            text: false,
+        },
+        bytes,
+        move |out| {
+            write_matlab(&owned.members(), exported_waveform_limits(), out)
+                .map(|facts| completion_detail(&facts))
+                .map_err(|error| error.to_string())
+        },
+    )
 }
 
 /// What the reader is told they now have — including the two things the
 /// format cannot keep, stated here because this is the only copy of them.
-fn completion_detail(export: &MatlabExport) -> String {
-    let signals = export.variables.len() - 1;
-    let mut detail = format!(
-        "'{}' and {signals} signals as double column vectors, {} samples each. MAT v5 has no \
-         unit slot and accepts only MATLAB identifiers as names, so both are stated here: {}.",
-        export.coordinate, export.rows, export.note
-    );
+fn completion_detail(export: &MatlabFacts) -> String {
+    let mut detail = if export.members > 1 {
+        format!(
+            "{} structures, one per member, named by its parameter values, each holding '{}' and \
+             its signals as double column vectors. MAT v5 has no unit slot and accepts only \
+             MATLAB identifiers as names, so both are stated here: {}.",
+            export.members, export.coordinate, export.note
+        )
+    } else {
+        let signals = export.variables - 1;
+        format!(
+            "'{}' and {signals} signals as double column vectors, {} samples each. MAT v5 has no \
+             unit slot and accepts only MATLAB identifiers as names, so both are stated here: {}.",
+            export.coordinate, export.rows, export.note
+        )
+    };
     detail.push_str(if export.note_truncated {
         " The file's header text carries as much of that note as its 116 characters hold."
     } else {
@@ -197,14 +164,46 @@ mod tests {
         analysis
     }
 
-    fn prepared(
-        analysis_type: AnalysisType,
-        waveforms: &[RetainedTrace],
-    ) -> Result<MatlabExport, String> {
+    /// A written file and what it holds.
+    #[derive(Debug)]
+    struct Written {
+        facts: MatlabFacts,
+        bytes: Vec<u8>,
+    }
+
+    impl std::ops::Deref for Written {
+        type Target = MatlabFacts;
+
+        fn deref(&self) -> &MatlabFacts {
+            &self.facts
+        }
+    }
+
+    fn prepared(analysis_type: AnalysisType, waveforms: &[RetainedTrace]) -> Result<Written, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_matlab(&analysis, &borrowed, exported_waveform_limits())
-            .map_err(|error| error.to_string())
+        let mut bytes = Vec::new();
+        write_matlab(
+            &[rspice_formats::waveform_io::result::ExportMember::new(&analysis, borrowed)],
+            exported_waveform_limits(),
+            &mut bytes,
+        )
+        .map(|facts| Written { facts, bytes })
+        .map_err(|error| error.to_string())
+    }
+
+    fn encode_matlab(export: &Written) -> Result<Vec<u8>, String> {
+        Ok(export.bytes.clone())
+    }
+
+    /// The names of the file's variables, as MATLAB reads them.
+    fn variable_names(export: &Written) -> Vec<String> {
+        matfile::MatFile::parse(std::io::Cursor::new(&export.bytes))
+            .expect("MATLAB parses it")
+            .arrays()
+            .iter()
+            .map(|array| array.name().to_owned())
+            .collect()
     }
 
     #[test]
@@ -531,11 +530,7 @@ mod tests {
             waveform("time", vec![0.0, 1.0], vec![9.0, 10.0]),
         ];
         let export = prepared(AnalysisType::Transient, &waveforms).expect("prepares");
-        let names = export
-            .variables
-            .iter()
-            .map(|variable| variable.name.as_str())
-            .collect::<Vec<_>>();
+        let names = variable_names(&export);
         assert_eq!(
             names,
             [
@@ -563,13 +558,13 @@ mod tests {
             waveform(&long, vec![0.0, 1.0], vec![3.0, 4.0]),
         ];
         let export = prepared(AnalysisType::Transient, &waveforms).expect("prepares");
-        for variable in &export.variables {
-            assert!(variable.name.len() <= MAX_NAME_CHARS, "{}", variable.name);
-            assert!(is_matlab_identifier(&variable.name), "{}", variable.name);
+        let names = variable_names(&export);
+        for name in &names {
+            assert!(name.len() <= MAX_NAME_CHARS, "{name}");
+            assert!(is_matlab_identifier(name), "{name}");
         }
-        assert!(export.variables[2].name.ends_with("_2"));
-        assert_ne!(export.variables[1].name, export.variables[2].name);
-        encode_matlab(&export).expect("the writer accepts every name");
+        assert!(names[2].ends_with("_2"));
+        assert_ne!(names[1], names[2]);
     }
 
     #[test]

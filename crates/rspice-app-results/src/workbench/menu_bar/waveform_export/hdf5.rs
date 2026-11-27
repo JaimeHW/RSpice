@@ -24,17 +24,16 @@
 //! sampled domain. An all-complex AC result uses the native spectral layout;
 //! mixed representations use the shared typed table layout.
 
-use super::{
-    ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
-    note_result_export_success,
+use super::job::ResultExportJob;
+use super::members::{
+    ExportFile, OwnedMembers, estimated_bytes, export_members, exported_members, publish_export,
 };
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use crate::workbench::workflows::result_import_workflow::exported_waveform_limits;
 
-use rspice_core::io::write_hdf5;
-use rspice_formats::hdf5::result::{Hdf5Export, prepare_hdf5};
+use rspice_formats::hdf5::result::{Hdf5Facts, check_hdf5, write_hdf5};
 
 /// Registered by The HDF Group for HDF5 files.
 const HDF5_MIME_TYPE: &str = "application/x-hdf5";
@@ -45,116 +44,63 @@ const EXTENSION: &str = "h5";
 /// How many column names a completion message spells before it summarises.
 const MAX_STATED_COLUMNS: usize = 12;
 
-/// The bytes of a prepared document.
-pub(super) fn encode_hdf5(export: &Hdf5Export) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    write_hdf5(&mut bytes, &export.document)
-        .map_err(|error| format!("the HDF5 document could not be written: {error}"))?;
-    Ok(bytes)
-}
-
 pub(super) fn export_hdf5(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
     signals: super::ExportedSignals,
-) {
-    let prepared = match displayed.primary_analysis(state.results_reads()) {
-        Some(analysis) => {
-            let waveforms = exported_waveforms(
-                state.results_reads(),
-                displayed.dataset_id,
-                analysis,
-                signals,
-            );
-            if waveforms.is_empty() {
-                Err(if analysis.waveforms.is_empty() {
-                    NO_SAMPLES_MESSAGE.to_owned()
-                } else {
-                    ALL_TRACES_HIDDEN_MESSAGE.to_owned()
-                })
-            } else {
-                prepare_hdf5(analysis, &waveforms, exported_waveform_limits())
-                    .map_err(|error| error.to_string())
-            }
-        }
-        None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
-    };
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
+) -> Option<ResultExportJob> {
+    let members = match exported_members(state.results_reads(), displayed, signals) {
+        Ok(members) => members,
         Err(message) => {
             state.prompt(message);
-            return;
+            return None;
         }
     };
-    // Encode before the picker opens: a refused export never asks the reader
-    // for a destination it cannot fill.
-    let bytes = match encode_hdf5(&prepared) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            state.report_failure(format!("{LABEL} export failed"), error.to_string());
-            return;
-        }
-    };
-
-    let default_name = format!("waveforms.{EXTENSION}");
-    let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
-        title: "Export HDF5 Dataset",
-        default_name: &default_name,
-        filter_name: "HDF5 Dataset",
-        filter_extensions: &[EXTENSION],
-    }) {
-        Ok(Some(mut path)) => {
-            crate::io::file_exchange::ensure_file_extension(&mut path, EXTENSION);
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_bytes_file_observed(&destination, &bytes, HDF5_MIME_TYPE)
-            });
-            (path, export)
-        }
-        Ok(None) => return,
-        Err(error) => (std::path::PathBuf::from(default_name), Err(error)),
-    };
-    match export {
-        Ok(()) => {
-            note_result_export_success(
-                state,
-                crate::workbench::workflows::export_workflow::export_completion_message(
-                    LABEL,
-                    &published_path,
-                    Some(completion_detail(&prepared)),
-                    io,
-                ),
-            );
-        }
-        Err(error) => {
-            state.report_failure(format!("{LABEL} export failed"), error.to_string());
-        }
+    // A refused export never asks the reader for a destination it cannot fill.
+    if let Err(error) = check_hdf5(&export_members(&members), exported_waveform_limits()) {
+        state.prompt(error.to_string());
+        return None;
     }
+    let bytes = estimated_bytes(&members, 8);
+    let owned = OwnedMembers::of(&members);
+    publish_export(
+        state,
+        io,
+        ExportFile {
+            label: LABEL,
+            title: "Export HDF5 Dataset",
+            default_name: format!("waveforms.{EXTENSION}"),
+            filter_name: "HDF5 Dataset",
+            extension: EXTENSION,
+            mime_type: HDF5_MIME_TYPE,
+            text: false,
+        },
+        bytes,
+        move |out| {
+            write_hdf5(&owned.members(), exported_waveform_limits(), out)
+                .map(|facts| completion_detail(&facts))
+                .map_err(|error| error.to_string())
+        },
+    )
 }
 
 /// What the reader is told they now have: where the numbers are in the file,
 /// so they can open it without guessing.
-fn completion_detail(export: &Hdf5Export) -> String {
-    let mut detail = format!(
-        "group /{}: {} rows x {} signals on '{}'",
-        export.section, export.rows, export.columns, export.coordinate_name
-    );
-    let names = export
-        .document
-        .groups
-        .first()
-        .map(|group| {
-            group
-                .attributes
-                .iter()
-                .filter(|(name, _)| name.ends_with("_name"))
-                .filter_map(|(_, value)| match value {
-                    rspice_core::io::Hdf5Attribute::Text(name) => Some(name.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+fn completion_detail(export: &Hdf5Facts) -> String {
+    let mut detail = if export.members > 1 {
+        format!(
+            "{} groups, one per member, named by its parameter values and stating them as \
+             attributes; the first: {} rows x {} signals on '{}'",
+            export.members, export.rows, export.columns, export.coordinate_name
+        )
+    } else {
+        format!(
+            "group /{}: {} rows x {} signals on '{}'",
+            export.section, export.rows, export.columns, export.coordinate_name
+        )
+    };
+    let names = export.names.iter().map(String::as_str).collect::<Vec<_>>();
     detail.push_str(" — ");
     detail.push_str(&names[..names.len().min(MAX_STATED_COLUMNS)].join(", "));
     if names.len() > MAX_STATED_COLUMNS {
@@ -181,14 +127,36 @@ mod tests {
         AnalysisResult::new(1, analysis_type, "A")
     }
 
-    fn prepared(
-        analysis_type: AnalysisType,
-        waveforms: &[RetainedTrace],
-    ) -> Result<Hdf5Export, String> {
+    /// A written file and what it holds.
+    #[derive(Debug)]
+    struct Written {
+        facts: Hdf5Facts,
+        bytes: Vec<u8>,
+    }
+
+    impl std::ops::Deref for Written {
+        type Target = Hdf5Facts;
+
+        fn deref(&self) -> &Hdf5Facts {
+            &self.facts
+        }
+    }
+
+    fn prepared(analysis_type: AnalysisType, waveforms: &[RetainedTrace]) -> Result<Written, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_hdf5(&analysis, &borrowed, exported_waveform_limits())
-            .map_err(|error| error.to_string())
+        let mut bytes = Vec::new();
+        write_hdf5(
+            &[rspice_formats::waveform_io::result::ExportMember::new(&analysis, borrowed)],
+            exported_waveform_limits(),
+            &mut bytes,
+        )
+        .map(|facts| Written { facts, bytes })
+        .map_err(|error| error.to_string())
+    }
+
+    fn encode_hdf5(export: &Written) -> Result<Vec<u8>, String> {
+        Ok(export.bytes.clone())
     }
 
     #[test]

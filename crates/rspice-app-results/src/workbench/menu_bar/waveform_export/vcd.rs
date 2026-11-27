@@ -22,69 +22,58 @@
 //! encoder, and it is stated to the reader on every successful publication.
 //! A reader who needs the strength band wants the RSpice Result Bundle.
 
-use super::{NO_ACTIVE_ANALYSIS_MESSAGE, note_result_export_success};
+use super::NO_ACTIVE_ANALYSIS_MESSAGE;
+use super::job::ResultExportJob;
+use super::members::{ExportFile, publish_export};
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 
-use rspice_formats::vcd::encode_result_vcd;
+use rspice_formats::vcd::{check_result_vcd, write_result_vcd};
 
 /// VCD is ASCII text. There is no registered media type for it, and claiming
 /// one would be an invention rather than a fact about the bytes.
 const MIME_TYPE: &str = "text/plain;charset=utf-8";
 
+/// A dump is written on a Results job where this process writes the file, as
+/// every export of a run is: the history is in memory beside the run, and the
+/// file it makes is written out without the frame waiting on it.
 pub(super) fn export_vcd(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
-) {
-    let prepared = match displayed.primary_analysis(state.results_reads()) {
-        Some(analysis) => encode_result_vcd(analysis).map_err(|error| error.to_string()),
-        None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
+) -> Option<ResultExportJob> {
+    let Some(analysis) = displayed.primary_analysis(state.results_reads()) else {
+        state.prompt(NO_ACTIVE_ANALYSIS_MESSAGE);
+        return None;
     };
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
-        Err(message) => {
-            state.prompt(message);
-            return;
-        }
-    };
-
-    let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
-        title: "Export Value Change Dump",
-        default_name: "events.vcd",
-        filter_name: "Value Change Dump",
-        filter_extensions: &["vcd"],
-    }) {
-        Ok(Some(mut path)) => {
-            crate::io::file_exchange::ensure_file_extension(&mut path, "vcd");
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_bytes_file_observed(&destination, &prepared.bytes, MIME_TYPE)
-            });
-            (path, export)
-        }
-        Ok(None) => return,
-        Err(error) => (std::path::PathBuf::from("events.vcd"), Err(error)),
-    };
-    match export {
-        Ok(()) => {
-            let detail = format!(
-                "{} event nodes, {} changes; four bit states, XSPICE drive strength dropped \
-                 because VCD has no strength band",
-                prepared.node_count, prepared.change_count
-            );
-            note_result_export_success(
-                state,
-                crate::workbench::workflows::export_workflow::export_completion_message(
-                    "VCD",
-                    &published_path,
-                    Some(detail),
-                    io,
-                ),
-            );
-        }
-        Err(error) => {
-            state.report_failure("VCD export failed", error.to_string());
-        }
+    if let Err(error) = check_result_vcd(analysis) {
+        state.prompt(error.to_string());
+        return None;
     }
+    let analysis = analysis.clone();
+    publish_export(
+        state,
+        io,
+        ExportFile {
+            label: "VCD",
+            title: "Export Value Change Dump",
+            default_name: "events.vcd".to_owned(),
+            filter_name: "Value Change Dump",
+            extension: "vcd",
+            mime_type: MIME_TYPE,
+            text: false,
+        },
+        0,
+        move |out| {
+            write_result_vcd(&analysis, out)
+                .map(|facts| {
+                    format!(
+                        "{} event nodes, {} changes; four bit states, XSPICE drive strength                          dropped because VCD has no strength band",
+                        facts.node_count, facts.change_count
+                    )
+                })
+                .map_err(|error| error.to_string())
+        },
+    )
 }

@@ -8,7 +8,8 @@
 //! pretend otherwise: it writes the coordinate as column 0 and the signals
 //! after it in the dataset's own order, and it states that order back to the
 //! reader on every publication. A sidecar naming the columns is not an option,
-//! because `.npy` is one file.
+//! because `.npy` is one file, and for the same reason it holds one analysis:
+//! the member of a family the form chose.
 //!
 //! An `.npz` archive is a ZIP of `.npy` members, and a member has a name, so
 //! the names survive. What still does not survive is everything that is not an
@@ -17,7 +18,8 @@
 //! a `manifest.json` member makes the archive unreadable to it — so the
 //! metadata is stated to the reader rather than smuggled into a member that
 //! would break the round trip. A reader who needs it wants the RSpice Dataset
-//! Bundle.
+//! Bundle. An archive of every member of a family keeps each member's arrays
+//! under its parameter values, `r=2k/time`, `r=2k/V(out)`.
 //!
 //! # Complex data
 //!
@@ -26,17 +28,23 @@
 //! convention two columns share. In an `.npy` the whole array takes the
 //! complex dtype, since one array has one dtype; in an `.npz` only the complex
 //! signals do, so a mixed result costs nothing in the members that are real.
+//!
+//! # Written as it is read
+//!
+//! Either file is written on a Results job where this process writes it, a
+//! block of each column at a time, so a run kept in a results store exports
+//! whatever its length; a browser download takes the same bytes.
 
-use super::{
-    ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
-    note_result_export_success,
+use super::job::ResultExportJob;
+use super::members::{
+    ExportFile, OwnedMembers, estimated_bytes, export_members, exported_members, publish_export,
 };
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 use crate::workbench::workflows::result_import_workflow::exported_waveform_limits;
 
-use rspice_formats::numpy::result::{NumpyExport, encode_npy, encode_npz, prepare_numpy};
+use rspice_formats::numpy::result::{NumpyFacts, check_npy, check_npz, write_npy, write_npz};
 
 /// NumPy has no registered media type. `application/octet-stream` is what the
 /// bytes are; `.npz` is genuinely a ZIP and says so.
@@ -46,6 +54,11 @@ const NPZ_MIME_TYPE: &str = "application/zip";
 /// How many column names a completion message spells before it summarises.
 /// The order is the only key an `.npy` reader has, so the cap is generous.
 const MAX_STATED_COLUMNS: usize = 24;
+
+/// Why an `.npy` export of a view of several analyses is refused.
+const ONE_ARRAY_REFUSAL: &str = "An .npy file is one array, so it holds one analysis, and this \
+     view shows several. Choose the analysis in Export result dataset\u{2026}, or choose NumPy \
+     .npz to export every one.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum NumpyKind {
@@ -94,12 +107,12 @@ impl NumpyKind {
 
 /// The sentence an `.npy` reader needs, because the file itself cannot
 /// carry it.
-fn column_order(export: &NumpyExport) -> String {
+fn column_order(export: &NumpyFacts) -> String {
     let mut order = String::from("column order = ");
     order.push_str(export.coordinate_name);
     for signal in export.signals.iter().take(MAX_STATED_COLUMNS) {
         order.push_str(", ");
-        order.push_str(&signal.name);
+        order.push_str(signal);
     }
     if export.signals.len() > MAX_STATED_COLUMNS {
         order.push_str(&format!(
@@ -116,97 +129,72 @@ pub(super) fn export_numpy(
     displayed: &ResolvedResultView,
     kind: NumpyKind,
     signals: super::ExportedSignals,
-) {
-    let prepared = match displayed.primary_analysis(state.results_reads()) {
-        Some(analysis) => {
-            let waveforms = exported_waveforms(
-                state.results_reads(),
-                displayed.dataset_id,
-                analysis,
-                signals,
-            );
-            if waveforms.is_empty() {
-                Err(if analysis.waveforms.is_empty() {
-                    NO_SAMPLES_MESSAGE.to_owned()
-                } else {
-                    ALL_TRACES_HIDDEN_MESSAGE.to_owned()
-                })
-            } else {
-                prepare_numpy(analysis, &waveforms, exported_waveform_limits())
-                    .map_err(|error| error.to_string())
-            }
-        }
-        None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
-    };
-    // NumPy files carry arrays and nothing else, so which member of a family this is goes to the
-    // reader instead.
-    let member = displayed
-        .primary_analysis(state.results_reads())
-        .and_then(|analysis| analysis.family_member())
-        .map(|member| member.label());
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
+) -> Option<ResultExportJob> {
+    let reads = state.results_reads();
+    let members = match exported_members(reads, displayed, signals) {
+        Ok(members) => members,
         Err(message) => {
             state.prompt(message);
-            return;
+            return None;
         }
     };
-    // Encode before the picker opens: a refused export never asks the reader
-    // for a destination it cannot fill.
-    let bytes = match match kind {
-        NumpyKind::Array => encode_npy(&prepared),
-        NumpyKind::Archive => encode_npz(&prepared),
+    if kind == NumpyKind::Array && members.len() > 1 {
+        state.prompt(ONE_ARRAY_REFUSAL);
+        return None;
     }
-    .map_err(|error| error.to_string())
-    {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            state.report_failure(format!("{} export failed", kind.label()), error.to_string());
-            return;
+    // A refused export never asks the reader for a destination it cannot fill.
+    let checked = match kind {
+        NumpyKind::Array => {
+            let (analysis, waveforms) = &members[0];
+            check_npy(*analysis, waveforms, exported_waveform_limits())
         }
+        NumpyKind::Archive => check_npz(&export_members(&members), exported_waveform_limits()),
     };
-
-    let extension = kind.extension();
-    let default_name = format!("waveforms.{extension}");
-    let filter_extensions = [extension];
-    let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
-        title: kind.dialog_title(),
-        default_name: &default_name,
-        filter_name: kind.filter_name(),
-        filter_extensions: &filter_extensions,
-    }) {
-        Ok(Some(mut path)) => {
-            crate::io::file_exchange::ensure_file_extension(&mut path, extension);
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_bytes_file_observed(&destination, &bytes, kind.mime_type())
-            });
-            (path, export)
-        }
-        Ok(None) => return,
-        Err(error) => (std::path::PathBuf::from(default_name), Err(error)),
-    };
-    match export {
-        Ok(()) => {
-            note_result_export_success(
-                state,
-                crate::workbench::workflows::export_workflow::export_completion_message(
-                    kind.label(),
-                    &published_path,
-                    Some(completion_detail(&prepared, kind, member.as_deref())),
-                    io,
+    if let Err(error) = checked {
+        state.prompt(error.to_string());
+        return None;
+    }
+    // NumPy files carry arrays and nothing else, so which member of a family an `.npy` is goes
+    // to the reader instead.
+    let member = (members.len() == 1)
+        .then(|| members[0].0.family_member().map(|member| member.label()))
+        .flatten();
+    let bytes = estimated_bytes(&members, 16);
+    let owned = OwnedMembers::of(&members);
+    publish_export(
+        state,
+        io,
+        ExportFile {
+            label: kind.label(),
+            title: kind.dialog_title(),
+            default_name: format!("waveforms.{}", kind.extension()),
+            filter_name: kind.filter_name(),
+            extension: kind.extension(),
+            mime_type: kind.mime_type(),
+            text: false,
+        },
+        bytes,
+        move |out| {
+            let members = owned.members();
+            match kind {
+                NumpyKind::Array => write_npy(
+                    members[0].analysis,
+                    &members[0].waveforms,
+                    exported_waveform_limits(),
+                    out,
                 ),
-            );
-        }
-        Err(error) => {
-            state.report_failure(format!("{} export failed", kind.label()), error.to_string());
-        }
-    }
+                NumpyKind::Archive => write_npz(&members, exported_waveform_limits(), out),
+            }
+            .map(|facts| completion_detail(&facts, kind, member.as_deref()))
+            .map_err(|error| error.to_string())
+        },
+    )
 }
 
 /// What the reader is told they now have. For `.npy` this is load-bearing:
 /// the column order is the only key to the file.
-fn completion_detail(export: &NumpyExport, kind: NumpyKind, member: Option<&str>) -> String {
-    let dtype = if export.is_complex() {
+fn completion_detail(export: &NumpyFacts, kind: NumpyKind, member: Option<&str>) -> String {
+    let dtype = if export.complex {
         "complex128"
     } else {
         "float64"
@@ -215,17 +203,21 @@ fn completion_detail(export: &NumpyExport, kind: NumpyKind, member: Option<&str>
         NumpyKind::Array => format!(
             "one {dtype} array, {} rows x {} columns; {}. An .npy file carries no names, so this \
              order is the only key to its columns.",
-            export.coordinate.len(),
+            export.rows,
             export.columns(),
             column_order(export)
+        ),
+        NumpyKind::Archive if export.members > 1 => format!(
+            "{} arrays of {} members, each member's under its parameter values: '{}' plus one per \
+             signal, named. {dtype} values. Units, the analysis domain and the producing version \
+             are not carried — an .npz member is an array and nothing else.",
+            export.arrays, export.members, export.coordinate_name,
         ),
         NumpyKind::Archive => format!(
             "{} arrays of {} samples: '{}' plus one per signal, named. {dtype} values. Units, the \
              analysis domain and the producing version are not carried — an .npz member is an \
              array and nothing else.",
-            export.columns(),
-            export.coordinate.len(),
-            export.coordinate_name,
+            export.arrays, export.rows, export.coordinate_name,
         ),
     };
     if let Some(member) = member {
@@ -265,29 +257,42 @@ mod tests {
         AnalysisResult::new(1, analysis_type, "A")
     }
 
-    fn prepared(
+    /// The file `kind` writes of `waveforms`, and what it holds.
+    fn written(
+        kind: NumpyKind,
         analysis_type: AnalysisType,
         waveforms: &[RetainedTrace],
-    ) -> Result<NumpyExport, String> {
+    ) -> Result<(Vec<u8>, NumpyFacts), String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_numpy(&analysis, &borrowed, exported_waveform_limits())
-            .map_err(|error| error.to_string())
+        let mut bytes = Vec::new();
+        match kind {
+            NumpyKind::Array => {
+                write_npy(&analysis, &borrowed, exported_waveform_limits(), &mut bytes)
+            }
+            NumpyKind::Archive => write_npz(
+                &[rspice_formats::waveform_io::result::ExportMember::new(&analysis, borrowed)],
+                exported_waveform_limits(),
+                &mut bytes,
+            ),
+        }
+        .map(|facts| (bytes, facts))
+        .map_err(|error| error.to_string())
     }
 
     #[test]
     fn a_real_array_puts_the_coordinate_first_and_says_so() {
-        let export = prepared(
+        let (bytes, export) = written(
+            NumpyKind::Array,
             AnalysisType::Transient,
             &[
                 waveform("V(out)", vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]),
                 waveform("V(in)", vec![0.0, 1.0, 2.0], vec![20.0, 21.0, 22.0]),
             ],
         )
-        .expect("a shared-axis transient prepares");
+        .expect("a shared-axis transient writes");
         assert_eq!(column_order(&export), "column order = time, V(out), V(in)");
 
-        let bytes = encode_npy(&export).expect("encodes");
         // `\x93NUMPY`, version 1.0, then a C-order 3x3 float64 header.
         assert_eq!(&bytes[..8], b"\x93NUMPY\x01\x00");
         let header = String::from_utf8_lossy(&bytes[10..128]);
@@ -305,15 +310,15 @@ mod tests {
 
     #[test]
     fn an_npy_matrix_reimports_with_its_values_in_column_order() {
-        let export = prepared(
+        let (bytes, _) = written(
+            NumpyKind::Array,
             AnalysisType::Transient,
             &[
                 waveform("V(out)", vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]),
                 waveform("V(in)", vec![0.0, 1.0, 2.0], vec![20.0, 21.0, 22.0]),
             ],
         )
-        .expect("prepares");
-        let bytes = encode_npy(&export).expect("encodes");
+        .expect("writes");
         let parsed = parse_result_dataset("waveforms.npy", &bytes).expect("re-imports");
         assert_eq!(parsed.sample_count, 3);
         assert_eq!(parsed.waveforms.len(), 2);
@@ -337,7 +342,8 @@ mod tests {
 
     #[test]
     fn an_ac_array_is_complex128() {
-        let export = prepared(
+        let (bytes, export) = written(
+            NumpyKind::Array,
             AnalysisType::Ac,
             &[complex_waveform(
                 "V(out) magnitude",
@@ -348,9 +354,8 @@ mod tests {
                 vec![0.0, -0.5, -0.25],
             )],
         )
-        .expect("prepares");
-        assert!(export.is_complex());
-        let bytes = encode_npy(&export).expect("encodes");
+        .expect("writes");
+        assert!(export.complex);
         let header = String::from_utf8_lossy(&bytes[10..128]);
         assert!(header.contains("'descr': '<c16'"), "{header}");
         assert!(header.contains("'shape': (3, 2, )"), "{header}");
@@ -376,15 +381,15 @@ mod tests {
 
     #[test]
     fn an_archive_names_every_array_and_reimports_with_those_names() {
-        let export = prepared(
+        let (bytes, _) = written(
+            NumpyKind::Archive,
             AnalysisType::Transient,
             &[
                 waveform("V(out)", vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]),
                 waveform("I(R1)", vec![0.0, 1.0, 2.0], vec![20.0, 21.0, 22.0]),
             ],
         )
-        .expect("prepares");
-        let bytes = encode_npz(&export).expect("encodes");
+        .expect("writes");
         let parsed = parse_result_dataset("waveforms.npz", &bytes).expect("re-imports");
         assert_eq!(parsed.coordinate_name, "time");
         assert_eq!(parsed.analysis_type, AnalysisType::Transient);
@@ -406,7 +411,8 @@ mod tests {
 
     #[test]
     fn an_ac_archive_reimports_its_complex_components() {
-        let export = prepared(
+        let (bytes, _) = written(
+            NumpyKind::Archive,
             AnalysisType::Ac,
             &[complex_waveform(
                 "V(out) magnitude",
@@ -417,8 +423,7 @@ mod tests {
                 vec![0.0, -0.5, -0.25],
             )],
         )
-        .expect("prepares");
-        let bytes = encode_npz(&export).expect("encodes");
+        .expect("writes");
         let parsed = parse_result_dataset("waveforms.npz", &bytes).expect("re-imports");
         assert_eq!(parsed.coordinate_name, "frequency");
         assert_eq!(parsed.analysis_type, AnalysisType::Ac);
@@ -442,21 +447,18 @@ mod tests {
             waveform("V(out)", vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]),
             waveform("V(in)", vec![0.0, 1.0, 2.0], vec![20.0, 21.0, 22.0]),
         ];
-        let first = prepared(AnalysisType::Transient, &waveforms).expect("prepares");
-        let second = prepared(AnalysisType::Transient, &waveforms).expect("prepares");
-        assert_eq!(
-            encode_npy(&first).expect("encodes"),
-            encode_npy(&second).expect("encodes")
-        );
-        assert_eq!(
-            encode_npz(&first).expect("encodes"),
-            encode_npz(&second).expect("encodes")
-        );
+        for kind in [NumpyKind::Array, NumpyKind::Archive] {
+            assert_eq!(
+                written(kind, AnalysisType::Transient, &waveforms).expect("writes"),
+                written(kind, AnalysisType::Transient, &waveforms).expect("writes")
+            );
+        }
     }
 
     #[test]
     fn a_ragged_result_is_refused_rather_than_padded() {
-        let error = prepared(
+        let error = written(
+            NumpyKind::Array,
             AnalysisType::Transient,
             &[
                 waveform("V(out)", vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]),
@@ -470,28 +472,25 @@ mod tests {
 
     #[test]
     fn two_signals_that_differ_only_in_case_cannot_share_one_archive() {
-        let export = prepared(
-            AnalysisType::Transient,
-            &[
-                waveform("V(out)", vec![0.0, 1.0], vec![1.0, 2.0]),
-                waveform("v(OUT)", vec![0.0, 1.0], vec![3.0, 4.0]),
-            ],
-        )
-        .expect("prepares");
+        let waveforms = [
+            waveform("V(out)", vec![0.0, 1.0], vec![1.0, 2.0]),
+            waveform("v(OUT)", vec![0.0, 1.0], vec![3.0, 4.0]),
+        ];
         // One array each is fine; an archive has to name them.
-        assert!(encode_npy(&export).is_ok());
-        let error = encode_npz(&export).expect_err("the member names collide");
+        assert!(written(NumpyKind::Array, AnalysisType::Transient, &waveforms).is_ok());
+        let error = written(NumpyKind::Archive, AnalysisType::Transient, &waveforms)
+            .expect_err("the member names collide");
         assert!(error.to_string().contains("v(OUT)"), "{error}");
     }
 
     #[test]
     fn a_member_name_the_reader_refuses_is_refused_at_export() {
-        let export = prepared(
+        let error = written(
+            NumpyKind::Archive,
             AnalysisType::Transient,
             &[waveform("V(../escape)", vec![0.0, 1.0], vec![1.0, 2.0])],
         )
-        .expect("prepares");
-        let error = encode_npz(&export).expect_err("'..' is refused by the archive reader");
+        .expect_err("'..' is refused by the archive reader");
         assert!(error.to_string().contains("'..'"), "{error}");
     }
 }

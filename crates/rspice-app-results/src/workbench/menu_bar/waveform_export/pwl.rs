@@ -20,12 +20,25 @@
 //! A PWL source has one value at each time, so a trace that holds two values
 //! at one instant cannot be written and is refused at that instant; a sample
 //! that repeats its predecessor exactly carries nothing and is dropped.
+//!
+//! # Written as it is read
+//!
+//! The file opens with a comment stating how many breakpoints it holds and
+//! the times they span, which only the last sample settles. So it is written
+//! in two passes over the trace on a Results job, a block at a time: the
+//! first checks every sample and counts the breakpoints, the second writes
+//! them. Neither holds the trace, so a run kept in a results store exports
+//! whatever its length.
 
-use super::{NO_ACTIVE_ANALYSIS_MESSAGE, note_result_export_success};
+use std::io::Write;
+
+use super::NO_ACTIVE_ANALYSIS_MESSAGE;
+use super::job::ResultExportJob;
+use super::members::{ExportFile, publish_export};
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
-use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::export_workflow::ExportWorkflowIo;
 
 const LABEL: &str = "SPICE PWL";
 const EXTENSION: &str = "inc";
@@ -49,11 +62,8 @@ pub(super) fn pwl_traces(analysis: &AnalysisResult) -> impl Iterator<Item = &Ret
         .filter(|waveform| waveform.complex.is_none())
 }
 
-/// One encoded source file.
-pub(super) struct PwlSource {
-    pub text: String,
-    /// The name the file is offered under, without its extension.
-    pub file_stem: String,
+/// What a written source file holds.
+pub(super) struct PwlFacts {
     pub subcircuit: String,
     pub source: char,
     pub points: usize,
@@ -110,17 +120,45 @@ fn named_as_current(name: &str) -> bool {
         .starts_with('(')
 }
 
-/// Write `trace` of `analysis` as a PWL source subcircuit.
-pub(super) fn encode_pwl(
-    analysis: &AnalysisResult,
+/// Each sample of `trace` in order, a block at a time, handed to `visit` as (time, value).
+fn each_sample(
     trace: &RetainedTrace,
-) -> Result<PwlSource, String> {
-    use std::fmt::Write as _;
+    mut visit: impl FnMut(f64, f64) -> Result<(), String>,
+) -> Result<(), String> {
+    let rows = trace.x.len();
+    let read = |values, window| read_window(trace, values, window);
+    let mut first = 0;
+    while first < rows {
+        let end = first
+            .saturating_add(rspice_results::waveform::BLOCK_SAMPLES)
+            .min(rows);
+        let times = read(&trace.x, first..end)?;
+        let values = read(&trace.y, first..end)?;
+        for (&time, &value) in times.iter().zip(values.iter()) {
+            visit(time, value)?;
+        }
+        first = end;
+    }
+    Ok(())
+}
 
-    let current = trace.unit.as_deref() == Some("A")
-        || (trace.unit.is_none() && named_as_current(&trace.name));
-    let source = if current { 'I' } else { 'V' };
-    let unit = if current { "A" } else { "V" };
+/// Samples `window` of `values`, a column of `trace`: borrowed from memory, or one block read
+/// from its store.
+fn read_window<'a>(
+    trace: &RetainedTrace,
+    values: &'a rspice_results::waveform::WaveformValues,
+    window: std::ops::Range<usize>,
+) -> Result<std::borrow::Cow<'a, [f64]>, String> {
+    values
+        .blocks(window)
+        .next()
+        .transpose()
+        .map_err(|failure| format!("'{}' could not be read: {failure}", trace.name))
+        .map(Option::unwrap_or_default)
+}
+
+/// Whether `trace` has a PWL form, checked without reading a sample: one value at each time.
+fn check_pwl(trace: &RetainedTrace) -> Result<(), String> {
     if trace.x.len() != trace.y.len() {
         return Err(format!(
             "'{}' holds {} times and {} values, so it has no PWL form.",
@@ -129,15 +167,36 @@ pub(super) fn encode_pwl(
             trace.y.len()
         ));
     }
-    let mut points: Vec<(f64, f64)> = Vec::with_capacity(trace.x.len());
-    for (time, value) in trace.x.samples(..).zip(trace.y.samples(..)) {
+    if trace.x.is_empty() {
+        return Err(format!("'{}' holds no samples to export.", trace.name));
+    }
+    Ok(())
+}
+
+/// Write `trace` of the analysis `label` as a PWL source subcircuit to `out`: every sample
+/// checked and the breakpoints counted in a first pass, written in a second.
+pub(super) fn write_pwl(
+    label: &str,
+    trace: &RetainedTrace,
+    out: &mut dyn Write,
+) -> Result<PwlFacts, String> {
+    check_pwl(trace)?;
+    let current = trace.unit.as_deref() == Some("A")
+        || (trace.unit.is_none() && named_as_current(&trace.name));
+    let source = if current { 'I' } else { 'V' };
+    let unit = if current { "A" } else { "V" };
+    // The first pass: what the header states, and every refusal before a byte is written.
+    let mut previous: Option<(f64, f64)> = None;
+    let mut first = None;
+    let mut points = 0_usize;
+    each_sample(trace, |time, value| {
         if !time.is_finite() || !value.is_finite() {
             return Err(format!(
                 "'{}' holds a non-finite sample at t = {time:e} s, which a PWL source cannot take.",
                 trace.name
             ));
         }
-        if let Some(&(previous_time, previous_value)) = points.last() {
+        if let Some((previous_time, previous_value)) = previous {
             if time < previous_time {
                 return Err(format!(
                     "'{}' steps back in time at t = {time:e} s; a PWL source needs increasing times.",
@@ -146,7 +205,7 @@ pub(super) fn encode_pwl(
             }
             if time == previous_time {
                 if value.to_bits() == previous_value.to_bits() {
-                    continue;
+                    return Ok(());
                 }
                 return Err(format!(
                     "'{}' holds two values at t = {time:e} s ({previous_value:e} and {value:e}); a \
@@ -155,41 +214,51 @@ pub(super) fn encode_pwl(
                 ));
             }
         }
-        points.push((time, value));
-    }
-    let (Some(&(first, _)), Some(&(last, _))) = (points.first(), points.last()) else {
+        first.get_or_insert(time);
+        previous = Some((time, value));
+        points += 1;
+        Ok(())
+    })?;
+    let (Some(first), Some((last, _))) = (first, previous) else {
         return Err(format!("'{}' holds no samples to export.", trace.name));
     };
     let subcircuit = subcircuit_name(&trace.name);
-    let mut text = String::new();
+    let mut out = std::io::BufWriter::with_capacity(1 << 16, out);
+    let written = |error: std::io::Error| format!("the file could not be written: {error}");
     // Comment lines stay on one line each: a label is the reader's text.
     let one_line = |text: &str| text.replace(['\r', '\n'], " ");
     writeln!(
-        text,
-        "* SPICE PWL source: {} ({unit}) of '{}', {} retained samples from {first:e} s to {last:e} s.",
+        out,
+        "* SPICE PWL source: {} ({unit}) of '{}', {points} retained samples from {first:e} s to {last:e} s.",
         one_line(&trace.name),
-        one_line(&analysis.label),
-        points.len()
+        one_line(label),
     )
-    .expect("writing to a String cannot fail");
+    .map_err(written)?;
     writeln!(
-        text,
+        out,
         "* Use: .include this file, then X<name> <p> <n> {subcircuit}"
     )
-    .expect("writing to a String cannot fail");
-    writeln!(text, ".subckt {subcircuit} p n").expect("writing to a String cannot fail");
-    writeln!(text, "{source}1 p n PWL(").expect("writing to a String cannot fail");
-    for (time, value) in &points {
-        writeln!(text, "+ {time:e} {value:e}").expect("writing to a String cannot fail");
-    }
-    writeln!(text, "+ )").expect("writing to a String cannot fail");
-    writeln!(text, ".ends {subcircuit}").expect("writing to a String cannot fail");
-    Ok(PwlSource {
-        text,
-        file_stem: readable_name(&trace.name),
+    .map_err(written)?;
+    writeln!(out, ".subckt {subcircuit} p n").map_err(written)?;
+    writeln!(out, "{source}1 p n PWL(").map_err(written)?;
+    // The second pass: the breakpoints, a sample that repeats its predecessor dropped again.
+    let mut previous: Option<(f64, f64)> = None;
+    each_sample(trace, |time, value| {
+        if previous.is_some_and(|(previous_time, previous_value)| {
+            time == previous_time && value.to_bits() == previous_value.to_bits()
+        }) {
+            return Ok(());
+        }
+        previous = Some((time, value));
+        writeln!(out, "+ {time:e} {value:e}").map_err(written)
+    })?;
+    writeln!(out, "+ )").map_err(written)?;
+    writeln!(out, ".ends {subcircuit}").map_err(written)?;
+    out.flush().map_err(written)?;
+    Ok(PwlFacts {
         subcircuit,
         source,
-        points: points.len(),
+        points,
     })
 }
 
@@ -198,9 +267,9 @@ pub(super) fn export_pwl(
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
     trace: Option<&str>,
-) {
+) -> Option<ResultExportJob> {
     let reads = state.results_reads();
-    let prepared = match displayed.primary_analysis(reads) {
+    let chosen = match displayed.primary_analysis(reads) {
         Some(analysis) if !carries_time_waveforms(analysis.analysis_type) => Err(format!(
             "A PWL source is a waveform in time, and '{}' is a {} result. Choose a transient \
              analysis.",
@@ -221,7 +290,7 @@ pub(super) fn export_pwl(
                 .find(|waveform| waveform.complex.is_none()),
             };
             match chosen {
-                Some(waveform) => encode_pwl(analysis, waveform),
+                Some(waveform) => check_pwl(waveform).map(|()| (analysis, waveform)),
                 None => Err(match trace {
                     Some(name) => format!("'{name}' is not a trace of '{}'.", analysis.label),
                     None => format!("No trace of '{}' is plotted to export.", analysis.label),
@@ -230,54 +299,41 @@ pub(super) fn export_pwl(
         }
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
     };
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
+    let (label, waveform) = match chosen {
+        Ok((analysis, waveform)) => (analysis.label.clone(), waveform.clone()),
         Err(message) => {
             state.prompt(message);
-            return;
+            return None;
         }
     };
-
-    let default_name = format!("{}.{EXTENSION}", prepared.file_stem);
-    let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
-        title: "Export SPICE PWL Source",
-        default_name: &default_name,
-        filter_name: "SPICE PWL Source",
-        filter_extensions: &[EXTENSION],
-    }) {
-        Ok(Some(mut path)) => {
-            crate::io::file_exchange::ensure_file_extension(&mut path, EXTENSION);
-            let export = io.observe_destination(&path).and_then(|destination| {
-                io.write_bytes_file_observed(&destination, prepared.text.as_bytes(), MIME_TYPE)
-            });
-            (path, export)
-        }
-        Ok(None) => return,
-        Err(error) => (std::path::PathBuf::from(default_name), Err(error)),
-    };
-    match export {
-        Ok(()) => note_result_export_success(
-            state,
-            crate::workbench::workflows::export_workflow::export_completion_message(
-                LABEL,
-                &published_path,
-                Some(format!(
-                    "subcircuit {} with a {} source through {} breakpoints; .include it and \
-                     instance X<name> <p> <n> {}",
-                    prepared.subcircuit,
-                    if prepared.source == 'I' {
-                        "current"
-                    } else {
-                        "voltage"
-                    },
-                    prepared.points,
-                    prepared.subcircuit
-                )),
-                io,
-            ),
-        ),
-        Err(error) => {
-            state.report_failure(format!("{LABEL} export failed"), error.to_string());
-        }
-    }
+    let bytes = (waveform.x.len() as u64).saturating_mul(50);
+    publish_export(
+        state,
+        io,
+        ExportFile {
+            label: LABEL,
+            title: "Export SPICE PWL Source",
+            default_name: format!("{}.{EXTENSION}", readable_name(&waveform.name)),
+            filter_name: "SPICE PWL Source",
+            extension: EXTENSION,
+            mime_type: MIME_TYPE,
+            text: false,
+        },
+        bytes,
+        move |out| {
+            let facts = write_pwl(&label, &waveform, out)?;
+            Ok(format!(
+                "subcircuit {} with a {} source through {} breakpoints; .include it and \
+                 instance X<name> <p> <n> {}",
+                facts.subcircuit,
+                if facts.source == 'I' {
+                    "current"
+                } else {
+                    "voltage"
+                },
+                facts.points,
+                facts.subcircuit
+            ))
+        },
+    )
 }

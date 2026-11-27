@@ -83,6 +83,8 @@ pub struct Hdf5Facts {
     pub rows: usize,
     /// Signals of the first member.
     pub columns: usize,
+    /// The names the first member's group states, its coordinate's first, in the file's order.
+    pub names: Vec<String>,
     /// The members the file holds, a group each: more than one for every member of a family.
     pub members: usize,
 }
@@ -279,6 +281,15 @@ fn plan<'a, W: AsRef<RetainedWaveform>>(
         if let Some(unit) = analysis.waveform_coordinate_unit() {
             group.set_attr("coordinate_unit", Hdf5Attribute::Text(unit.to_owned()));
         }
+        let names = group
+            .attributes
+            .iter()
+            .filter(|(name, _)| name.ends_with("_name"))
+            .filter_map(|(_, value)| match value {
+                Hdf5Attribute::Text(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         if family {
             group.set_attr("member", Hdf5Attribute::Text(member.label()));
             match analysis.family_member() {
@@ -311,6 +322,7 @@ fn plan<'a, W: AsRef<RetainedWaveform>>(
             coordinate_name,
             rows,
             columns: waveforms.len(),
+            names,
             members: members.len(),
         });
     }
