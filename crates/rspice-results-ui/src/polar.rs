@@ -523,8 +523,6 @@ pub fn domain_bar(
         .iter()
         .map(|quantity| quantity.label.clone())
         .collect::<Vec<_>>();
-    let identity = quantities[selected].label.clone();
-    let reference = quantities[selected].reference_impedance_ohm;
 
     if let Some(picked) = select(
         ui,
@@ -594,23 +592,8 @@ pub fn domain_bar(
     if response.clicked() {
         sheet.normalize = !normalize;
     }
-
-    let t = Tokens::get(ui.ctx());
-    ui.add_space(8.0);
-    ui.label(
-        egui::RichText::new(identity)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
-    // The ohm sign is absent from the bundled mono face, so the retained
-    // reference impedance is stated in the sans pane head rather than here.
-    if let Some(reference) = reference {
-        ui.label(
-            egui::RichText::new(format!("Z\u{2080} {reference} \u{3a9}"))
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-    }
+    // The selector names the response and the strip head its reference
+    // impedance, so the bar says neither again.
     true
 }
 
