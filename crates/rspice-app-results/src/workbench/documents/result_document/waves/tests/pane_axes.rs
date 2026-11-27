@@ -274,7 +274,7 @@ fn a_bode_strip_names_each_trace_in_the_pane_that_draws_it() {
     let mut names = legend_names(&ctx, &output);
     names.sort();
     let expected: Vec<(String, usize)> = (0..3)
-        .map(|ordinal| (format!("phase(V(o{ordinal}))"), 1))
+        .map(|ordinal| (format!("V(o{ordinal}) phase"), 1))
         .chain((0..3).map(|ordinal| (format!("|V(o{ordinal})|"), 0)))
         .collect();
     assert_eq!(names, expected, "each name once, in the pane that draws it");
