@@ -252,8 +252,7 @@ pub fn show_run_line(
         .map(|run| run.log.lines().get(line).map(|line| line.severity))
     else {
         workbench.prompt(format!(
-            "Run {run_sequence} is no longer retained in this session, so its log could not be \
-             opened."
+            "Run {run_sequence} is no longer in this session, so its log could not be opened."
         ));
         return;
     };

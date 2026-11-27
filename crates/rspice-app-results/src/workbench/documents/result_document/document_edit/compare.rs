@@ -238,7 +238,7 @@ pub fn open_compare(state: &mut ResultsParts<'_>) {
     }));
 }
 
-const NO_BASELINE: &str = "No other retained dataset holds this analysis on the same X axis.";
+const NO_BASELINE: &str = "No other run has this analysis on the same X axis.";
 const NO_SIGNAL: &str = "Choose at least one signal to compare.";
 
 /// The parsed numbers of a draft.
@@ -413,7 +413,7 @@ pub(super) fn commit(
         let baseline = draft
             .baseline
             .and_then(|id| retained_run(reads, id))
-            .ok_or_else(|| "The baseline dataset is no longer retained.".to_owned())?;
+            .ok_or_else(|| "The baseline run is no longer available.".to_owned())?;
         let baseline_analysis = matching_comparison_analysis(analysis, baseline)
             .ok_or_else(|| "The baseline holds no matching analysis.".to_owned())?;
         let shared = baselines(reads, run, analysis)
@@ -558,7 +558,7 @@ fn finish(
                 .find(|analysis| analysis.id == analysis_id)?;
             Some((run, analysis))
         };
-        let gone = || "The compared results are no longer retained.".to_owned();
+        let gone = || "The compared runs are no longer available.".to_owned();
         let (run, analysis) = resolve(request.candidate).ok_or_else(gone)?;
         let (baseline, baseline_analysis) = resolve(request.baseline).ok_or_else(gone)?;
         let finished = finished(reads, (run, analysis), baseline, request, found);

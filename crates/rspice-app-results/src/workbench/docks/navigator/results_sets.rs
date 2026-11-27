@@ -234,11 +234,11 @@ pub(super) fn apply_signal_set(
     Ok(match missing.as_slice() {
         [] => format!("Plotted the set {}: {plotted}.", set.name),
         [one] => format!(
-            "Plotted the set {}: {plotted}; this run did not retain {one}.",
+            "Plotted the set {}: {plotted}; this run did not keep {one}.",
             set.name
         ),
         [first, rest @ ..] => format!(
-            "Plotted the set {}: {plotted}; this run did not retain {first} and {} more.",
+            "Plotted the set {}: {plotted}; this run did not keep {first} and {} more.",
             set.name,
             rest.len()
         ),

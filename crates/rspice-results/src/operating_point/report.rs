@@ -34,7 +34,7 @@ pub fn annotation_label(annotation: OperatingPointAnnotationEvidence) -> &'stati
         OperatingPointAnnotationEvidence::VoltagesAndCurrents => "voltages and currents",
         OperatingPointAnnotationEvidence::VoltagesOnly => "voltages only",
         OperatingPointAnnotationEvidence::VoltagesAndDeviceOp => "voltages and device OP",
-        OperatingPointAnnotationEvidence::None => "not retained",
+        OperatingPointAnnotationEvidence::None => "none",
     }
 }
 

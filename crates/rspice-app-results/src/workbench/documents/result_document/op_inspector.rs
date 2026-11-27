@@ -197,7 +197,7 @@ pub fn apply_action(state: &mut ResultsParts<'_>, action: OpAction) {
                 .iter()
                 .find(|component| component.id == component_id)
             else {
-                state.prompt("The retained device no longer resolves to the active schematic.");
+                state.prompt("This device no longer matches a part on the schematic.");
                 return;
             };
             let position = component.pos;

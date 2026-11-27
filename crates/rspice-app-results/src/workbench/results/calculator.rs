@@ -222,7 +222,7 @@ pub fn plot_expression(panel: &mut CalculatorPanel, state: &mut ResultsParts<'_>
     let Some(analysis_index) = state.model.simulation.view.active_analysis_idx else {
         state
             .workbench
-            .prompt("Select a retained result analysis before plotting an expression.");
+            .prompt("Pick an analysis in the data browser to plot an expression.");
         return;
     };
     let Some(run) = state.model.simulation.active_run() else {

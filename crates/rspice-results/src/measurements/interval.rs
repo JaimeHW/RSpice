@@ -28,7 +28,7 @@ pub enum MeasurementError {
 impl fmt::Display for MeasurementError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Empty => write!(f, "no retained samples"),
+            Self::Empty => write!(f, "no samples"),
             Self::LengthMismatch => {
                 write!(f, "sample coordinates and values have different lengths")
             }

@@ -14,7 +14,7 @@ fn a_device_that_cannot_be_located_is_answered_on_the_status_bar() {
     state.drain_notices(&egui::Context::default());
     assert_eq!(
         state.prompt_text(),
-        Some("The retained device no longer resolves to the active schematic.")
+        Some("This device no longer matches a part on the schematic.")
     );
     assert!(state.workbench.toasts.activity().is_empty());
 }

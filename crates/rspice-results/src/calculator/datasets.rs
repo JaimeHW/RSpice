@@ -136,7 +136,7 @@ impl<W: AsRef<RetainedWaveform>> DatasetSource for RunDatasets<'_, W> {
                          run first, or name a run, as in {signal}@\"Run 2\""
                 )
             } else {
-                format!("{named}: no retained run named {dataset} holds this analysis")
+                format!("{named}: no run named {dataset} has this analysis")
             })
         })?;
         if run.coordinate_unit != self.coordinate_unit {

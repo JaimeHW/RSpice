@@ -326,6 +326,6 @@ fn a_report_copy_carries_exactly_the_samples_its_traces_draw() {
             .with_figure_samples(&elsewhere)
             .unwrap_err()
             .to_string()
-            .contains("not retained")
+            .contains("were not kept")
     );
 }

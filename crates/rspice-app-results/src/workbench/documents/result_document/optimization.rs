@@ -320,7 +320,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     else {
         well_hint(
             ui,
-            "Select a validated optimization analysis with a retained cost history",
+            "Pick an optimization analysis with a cost history in the data browser",
         );
         return;
     };

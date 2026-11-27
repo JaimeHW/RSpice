@@ -108,7 +108,7 @@ impl HistogramDistribution {
             || samples.len() != histogram.total_count
             || samples.iter().any(|value| !value.is_finite())
         {
-            return Err("The distribution requires a finite retained sample population");
+            return Err("The distribution needs a finite set of samples");
         }
         let mut ordinates = Vec::new();
         if mode != HistogramDisplayMode::Cdf {

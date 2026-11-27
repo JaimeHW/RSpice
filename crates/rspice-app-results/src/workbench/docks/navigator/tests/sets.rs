@@ -108,7 +108,7 @@ fn a_set_applied_to_a_run_without_some_members_names_them() {
     let message = apply_signal_set(&mut host.results_parts(), 0).unwrap();
     assert_eq!(
         message,
-        "Plotted the set Out: 1 signal; this run did not retain V(gone)."
+        "Plotted the set Out: 1 signal; this run did not keep V(gone)."
     );
     assert_eq!(plotted(&host), ["V(out)"]);
 }

@@ -529,7 +529,7 @@ impl RunSource {
                 Some(_) => {
                     return Err(VisualizationError::InvalidValue {
                         field: "visualization-document.datasets",
-                        message: "an attached analysis projection cannot be rewritten under the same immutable binding"
+                        message: "a run already in this document cannot be changed in place"
                             .to_owned(),
                     });
                 }
@@ -797,7 +797,7 @@ impl VisualizationDocument {
                     |RunNotHeld| VisualizationError::InvalidValue {
                         field: "run-source.figure-samples",
                         message: format!(
-                            "the samples of {:?} of run {} are not retained",
+                            "the samples of {:?} of run {} were not kept",
                             key.name, binding.dataset_id
                         ),
                     },

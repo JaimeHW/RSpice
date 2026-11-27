@@ -224,7 +224,7 @@ impl ExecutedDeckArchive {
     pub fn restore(records: Vec<ExecutedDeck>) -> Result<Self, String> {
         if records.len() > MAX_RETAINED_RUNS {
             return Err(format!(
-                "retained executed decks for {} runs exceed the archive limit of \
+                "executed decks for {} runs exceed the archive limit of \
                  {MAX_RETAINED_RUNS}",
                 records.len()
             ));
@@ -233,13 +233,13 @@ impl ExecutedDeckArchive {
         for record in &records {
             if record.points.is_empty() {
                 return Err(format!(
-                    "retained executed deck for run {} holds no point",
+                    "executed deck for run {} holds no point",
                     record.run_id
                 ));
             }
             if seen.contains(&record.run_id) {
                 return Err(format!(
-                    "run {} has more than one retained executed deck",
+                    "run {} has more than one executed deck",
                     record.run_id
                 ));
             }
@@ -250,7 +250,7 @@ impl ExecutedDeckArchive {
         let total = records.iter().map(ExecutedDeck::bytes).sum::<usize>();
         if records.len() > 1 && total > MAX_RETAINED_BYTES {
             return Err(format!(
-                "retained executed decks hold {total} bytes across {} runs, over the archive \
+                "executed decks hold {total} bytes across {} runs, over the archive \
                  budget of {MAX_RETAINED_BYTES}",
                 records.len()
             ));
@@ -369,7 +369,7 @@ mod tests {
         ])
         .expect_err("retaining a run twice replaces it, so two records cannot both exist");
         assert!(
-            error.contains("more than one retained executed deck"),
+            error.contains("more than one executed deck"),
             "{error}"
         );
     }

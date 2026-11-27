@@ -92,7 +92,7 @@ pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
     let held = cx.model.simulation.retained.deleted_runs.len();
     let mut question = Dialog::new(TITLE, delete_label(deleted))
         .description(
-            "Delete the retained runs of this project's result history. Pinned golden baselines \
+            "Delete the runs in this project's result history. Pinned golden baselines \
              and runs a saved result document reads are kept unless you delete them too.",
         )
         .size(DialogSize::Confirmation);

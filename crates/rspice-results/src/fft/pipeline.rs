@@ -100,7 +100,7 @@ pub enum FftInputError {
     TargetExceedsPointCap { target: usize, point_cap: usize },
     #[error("FFT time window must have finite ordered bounds; received [{start:?}, {end:?}]")]
     InvalidTimeWindow { start: f64, end: f64 },
-    #[error("FFT time window [{start:?}, {end:?}] retains only {retained} authored samples")]
+    #[error("FFT time window [{start:?}, {end:?}] holds only {retained} samples")]
     InsufficientWindowSamples {
         start: f64,
         end: f64,

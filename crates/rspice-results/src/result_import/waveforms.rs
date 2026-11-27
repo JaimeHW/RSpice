@@ -105,7 +105,7 @@ pub fn assemble_imported_waveforms(
     });
     let retained_values = retained_columns
         .and_then(|columns| coordinate.len().checked_mul(columns))
-        .ok_or_else(|| adapter_error(format, "retained-value count overflow"))?;
+        .ok_or_else(|| adapter_error(format, "too many values to count"))?;
     if retained_values > max_values {
         return Err(adapter_error(
             format,

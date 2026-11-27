@@ -1467,7 +1467,7 @@ impl VisualizationDocument {
             _ => {
                 return Err(VisualizationError::InvalidValue {
                     field: "visualization-document.datasets",
-                    message: "a run reference and an embedded table cannot share one binding"
+                    message: "a run and an embedded table cannot share one source"
                         .to_owned(),
                 });
             }
@@ -1501,7 +1501,7 @@ impl VisualizationDocument {
             let Some(TypedValue::Text(analysis_id)) = row.values.get(analysis_index) else {
                 return Err(VisualizationError::InvalidValue {
                     field: "visualization-document.datasets",
-                    message: "every projected source row must retain its analysis identity"
+                    message: "every source row must name its analysis"
                         .to_owned(),
                 });
             };
@@ -1516,7 +1516,7 @@ impl VisualizationDocument {
         let projection_analysis =
             projection_analysis.ok_or_else(|| VisualizationError::InvalidValue {
                 field: "visualization-document.datasets",
-                message: "an analysis projection must retain at least one exact row".to_owned(),
+                message: "an analysis selection must keep at least one row".to_owned(),
             })?;
         let retained_rows = existing
             .rows
@@ -1537,7 +1537,7 @@ impl VisualizationDocument {
             {
                 return Err(VisualizationError::InvalidValue {
                     field: "visualization-document.datasets",
-                    message: "an attached analysis projection cannot be rewritten under the same immutable binding"
+                    message: "a run already in this document cannot be changed in place"
                         .to_owned(),
                 });
             }
@@ -1567,7 +1567,7 @@ impl VisualizationDocument {
         if next_binding == previous {
             return Err(VisualizationError::InvalidValue {
                 field: "visualization-document.datasets",
-                message: "the replacement dataset is identical to the current binding".to_owned(),
+                message: "the replacement run is the run already shown".to_owned(),
             });
         }
         self.attach_dataset(next)?;

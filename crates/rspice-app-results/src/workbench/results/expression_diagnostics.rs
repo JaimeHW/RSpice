@@ -167,7 +167,7 @@ fn body(ui: &mut Ui, rows: &[ExpressionRow]) {
                                         .color(c.text_faint),
                                 )
                                 .on_hover_text(
-                                    "Open the sheet that owns this expression to evaluate it against the retained samples.",
+                                    "Open the sheet that owns this expression to evaluate it against the run's samples.",
                                 );
                             }
                         }
@@ -230,7 +230,7 @@ fn domain_label(analysis: &AnalysisResult) -> &'static str {
         AnalysisType::Pnoise => "PNOISE · offset frequency",
         AnalysisType::DcSweep => "DC · swept source",
         AnalysisType::DcOp => "OP · scalar",
-        _ => "retained sweep",
+        _ => "sweep",
     }
 }
 

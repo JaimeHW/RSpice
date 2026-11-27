@@ -301,12 +301,12 @@ impl ResultsReads<'_> {
                     || self.analysis.smith_chart_state.traces.is_empty()
                 {
                     ViewerCapability::unavailable(
-                        "Requires retained complex traces: S-parameters with per-port reference \
+                        "Requires complex traces: S-parameters with per-port reference \
                          impedances, or an AC or HB response",
                     )
                 } else {
                     ViewerCapability::available(
-                        "Active complex traces loaded from the retained result",
+                        "Complex traces loaded from the active analysis",
                     )
                 }
             }
@@ -325,9 +325,9 @@ impl ResultsReads<'_> {
             }
             ActiveViewer::Histogram => {
                 if histogram_is_available(self) {
-                    ViewerCapability::available("Retained Monte Carlo samples available")
+                    ViewerCapability::available("Monte Carlo samples available")
                 } else {
-                    ViewerCapability::unavailable("Requires retained Monte Carlo samples")
+                    ViewerCapability::unavailable("Requires Monte Carlo samples")
                 }
             }
             ActiveViewer::BodePlot => {
@@ -383,10 +383,10 @@ impl ResultsReads<'_> {
                             })
                     });
                 if retained {
-                    ViewerCapability::available("Pole-zero result retained by the active analysis")
+                    ViewerCapability::available("The active analysis has pole-zero results")
                 } else {
                     ViewerCapability::unavailable(
-                        "Requires a retained pole-zero payload in the active analysis",
+                        "Requires an analysis with pole-zero results",
                     )
                 }
             }
@@ -681,7 +681,7 @@ mod tests {
         run.add_analysis(crate::state::AnalysisResult::new(
             1,
             crate::state::AnalysisType::PoleZero,
-            "PZ without retained evidence",
+            "PZ without roots",
         ));
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
@@ -693,7 +693,7 @@ mod tests {
         state.model.simulation.retained.runs[0].analyses[0] = crate::state::AnalysisResult::new(
             1,
             crate::state::AnalysisType::PoleZero,
-            "Retained PZ",
+            "PZ with roots",
         )
         .with_result_payload(crate::state::AnalysisResultPayload::PoleZero {
             poles: vec![crate::state::ComplexResultValue {

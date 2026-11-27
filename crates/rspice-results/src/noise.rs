@@ -147,7 +147,7 @@ impl NoiseSummary {
     /// Legacy results may lack the source quantity; do not invent a voltage unit for them.
     pub fn input_rms_unit(&self) -> &'static str {
         self.input_quantity
-            .map_or("RMS (unit not retained)", |quantity| quantity.rms_unit())
+            .map_or("RMS (unit not recorded)", |quantity| quantity.rms_unit())
     }
 }
 

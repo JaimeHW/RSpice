@@ -111,7 +111,7 @@ fn resolve_dataset_view(
         .runs
         .iter()
         .position(|run| run.dataset_id == dataset_id)
-        .ok_or_else(|| "The active result dataset is no longer retained.".to_owned())?;
+        .ok_or_else(|| "The active run is no longer available.".to_owned())?;
     let run = &reads.model.simulation.retained.runs[run_index];
     let viewer = reads.results.session.viewer;
     let mut analysis_indices = run
@@ -233,7 +233,7 @@ fn resolve_visualization_pane(
         .analyses
         .iter()
         .position(|analysis| analysis_instance_id(run, analysis) == binding.analysis_id)
-        .ok_or_else(|| "The pane's bound analysis is no longer retained.".to_owned())?;
+        .ok_or_else(|| "The pane's analysis is no longer available.".to_owned())?;
     let analysis = &run.analyses[analysis_index];
     let viewer = analysis_supports_viewer_memoized(
         reads,

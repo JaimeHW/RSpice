@@ -257,7 +257,7 @@ impl EvaluationContext for NamedValues<'_> {
             .find(|(name, _)| name.eq_ignore_ascii_case(signal))
             .map(|(_, value)| CalcValue::from(RealValue::Scalar(*value)))
             .ok_or_else(|| {
-                EvaluationError::IdentifierNotFound(format!("{signal} is not retained per trial"))
+                EvaluationError::IdentifierNotFound(format!("{signal} was not kept for each trial"))
             })
     }
 }

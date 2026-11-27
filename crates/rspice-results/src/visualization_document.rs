@@ -622,7 +622,7 @@ impl SourceRow {
                 .checked_add(bytes)
                 .ok_or_else(|| VisualizationError::InvalidValue {
                     field: "source-dataset.retained-text-bytes",
-                    message: "retained source text byte count overflowed".to_owned(),
+                    message: "the source text is too large to count".to_owned(),
                 })
         })
     }

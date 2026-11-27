@@ -104,7 +104,7 @@ pub fn evaluated_waveform(
         scalar_axis
             .filter(|axis| !axis.is_empty())
             .cloned()
-            .ok_or_else(|| "scalar expression has no retained axis".to_owned())
+            .ok_or_else(|| "scalar expression has no X axis".to_owned())
     };
     match value {
         CalcValue::Real(RealValue::Scalar(value)) => {
@@ -218,7 +218,7 @@ impl<'a, W: AsRef<RetainedWaveform>> WaveformsContext<'a, W> {
             })
         {
             return Err(EvaluationError::WaveformMismatch(
-                "selected rows exceed the retained analysis axis".to_owned(),
+                "selected rows run past the end of the analysis X axis".to_owned(),
             ));
         }
         Ok(self)
@@ -365,7 +365,7 @@ pub fn canonical_ground_value(
             })
             .unwrap_or_else(|| {
                 Err(EvaluationError::IdentifierNotFound(
-                    "V(0) has no retained analysis axis".to_owned(),
+                    "V(0) needs an analysis X axis".to_owned(),
                 ))
             }),
     )

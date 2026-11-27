@@ -238,7 +238,7 @@ impl PopulationData {
 
 /// Why a measured column and a sampled variable cannot be read together.
 pub const UNPAIRED_REASON: &str = "This run dropped trials, so its sampled variables and its measurements are indexed \
-     differently — no per-trial correspondence between them is retained.";
+     differently — the run kept no per-trial pairing between them.";
 
 pub fn is_a_population<W: AsRef<RetainedWaveform>>(analysis: &AnalysisResult<W>) -> bool {
     analysis.success

@@ -51,7 +51,7 @@ pub(super) fn prepare_typed_result_csv(
                 zero_count,
                 zero_status,
                 if gain_retained {
-                    "retained"
+                    "available"
                 } else {
                     "unavailable"
                 }
@@ -161,6 +161,6 @@ fn floquet_export_count_label(count: usize, complete: bool, noun: &str) -> Strin
     if complete {
         format!("{count} complete {noun}")
     } else {
-        format!("{count} retained {noun}; completeness unavailable")
+        format!("{count} {noun}; completeness unavailable")
     }
 }

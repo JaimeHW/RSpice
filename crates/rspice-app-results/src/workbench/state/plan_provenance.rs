@@ -85,8 +85,8 @@ pub(crate) fn producing_plan_hop(
             None,
             None,
             Some(format!(
-                "Opened simulation plan {plan_id}. The selected result carries no analysis \
-                 provenance, so no producing instance could be selected on arrival."
+                "Opened simulation plan {plan_id}. The selected result does not record which \
+                 analysis in the plan produced it, so nothing was selected on arrival."
             )),
         ),
     };
