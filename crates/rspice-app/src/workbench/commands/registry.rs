@@ -250,6 +250,14 @@ impl ShellCommand {
             Self::RepeatLastCommand if app.state.workbench.last_repeatable_command.is_none() => {
                 "no placement or edit has run yet"
             }
+            Self::CloseOtherDocuments
+            | Self::CloseAllDocuments
+            | Self::PreviousDocument
+            | Self::NextDocument
+                if app.state.workbench.workspace == Workspace::Results =>
+            {
+                "Results picks what it shows in the data browser"
+            }
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",
             Self::PreviousDocument | Self::NextDocument => "only one document is open",

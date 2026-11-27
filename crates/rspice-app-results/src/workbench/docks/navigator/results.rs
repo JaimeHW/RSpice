@@ -6,6 +6,7 @@ use egui::{Response, ScrollArea, Ui};
 use crate::product::DatasetId;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::chrome::document_bar::results::{saved_documents, shown_document};
 use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::browser_plot::result_quantity_ticked;
 use crate::workbench::documents::result_document::operational_state::RunMark;
@@ -64,6 +65,13 @@ pub(in crate::workbench) fn results(
     }
     let query = BrowserQuery::parse(state.workbench.navigator_filter());
     let ticked = ticked_quantities(ui.ctx(), state);
+    // The saved result documents the browser lists above the runs, by the
+    // names a query matches, and the one Results shows.
+    let documents = saved_documents(state.model)
+        .into_iter()
+        .filter(|document| query.is_empty() || query.matches_name(&document.title))
+        .collect::<Vec<_>>();
+    let shown_document = shown_document(state.results_reads());
     let active_browser_tab = results_browser_active_tab(ui.ctx());
     // Kind/layout read the values the toolbar stored last frame — the row
     // renders below the tab band while filtering happens here, the same
@@ -424,6 +432,7 @@ pub(in crate::workbench) fn results(
         .sum::<usize>();
     let signal_list = signal_rows(
         ui.ctx(),
+        documents.len(),
         runs,
         active_run,
         active_analysis,
@@ -654,6 +663,8 @@ pub(in crate::workbench) fn results(
         show_virtualized_result_signals(
             ui,
             state,
+            &documents,
+            shown_document,
             runs,
             &signal_list,
             active_run,
@@ -2694,6 +2705,14 @@ pub struct ResultArtifact {
 
 #[derive(Clone, Copy)]
 pub(super) enum ResultSignalVirtualRow {
+    /// The saved result documents' head, above the runs.
+    Documents {
+        expanded: bool,
+    },
+    /// A saved result document, by its index in the frame's document list.
+    Document {
+        document: usize,
+    },
     Dataset {
         run: usize,
         expanded: bool,

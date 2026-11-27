@@ -1,11 +1,11 @@
-//! The document bar's Results tabs: the browser's view, then one per saved
-//! result document, and the activation of either.
+//! Results' documents: the browser's view of the run it picked, then one
+//! per saved result document, and the activation of either.
 //!
-//! The data browser picks the run Results shows, and the run is drawn
-//! through its plan's view, or the imported run's. The first tab is that
-//! view's, named for the run: it is never closed, and it is the way back to
-//! the browser's pick from a saved document. Runs and plans take no tab of
-//! their own.
+//! The data browser is the one place that picks what Results shows: a run,
+//! drawn through its plan's view or the imported run's, or a saved
+//! document, which it lists above the runs. Results draws no strip of tabs;
+//! these documents are what the window records as shown, what a secondary
+//! window holds, and what the hardcopy and export paths read.
 
 use crate::product::DatasetId;
 use crate::results::visualization_document::{ResultDocumentTrackingMode, WorkingViewSource};
@@ -134,12 +134,38 @@ fn browser_view_tab(run: &SimulationRun) -> WorkspaceDocument {
     }
 }
 
-/// The browser's view first, then one tab per saved result document in the
-/// order the project made them, then the browser's views other windows show,
-/// which their own strips list.
+/// A saved result document as the data browser lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedDocument {
+    pub id: crate::product::ResultDocumentId,
+    pub title: String,
+    /// Whether it holds edits the project has not saved. Only its own edits
+    /// count: what the reader does to a run's view edits that view, which
+    /// the browser does not list; the project's unsaved state shows it.
+    pub dirty: bool,
+}
+
+/// The saved result documents, in the order the project made them.
+pub fn saved_documents(model: &Model) -> Vec<ListedDocument> {
+    let content = &model.workspace.content;
+    content
+        .visualization_documents
+        .iter()
+        .filter(|document| document.working_view().is_none())
+        .map(|document| ListedDocument {
+            id: document.id(),
+            title: document.title().to_owned(),
+            dirty: content
+                .visualization_documents_modified
+                .contains(&document.id()),
+        })
+        .collect()
+}
+
+/// The browser's view first, then each saved result document in the order
+/// the project made them, then the browser's views other windows show.
 pub fn result_documents(state: ResultsReads<'_>) -> Vec<WorkspaceDocument> {
     let model = state.model;
-    let content = &model.workspace.content;
     let view = browser_run(state).map(browser_view_tab);
     let shown = view.as_ref().map(|tab| tab.id.clone());
     let sessions = &state.workbench.window_session;
@@ -163,20 +189,13 @@ pub fn result_documents(state: ResultsReads<'_>) -> Vec<WorkspaceDocument> {
         .map(browser_view_tab)
         .filter(|tab| Some(&tab.id) != shown.as_ref())
         .collect();
-    let documents = content
-        .visualization_documents
-        .iter()
-        .filter(|document| document.working_view().is_none())
+    let documents = saved_documents(model)
+        .into_iter()
         .map(|document| WorkspaceDocument {
-            id: WorkspaceDocumentId::VisualizationDocument(document.id()),
-            label: document.title().to_owned(),
+            id: WorkspaceDocumentId::VisualizationDocument(document.id),
+            label: document.title,
             icon: WorkbenchIcon::Results,
-            // Only this document's own edits mark its tab. What the reader
-            // does in the quick view edits its run's working view, which has
-            // no tab to mark; the project's unsaved state shows it.
-            dirty: content
-                .visualization_documents_modified
-                .contains(&document.id()),
+            dirty: document.dirty,
         });
     view.into_iter().chain(documents).chain(elsewhere).collect()
 }
@@ -394,7 +413,7 @@ pub(in crate::workbench) fn save_shown_view(
 }
 
 /// The saved result document Results shows, if it shows one.
-fn shown_saved_document(state: ResultsReads<'_>) -> Option<crate::product::ResultDocumentId> {
+pub fn shown_document(state: ResultsReads<'_>) -> Option<crate::product::ResultDocumentId> {
     match active_result_document(state) {
         Some(WorkspaceDocumentId::VisualizationDocument(document)) => Some(document),
         _ => None,
@@ -406,7 +425,7 @@ fn shown_saved_document(state: ResultsReads<'_>) -> Option<crate::product::Resul
 pub(in crate::workbench) fn document_refusal(state: ResultsReads<'_>) -> Option<&'static str> {
     if state.model.safe_mode.project_read_only() {
         Some("the project is open read-only")
-    } else if shown_saved_document(state).is_none() {
+    } else if shown_document(state).is_none() {
         Some("show a saved result document")
     } else {
         None
@@ -416,7 +435,7 @@ pub(in crate::workbench) fn document_refusal(state: ResultsReads<'_>) -> Option<
 /// Open the form that renames the saved document shown.
 pub(in crate::workbench) fn open_rename(state: &mut ResultsParts<'_>) {
     let reads = state.results_reads();
-    let Some(title) = shown_saved_document(reads)
+    let Some(title) = shown_document(reads)
         .and_then(|document| {
             reads
                 .model
@@ -442,8 +461,8 @@ pub(in crate::workbench) fn commit_rename(
     state: &mut ResultsParts<'_>,
     draft: &rspice_results_ui::document_dialogs::rename::RenameDraft,
 ) -> Result<Option<rspice_results_ui::document_dialogs::ResultDocumentDialog>, String> {
-    let document = shown_saved_document(state.results_reads())
-        .ok_or("Results no longer shows the document")?;
+    let document =
+        shown_document(state.results_reads()).ok_or("Results no longer shows the document")?;
     let title = draft.title.trim();
     if title.is_empty() {
         return Err("Type a name for the document.".to_owned());
@@ -462,7 +481,7 @@ pub(in crate::workbench) fn duplicate_shown_document(
     state: &mut ResultsParts<'_>,
 ) -> Result<String, String> {
     let reads = state.results_reads();
-    let of = shown_saved_document(reads).ok_or("show a saved result document")?;
+    let of = shown_document(reads).ok_or("show a saved result document")?;
     let document = reads
         .model
         .workspace
@@ -479,13 +498,14 @@ pub(in crate::workbench) fn duplicate_shown_document(
     Ok(format!("Duplicated {from} as {title}."))
 }
 
-/// Delete the saved document shown and show the tab beside it, as closing
-/// it would: a step Undo takes back. Returns what the status bar says.
+/// Delete the saved document shown and go back to the run the browser's
+/// view showed before it: a step Undo takes back, so nothing asks first,
+/// unsaved edits or not. Returns what the status bar says.
 pub(in crate::workbench) fn delete_shown_document(
     state: &mut ResultsParts<'_>,
 ) -> Result<String, String> {
     let reads = state.results_reads();
-    let document = shown_saved_document(reads).ok_or("show a saved result document")?;
+    let document = shown_document(reads).ok_or("show a saved result document")?;
     let title = reads
         .model
         .workspace
@@ -493,25 +513,10 @@ pub(in crate::workbench) fn delete_shown_document(
         .visualization_document(document)
         .map(|document| document.title().to_owned())
         .ok_or("the document is no longer in the project")?;
-    let tabs = result_documents(reads);
-    let at = tabs
-        .iter()
-        .position(|tab| tab.id == WorkspaceDocumentId::VisualizationDocument(document));
-    let beside = at
-        .and_then(|at| {
-            tabs.get(at + 1)
-                .or_else(|| at.checked_sub(1).and_then(|at| tabs.get(at)))
-        })
-        .map(|tab| tab.id.clone());
+    let run = browser_run(reads).map(|run| run.dataset_id);
     view_edits::delete_document(state, document)?;
-    match beside {
-        Some(WorkspaceDocumentId::VisualizationDocument(next)) => {
-            show_visualization_document(state, &next);
-        }
-        Some(WorkspaceDocumentId::ResultDataset(dataset)) => {
-            show_result_dataset(state, &dataset);
-        }
-        _ => {}
+    if let Some(run) = run {
+        show_result_dataset(state, &run);
     }
     Ok(format!("Deleted {title}. Undo puts it back."))
 }

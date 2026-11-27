@@ -915,9 +915,15 @@ fn reconcile_document_registry(state: &mut impl DocumentSession) {
         .retain_documents(all_available);
 }
 
+/// Whether `workspace`'s strip shows with `document_count` documents open.
+/// Results has none: its data browser lists the run shown and the saved
+/// result documents, and picks among them.
 pub fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
-    document_count > 1
-        || (matches!(workspace, Workspace::Design | Workspace::Models) && document_count == 1)
+    match workspace {
+        Workspace::Results => false,
+        Workspace::Design | Workspace::Models => document_count > 0,
+        _ => document_count > 1,
+    }
 }
 
 /// The tabs a strip draws: its documents, whether each can be closed, and
