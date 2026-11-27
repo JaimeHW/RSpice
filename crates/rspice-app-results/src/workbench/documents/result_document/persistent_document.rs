@@ -177,6 +177,12 @@ pub fn show(
         ui.ctx().request_repaint();
     }
     let active_viewer = compatible_active_viewer(state.results_reads(), active_pane);
+    let revision_before_bar = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .map(VisualizationDocument::revision);
     if let Some(viewer) = active_viewer {
         state.results.session.viewer = viewer;
         if let Err(reason) = project_pane_presentation(state, active_pane, viewer) {
@@ -193,6 +199,28 @@ pub fn show(
             state.results.session.plot_tool.interaction_mode(),
         );
     }
+    // What the bar did is the document's now, a log X as much as a zoom, so
+    // the panes draw from the document as it stands after the bar: a pane
+    // projected from what the document read before it would put its old
+    // scale back.
+    let refreshed = (state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .map(VisualizationDocument::revision)
+        != revision_before_bar)
+        .then(|| projection(state.results_reads(), document_id))
+        .flatten();
+    let page = refreshed
+        .as_ref()
+        .and_then(|document| {
+            document
+                .pages
+                .iter()
+                .find(|page| page.page.id == selected_page_id)
+        })
+        .unwrap_or(page);
 
     // What the cursors and markers read is the dock's Cursors page, as in
     // quick Results; panes reserve no instrument chrome of their own.
