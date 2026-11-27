@@ -255,11 +255,7 @@ impl Write for StreamedZip<'_> {
 
 /// `value` in a ZIP32 field: itself, or the "see ZIP64" mark when ZIP64 states it.
 fn clamp32(value: u64, zip64: bool) -> u32 {
-    if zip64 {
-        u32::MAX
-    } else {
-        value as u32
-    }
+    if zip64 { u32::MAX } else { value as u32 }
 }
 
 fn push_u16(bytes: &mut Vec<u8>, value: u16) {

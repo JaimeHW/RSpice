@@ -478,7 +478,10 @@ fn every_sample_format_writes_a_stored_run_as_it_reads_it() {
         state
             .model
             .preferences
-            .set_choice(crate::workbench::ChoicePreference::EngineeringExport, choice)
+            .set_choice(
+                crate::workbench::ChoicePreference::EngineeringExport,
+                choice,
+            )
             .expect("an export preference");
         let path = scratch.0.join(name);
         let work = ColumnWork::read();

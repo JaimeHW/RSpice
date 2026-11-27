@@ -271,7 +271,9 @@ mod tests {
                 write_npy(&analysis, &borrowed, exported_waveform_limits(), &mut bytes)
             }
             NumpyKind::Archive => write_npz(
-                &[rspice_formats::waveform_io::result::ExportMember::new(&analysis, borrowed)],
+                &[rspice_formats::waveform_io::result::ExportMember::new(
+                    &analysis, borrowed,
+                )],
                 exported_waveform_limits(),
                 &mut bytes,
             ),

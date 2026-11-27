@@ -3,10 +3,10 @@
 mod bounds;
 mod delimited;
 mod export;
+#[cfg(feature = "native-bundle")]
+pub(crate) use bounds::export_samples;
 pub use bounds::{ExportMember, WaveformExportError};
-pub(crate) use bounds::{
-    RowReader, check_export_shape, checked_coordinate, export_samples, window, windows,
-};
+pub(crate) use bounds::{RowReader, check_export_shape, checked_coordinate, window, windows};
 pub use delimited::{
     DelimitedExportError, DelimitedTable, check_delimited_waveforms, write_delimited_waveforms,
 };

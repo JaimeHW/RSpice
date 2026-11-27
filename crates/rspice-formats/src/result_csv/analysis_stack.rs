@@ -106,20 +106,22 @@ fn components<'a, W: AsRef<RetainedWaveform>>(
 ) -> impl Iterator<Item = (&'a WaveformValues, Component<'a>)> {
     waveforms.iter().flat_map(|waveform| {
         let waveform = (*waveform).as_ref();
-        std::iter::once((&waveform.x, (waveform.name.as_str(), "display", &waveform.y))).chain(
-            waveform.complex.iter().flat_map(move |complex| {
-                [
-                    (
-                        &waveform.x,
-                        (complex.source_name.as_str(), "real", &complex.real),
-                    ),
-                    (
-                        &waveform.x,
-                        (complex.source_name.as_str(), "imaginary", &complex.imag),
-                    ),
-                ]
-            }),
-        )
+        std::iter::once((
+            &waveform.x,
+            (waveform.name.as_str(), "display", &waveform.y),
+        ))
+        .chain(waveform.complex.iter().flat_map(move |complex| {
+            [
+                (
+                    &waveform.x,
+                    (complex.source_name.as_str(), "real", &complex.real),
+                ),
+                (
+                    &waveform.x,
+                    (complex.source_name.as_str(), "imaginary", &complex.imag),
+                ),
+            ]
+        }))
     })
 }
 
@@ -216,16 +218,21 @@ pub fn write_analysis_stack<W: AsRef<RetainedWaveform>>(
         })
         .flexible(false)
         .from_writer(out);
-    let header = ["dataset_id", "analysis_sequence", "analysis_label", "analysis_type"]
-        .into_iter()
-        .map(str::to_owned)
-        .chain(facts.parameters.iter().cloned())
-        .chain(
-            ["trace", "component", "sample_index", "x", "y"]
-                .into_iter()
-                .map(str::to_owned),
-        )
-        .collect::<Vec<_>>();
+    let header = [
+        "dataset_id",
+        "analysis_sequence",
+        "analysis_label",
+        "analysis_type",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .chain(facts.parameters.iter().cloned())
+    .chain(
+        ["trace", "component", "sample_index", "x", "y"]
+            .into_iter()
+            .map(str::to_owned),
+    )
+    .collect::<Vec<_>>();
     table.write_record(&header).map_err(written)?;
     let dataset = dataset_id.to_string();
     let mut rows = 0;
@@ -353,9 +360,10 @@ mod tests {
         assert_eq!(&rows[5][7], "1.00000000000000000e1");
         assert_eq!(&rows[6][8], "3.00000000000000000e0");
 
-        let ragged = AnalysisResult::new(1, AnalysisType::Transient, "A", 0.0).with_waveforms(
-            vec![RetainedWaveform::new(" V(a,\nb) ", vec![f64::NAN], vec![])],
-        );
+        let ragged =
+            AnalysisResult::new(1, AnalysisType::Transient, "A", 0.0).with_waveforms(vec![
+                RetainedWaveform::new(" V(a,\nb) ", vec![f64::NAN], vec![]),
+            ]);
         let error = written(&[StackAnalysis {
             analysis: &ragged,
             waveforms: ragged.waveforms.iter().collect(),
@@ -365,9 +373,10 @@ mod tests {
             error.to_string(),
             "Displayed trace 'V(a b)' has 1 coordinates and 0 display samples; export refused instead of truncating evidence."
         );
-        let infinite = AnalysisResult::new(1, AnalysisType::Transient, "A", 0.0).with_waveforms(
-            vec![RetainedWaveform::new("V(a,b)", vec![0.0, 1.0], vec![2.0, f64::INFINITY])],
-        );
+        let infinite =
+            AnalysisResult::new(1, AnalysisType::Transient, "A", 0.0).with_waveforms(vec![
+                RetainedWaveform::new("V(a,b)", vec![0.0, 1.0], vec![2.0, f64::INFINITY]),
+            ]);
         let error = written(&[StackAnalysis {
             analysis: &infinite,
             waveforms: infinite.waveforms.iter().collect(),
@@ -404,11 +413,13 @@ mod tests {
                     coordinate: None,
                     family_member: Some(AnalysisResultFamilyMember::StepPoint {
                         index,
-                        coordinate: vec![rspice_results::provenance::AnalysisResultStepCoordinate {
-                            name: "r".to_owned(),
-                            value: r,
-                            unit: String::new(),
-                        }],
+                        coordinate: vec![
+                            rspice_results::provenance::AnalysisResultStepCoordinate {
+                                name: "r".to_owned(),
+                                value: r,
+                                unit: String::new(),
+                            },
+                        ],
                     }),
                     event_dump: None,
                 });
@@ -447,6 +458,11 @@ mod tests {
                 "dataset_id\tanalysis_sequence\tanalysis_label\tanalysis_type\tr\ttrace\tcomponent\tsample_index\tx\ty"
             )
         );
-        assert!(lines.next().unwrap().contains("\t1000\tV(out)\tdisplay\t0\t"));
+        assert!(
+            lines
+                .next()
+                .unwrap()
+                .contains("\t1000\tV(out)\tdisplay\t0\t")
+        );
     }
 }

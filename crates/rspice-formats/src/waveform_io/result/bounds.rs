@@ -228,6 +228,7 @@ impl<'a> RowReader<'a> {
     }
 
     /// Whether a row could not be read.
+    #[cfg(feature = "spice-raw")]
     pub(crate) fn failed(&self) -> bool {
         self.failure.is_some()
     }
@@ -282,7 +283,12 @@ impl<W: AsRef<RetainedWaveform>> ExportMember<'_, W> {
 pub(crate) fn windows(rows: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
     (0..rows)
         .step_by(rspice_results::waveform::BLOCK_SAMPLES)
-        .map(move |first| first..first.saturating_add(rspice_results::waveform::BLOCK_SAMPLES).min(rows))
+        .map(move |first| {
+            first
+                ..first
+                    .saturating_add(rspice_results::waveform::BLOCK_SAMPLES)
+                    .min(rows)
+        })
 }
 
 /// Samples `window` of `values`, the signal `signal`: borrowed from memory, or one block read
@@ -306,6 +312,7 @@ pub(crate) fn window<'a>(
 /// The samples of `values`, the signal `signal`, for a writer that takes them as one array:
 /// borrowed when they are in memory, read whole from their results store when the loaded results
 /// may hold them, refused with the store's reason otherwise.
+#[cfg(feature = "native-bundle")]
 pub(crate) fn export_samples<'a>(
     signal: &str,
     values: &'a WaveformValues,

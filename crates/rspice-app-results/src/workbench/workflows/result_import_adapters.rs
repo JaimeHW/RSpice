@@ -137,9 +137,8 @@ pub(super) fn parse_native_bundle(
     let mut further = Vec::with_capacity(family.len());
     for (position, read) in family.into_iter().enumerate() {
         let family_member = read.member.map(|member| member.into_family_member());
-        let plot = finish_numeric_dataset(format, read.dataset).map_err(|error| {
-            format!("member {} of the bundle: {error}", position + 2)
-        })?;
+        let plot = finish_numeric_dataset(format, read.dataset)
+            .map_err(|error| format!("member {} of the bundle: {error}", position + 2))?;
         further.push(
             crate::workbench::documents::result_document::import::ResultImportPlot {
                 name: title(family_member.as_ref(), plot.analysis_type),

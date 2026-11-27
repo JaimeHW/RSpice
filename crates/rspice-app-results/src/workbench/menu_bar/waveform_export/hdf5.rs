@@ -142,12 +142,17 @@ mod tests {
         }
     }
 
-    fn prepared(analysis_type: AnalysisType, waveforms: &[RetainedTrace]) -> Result<Written, String> {
+    fn prepared(
+        analysis_type: AnalysisType,
+        waveforms: &[RetainedTrace],
+    ) -> Result<Written, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
         let mut bytes = Vec::new();
         write_hdf5(
-            &[rspice_formats::waveform_io::result::ExportMember::new(&analysis, borrowed)],
+            &[rspice_formats::waveform_io::result::ExportMember::new(
+                &analysis, borrowed,
+            )],
             exported_waveform_limits(),
             &mut bytes,
         )

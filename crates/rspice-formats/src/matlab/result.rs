@@ -203,8 +203,7 @@ fn plan<'a, W: AsRef<RetainedWaveform>>(
     // recoverable from nowhere else, so a note that covered some of them
     // would be a note that quietly lost the rest.
     let note = entries.join("; ");
-    let (header_text, note_truncated) =
-        header_text(&created_on(first.analysis.timestamp), &note);
+    let (header_text, note_truncated) = header_text(&created_on(first.analysis.timestamp), &note);
     let variables = if family {
         planned.len()
     } else {
@@ -244,7 +243,9 @@ pub fn write_matlab<W: AsRef<RetainedWaveform>>(
 ) -> Result<MatlabFacts, MatlabProjectionError> {
     let plan = plan(members, limits)?;
     let mut out = std::io::BufWriter::with_capacity(1 << 16, out);
-    let file = |error: std::io::Error| MatlabProjectionError::File(MatWriteError::Write(error.to_string()));
+    let file = |error: std::io::Error| {
+        MatlabProjectionError::File(MatWriteError::Write(error.to_string()))
+    };
     super::write_header(&mut out, &plan.facts.header_text).map_err(file)?;
     for member in &plan.members {
         let rows = row_dimension("", member.rows).map_err(MatlabProjectionError::File)?;
@@ -263,8 +264,7 @@ pub fn write_matlab<W: AsRef<RetainedWaveform>>(
             } else {
                 column.name.as_str()
             };
-            super::write_column_start(&mut out, name, rows, column.imag.is_some())
-                .map_err(file)?;
+            super::write_column_start(&mut out, name, rows, column.imag.is_some()).map_err(file)?;
             write_part(&mut out, column.signal, column.real, member.rows)?;
             if let Some(imag) = column.imag {
                 super::write_part_tag(&mut out, rows).map_err(file)?;
@@ -307,7 +307,10 @@ mod tests {
     fn written(analysis: &AnalysisResult) -> Vec<u8> {
         let mut bytes = Vec::new();
         write_matlab(
-            &[ExportMember::new(analysis, analysis.waveforms.iter().collect())],
+            &[ExportMember::new(
+                analysis,
+                analysis.waveforms.iter().collect(),
+            )],
             EXPORT_TEST_LIMITS,
             &mut bytes,
         )
@@ -363,7 +366,10 @@ mod tests {
                 .with_unit("V"),
         ]);
         let facts = check_matlab(
-            &[ExportMember::new(&analysis, analysis.waveforms.iter().collect())],
+            &[ExportMember::new(
+                &analysis,
+                analysis.waveforms.iter().collect(),
+            )],
             EXPORT_TEST_LIMITS,
         )
         .unwrap();
@@ -384,7 +390,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(written(&analysis), expected);
-        assert!(facts.note.contains("V_out_ = V(out) in V"), "{}", facts.note);
+        assert!(
+            facts.note.contains("V_out_ = V(out) in V"),
+            "{}",
+            facts.note
+        );
     }
 
     /// Every member of a family is a structure named by its parameter values, holding that
@@ -412,14 +422,21 @@ mod tests {
         let mut bytes = Vec::new();
         let facts = write_matlab(&export, EXPORT_TEST_LIMITS, &mut bytes).unwrap();
         assert_eq!((facts.members, facts.variables), (3, 3));
-        assert!(facts.note.starts_with("r_1k = r=1k; r_2k = r=2k"), "{}", facts.note);
+        assert!(
+            facts.note.starts_with("r_1k = r=1k; r_2k = r=2k"),
+            "{}",
+            facts.note
+        );
         let structures = mat_structures(&bytes);
         assert_eq!(
             structures
                 .iter()
                 .map(|(name, fields)| (
                     name.as_str(),
-                    fields.iter().map(|(field, _)| field.as_str()).collect::<Vec<_>>()
+                    fields
+                        .iter()
+                        .map(|(field, _)| field.as_str())
+                        .collect::<Vec<_>>()
                 ))
                 .collect::<Vec<_>>(),
             [
@@ -432,9 +449,12 @@ mod tests {
         assert_eq!(structures[2].1[1].1, [4000.0, -4000.0]);
     }
 
+    /// A structure's name and its real column fields, each by name.
+    type Structure = (String, Vec<(String, Vec<f64>)>);
+
     /// Each top-level structure of a MAT v5 file and its real column fields, read by the
     /// element layout *MAT-File Format* states.
-    fn mat_structures(bytes: &[u8]) -> Vec<(String, Vec<(String, Vec<f64>)>)> {
+    fn mat_structures(bytes: &[u8]) -> Vec<Structure> {
         let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
         let pad = |length: usize| (8 - length % 8) % 8;
         let mut structures = Vec::new();
@@ -466,7 +486,9 @@ mod tests {
                 let real = (0..rows)
                     .map(|row| {
                         f64::from_le_bytes(
-                            bytes[values + row * 8..values + row * 8 + 8].try_into().unwrap(),
+                            bytes[values + row * 8..values + row * 8 + 8]
+                                .try_into()
+                                .unwrap(),
                         )
                     })
                     .collect();

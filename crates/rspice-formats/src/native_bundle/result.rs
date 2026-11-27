@@ -191,7 +191,10 @@ fn checked_member<'a, W: AsRef<RetainedWaveform>>(
             .complex
             .as_ref()
             .map_or(waveform.name.as_str(), |complex| &complex.source_name);
-        if name.trim().is_empty() || name.len() > MAX_BUNDLE_NAME_BYTES || name.chars().any(char::is_control) {
+        if name.trim().is_empty()
+            || name.len() > MAX_BUNDLE_NAME_BYTES
+            || name.chars().any(char::is_control)
+        {
             return Err(NativeBundleError::InvalidData(
                 "native bundle signal identity is empty or invalid".into(),
             ));
@@ -201,11 +204,9 @@ fn checked_member<'a, W: AsRef<RetainedWaveform>>(
                 "native bundle repeats signal identity '{name}'"
             )));
         }
-        if waveform
-            .unit
-            .as_deref()
-            .is_some_and(|unit| unit.len() > MAX_BUNDLE_NAME_BYTES || unit.chars().any(char::is_control))
-        {
+        if waveform.unit.as_deref().is_some_and(|unit| {
+            unit.len() > MAX_BUNDLE_NAME_BYTES || unit.chars().any(char::is_control)
+        }) {
             return Err(NativeBundleError::InvalidData(format!(
                 "native bundle signal '{name}' has an invalid unit"
             )));
@@ -278,14 +279,21 @@ pub fn write_native_bundle<W: AsRef<RetainedWaveform>>(
         let (domain, reference) = checked_member(member)?;
         let name = dataset_member(position);
         let values = member.waveforms.iter().fold(1_u64, |values, waveform| {
-            values + if (*waveform).as_ref().complex.is_some() { 2 } else { 1 }
+            values
+                + if (*waveform).as_ref().complex.is_some() {
+                    2
+                } else {
+                    1
+                }
         });
         // A sample is at most 24 characters and its separator.
         let bytes = (reference.x.len() as u64)
             .saturating_mul(values)
             .saturating_mul(26)
             .saturating_add(1 << 16);
-        archive.start(&name, bytes).map_err(io("could not begin a bundle dataset"))?;
+        archive
+            .start(&name, bytes)
+            .map_err(io("could not begin a bundle dataset"))?;
         let mut hashed = Hashed {
             out: &mut archive,
             digest: sha2::Sha256::new(),
@@ -308,7 +316,9 @@ pub fn write_native_bundle<W: AsRef<RetainedWaveform>>(
                 NativeBundleError::InvalidData(error.to_string())
             }
         })?;
-        buffered.flush().map_err(io("could not write a bundle dataset"))?;
+        buffered
+            .flush()
+            .map_err(io("could not write a bundle dataset"))?;
         drop(buffered);
         digests.push((name, format!("{:x}", hashed.digest.finalize())));
     }
@@ -334,7 +344,9 @@ pub fn write_native_bundle<W: AsRef<RetainedWaveform>>(
         .start("manifest.json", manifest.len() as u64)
         .and_then(|()| archive.write_all(&manifest))
         .map_err(io("could not write the bundle manifest"))?;
-    archive.finish().map_err(io("could not finish the bundle"))?;
+    archive
+        .finish()
+        .map_err(io("could not finish the bundle"))?;
     Ok(facts)
 }
 
@@ -607,7 +619,10 @@ impl Serialize for Samples<'_> {
                     )));
                 }
                 if let Some(paired) = &paired {
-                    if paired.get(offset).is_some_and(|real| real.is_nan() != value.is_nan()) {
+                    if paired
+                        .get(offset)
+                        .is_some_and(|real| real.is_nan() != value.is_nan())
+                    {
                         return Err(S::Error::custom(format!(
                             "native bundle signal '{}' has inconsistent complex sample availability",
                             self.signal
@@ -753,21 +768,39 @@ mod tests {
     fn a_streamed_bundle_reads_back_as_written() {
         let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC", 0.0).with_waveforms(vec![
             RetainedWaveform::new("|V(out)|", vec![1.0, 10.0, 100.0], vec![1.0, 2.0, 3.0])
-                .with_complex_components("V(out)", vec![-0.0, f64::NAN, 3.0], vec![1.0, f64::NAN, -1.0])
+                .with_complex_components(
+                    "V(out)",
+                    vec![-0.0, f64::NAN, 3.0],
+                    vec![1.0, f64::NAN, -1.0],
+                )
                 .with_unit("V"),
             RetainedWaveform::new("Re(in)", vec![1.0, 10.0, 100.0], vec![4.0, 5.0, 6.0]),
         ]);
-        let members = [ExportMember::new(&analysis, analysis.waveforms.iter().collect())];
+        let members = [ExportMember::new(
+            &analysis,
+            analysis.waveforms.iter().collect(),
+        )];
         for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
             let mut bytes = Vec::new();
             let facts = write_native_bundle(kind, &members, &mut bytes).unwrap();
-            assert_eq!(facts, NativeBundleFacts { signals: 2, points: 3, members: 1 });
-            let read = crate::native_bundle::read_native_bundle(&bytes, kind, read_limits()).unwrap();
+            assert_eq!(
+                facts,
+                NativeBundleFacts {
+                    signals: 2,
+                    points: 3,
+                    members: 1
+                }
+            );
+            let read =
+                crate::native_bundle::read_native_bundle(&bytes, kind, read_limits()).unwrap();
             assert!(read.family.is_empty() && read.unread_members.is_empty());
             assert_eq!(read.dataset.coordinate, [1.0, 10.0, 100.0]);
             assert_eq!(read.dataset.signals[0].name, "V(out)");
             assert_eq!(read.dataset.signals[0].unit.as_deref(), Some("V"));
-            assert_eq!(read.dataset.signals[0].real[0].to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(
+                read.dataset.signals[0].real[0].to_bits(),
+                (-0.0_f64).to_bits()
+            );
             assert!(read.dataset.signals[0].real[1].is_nan());
             assert_eq!(read.dataset.signals[0].imag.as_ref().unwrap()[2], -1.0);
             assert_eq!(read.dataset.signals[1].real, [4.0, 5.0, 6.0]);
@@ -799,21 +832,32 @@ mod tests {
         let mut bytes = Vec::new();
         let facts = write_native_bundle(NativeBundleKind::Result, &export, &mut bytes).unwrap();
         assert_eq!(facts.members, 3);
-        let read =
-            crate::native_bundle::read_native_bundle(&bytes, NativeBundleKind::Result, read_limits())
-                .unwrap();
+        let read = crate::native_bundle::read_native_bundle(
+            &bytes,
+            NativeBundleKind::Result,
+            read_limits(),
+        )
+        .unwrap();
         assert!(read.unread_members.is_empty());
         let datasets = std::iter::once((read.dataset, read.member))
-            .chain(read.family.into_iter().map(|member| (member.dataset, member.member)))
+            .chain(
+                read.family
+                    .into_iter()
+                    .map(|member| (member.dataset, member.member)),
+            )
             .collect::<Vec<_>>();
         assert_eq!(datasets.len(), 3);
-        for (position, ((dataset, member), r)) in
-            datasets.into_iter().zip([1000.0, 2000.0, 4000.0]).enumerate()
+        for (position, ((dataset, member), r)) in datasets
+            .into_iter()
+            .zip([1000.0, 2000.0, 4000.0])
+            .enumerate()
         {
             assert_eq!(dataset.coordinate, [0.0, 1.0 + position as f64]);
             assert_eq!(dataset.signals[0].real, [r, -r]);
             assert_eq!(
-                member.map(NativeBundleMember::into_family_member).map(|member| member.label()),
+                member
+                    .map(NativeBundleMember::into_family_member)
+                    .map(|member| member.label()),
                 Some(format!("r={}k", r / 1000.0))
             );
         }
@@ -822,16 +866,17 @@ mod tests {
     /// A coordinate a reader would refuse refuses the write when it is read.
     #[test]
     fn a_coordinate_that_repeats_refuses_the_write() {
-        let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
-            .with_waveforms(vec![RetainedWaveform::new(
-                "V(out)",
-                vec![0.0, 1.0, 1.0],
-                vec![1.0, 2.0, 3.0],
-            )]);
-        let members = [ExportMember::new(&analysis, analysis.waveforms.iter().collect())];
+        let analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![
+                RetainedWaveform::new("V(out)", vec![0.0, 1.0, 1.0], vec![1.0, 2.0, 3.0]),
+            ]);
+        let members = [ExportMember::new(
+            &analysis,
+            analysis.waveforms.iter().collect(),
+        )];
         check_native_bundle(&members).unwrap();
-        let error = write_native_bundle(NativeBundleKind::Result, &members, &mut Vec::new())
-            .unwrap_err();
+        let error =
+            write_native_bundle(NativeBundleKind::Result, &members, &mut Vec::new()).unwrap_err();
         assert!(error.to_string().contains("repeats at sample 2"), "{error}");
     }
 }

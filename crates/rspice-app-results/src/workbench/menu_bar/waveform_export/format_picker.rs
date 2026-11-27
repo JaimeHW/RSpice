@@ -218,8 +218,7 @@ pub fn dataset_export_form(state: ResultsReads<'_>) -> DatasetExportForm {
             .analyses(state)
             .all(|analysis| analysis.family_member().is_some());
     DatasetExportForm {
-        owns_table: super::prepare_displayed_table(state, &single)
-            .is_some(),
+        owns_table: super::prepare_displayed_table(state, &single).is_some(),
         family,
         analysis: if analyses.len() > 1 { None } else { active },
         analyses,

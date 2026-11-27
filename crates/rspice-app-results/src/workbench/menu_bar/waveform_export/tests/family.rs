@@ -58,7 +58,10 @@ fn exported(format: usize, analysis: Option<usize>) -> (MockExportWorkflowIo, St
     state
         .model
         .preferences
-        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, format)
+        .set_choice(
+            crate::workbench::ChoicePreference::EngineeringExport,
+            format,
+        )
         .expect("an export preference");
     let io = MockExportWorkflowIo::default();
     action_export_dataset_with_io(
@@ -166,15 +169,16 @@ fn every_member_is_written_by_each_format_that_holds_a_family() {
             );
         }
         assert_eq!(
-            plots.further[1].waveforms[0].y.read_whole().unwrap().as_ref(),
+            plots.further[1].waveforms[0]
+                .y
+                .read_whole()
+                .unwrap()
+                .as_ref(),
             &[0.0, 1.5, 3.0]
         );
     }
 
-    for (format, name) in [
-        (3, "waveforms.rspiceresult"),
-        (4, "waveforms.rspicedata"),
-    ] {
+    for (format, name) in [(3, "waveforms.rspiceresult"), (4, "waveforms.rspicedata")] {
         let (bundle, prompt) = exported(format, None);
         let bytes = &bundle.byte_files.borrow()[0].1;
         let parsed =
@@ -191,7 +195,11 @@ fn every_member_is_written_by_each_format_that_holds_a_family() {
             "{format}"
         );
         assert_eq!(
-            plots.further[0].waveforms[0].y.read_whole().unwrap().as_ref(),
+            plots.further[0].waveforms[0]
+                .y
+                .read_whole()
+                .unwrap()
+                .as_ref(),
             &[0.0, 1.0, 2.0]
         );
     }

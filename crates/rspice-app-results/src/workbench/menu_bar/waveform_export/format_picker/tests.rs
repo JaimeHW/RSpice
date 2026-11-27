@@ -282,22 +282,25 @@ fn a_stepped_view_offers_all_members_and_a_one_member_format_says_so() {
             event_dump: None,
         });
     }
-    let analysis_question = |nodes: &std::collections::HashMap<
-        egui::accesskit::NodeId,
-        egui::accesskit::Node,
-    >| {
-        nodes
-            .values()
-            .find(|node| {
-                node.role() == egui::accesskit::Role::ComboBox && node.label() == Some("Analysis")
-            })
-            .and_then(|node| node.value().map(str::to_owned))
-    };
+    let analysis_question =
+        |nodes: &std::collections::HashMap<egui::accesskit::NodeId, egui::accesskit::Node>| {
+            nodes
+                .values()
+                .find(|node| {
+                    node.role() == egui::accesskit::Role::ComboBox
+                        && node.label() == Some("Analysis")
+                })
+                .and_then(|node| node.value().map(str::to_owned))
+        };
 
     open_form(&mut state, 0);
     let nodes = form_nodes(&mut state);
     assert_eq!(analysis_question(&nodes).as_deref(), Some(ALL_MEMBERS));
-    assert!(!painted(&mut state).iter().any(|text| text == ONE_MEMBER_NOTE));
+    assert!(
+        !painted(&mut state)
+            .iter()
+            .any(|text| text == ONE_MEMBER_NOTE)
+    );
 
     open_form(&mut state, NPY);
     let nodes = form_nodes(&mut state);
@@ -307,7 +310,10 @@ fn a_stepped_view_offers_all_members_and_a_one_member_format_says_so() {
         Some("Transient \u{00b7} r=2k")
     );
     let texts = painted(&mut state);
-    assert!(texts.iter().any(|text| text == ONE_MEMBER_NOTE), "{texts:?}");
+    assert!(
+        texts.iter().any(|text| text == ONE_MEMBER_NOTE),
+        "{texts:?}"
+    );
 }
 
 /// A view of one analysis has nothing to ask about the analysis.

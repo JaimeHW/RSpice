@@ -1171,8 +1171,9 @@ fn touchstone_text(
     waveforms: &[&crate::state::RetainedTrace],
     version_two: bool,
 ) -> Result<TouchstoneText, String> {
-    let incompatible =
-        |error: &dyn std::fmt::Display| format!("Touchstone export is not compatible with the active result: {error}");
+    let incompatible = |error: &dyn std::fmt::Display| {
+        format!("Touchstone export is not compatible with the active result: {error}")
+    };
     let mut dataset = prepare_single_analysis_dataset(analysis, waveforms, true)
         .map_err(|error| incompatible(&error))?;
     let write = |dataset: &crate::io::WaveformDataset| {
@@ -1333,10 +1334,12 @@ fn stacked<'a>(
 ) -> Vec<rspice_formats::result_csv::StackAnalysis<'a, crate::state::RetainedTrace>> {
     members
         .iter()
-        .map(|(analysis, waveforms)| rspice_formats::result_csv::StackAnalysis {
-            analysis,
-            waveforms: waveforms.clone(),
-        })
+        .map(
+            |(analysis, waveforms)| rspice_formats::result_csv::StackAnalysis {
+                analysis,
+                waveforms: waveforms.clone(),
+            },
+        )
         .collect()
 }
 

@@ -337,7 +337,10 @@ const FIELD_NAME_BYTES: u64 = MAX_NAME_CHARS as u64 + 1;
 
 /// The size a structure `name` of numeric column `fields` (name, rows, complex) states in its
 /// tag, refused when it is more than the `u32` the tag holds.
-pub(crate) fn struct_size(name: &str, fields: &[(&str, usize, bool)]) -> Result<u64, MatWriteError> {
+pub(crate) fn struct_size(
+    name: &str,
+    fields: &[(&str, usize, bool)],
+) -> Result<u64, MatWriteError> {
     let name_bytes = name.len() as u64;
     let names = fields.len() as u64 * FIELD_NAME_BYTES;
     let bytes = 16

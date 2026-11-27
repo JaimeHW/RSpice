@@ -14,8 +14,8 @@
 use std::io::Write;
 
 use rspice_core::io::{
-    Hdf5Attribute, Hdf5Column, Hdf5Coordinate, Hdf5Document, Hdf5Error, Hdf5StreamError,
-    Hdf5Table, Hdf5Values,
+    Hdf5Attribute, Hdf5Column, Hdf5Coordinate, Hdf5Document, Hdf5Error, Hdf5StreamError, Hdf5Table,
+    Hdf5Values,
 };
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::provenance::AnalysisResultFamilyMember;
@@ -122,7 +122,9 @@ fn plan<'a, W: AsRef<RetainedWaveform>>(
     limits: WaveformImportLimits,
 ) -> Result<Planned<'a>, Hdf5ProjectionError> {
     let Some(first) = members.first() else {
-        return Err(Hdf5ProjectionError::Waveforms(WaveformExportError::NoSamples));
+        return Err(Hdf5ProjectionError::Waveforms(
+            WaveformExportError::NoSamples,
+        ));
     };
     let family = members.len() > 1;
     let title = match first.analysis.family_member() {
@@ -204,10 +206,7 @@ fn plan<'a, W: AsRef<RetainedWaveform>>(
                     {
                         columns.push(Hdf5Column::Real {
                             name: format!("{label}({})", complex.source_name),
-                            quantity: format!(
-                                "complex_{part}:{}",
-                                quantity(&complex.source_name)
-                            ),
+                            quantity: format!("complex_{part}:{}", quantity(&complex.source_name)),
                             unit: waveform.unit.clone(),
                             values: Vec::new(),
                         });
@@ -357,8 +356,7 @@ pub fn write_hdf5<W: AsRef<RetainedWaveform>>(
     rspice_core::io::write_hdf5_streamed(&mut out, &planned.document, |index, out| {
         let (signal, values) = datasets[index];
         for rows in windows(values.len()) {
-            let block =
-                window(signal, values, rows).map_err(Hdf5ProjectionError::Waveforms)?;
+            let block = window(signal, values, rows).map_err(Hdf5ProjectionError::Waveforms)?;
             bytes.clear();
             for value in block.iter() {
                 bytes.extend_from_slice(&value.to_le_bytes());
@@ -393,7 +391,10 @@ mod tests {
     ) -> Result<(Vec<u8>, Hdf5Facts), Hdf5ProjectionError> {
         let mut bytes = Vec::new();
         let facts = write_hdf5(
-            &[ExportMember::new(analysis, analysis.waveforms.iter().collect())],
+            &[ExportMember::new(
+                analysis,
+                analysis.waveforms.iter().collect(),
+            )],
             limits,
             &mut bytes,
         )?;
@@ -452,7 +453,10 @@ mod tests {
             RetainedWaveform::new("V(in)", vec![1.0, 2.0, 3.0], vec![7.0, 8.0, 9.0]),
         ]);
         let (streamed, _) = written(&analysis, EXPORT_TEST_LIMITS).unwrap();
-        let members = [ExportMember::new(&analysis, analysis.waveforms.iter().collect())];
+        let members = [ExportMember::new(
+            &analysis,
+            analysis.waveforms.iter().collect(),
+        )];
         let mut planned = plan(&members, EXPORT_TEST_LIMITS).unwrap();
         let mut samples = planned
             .datasets
@@ -597,7 +601,11 @@ mod tests {
         let mut groups = file.root().groups().unwrap();
         groups.sort();
         assert_eq!(groups, ["r=1k", "r=2k", "r=4k"]);
-        for (name, r, end) in [("r=1k", 1000.0, 1.0), ("r=2k", 2000.0, 2.0), ("r=4k", 4000.0, 3.0)] {
+        for (name, r, end) in [
+            ("r=1k", 1000.0, 1.0),
+            ("r=2k", 2000.0, 2.0),
+            ("r=4k", 4000.0, 3.0),
+        ] {
             let group = file.group(name).unwrap();
             let attrs = group.attrs().unwrap();
             assert!(matches!(

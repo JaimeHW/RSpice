@@ -49,7 +49,9 @@ pub(super) fn exported_members<'a>(
 }
 
 /// The members as the writers take them.
-pub(super) fn export_members<'a>(members: &'a [Member<'a>]) -> Vec<ExportMember<'a, RetainedTrace>> {
+pub(super) fn export_members<'a>(
+    members: &'a [Member<'a>],
+) -> Vec<ExportMember<'a, RetainedTrace>> {
     members
         .iter()
         .map(|(analysis, waveforms)| ExportMember::new(analysis, waveforms.clone()))
@@ -71,7 +73,9 @@ impl OwnedMembers {
                         .iter()
                         .enumerate()
                         .filter(|(_, waveform)| {
-                            waveforms.iter().any(|chosen| std::ptr::eq(*chosen, *waveform))
+                            waveforms
+                                .iter()
+                                .any(|chosen| std::ptr::eq(*chosen, *waveform))
                         })
                         .map(|(index, _)| index)
                         .collect();
@@ -88,7 +92,10 @@ impl OwnedMembers {
             .map(|(analysis, chosen)| {
                 ExportMember::new(
                     analysis,
-                    chosen.iter().map(|&index| &analysis.waveforms[index]).collect(),
+                    chosen
+                        .iter()
+                        .map(|&index| &analysis.waveforms[index])
+                        .collect(),
                 )
             })
             .collect()

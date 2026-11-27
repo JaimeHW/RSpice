@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 use std::io::Read;
 
-use super::reader::{NumpyReadError, NumpyReadFailure, read_error};
 use super::NumpyWriteError;
+use super::reader::{NumpyReadError, NumpyReadFailure, read_error};
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal, stated_coordinate_names};
 
 /// A member name RSpice's own archive reader will accept.

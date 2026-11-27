@@ -7,8 +7,8 @@
 
 use std::io::Write;
 
-use num_complex::Complex64;
 use npyz::WriterBuilder as _;
+use num_complex::Complex64;
 
 use super::{MAX_COLUMNS, NumpyWriteError};
 use crate::waveform_io::result::{
@@ -114,9 +114,7 @@ pub fn check_npy<W: AsRef<RetainedWaveform>>(
     let complex = signals.iter().any(|(_, _, imag)| imag.is_some());
     let columns = signals.len() + 1;
     if columns > MAX_COLUMNS {
-        return Err(NumpyWriteError::MatrixColumnLimit {
-            columns,
-        });
+        return Err(NumpyWriteError::MatrixColumnLimit { columns });
     }
     // One complex column promotes the whole matrix, including the signals that were real, and
     // reopening it keeps three arrays per promoted signal.
@@ -133,7 +131,10 @@ pub fn check_npy<W: AsRef<RetainedWaveform>>(
     Ok(NumpyFacts {
         coordinate_name: coordinate_name(analysis.analysis_type),
         rows,
-        signals: signals.iter().map(|(name, ..)| (*name).to_owned()).collect(),
+        signals: signals
+            .iter()
+            .map(|(name, ..)| (*name).to_owned())
+            .collect(),
         complex,
         arrays: 1,
         members: 1,
@@ -202,7 +203,11 @@ pub fn write_npy<W: AsRef<RetainedWaveform>>(
 
 /// The archive key of `name` in `member`'s part of an archive of `members` members: the name
 /// itself in an archive of one, else under the member's parameter values, `r=2k/V(out)`.
-fn archive_key<W: AsRef<RetainedWaveform>>(member: &ExportMember<'_, W>, members: usize, name: &str) -> String {
+fn archive_key<W: AsRef<RetainedWaveform>>(
+    member: &ExportMember<'_, W>,
+    members: usize,
+    name: &str,
+) -> String {
     if members > 1 {
         format!("{}/{name}", member.file_label())
     } else {
@@ -243,15 +248,18 @@ pub fn check_npz<W: AsRef<RetainedWaveform>>(
         facts.get_or_insert_with(|| NumpyFacts {
             coordinate_name: coordinate,
             rows: reference.x.len(),
-            signals: signals.iter().map(|(name, ..)| (*name).to_owned()).collect(),
+            signals: signals
+                .iter()
+                .map(|(name, ..)| (*name).to_owned())
+                .collect(),
             complex: false,
             arrays: 0,
             members: members.len(),
         });
-        if signals.iter().any(|(_, _, imag)| imag.is_some()) {
-            if let Some(facts) = facts.as_mut() {
-                facts.complex = true;
-            }
+        if signals.iter().any(|(_, _, imag)| imag.is_some())
+            && let Some(facts) = facts.as_mut()
+        {
+            facts.complex = true;
         }
     }
     let mut facts = facts.expect("an archive of one member or more");
@@ -428,7 +436,10 @@ mod tests {
         let facts = write_npz(&export, EXPORT_TEST_LIMITS, &mut bytes).unwrap();
         assert_eq!((facts.members, facts.arrays), (3, 6));
         let files = crate::zip::read_zip_files(&bytes, 10, 1 << 20).unwrap();
-        let names = files.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>();
+        let names = files
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(
             names,
             [
