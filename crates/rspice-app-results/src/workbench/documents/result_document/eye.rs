@@ -174,6 +174,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let source = selected_source(state.results_reads());
     let plot_view = state.results.session.plot_view(ResultViewer::Eye, 0);
     let significant_digits = significant_digits(state.results_reads());
+    let kind_tag = super::active_kind_tag(state.results_reads());
     let out = view::show(
         ui,
         &state.analysis.eye_diagram_state,
@@ -182,6 +183,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &mut state.results.session.eye_texture,
         &mut state.results.session.cache,
         significant_digits,
+        &kind_tag,
     );
     if out.density_baked {
         frame_work::note(DatasetWalk::EyeRaster);

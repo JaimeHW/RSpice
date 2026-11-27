@@ -275,6 +275,7 @@ pub fn show(
     quantity_policy: &QuantityPresentationPolicy,
     presentation: ReadoutPolicy,
     pin: &mut Option<f64>,
+    kind_tag: &str,
 ) -> FftViewResponse {
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let mut out = FftViewResponse::default();
@@ -299,7 +300,7 @@ pub fn show(
         on: true,
         glyph: strip::LegendGlyph::Line,
     }];
-    let header = strip::StripHeader::new("FFT", "", &legend)
+    let header = strip::StripHeader::new(kind_tag, "", &legend)
         .zoomed(view.is_zoomed())
         .maximizable(false)
         .show(ui);
@@ -1059,6 +1060,7 @@ mod tests {
                             &QuantityPresentationPolicy::default(),
                             ReadoutPolicy::default(),
                             &mut None,
+                            "TR",
                         )
                     });
             },

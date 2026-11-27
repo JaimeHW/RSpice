@@ -565,6 +565,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let sweep = two_port(state, owner);
     let viewer = super::ResultViewer::Smith;
     let stored = stored_markers(state.results_reads());
+    let kind_tag = super::active_kind_tag(state.results_reads());
     let analysis = state.model.simulation.active_analysis();
     let session = &mut state.results.session;
     let prepared = prepare(
@@ -592,6 +593,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &mut session.cache,
         &quantity_policy,
         digits,
+        &kind_tag,
     );
     let toggled = frame
         .as_ref()

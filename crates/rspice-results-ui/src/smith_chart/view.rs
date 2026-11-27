@@ -726,6 +726,7 @@ fn vswr_text(magnitude: f64, digits: usize) -> String {
 /// there, after the others; a click on a marker takes it away. The host
 /// owns source qualification and cache invalidation. Readouts use the
 /// reader's `significant_digits`.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     chart: &SmithChart<'_>,
@@ -734,6 +735,7 @@ pub fn show(
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
+    kind_tag: &str,
 ) -> Option<SmithFrame> {
     let SmithChart {
         traces,
@@ -803,7 +805,7 @@ pub fn show(
         .iter()
         .position(|prepared| prepared.removable)
         .unwrap_or(traces.len());
-    let header = strip::StripHeader::new("SMITH", &subtitle, &legend)
+    let header = strip::StripHeader::new(kind_tag, &subtitle, &legend)
         .removable_from(removable_from)
         .show(ui);
 

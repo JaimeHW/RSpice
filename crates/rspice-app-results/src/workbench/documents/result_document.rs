@@ -696,6 +696,18 @@ pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
     )
 }
 
+/// The active analysis as a sheet's strip header names it, as the waveform
+/// stack names its strips: `TR`, `AC`, `SP`. The sheet tab names the view.
+pub(crate) fn active_kind_tag(state: ResultsReads<'_>) -> String {
+    state
+        .model
+        .simulation
+        .active_analysis()
+        .map_or_else(String::new, |analysis| {
+            analysis.analysis_type.short_label().to_uppercase()
+        })
+}
+
 /// Whether the active sheet can be magnified about its centre.
 ///
 /// Only the unit-pane stack exposes the retained extents a zoom step has to

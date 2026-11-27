@@ -200,6 +200,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         mirror: &derived.mirror,
         stability: Some(derived.stability),
     };
+    let kind_tag = super::active_kind_tag(state.results_reads());
     let results = &mut state.results;
     let viewer = super::ResultViewer::Nyquist;
     let mut view = results.session.plot_view(viewer, 0);
@@ -212,6 +213,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         &mut results.session.cache,
         &quantity_policy,
         significant_digits,
+        &kind_tag,
     ) {
         super::record_drawn_axes(results, viewer, &response);
         if response.view.any() {

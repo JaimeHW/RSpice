@@ -178,6 +178,7 @@ const MIRROR_SERIES: usize = 3;
 
 /// Render a retained locus using host-selected data and local interaction state.
 /// The host owns cache invalidation and applies the returned axes to its inspector.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     source: Option<NyquistPlot<'_>>,
@@ -186,6 +187,7 @@ pub fn show(
     cache: &mut plot::DecimationCache,
     quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
+    kind_tag: &str,
 ) -> Option<plot::PlotResponse> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -220,7 +222,7 @@ pub fn show(
             glyph: strip::LegendGlyph::Line,
         },
     ];
-    strip::StripHeader::new("NYQ", &format!("{point_count} pts"), &legend).show(ui);
+    strip::StripHeader::new(kind_tag, &format!("{point_count} pts"), &legend).show(ui);
 
     // Opened on the critical point; the reader's zoom, or the bar's whole
     // locus, replaces it until a double-click brings it back.

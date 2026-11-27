@@ -143,6 +143,7 @@ const BATHTUB_CURVE_POINTS: usize = 201;
 const BATHTUB_FLOOR: f64 = 1e-18;
 
 /// Render the eye, and the bathtub of its crossings under it.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut Ui,
     eye: &EyeDiagramState,
@@ -151,6 +152,7 @@ pub fn show(
     texture: &mut Option<EyeTexture>,
     cache: &mut plot::DecimationCache,
     significant_digits: usize,
+    kind_tag: &str,
 ) -> EyeViewResponse {
     let mut out = EyeViewResponse::default();
     let t = Tokens::get(ui.ctx());
@@ -175,7 +177,7 @@ pub fn show(
         data.traces.len(),
         data.ui_count,
     );
-    strip::StripHeader::new("EYE", &subtitle, &[])
+    strip::StripHeader::new(kind_tag, &subtitle, &[])
         .incomplete(incoherent.then_some(INCOHERENT_REASON))
         .show(ui);
 

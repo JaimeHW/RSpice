@@ -150,6 +150,7 @@ fn render_chart(
             &mut cache,
             &QuantityPresentationPolicy::default(),
             4,
+            "SP",
         ) {
             plot_rect = frame.plot.plot_rect;
         }

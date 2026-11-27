@@ -111,6 +111,12 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
             &context.results.session.sweep,
         )
     });
+    let kind_tag = context
+        .simulation
+        .active_analysis()
+        .map_or_else(String::new, |analysis| {
+            analysis.analysis_type.short_label().to_uppercase()
+        });
     let session = &mut context.results.session;
     let pinned = session.plot_view(ResultViewer::Sweep, 0);
     let state = (*session.sweep).clone();
@@ -123,6 +129,7 @@ pub fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
             plot_view: pinned,
             cache_key: egui::Id::new(("sweep", plan.analysis)).value(),
             significant_digits: context.significant_digits,
+            kind_tag: &kind_tag,
         }),
         &mut session.cache,
     );

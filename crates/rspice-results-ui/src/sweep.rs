@@ -196,6 +196,8 @@ pub struct SweepView<'a> {
     pub cache_key: u64,
     /// The reader's displayed significant digits.
     pub significant_digits: usize,
+    /// The analysis the sheet draws, as its strip header names it: `DCS`.
+    pub kind_tag: &'a str,
 }
 
 /// What the reader did on the sheet this frame.
@@ -326,7 +328,7 @@ fn draw_plot(
         axis.name,
         if count == 1 { "" } else { "s" }
     );
-    let header = StripHeader::new("SWEEP", &subtitle, &legend)
+    let header = StripHeader::new(view.kind_tag, &subtitle, &legend)
         .zoomed(view.plot_view.is_zoomed())
         .show(ui);
     response.fit = header.fit_clicked;
