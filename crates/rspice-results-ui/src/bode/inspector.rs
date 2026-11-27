@@ -558,7 +558,7 @@ pub fn noise_spectrum_right_panel(
     let mut rows = vec![(
         "Band",
         format!(
-            "{} – {}",
+            "{} \u{2026} {}",
             frequency_readout(quantity_policy, band.0, significant_digits),
             frequency_readout(quantity_policy, band.1, significant_digits)
         ),

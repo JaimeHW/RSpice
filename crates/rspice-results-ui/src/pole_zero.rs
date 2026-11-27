@@ -454,6 +454,11 @@ pub fn show(
     // The map fills its region with σ and jω on one scale. Twice: the Y
     // gutter is as wide as the labels of the range it shows.
     let mut ranges = ((x0, x1), (y0, y1));
+    // The linear plane names its ordinate above it as the abscissa is named
+    // beside its values, quantity then unit, so both axes read alike.
+    if matches!(plane, Plane::Linear) {
+        spec = spec.with_y_without_unit("jω · rad/s");
+    }
     for _ in 0..2 {
         let plot = plot::plot_rect(&plot_ui, &spec).size();
         ranges = plot::equal_scale_ranges(plot, (x0, x1), (y0, y1));
@@ -461,7 +466,7 @@ pub fn show(
         // are square as its scale is.
         (spec.x, spec.y) = match plane {
             Plane::Linear => {
-                let (sigma, omega) = crate::presentation::plane_axes(ranges, ("rad/s", "rad/s"));
+                let (sigma, omega) = crate::presentation::plane_axes(ranges, ("rad/s", ""));
                 (sigma.with_label("σ"), omega.with_label("jω"))
             }
             Plane::Logarithmic { .. } => (
