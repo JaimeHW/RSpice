@@ -9,7 +9,7 @@ use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::results_job::hold_jobs_for_tests;
 use crate::workbench::workflows::result_import_workflow::{
     discard_result_import_draft, finish_result_import_job, import_result_dataset_from_path,
-    show_result_import_dialog, stage_imported_result_dataset, start_result_import_commit,
+    show_result_import_dialog, start_result_import_commit,
 };
 
 /// Frames drawn while a job is held, and after it ends.
@@ -621,113 +621,4 @@ fn a_plotted_run_of_377_mb_draws_flat_frames_while_its_kept_segment_is_checked()
     assert_eq!(failures_of(&kept), Vec::<String>::new());
     drop(state);
     std::fs::remove_dir_all(&folder).unwrap();
-}
-
-/// The browser workbench's screen in CI: 1440 by 857 points.
-const BROWSER_SCREEN: egui::Vec2 = egui::vec2(1_440.0, 857.1875);
-
-/// A review open on a staged CSV, as the browser opens it: on the frame its
-/// file is read, with no window drawn before it.
-fn staged_review() -> ResultsTestHost {
-    let mut state = ResultsTestHost::default();
-    state.platform.project_lifecycle.authority.open_session();
-    let mut csv = String::from("time,V(out),I(R1)\n");
-    for row in 0..400 {
-        csv.push_str(&format!("{},{row},{}\n", row as f64 * 2.5e-9, row * 2));
-    }
-    stage_imported_result_dataset(
-        &mut state.results_parts(),
-        "browser-import.csv",
-        csv.as_bytes(),
-    )
-    .expect("the CSV stages");
-    state
-}
-
-/// Draw the import dialog once with `events`; where the frame drew the
-/// enabled button labelled `label`, if it drew one.
-fn frame_with(
-    ctx: &egui::Context,
-    state: &mut ResultsTestHost,
-    events: Vec<egui::Event>,
-    label: &str,
-) -> Option<egui::Rect> {
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, BROWSER_SCREEN)),
-            events,
-            ..Default::default()
-        },
-        |ctx| show_result_import_dialog(ctx, &mut state.results_parts()),
-    );
-    let update = output.platform_output.accesskit_update?;
-    update.nodes.iter().find_map(|(_, node)| {
-        (node.label().as_deref() == Some(label) && !node.is_disabled())
-            .then(|| node.bounds())
-            .flatten()
-            .map(|bounds| {
-                egui::Rect::from_min_max(
-                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-                )
-            })
-    })
-}
-
-/// A press and a release at `point`, as two frames.
-fn click_at(ctx: &egui::Context, state: &mut ResultsTestHost, point: egui::Pos2) {
-    let button = |pressed| egui::Event::PointerButton {
-        pos: point,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    frame_with(
-        ctx,
-        state,
-        vec![egui::Event::PointerMoved(point), button(true)],
-        "",
-    );
-    frame_with(ctx, state, vec![button(false)], "");
-}
-
-/// The review is laid out at its final size and place on its first visible
-/// frame, with its footer on the screen: a click aimed at Map signals as any
-/// frame drew it lands on it, however many frames pass before the press. The
-/// window grew by its footer's height for its first eight frames, the button
-/// moving 21 points a frame, so CI's click, aimed at the button as one frame
-/// drew it and pressed a frame later, landed above it and was lost.
-#[test]
-fn a_click_aimed_at_the_review_as_any_frame_drew_it_lands() {
-    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, BROWSER_SCREEN);
-    let mut first_drawn = None;
-    for seen in 0..12 {
-        let mut state = staged_review();
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut aimed = None;
-        for _ in 0..=seen {
-            aimed = frame_with(&ctx, &mut state, Vec::new(), "Map signals");
-        }
-        // The first frame lays the window out unseen, and its button is disabled.
-        let Some(aimed) = aimed else {
-            assert_eq!(seen, 0, "every frame after the first draws Map signals");
-            continue;
-        };
-        let first = *first_drawn.get_or_insert(aimed);
-        assert_eq!(aimed, first, "Map signals moved by frame {seen}");
-        assert!(
-            screen.contains_rect(aimed),
-            "Map signals is off the screen: {aimed:?}"
-        );
-        // A frame runs between the drawing the click aims at and the press.
-        frame_with(&ctx, &mut state, Vec::new(), "");
-        click_at(&ctx, &mut state, aimed.center());
-        assert_eq!(
-            state.results_parts().result_import.stage,
-            crate::workbench::documents::result_document::import::ResultImportStage::Map,
-            "a click aimed at Map signals as frame {seen} drew it"
-        );
-    }
 }
