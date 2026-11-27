@@ -1537,16 +1537,14 @@ fn document_tab(
     if suffix_width > 0.0 {
         suffix_x += TAB_CONTENT_GAP;
     }
-    if dirty {
-        // The tab's unsaved marker is a live state, not a warning, so it is
-        // painted in the secondary text tone rather than in amber.
-        let center = egui::pos2(suffix_x + TAB_DIRTY_SIZE * 0.5, rect.center().y);
+    // The tab's unsaved marker is a live state, not a warning, so it is
+    // painted in the secondary text tone rather than in amber.
+    let paint_dirty = |center: egui::Pos2| {
         ui.painter()
             .circle_filled(center, TAB_DIRTY_SIZE * 0.5, t.color.text_dim);
-        suffix_x += TAB_DIRTY_SIZE;
-        if closable {
-            suffix_x += TAB_CONTENT_GAP;
-        }
+    };
+    if dirty && !closable {
+        paint_dirty(egui::pos2(suffix_x + TAB_DIRTY_SIZE * 0.5, rect.center().y));
     }
     let mut close_clicked = false;
     if closable {
@@ -1561,20 +1559,27 @@ fn document_tab(
             response.id.with("close"),
             Sense::click().difference(Sense::focusable_noninteractive()),
         );
-        if close_response.hovered() {
-            ui.painter().rect_filled(close_rect, 2.0, t.color.bg_active);
-        }
-        ui.painter().text(
-            close_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "×",
-            theme::sans(14.0, FontWeight::Regular),
+        // An unsaved tab's marker holds the close's place and turns into
+        // the close while the pointer is over the tab, as an editor's tab
+        // does, so a tab never shows both.
+        if dirty && !response.contains_pointer() && !close_response.contains_pointer() {
+            paint_dirty(close_rect.center());
+        } else {
             if close_response.hovered() {
-                t.color.text
-            } else {
-                t.color.text_faint
-            },
-        );
+                ui.painter().rect_filled(close_rect, 2.0, t.color.bg_active);
+            }
+            ui.painter().text(
+                close_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "×",
+                theme::sans(14.0, FontWeight::Regular),
+                if close_response.hovered() {
+                    t.color.text
+                } else {
+                    t.color.text_faint
+                },
+            );
+        }
         close_clicked = close_response.clicked();
     }
     theme::paint_focus_ring(ui, &response, rect);
@@ -1593,8 +1598,8 @@ pub fn suffix_width(dirty: bool, closable: bool) -> f32 {
     match (dirty, closable) {
         (false, false) => 0.0,
         (true, false) => TAB_CONTENT_GAP + TAB_DIRTY_SIZE,
-        (false, true) => TAB_CONTENT_GAP + 2.0 + TAB_CLOSE_SIZE,
-        (true, true) => TAB_CONTENT_GAP + TAB_DIRTY_SIZE + TAB_CONTENT_GAP + 2.0 + TAB_CLOSE_SIZE,
+        // An unsaved tab that closes shows its marker in the close's place.
+        (_, true) => TAB_CONTENT_GAP + 2.0 + TAB_CLOSE_SIZE,
     }
 }
 
