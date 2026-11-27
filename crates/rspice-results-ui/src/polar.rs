@@ -835,6 +835,9 @@ fn paint_canvas(
     let radius = side * 0.5;
     let painter = ui.painter().with_clip_rect(rect);
     let grid = egui::Stroke::new(1.0, c.canvas_grid);
+    // What a cursor flag must not cover: the ring and angle labels, then the
+    // locus's ends, both markers and each flag as it is set.
+    let mut taken: Vec<egui::Rect> = Vec::new();
 
     // Stack radial labels beside the 90° spoke. Along the horizontal spoke,
     // long SI labels overlapped one another in smaller panes. Thin the labels
@@ -857,13 +860,13 @@ fn paint_canvas(
             },
         );
         if (rings - step).is_multiple_of(label_stride) {
-            painter.text(
+            taken.push(painter.text(
                 egui::pos2(centre.x + 5.0, centre.y - radius * fraction as f32 + 3.0),
                 egui::Align2::LEFT_TOP,
                 rule.ring_label(fraction),
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 c.canvas_text_faint,
-            );
+            ));
         }
     }
     // The unit circle when it falls between rings rather than on one.
@@ -895,13 +898,13 @@ fn paint_canvas(
             centre.x + (radius + 12.0) * cos as f32,
             centre.y - (radius + 12.0) * sin as f32,
         );
-        painter.text(
+        taken.push(painter.text(
             label_at,
             egui::Align2::CENTER_CENTER,
             format!("{}\u{b0}", fmt_si_significant(signed.round(), "", 6)),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             c.canvas_text_faint,
-        );
+        ));
     }
 
     // The overlays under the primary locus, each in its own ink. Normalized,
@@ -944,29 +947,45 @@ fn paint_canvas(
             }
         }
     }
-    for (label, sample, color) in [
-        ("A", samples.a, c.canvas_cursor_a),
-        ("B", samples.b, c.canvas_cursor_b),
-    ] {
-        let Some(point) = sample.and_then(&place) else {
+    // Each flag beside its own marker, stepping clear of what is taken, so
+    // a cursor near the rim never wears an angle label or the locus's end
+    // as its name.
+    let markers = [samples.a, samples.b].map(|sample| sample.and_then(&place));
+    let ends = [
+        (0..locus.len()).find_map(&place),
+        (0..locus.len()).rev().find_map(&place),
+    ];
+    taken.extend(
+        markers
+            .iter()
+            .flatten()
+            .map(|point| egui::Rect::from_center_size(*point, egui::Vec2::splat(14.0)))
+            .chain(
+                ends.iter()
+                    .flatten()
+                    .map(|point| egui::Rect::from_center_size(*point, egui::Vec2::splat(10.0))),
+            ),
+    );
+    for ((label, color, above), point) in [
+        ("A", c.canvas_cursor_a, true),
+        ("B", c.canvas_cursor_b, false),
+    ]
+    .into_iter()
+    .zip(markers)
+    {
+        let Some(point) = point else {
             continue;
         };
         painter.circle_filled(point, 3.5, color);
         painter.circle_stroke(point, 6.0, egui::Stroke::new(1.2, color));
-        painter.text(
-            egui::pos2(
-                point.x + 8.0,
-                point.y + if label == "A" { -8.0 } else { 8.0 },
-            ),
-            if label == "A" {
-                egui::Align2::LEFT_BOTTOM
-            } else {
-                egui::Align2::LEFT_TOP
-            },
-            label,
+        let galley = painter.layout_no_wrap(
+            label.to_owned(),
             theme::mono(tokens::FS_0, FontWeight::SemiBold),
             color,
         );
+        let flag = cursor_flag(point, galley.size(), above, rect, &taken);
+        taken.push(flag);
+        painter.galley(flag.min, galley, color);
     }
 
     // Nearest sample of any locus under the pointer, and its card. Only a
@@ -1024,6 +1043,46 @@ fn paint_canvas(
         hovered,
         removed_overlay: None,
     }
+}
+
+/// Where a cursor's flag of `size` sits beside its marker at `point`: the
+/// first corner around the marker, above or below first as `above` says and
+/// right before left, that stays on `canvas` and overlaps no rectangle in
+/// `taken` (touching its own marker is beside it, not on it); the first
+/// corner when none is clear.
+fn cursor_flag(
+    point: egui::Pos2,
+    size: egui::Vec2,
+    above: bool,
+    canvas: egui::Rect,
+    taken: &[egui::Rect],
+) -> egui::Rect {
+    const GAP: f32 = 8.0;
+    let (near, far) = if above { (-1.0, 1.0) } else { (1.0, -1.0) };
+    let corners = [(1.0, near), (1.0, far), (-1.0, near), (-1.0, far)];
+    let at = |(right, down): (f32, f32)| {
+        let side = |forward: f32| {
+            if forward > 0.0 {
+                egui::Align::Min
+            } else {
+                egui::Align::Max
+            }
+        };
+        egui::Align2([side(right), side(down)]).anchor_size(
+            egui::pos2(point.x + right * GAP, point.y + down * GAP),
+            size,
+        )
+    };
+    corners
+        .into_iter()
+        .map(at)
+        .find(|flag| {
+            canvas.contains_rect(*flag)
+                && !taken
+                    .iter()
+                    .any(|other| other.expand(1.0).intersect(*flag).is_positive())
+        })
+        .unwrap_or_else(|| at(corners[0]))
 }
 
 /// Where each sample of `locus` lands on the canvas, its magnitude scaled by
