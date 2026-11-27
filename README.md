@@ -485,7 +485,7 @@ use faer.
 | [`rspice-app-results`](crates/rspice-app-results) | The application's results feature: the Results workspace, its result documents and viewers, result import and waveform export |
 | [`rspice-app-hardcopy`](crates/rspice-app-hardcopy) | The application's hardcopy feature: Page Setup, Print and Export, report authoring, hardcopy sources and the publication snapshot |
 | [`rspice-app-cloud`](crates/rspice-app-cloud) | The application's cloud feature: the RSpice Cloud account and licence, web publication and the live session |
-| [`rspice-app-models`](crates/rspice-app-models) | The application's models feature: the Models & PDKs workspace, the device-model editor, measurement correlation and PDK authoring |
+| [`rspice-app-models`](crates/rspice-app-models) | The application's models feature: the Models & PDKs workspace, the device-model editor and PDK authoring |
 | [`rspice-app-simulate`](crates/rspice-app-simulate) | The application's simulate feature: the Simulation and Verification Studios, the analysis plan and its run sets, the plan manager and the jobs manager |
 | [`rspice-app-code`](crates/rspice-app-code) | The application's code feature: the netlist and Verilog-A source editors, their documents and workflows, and the source dialogs |
 | [`rspice-app-project`](crates/rspice-app-project) | The application's project feature: the project pages, the launcher and examples browser, the Library browser and its dialogs, configuration sets, design management and revision history |

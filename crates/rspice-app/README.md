@@ -24,7 +24,7 @@ boundaries by `tools/ci/check_app_crate_dependencies.py`.
 | `product/` | `CommandId`, plus the product identities `rspice-vocabulary` defines |
 | `quantity/` | Platform number-locale discovery, plus the quantity presentation and input policy `rspice-vocabulary` defines; values crossing this boundary are always in documented SI base units |
 | `diagnostics/` | What the application reports about itself: the console message model and the structured, filterable application log |
-| `services/` | Service and platform adapters: license keys, cloud account, live-session protocol, Model Hub transport, model qualification |
+| `services/` | Service and platform adapters: license keys, cloud account, live-session protocol, Model Hub transport |
 | `io/` | File workflows and platform I/O adapters: project load/save, file exchange, netlist and waveform export, project execution |
 | `ui/` | The `rspice-ui-kit` exports application presentation uses |
 | `time_compat/` | `Instant` and `SystemTime` shims, because `std::time` traps at runtime on `wasm32-unknown-unknown` |

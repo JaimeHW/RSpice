@@ -4,8 +4,7 @@ Portable device-model definitions and the evidence that travels with them:
 model libraries and the source authority each came from, the content-pinned
 source closure a run executes, process corners, the executable model
 namespace of one run, project-authored model revisions, model-bound symbols,
-qualification and measurement-correlation evidence, and the PDK technology
-vocabulary. `rspice-design`, `rspice-formats`,
+model validation receipts, and the PDK technology vocabulary. `rspice-design`, `rspice-formats`,
 `rspice-project`, `rspice-simulation` and the project and simulation contract
 crates read the same definitions, so a model's identity is decided once. It
 sits below `rspice-design`, whose model-bound symbols name these definitions.
@@ -27,7 +26,7 @@ winit, wgpu and rfd in its closure.
 | `authoring`, `project_revision`, `definition_metadata` | `ProjectModelDefinition`, models a project authors itself; `ProjectModelRevisionDefinition`, which admits a revision only when its source renders and reparses without losing a parameter, section or type; `ModelDefinitionMetadata`, the typed parameters, section inheritance, statistics and temperature behaviour the model editor presents |
 | `technology_binding` | `ProjectTechnologyBinding` and `ProjectPdkPackagePin`: a project's model-source attachment and its exact PDK package pin |
 | `pdk` | PDK archive and manifest contracts; `verify_archive_contents`; technology-revision diffs and library search paths |
-| `qualification`, `correlation`, `validation` | Model qualification and release evidence (golden vectors, desktop and WebAssembly parity, fail-closed promotion); versioned measurement-correlation datasets, alignment, metrics and reviewer evidence; `ModelValidationReceipt` and its integrity digest |
+| `validation` | `ModelValidationReceipt` and its integrity digest |
 | `symbol` | Model-bound symbol definitions, parameter forms and retained graphics, stored under the `rspice.symbol.*` metadata keys |
 | `facts` | `ClosureFacts`: facts about a model closure that more than one surface reports, derived in one place |
 

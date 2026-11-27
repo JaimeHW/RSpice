@@ -2,7 +2,7 @@
 name = "rspice-app-models"
 version.workspace = true
 edition.workspace = true
-description = "The RSpice application's models feature: the Models & PDKs workspace, the device-model editor, measurement correlation and PDK authoring"
+description = "The RSpice application's models feature: the Models & PDKs workspace, the device-model editor and PDK authoring"
 license-file.workspace = true
 publish.workspace = true
 rust-version.workspace = true
