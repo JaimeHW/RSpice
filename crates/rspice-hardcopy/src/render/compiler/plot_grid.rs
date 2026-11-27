@@ -39,7 +39,14 @@ impl SemanticSceneCompiler<'_> {
             )
         };
         for guide in &plot.guides {
-            let stroke = if guide.major {
+            let stroke = if guide.reference {
+                StrokeStyle::try_new(
+                    SemanticColor::Secondary,
+                    Length::from_micrometres(160),
+                    StrokePattern::Dashed,
+                    None,
+                )?
+            } else if guide.major {
                 StrokeStyle::try_new(
                     SemanticColor::Secondary,
                     Length::from_micrometres(220),

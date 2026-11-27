@@ -8,7 +8,7 @@
 //! by its decades.
 
 use super::quick_plot::quick_plot_in;
-use super::result_view::{drawn_bounds, keyed_as_the_sheet, series_unit};
+use super::result_view::{drawn_bounds, keyed_as_the_sheet, series_unit, with_fact_row};
 use super::*;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::bode::retained::response_signal;
@@ -30,6 +30,10 @@ pub fn resolve_visualization_pane_source(
     ) {
         return Err(HardcopySourceError::UnsupportedScope(source.scope));
     }
+    for (name, reading) in source.figures {
+        validate_label("printed figure name", name, DISPLAY_NAME_LIMIT)?;
+        validate_label("printed figure", reading, DISPLAY_NAME_LIMIT)?;
+    }
     let figure = resolve_pane_figure(
         source.document,
         source.reference,
@@ -37,7 +41,7 @@ pub fn resolve_visualization_pane_source(
         source.pane_id,
     )
     .map_err(map_visualization_error)?;
-    let plot = pane_plot(&figure, source.page_id, source.pane_id)?;
+    let plot = pane_plot(&figure, source.page_id, source.pane_id, source.figures)?;
     // Its strips take the page, as a sheet's do.
     let bounds = drawn_bounds(&plot)?;
     let semantic_document = HardcopySemanticDocument::Plot(plot);
@@ -62,11 +66,13 @@ pub fn resolve_visualization_pane_source(
     )
 }
 
-/// The page `figure` prints as: the page its sheet prints for the run.
+/// The page `figure` prints as: the page its sheet prints for the run,
+/// with the line of figures a Bode pane's card reads under it.
 fn pane_plot(
     figure: &PaneFigure,
     page_id: PageId,
     pane_id: PaneId,
+    figures: &[(String, String)],
 ) -> Result<SemanticPlot, HardcopySourceError> {
     let bode = figure.viewer_id == "viewer-bode";
     let viewer = if bode {
@@ -136,7 +142,11 @@ fn pane_plot(
         },
     )?;
     keyed_as_the_sheet(&mut plot, &keys.into_iter().flatten().collect::<Vec<_>>());
-    Ok(plot)
+    Ok(if bode {
+        with_fact_row(plot, figures)
+    } else {
+        plot
+    })
 }
 
 /// One trace as its sheet prints it, and the name its key gives it where

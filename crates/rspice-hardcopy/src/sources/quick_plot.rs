@@ -355,7 +355,7 @@ pub(crate) fn quick_plot_in(
                 maximum: SemanticPoint::new(PLOT_INSET_UM + plot_width, rect.bottom()),
             })
             .collect(),
-        guides: Vec::new(),
+        guides: strips::decibel_references(&frames, &rects, &units, &scales)?,
     })
 }
 

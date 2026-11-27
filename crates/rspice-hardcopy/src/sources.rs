@@ -141,6 +141,9 @@ pub struct VisualizationPaneHardcopySource<'a> {
     pub page_id: PageId,
     pub pane_id: PaneId,
     pub scope: HardcopyScope,
+    /// The figures the card beside the pane reads off its analysis, each
+    /// name with its reading, printed under it as the sheet prints them.
+    pub figures: &'a [(String, String)],
 }
 
 /// Validate captured source semantics and bind their exact publication identity.

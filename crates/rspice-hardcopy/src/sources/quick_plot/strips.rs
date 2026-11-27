@@ -86,6 +86,44 @@ pub(crate) fn strip_rects(count: usize, plot_height: i64) -> Vec<StripRect> {
         .collect()
 }
 
+/// The 0 dB line each decibel strip is read against, dashed across the
+/// strip where its window spans unity gain, as the sheet draws it.
+pub(crate) fn decibel_references(
+    frames: &[PlotFrame],
+    rects: &[StripRect],
+    units: &[&str],
+    scales: &[AxisScale],
+) -> Result<Vec<SemanticPlotGuide>, HardcopySourceError> {
+    let mut guides = Vec::new();
+    for (((frame, rect), unit), scale) in frames.iter().zip(rects).zip(units).zip(scales) {
+        if *unit != "dB"
+            || *scale == AxisScale::Logarithmic
+            || !(frame.y_minimum < 0.0 && frame.y_maximum > 0.0)
+        {
+            continue;
+        }
+        let paths = clipped_plot_paths(
+            &[(frame.x_minimum, 0.0), (frame.x_maximum, 0.0)],
+            frame.x_minimum,
+            frame.x_maximum,
+            frame.y_minimum,
+            frame.y_maximum,
+            frame.plot_width,
+            frame.plot_height,
+        )?
+        .into_iter()
+        .map(|path| path.into_iter().map(|point| rect.place(point)).collect())
+        .collect();
+        guides.push(SemanticPlotGuide {
+            paths,
+            major: false,
+            second: false,
+            reference: true,
+        });
+    }
+    Ok(guides)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

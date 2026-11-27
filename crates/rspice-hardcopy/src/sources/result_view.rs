@@ -255,7 +255,7 @@ const FACT_ROW_DROP_UM: i64 = 7_000;
 
 /// The plot with the figures its sheet's card shows set on one line under
 /// it, in the card's words. A plot whose card shows none is unchanged.
-fn with_fact_row(mut plot: SemanticPlot, figures: &[(String, String)]) -> SemanticPlot {
+pub(super) fn with_fact_row(mut plot: SemanticPlot, figures: &[(String, String)]) -> SemanticPlot {
     let Some(text) = fact_row(figures) else {
         return plot;
     };

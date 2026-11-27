@@ -104,6 +104,7 @@ impl Plane {
             paths: self.paths(points)?,
             major,
             second: false,
+            reference: false,
         })
     }
 
@@ -123,6 +124,7 @@ impl Plane {
             paths: vec![ring],
             major: true,
             second: false,
+            reference: false,
         })
     }
 

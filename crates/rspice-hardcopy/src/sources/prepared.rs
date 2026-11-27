@@ -30,7 +30,7 @@ use rspice_vocabulary::product::{ObjectRevision, ProjectId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 9;
+const PREPARED_WORKER_SNAPSHOT_SCHEMA_VERSION: u32 = 10;
 
 #[cfg(test)]
 mod tests;
@@ -83,6 +83,9 @@ pub enum RetainedHardcopySourceInput {
         pane_id: PaneId,
         all_panes: bool,
         scope: HardcopyScope,
+        /// The figures the card beside the pane reads off its analysis,
+        /// each name with its reading; none where the card reads another.
+        figures: Vec<(String, String)>,
     },
     Report {
         project_id: ProjectId,
@@ -276,6 +279,7 @@ enum PreparedRetainedHardcopyWorkerPayload {
         pane_id: PaneId,
         all_panes: bool,
         scope: HardcopyScope,
+        figures: Vec<(String, String)>,
     },
     Report {
         project_id: ProjectId,
@@ -396,6 +400,7 @@ macro_rules! validate_prepared_shape {
                 pane_id,
                 all_panes,
                 scope,
+                figures,
                 ..
             } => {
                 validate_label(
@@ -403,6 +408,10 @@ macro_rules! validate_prepared_shape {
                     source_key,
                     SOURCE_KEY_LIMIT,
                 )?;
+                for (name, reading) in figures {
+                    validate_label("printed figure name", name, DISPLAY_NAME_LIMIT)?;
+                    validate_label("printed figure", reading, DISPLAY_NAME_LIMIT)?;
+                }
                 require_project_source_prefix(*project_id, source_key, "result-document")?;
                 let pane_suffix = format!(":pane:{}", pane_id.get());
                 if !source_key.ends_with(&pane_suffix) {
@@ -692,6 +701,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 pane_id,
                 all_panes,
                 scope,
+                figures,
             } => Self::VisualizationDocument {
                 source_key,
                 project_id,
@@ -703,6 +713,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 pane_id,
                 all_panes,
                 scope,
+                figures,
             },
             RetainedHardcopySourceInput::Report {
                 project_id,
@@ -839,6 +850,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                 pane_id,
                 all_panes,
                 scope,
+                figures,
             } => {
                 let document =
                     document.restore::<VisualizationDocument>("prepared visualization document")?;
@@ -857,6 +869,7 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     pane_id,
                     all_panes,
                     scope,
+                    figures,
                 }
             }
             Self::Report {
@@ -1429,8 +1442,9 @@ impl PreparedRetainedHardcopyResolution {
                 pane_id,
                 all_panes,
                 scope,
+                figures,
             } => resolve_visualization_document_source(
-                source_key, project_id, &document, page_id, pane_id, all_panes, scope,
+                source_key, project_id, &document, page_id, pane_id, all_panes, scope, &figures,
             ),
             RetainedHardcopySourceInput::Report {
                 project_id: _,

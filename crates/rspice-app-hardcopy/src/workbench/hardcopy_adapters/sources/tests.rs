@@ -658,6 +658,7 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
         page_id,
         pane_id,
         scope: HardcopyScope::ActivePlotDocument,
+        figures: &[],
     })
     .unwrap();
     let second = resolve_visualization_pane_source(VisualizationPaneHardcopySource {
@@ -668,6 +669,7 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
         page_id,
         pane_id,
         scope: HardcopyScope::ActivePlotDocument,
+        figures: &[],
     })
     .unwrap();
     assert_eq!(first.semantic_document(), second.semantic_document());
@@ -797,6 +799,7 @@ fn a_figure_of_a_run_reference_prints_from_the_samples_its_copy_carries() {
             page_id: document.pages()[0].id,
             pane_id: document.panes()[0].id,
             scope: HardcopyScope::ActivePlotDocument,
+            figures: &[],
         })
     };
 

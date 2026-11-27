@@ -187,6 +187,33 @@ fn captured_sheet_reading(reads: SourceReads<'_>) -> QuickSheetReading {
     }
 }
 
+/// The figures the card beside `pane` shows, where the card reads the run
+/// and analysis the pane draws. The card reads the run selected, so a pane
+/// bound to another has no reading beside it, and prints none.
+fn pane_card_figures(reads: SourceReads<'_>, pane: &Pane) -> Vec<(String, String)> {
+    let Some(binding) = pane.binding else {
+        return Vec::new();
+    };
+    let sheet = reads.results.sheet_print(reads.model, reads.workbench);
+    let reads_the_pane = reads.model.simulation.active_run().is_some_and(|run| {
+        run.dataset_id == binding.dataset.dataset_id
+            && run.analyses.iter().any(|analysis| {
+                Some(analysis.id) == sheet.analysis
+                    && rspice_results::result_presentation::AnalysisPresentationKey::new(
+                        run.dataset_id,
+                        analysis,
+                    )
+                    .retained_instance_id()
+                        == binding.analysis_id
+            })
+    });
+    if reads_the_pane {
+        sheet.figures
+    } else {
+        Vec::new()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetainedHardcopySourceAvailability {
     Available,
@@ -600,6 +627,7 @@ pub fn prepare_retained_hardcopy_resolution(
                 pane_id: pane.id,
                 all_panes,
                 scope,
+                figures: pane_card_figures(reads, pane),
             },
         );
     }

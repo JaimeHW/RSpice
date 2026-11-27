@@ -5,6 +5,7 @@ use rspice_results::report_document::ReportSourceId;
 use rspice_results::visualization_document::{Page, Pane};
 use rspice_vocabulary::product::{ProjectId, ResultDocumentId};
 
+#[allow(clippy::too_many_arguments)]
 pub fn resolve_visualization_document_source(
     source_key: String,
     project_id: ProjectId,
@@ -13,6 +14,7 @@ pub fn resolve_visualization_document_source(
     pane_id: PaneId,
     all_panes: bool,
     scope: HardcopyScope,
+    figures: &[(String, String)],
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
     let reference = visualization_document_reference(document)?;
     if !all_panes {
@@ -41,6 +43,7 @@ pub fn resolve_visualization_document_source(
             page_id,
             pane_id,
             scope,
+            figures,
         });
     }
     if !matches!(scope, HardcopyScope::AllSheetsOrPanes) {
@@ -76,6 +79,8 @@ pub fn resolve_visualization_document_source(
                 page_id: page.id,
                 pane_id: pane.id,
                 scope: HardcopyScope::ActivePlotDocument,
+                // The card reads the pane it stands beside.
+                figures: if pane.id == pane_id { figures } else { &[] },
             },
         )?);
     }

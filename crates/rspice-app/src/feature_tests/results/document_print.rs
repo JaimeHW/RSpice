@@ -299,7 +299,33 @@ fn a_saved_ac_document_prints_its_frequency_on_decades() {
     let sheet_plot = plot_of(&sheet);
     assert_eq!(plot.frames, sheet_plot.frames);
     assert_eq!(plot.axis_ticks, sheet_plot.axis_ticks);
-    assert_eq!(plot.captions.first(), sheet_plot.captions.first());
+
+    // The figures the response card reads print under the plot, and the
+    // gain is read against its 0 dB line, as on the run's own Bode sheet.
+    assert_eq!(plot.captions, sheet_plot.captions);
+    assert!(
+        plot.captions
+            .iter()
+            .any(|caption| caption.text.contains("bandwidth")),
+        "{:?}",
+        plot.captions
+    );
+    assert_eq!(plot.guides, sheet_plot.guides);
+    let references = plot
+        .guides
+        .iter()
+        .filter(|guide| guide.reference)
+        .collect::<Vec<_>>();
+    assert_eq!(references.len(), 1, "one 0 dB line, on the gain strip");
+    let gain = &plot.frames[0];
+    assert!(
+        references[0]
+            .paths
+            .iter()
+            .flatten()
+            .all(|point| (gain.minimum.y_um..=gain.maximum.y_um).contains(&point.y_um)),
+        "the 0 dB line runs across the gain strip"
+    );
 }
 
 /// A pane that reads its current against a second, right-hand axis prints,

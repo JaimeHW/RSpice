@@ -420,6 +420,10 @@ pub struct SemanticPlotGuide {
     /// ink: the admittance grid of a Smith chart ruled for both.
     #[serde(default)]
     pub second: bool,
+    /// A level the figure is read against, dashed over the grid as the
+    /// sheet dashes it: the 0 dB line of a decibel strip.
+    #[serde(default)]
+    pub reference: bool,
 }
 
 const fn linear_axis() -> AxisScale {
