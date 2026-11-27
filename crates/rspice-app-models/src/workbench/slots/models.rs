@@ -1,6 +1,5 @@
 //! The models feature's session: the Models & PDKs workspace's page and
-//! catalog view, the device-model editor and its recovery, and measurement
-//! correlation.
+//! catalog view, and the device-model editor and its recovery.
 
 /// What the models feature keeps between frames.
 #[derive(Debug, Clone, Default)]
@@ -12,19 +11,14 @@ pub struct ModelsState {
     /// Selected model name within the currently selected model library.
     pub selected_model: Option<String>,
     /// Runtime-only transaction and presentation state for the project-owned
-    /// device-model editor. Committed source and qualification records remain
-    /// in the project model-library domain.
+    /// device-model editor. Committed source records remain in the project
+    /// model-library domain.
     pub model_editor: crate::workbench::documents::model_editor::ModelEditorState,
     /// Exact unsaved model candidate retained for device-local crash/session
     /// recovery. Its immutable base is reconstructed and authenticated before
     /// it is allowed back into the runtime editor.
     pub model_editor_recovery:
         Option<crate::workbench::documents::model_editor::ModelEditorRecoveryDraft>,
-    /// Runtime-only selection and transactional drafts for measurement
-    /// correlation. Committed suites and evidence remain in the project-owned
-    /// model-library domain.
-    pub model_correlation:
-        crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState,
     /// PDK Settings dialog state. Boxed: it carries a whole PDK configuration
     /// working copy and its original.
     pub pdk_settings_dialog:
@@ -133,8 +127,8 @@ impl ModelsState {
     }
 }
 
-/// What another part reads of the models feature: its unsaved authoring, its
-/// selected model and each model's release gate.
+/// What another part reads of the models feature: its unsaved authoring and
+/// its selected model.
 impl crate::workbench::framework::feature::ModelsPort for ModelsState {
     fn has_unsaved_authoring_changes(&self) -> bool {
         ModelsState::has_unsaved_authoring_changes(self)
@@ -146,12 +140,5 @@ impl crate::workbench::framework::feature::ModelsPort for ModelsState {
 
     fn selected_model(&self) -> Option<&str> {
         self.selected_model.as_deref()
-    }
-
-    fn model_gate_facts(
-        &self,
-        model: &rspice_app_state::workbench::app_state::model::Model,
-    ) -> Vec<crate::workbench::framework::ports::ModelGateFact> {
-        crate::workbench::models::qualification::model_gate_facts(model, &self.model_editor)
     }
 }

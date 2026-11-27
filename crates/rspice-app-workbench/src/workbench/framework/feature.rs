@@ -31,7 +31,7 @@ use rspice_schematic_editor::session::visibility::{
 
 use super::command_registry::{CommandAvailability, CommandFlags, CommandSpec, Registry};
 use super::dialogs::DialogKey;
-use super::ports::{ModelGateFact, ResultsPeer, ResultsPort, RunEventPort};
+use super::ports::{ResultsPeer, ResultsPort, RunEventPort};
 use super::requests::{Drain, Outbox, Request};
 
 #[cfg(any(test, feature = "test-support"))]
@@ -320,8 +320,7 @@ impl Default for PublicationDraft {
 }
 
 /// What the models feature shows that another part reads: whether its
-/// authoring holds unsaved work, the model it has selected, and each model's
-/// release gate.
+/// authoring holds unsaved work, and the model it has selected.
 pub trait ModelsPort {
     /// Whether the model editor or PDK authoring holds changes not
     /// yet saved.
@@ -330,9 +329,6 @@ pub trait ModelsPort {
     fn model_editor_has_unsaved_changes(&self) -> bool;
     /// The model selected in the selected model library, if any.
     fn selected_model(&self) -> Option<&str>;
-    /// Every model in `model`'s library closure, with its release gate as a
-    /// reading surface may know it.
-    fn model_gate_facts(&self, model: &Model) -> Vec<ModelGateFact>;
 }
 
 /// The other features a feature reads, as live references, never a copy
