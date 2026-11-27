@@ -1483,4 +1483,18 @@ fn the_summary_flags_bias_and_adds_up_dissipation() {
         [(report.entries[1].name.clone(), "triode")]
     );
     assert_eq!(summary.biased, 3);
+    assert_eq!(summary.gain_regions, ["saturation"]);
+}
+
+#[test]
+fn every_transistor_in_its_gain_region_reads_as_a_sentence() {
+    assert_eq!(
+        gain_region_words(1, &["saturation"]),
+        "1 transistor, saturation"
+    );
+    assert_eq!(gain_region_words(2, &["saturation"]), "all 2 in saturation");
+    assert_eq!(
+        gain_region_words(3, &["saturation", "forward"]),
+        "all 3 in saturation or forward active"
+    );
 }

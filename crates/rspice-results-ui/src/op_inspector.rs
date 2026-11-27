@@ -1137,6 +1137,9 @@ pub struct OpSummary {
     pub off_bias: Vec<(String, &'static str)>,
     /// How many transistors report a region the summary judged.
     pub biased: usize,
+    /// The gain regions the transistors in theirs report, once each, in the
+    /// order the devices first report them.
+    pub gain_regions: Vec<&'static str>,
 }
 
 impl OpSummary {
@@ -1173,7 +1176,40 @@ impl OpSummary {
                             || !leading_quantities(entry.device_kind).is_empty())
                 })
                 .count(),
+            gain_regions: entries
+                .iter()
+                .filter_map(|entry| {
+                    let region = entry.region?;
+                    let transistor = entry.device_kind == "BJT"
+                        || !leading_quantities(entry.device_kind).is_empty();
+                    (transistor && !off_bias(entry.device_kind, region)).then_some(region)
+                })
+                .fold(Vec::new(), |mut regions, region| {
+                    if !regions.contains(&region) {
+                        regions.push(region);
+                    }
+                    regions
+                }),
         }
+    }
+}
+
+/// Every judged transistor in its gain region, read as a sentence:
+/// `1 transistor, saturation`, `all 2 in saturation`.
+fn gain_region_words(biased: usize, regions: &[&str]) -> String {
+    // A bipolar transistor reports its gain region as `forward`, which
+    // alone reads as a diode's.
+    let regions = regions
+        .iter()
+        .map(|region| match *region {
+            "forward" => "forward active",
+            region => region,
+        })
+        .collect::<Vec<_>>()
+        .join(" or ");
+    match biased {
+        1 => format!("1 transistor, {regions}"),
+        biased => format!("all {biased} in {regions}"),
     }
 }
 
@@ -1213,7 +1249,7 @@ pub fn summary_panel(
                 ui,
                 &[(
                     "Gain region",
-                    format!("all {} transistors", summary.biased),
+                    gain_region_words(summary.biased, &summary.gain_regions),
                     false,
                 )],
             );
