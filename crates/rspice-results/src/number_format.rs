@@ -571,7 +571,8 @@ pub(crate) fn is_plane_angle(unit: &str) -> bool {
 /// glued to such a unit is raised with it — `aV²` is `(aV)²`, 10⁻³⁶ V² —
 /// so a value in it carries its prefix on the number, apart from the unit,
 /// `4.000a V²/Hz`, and its reading has no prefix slot to hold.
-fn powers_its_numerator(unit: &str) -> bool {
+#[must_use]
+pub fn powers_its_numerator(unit: &str) -> bool {
     unit.split('/')
         .next()
         .is_some_and(|numerator| numerator.contains(['²', '³', '^']))
@@ -684,6 +685,16 @@ pub fn unit_takes_prefix(unit: &str) -> bool {
 #[must_use]
 pub fn unit_carries_its_decade(unit: &str) -> bool {
     matches!(unit, "nV/√Hz" | "nA/√Hz" | "ns/√Hz")
+}
+
+/// `value` to `significant_digits`, the SI prefix of its decade on the
+/// number and the zeros its rounding leaves trimmed, `9.97a`: an end of an
+/// interval in a unit raised to a power ([`powers_its_numerator`]), which
+/// states the unit once after both ends.
+#[must_use]
+pub fn prefixed_number(value: f64, significant_digits: usize) -> String {
+    let (number, prefix) = significant_number(value, significant_digits, true, Zeros::Trim);
+    format!("{number}{prefix}")
 }
 
 /// [`fmt_si_significant`] with an explicit sign on a positive value, for a

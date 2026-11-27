@@ -249,40 +249,77 @@ pub(super) fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrum
         .x
         .fetch_whole()
         .ready()?;
-    let (total_rms, input_rms, band) = analysis
-        .noise_summary
-        .as_ref()
-        .map_or((None, None, None), |summary| {
-            (summary.total_rms, summary.input_rms, Some(summary.band))
-        });
-
-    let output = analysis.waveforms.iter().find(|waveform| {
-        rspice_results::noise_spectrum::retained_noise_reference(&waveform.name)
-            == Some(rspice_results::noise_spectrum::RetainedNoiseReference::Output)
-    });
-    let total_rms_unit = match output.and_then(|waveform| waveform.unit.as_deref()) {
-        Some("A²/Hz") => "A rms",
-        _ => "V rms",
+    let summary = analysis.noise_summary.as_ref();
+    let band = summary.map(|summary| summary.band);
+    let reference = |wanted: rspice_results::noise_spectrum::RetainedNoiseReference| {
+        analysis.waveforms.iter().find(|waveform| {
+            rspice_results::noise_spectrum::retained_noise_reference(&waveform.name) == Some(wanted)
+        })
     };
-    let jitter = analysis
-        .noise_summary
-        .as_ref()
+    let output = reference(rspice_results::noise_spectrum::RetainedNoiseReference::Output);
+    let input = reference(rspice_results::noise_spectrum::RetainedNoiseReference::Input);
+    // What the run reports integrated, else its retained density integrated
+    // over the analysis band, or over the sweep when it states none.
+    let swept = (
+        frequency.first().copied().unwrap_or_default(),
+        frequency.last().copied().unwrap_or_default(),
+    );
+    let total_rms = summary
+        .and_then(|summary| summary.total_rms)
+        .or_else(|| integrated_rms(output?, band.unwrap_or(swept)));
+    let input_rms = summary
+        .and_then(|summary| summary.input_rms)
+        .or_else(|| integrated_rms(input?, band.unwrap_or(swept)));
+    let input_rms_unit = match summary.filter(|summary| summary.input_rms.is_some()) {
+        Some(summary) => summary.input_rms_unit(),
+        None => rms_unit(input),
+    };
+    let jitter = summary
         .filter(|summary| summary.is_timing())
         .map(|summary| edge_jitter(output, summary));
     Some(NoiseSpectrumModel {
         frequency,
         total_rms,
-        total_rms_unit,
+        total_rms_unit: rms_unit(output),
+        total_absent: match output {
+            _ if total_rms.is_some() => None,
+            None => Some("The run kept no output noise spectrum to integrate."),
+            Some(_) => {
+                Some("The output spectrum holds a sample that is not a density over the band.")
+            }
+        },
         input_rms,
-        input_rms_unit: analysis
-            .noise_summary
-            .as_ref()
-            .map_or("RMS (unit not retained)", |summary| {
-                summary.input_rms_unit()
-            }),
+        input_rms_unit,
+        input_absent: match input {
+            _ if input_rms.is_some() => None,
+            None => Some(
+                "Input-referred noise needs the gain from the input source to the output, which this run did not keep.",
+            ),
+            Some(_) => Some(
+                "The input-referred spectrum holds a sample that is not a density over the band.",
+            ),
+        },
         band,
         jitter,
     })
+}
+
+/// What a retained density in `V²/Hz` or `A²/Hz` integrates to: `V rms`, or
+/// `A rms` for a current.
+fn rms_unit(density: Option<&RetainedTrace>) -> &'static str {
+    match density.and_then(|waveform| waveform.unit.as_deref()) {
+        Some("A²/Hz" | "A^2/Hz") => "A rms",
+        _ => "V rms",
+    }
+}
+
+/// The rms a retained power density integrates to over `band`, read whole
+/// once it has arrived; none when the band reaches outside its sweep or a
+/// sample in it is not a density.
+fn integrated_rms(density: &RetainedTrace, band: (f64, f64)) -> Option<f64> {
+    let frequency = density.x.fetch_whole().ready()?;
+    let samples = density.y.fetch_whole().ready()?;
+    rspice_results::phase_noise::integrate_density(&frequency, &samples, band).map(f64::sqrt)
 }
 
 /// An edge's jitter from its timing density, read whole once it has arrived:
@@ -837,6 +874,33 @@ mod tests {
         let model = build_noise_model(state.results_reads()).expect("ordinary noise spectrum");
         assert_eq!(&model.frequency[..], &[1.0, 10.0]);
         assert_eq!(selected_noise_trace_count(&state), Some(1));
+    }
+
+    /// A run whose noise summary reports no integrated figure still has
+    /// its output density: white noise of 4·10⁻¹⁶ V²/Hz from 1 Hz to 10 kHz
+    /// integrates to √(4·10⁻¹⁶ × 9999) V rms. With no input-referred
+    /// spectrum, the card says why it has no input figure.
+    #[test]
+    fn a_retained_output_density_integrates_to_the_output_noise() {
+        let frequency: Vec<f64> = (0..=40).map(|i| 10f64.powf(f64::from(i) / 10.0)).collect();
+        let density = vec![4.0e-16; frequency.len()];
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Noise, "NOISE").with_waveforms(vec![
+                RetainedTrace::new("onoise", frequency, density, "#fff").with_unit("V^2/Hz"),
+            ]),
+        );
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        let model = build_noise_model(state.results_reads()).expect("the noise model");
+        let expected = (4.0e-16_f64 * 9999.0).sqrt();
+        let total = model.total_rms.expect("the output density integrates");
+        assert!((total / expected - 1.0).abs() < 1e-9, "{total} V rms");
+        assert_eq!(model.total_rms_unit, "V rms");
+        assert!(model.total_absent.is_none());
+        assert!(model.input_rms.is_none());
+        assert!(model.input_absent.is_some_and(|why| why.contains("gain")));
     }
 
     #[test]

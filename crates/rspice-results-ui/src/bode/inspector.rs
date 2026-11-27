@@ -51,8 +51,12 @@ pub struct NoiseSpectrumModel {
     /// What the output-referred density integrates to: `V rms`, or `A rms`
     /// for a current.
     pub total_rms_unit: &'static str,
+    /// Why there is no output figure, when there is none.
+    pub total_absent: Option<&'static str>,
     pub input_rms: Option<f64>,
     pub input_rms_unit: &'static str,
+    /// Why there is no input-referred figure, when there is none.
+    pub input_absent: Option<&'static str>,
     pub band: Option<(f64, f64)>,
     /// An edge's jitter, for a periodic noise run sampled at an edge's
     /// timing: its density is the edge's timing in s²/Hz, not a voltage.
@@ -345,10 +349,19 @@ fn low_frequency_labels(adc_is_dc: bool) -> (&'static str, &'static str) {
     }
 }
 
-/// A row's value, or a dash for a figure the sweep does not reach.
+/// A row's value, or a dash for a figure the sweep holds nothing to read
+/// from.
 fn or_dash(value: Option<String>) -> String {
     value.unwrap_or_else(|| "\u{2014}".to_owned())
 }
+
+/// A frequency the response crosses at, or that it does not cross within
+/// the sweep.
+const NOT_REACHED: &str = "Not reached";
+
+/// What a figure the card cannot read reads in its row; a note under the
+/// table says why.
+const NOT_AVAILABLE: &str = "Not available";
 
 /// The stability card's rows: the loop gain measured, then each margin and
 /// the frequency it was found at, as the Nyquist panel prints them, then the
@@ -393,7 +406,10 @@ fn response_rows(
 ) -> Vec<(&'static str, String, bool)> {
     let (low, bandwidth) = low_frequency_labels(m.adc_is_dc);
     let frequency = |value: Option<f64>| {
-        or_dash(value.map(|hertz| frequency_readout(quantity_policy, hertz, significant_digits)))
+        value.map_or_else(
+            || NOT_REACHED.to_owned(),
+            |hertz| frequency_readout(quantity_policy, hertz, significant_digits),
+        )
     };
     vec![
         ("Response", signal.to_owned(), false),
@@ -452,7 +468,10 @@ pub fn noise_spectrum_right_panel(
     });
     let figure = |value: Option<f64>, unit: &str| {
         (
-            or_dash(value.map(|value| fmt_column_reading(value, unit, significant_digits))),
+            value.map_or_else(
+                || NOT_AVAILABLE.to_owned(),
+                |value| fmt_column_reading(value, unit, significant_digits),
+            ),
             value.is_some(),
         )
     };
@@ -484,6 +503,10 @@ pub fn noise_spectrum_right_panel(
     let (text, strong) = figure(model.input_rms, model.input_rms_unit);
     rows.push(("Input referred", text, strong));
     crate::presentation::stat_table(ui, &rows);
+    let output_absent = model.total_absent.filter(|_| model.jitter.is_none());
+    for why in output_absent.into_iter().chain(model.input_absent) {
+        crate::presentation::panel_note(ui, why);
+    }
 }
 
 #[cfg(test)]

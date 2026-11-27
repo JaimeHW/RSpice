@@ -89,7 +89,21 @@ pub(crate) fn shorter_axis_ranges(range: (f64, f64), unit: &str) -> Vec<String> 
 
 /// `(minimum, maximum)` to `digits` significant digits of the interval's
 /// width.
+///
+/// In a unit raised to a power each end carries its own prefix on its
+/// number, apart from the unit, which follows both once: `9.97a … 1.2p
+/// V²/Hz`. A prefix written on the unit would be raised with it, and a
+/// density spans more decades than an exponent beside a prefix reads.
 fn written((minimum, maximum): (f64, f64), unit: &str, digits: i32) -> String {
+    if rspice_results::number_format::powers_its_numerator(unit) {
+        let digits = usize::try_from(digits).unwrap_or(1);
+        let end = |value: f64| {
+            typographic_minus(&rspice_results::number_format::prefixed_number(
+                value, digits,
+            ))
+        };
+        return format!("{} \u{2026} {} {unit}", end(minimum), end(maximum));
+    }
     let width = (maximum - minimum).abs();
     if let Some(shared) = shared_decade_range((minimum, maximum), width, unit, digits) {
         return shared;
@@ -228,6 +242,15 @@ fn parse_axis_value(text: &str, unit: &str) -> Option<f64> {
         return parse_engineering_value(text).ok();
     }
     let number = text.strip_suffix(unit).unwrap_or(text).trim_end();
+    // The decades under femto, which a density in a squared unit reaches
+    // and the engineering reader has no letter for.
+    for (letter, scale) in [('a', 1.0e-18), ('z', 1.0e-21), ('y', 1.0e-24)] {
+        if let Some(mantissa) = number.strip_suffix(letter)
+            && let Ok(value) = mantissa.trim_end().parse::<f64>()
+        {
+            return Some(value * scale);
+        }
+    }
     match number.strip_suffix('M') {
         Some(mantissa) if !mantissa.ends_with(char::is_alphabetic) => {
             parse_engineering_value(&format!("{}Meg", mantissa.trim_end())).ok()
@@ -432,6 +455,22 @@ mod tests {
         );
         // A bare number keeps SPICE's spelling, where a lone M is milli.
         assert_eq!(format_axis_range((0.0, 2.0e6), ""), "0 \u{2026} 2Meg");
+    }
+
+    /// A noise power density's range read `9.97e-18… pV²/Hz`: an exponent
+    /// beside a prefix, the prefix squared with the volt, and cut short. Each
+    /// end carries its own prefix on its number, the unit once after both,
+    /// and it reads back as written.
+    #[test]
+    fn a_density_in_a_squared_unit_carries_each_ends_prefix_on_its_number() {
+        let range = (9.97e-18, 1.204e-12);
+        assert_eq!(
+            format_axis_range(range, "V\u{b2}/Hz"),
+            "9.97a \u{2026} 1.204p V\u{b2}/Hz"
+        );
+        let (low, high) = parse_axis_range("9.97a \u{2026} 1.204p V\u{b2}/Hz", "V\u{b2}/Hz")
+            .expect("the range reads back");
+        assert!((low / 9.97e-18 - 1.0).abs() < 1e-12 && (high / 1.204e-12 - 1.0).abs() < 1e-12);
     }
 
     /// A level in decibels is written as it stands, as its ticks are: never
