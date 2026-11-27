@@ -214,11 +214,29 @@ pub fn choices(
         .zip(viewer_document(&draft.viewer_id))
         .filter(|(_, viewer)| plots_signals(viewer))
         .map_or_else(Vec::new, |(analysis, _)| signal_names(analysis));
+    let places = analysis.map_or_else(Vec::new, |analysis| {
+        let ticked = signals
+            .iter()
+            .filter(|signal| draft.signals.contains(signal))
+            .cloned()
+            .collect();
+        let spread = spread_by_unit(analysis, ticked, draft.layout.pane_count());
+        signals
+            .iter()
+            .map(|signal| {
+                spread
+                    .iter()
+                    .position(|pane| pane.contains(signal))
+                    .and_then(|index| draft.layout.pane_place(index))
+            })
+            .collect()
+    });
     CreateDocumentChoices {
         runs,
         analyses,
         viewers,
         signals,
+        places,
         refusal: resolve_draft(state, draft)
             .err()
             .map(|error| error.to_string()),
@@ -806,7 +824,6 @@ fn build_document(
             .expect("AddBoundPane transaction returns its stable pane identity");
         pane_ids.push(pane_id);
     }
-
     let horizontal_axes = pane_ids
         .iter()
         .filter_map(|pane_id| {

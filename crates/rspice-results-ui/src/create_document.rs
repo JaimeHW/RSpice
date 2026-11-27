@@ -60,6 +60,9 @@ pub struct CreateDocumentChoices {
     pub viewers: Vec<(&'static str, String)>,
     /// The chosen analysis's signals, when the chosen sheet plots signals.
     pub signals: Vec<String>,
+    /// Where each ticked signal lands, beside `signals`, when the layout has
+    /// more than one pane.
+    pub places: Vec<Option<&'static str>>,
     /// Why Create is refused, when it is.
     pub refusal: Option<String>,
 }
@@ -157,21 +160,36 @@ pub fn show(
             signals.len()
         );
         band_header(ui, "Signals", Some(&count));
-        let columns = [Column::name("Signal", 120.0)];
+        // The pane each ticked signal lands in, when there is a choice of
+        // pane: the panes take the signals by unit.
+        let placed = choices.places.iter().any(Option::is_some);
+        let columns = [Column::name("Signal", 120.0), Column::words("Pane", 84.0)];
+        let columns = if placed { &columns[..] } else { &columns[..1] };
         let row_h = rspice_ui_kit::widgets::table::LineHeights::list(
             &rspice_ui_kit::tokens::Tokens::get(ui.ctx()),
         )
         .row;
         let response = DataTable::new(
             "rspice.create-result-document.signals",
-            &columns,
+            columns,
             signals.len(),
         )
         .list()
         .max_height(row_h * SIGNAL_ROWS)
         .show(ui, |row| {
             let signal = &signals[row];
-            vec![Cell::text(signal.as_str()).check(ticked.contains(signal))]
+            let mut cells = vec![Cell::text(signal.as_str()).check(ticked.contains(signal))];
+            if placed {
+                cells.push(
+                    choices
+                        .places
+                        .get(row)
+                        .copied()
+                        .flatten()
+                        .map_or_else(Cell::empty, Cell::faint),
+                );
+            }
+            cells
         });
         if let Some((row, on)) = response.checked {
             let signal = &signals[row];
@@ -181,6 +199,8 @@ pub fn show(
             }
             // The run's order, so the panes plot them as the run lists them.
             ticked.sort_by_key(|kept| signals.iter().position(|signal| signal == kept));
+            // The panes the ticks land in follow on the next frame.
+            ui.ctx().request_repaint();
         }
     });
     if ticked != held {
