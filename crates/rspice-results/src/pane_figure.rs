@@ -366,13 +366,17 @@ fn authenticated_dataset<'d>(
     Ok(dataset)
 }
 
+/// A trace's samples in source values and the unit its source states them
+/// in, where it states one.
+type TraceSamples = (Vec<(f64, f64)>, Option<String>);
+
 /// The samples one trace draws from `dataset`, and the unit its source
 /// states them in. `None` for a run signal a report copy carries no samples
 /// of, since the run has no signal by that name.
 fn trace_points(
     dataset: &SourceDataset,
     trace: &Trace,
-) -> Result<Option<(Vec<(f64, f64)>, Option<String>)>, VisualizationRasterError> {
+) -> Result<Option<TraceSamples>, VisualizationRasterError> {
     let empty = || VisualizationRasterError::EmptyTrace(trace.id.get());
     if let Some(run) = dataset.run_source() {
         // A run reference draws only from the samples a report copy of the
