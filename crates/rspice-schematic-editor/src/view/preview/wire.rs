@@ -45,7 +45,11 @@ pub fn draw_wire_preview(
                 .gamma_multiply(ROUTE_PREVIEW_ALPHA);
             // The route being drawn is a raised wire: the width it would
             // carry selected once committed.
-            let width = conductor_width_pt(viewport.zoom, painter.pixels_per_point(), true);
+            let width = conductor_width_pt(
+                viewport.zoom,
+                painter.pixels_per_point(),
+                crate::view::lod::Emphasis::Raised,
+            );
             paint_conductor(
                 painter,
                 route,

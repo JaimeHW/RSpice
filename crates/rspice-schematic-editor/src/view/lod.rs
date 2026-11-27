@@ -37,11 +37,17 @@ pub enum StrokeRole {
     Probe,
 }
 
-/// Whether the object is drawn plain or raised by selection or a highlight.
+/// Whether the object is drawn plain, raised by selection or a highlight, or
+/// at a plotted net's weight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Emphasis {
     Plain,
     Raised,
+    /// The net is on the plot. Its weight, not only its trace colour, sets
+    /// it apart from the wires: a hue alone can sit near the wire ink.
+    Plotted,
+    /// The plotted net whose trace the reader is on: plotted, then raised.
+    PlottedLit,
 }
 
 impl Emphasis {
@@ -58,6 +64,8 @@ struct StrokeLimits {
 
 /// What a raised stroke adds, in points.
 const RAISED_ADD_PT: f32 = 1.0;
+/// A plotted net draws at this multiple of its plain weight.
+const PLOTTED_SCALE: f32 = 2.0;
 /// Below this a stroke is rounded to whole device pixels.
 const CRISP_BELOW_DPX: f32 = 6.0;
 
@@ -105,11 +113,14 @@ pub fn stroke_pt(role: StrokeRole, zoom: f32, ppp: f32, emphasis: Emphasis) -> f
     let limits = limits(role);
     let floor = floor_dpx(limits.floor_pt, ppp);
     let ceiling = (limits.ceiling_pt * ppp).max(floor);
-    let add = match emphasis {
-        Emphasis::Plain => 0.0,
-        Emphasis::Raised => RAISED_ADD_PT * ppp,
+    let plain = (limits.nominal_wu * zoom.max(0.0) * ppp).clamp(floor, ceiling);
+    let raise = RAISED_ADD_PT * ppp;
+    let mut width = match emphasis {
+        Emphasis::Plain => plain,
+        Emphasis::Raised => plain + raise,
+        Emphasis::Plotted => plain * PLOTTED_SCALE,
+        Emphasis::PlottedLit => plain * PLOTTED_SCALE + raise,
     };
-    let mut width = (limits.nominal_wu * zoom.max(0.0) * ppp).clamp(floor, ceiling) + add;
     if width < CRISP_BELOW_DPX {
         width = width.round().max(floor);
     }

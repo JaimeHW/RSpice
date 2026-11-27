@@ -348,7 +348,7 @@ fn junctions_at_screen(
     pointer: egui::Pos2,
     slop: f32,
 ) -> Vec<Point> {
-    let wire = conductor_width_pt(viewport.zoom, 1.0, false);
+    let wire = conductor_width_pt(viewport.zoom, 1.0, lod::Emphasis::Plain);
     let reach = lod::junction_radius_pt(viewport.zoom, wire) + slop;
     let mut hits: Vec<(f32, Point)> = view
         .document
@@ -375,7 +375,7 @@ fn wires_at_screen(
     slop: f32,
     all: bool,
 ) -> Vec<u64> {
-    let reach = conductor_width_pt(viewport.zoom, 1.0, false) * 0.5 + slop;
+    let reach = conductor_width_pt(viewport.zoom, 1.0, lod::Emphasis::Plain) * 0.5 + slop;
     let world = super::coordinates::screen_to_schematic(viewport, pointer);
     let margin = reach / viewport.zoom.max(f32::EPSILON) + 1.0;
     let candidates: Vec<Wire> = match view.canvas_cache {

@@ -170,12 +170,15 @@ impl ConductorInk {
         }
     }
 
-    /// Selection, a highlight and the trace the reader is on raise the
-    /// stroke; a class or trace colour is a colour, not emphasis.
+    /// A plotted net draws heavy, and the trace the reader is on heavier
+    /// still; selection and a highlight raise the stroke; a class colour is
+    /// a colour, not emphasis.
     pub const fn emphasis(self) -> Emphasis {
         match self {
-            Self::Plain | Self::Class(_) | Self::Traced(_) => Emphasis::Plain,
-            Self::TracedLit(_) | Self::Highlighted | Self::Selected => Emphasis::Raised,
+            Self::Plain | Self::Class(_) => Emphasis::Plain,
+            Self::Traced(_) => Emphasis::Plotted,
+            Self::TracedLit(_) => Emphasis::PlottedLit,
+            Self::Highlighted | Self::Selected => Emphasis::Raised,
         }
     }
 }
@@ -189,11 +192,7 @@ pub fn draw_conductor(
     ink: ConductorInk,
     palette: &Palette,
 ) {
-    let width = conductor_width_pt(
-        viewport.zoom,
-        painter.pixels_per_point(),
-        ink.emphasis() == Emphasis::Raised,
-    );
+    let width = conductor_width_pt(viewport.zoom, painter.pixels_per_point(), ink.emphasis());
 
     let points = points
         .iter()
@@ -202,15 +201,10 @@ pub fn draw_conductor(
     paint_conductor(painter, points, Stroke::new(width, ink.colour(palette)));
 }
 
-/// The drawn width of a wire, in points: raised when it is selected or its
-/// net is highlighted. A junction dot on it is sized from this.
-pub fn conductor_width_pt(zoom: f32, pixels_per_point: f32, raised: bool) -> f32 {
-    lod::stroke_pt(
-        StrokeRole::Wire,
-        zoom,
-        pixels_per_point,
-        Emphasis::raised_if(raised),
-    )
+/// The drawn width of a wire, in points, at its emphasis. A junction dot on
+/// it is sized from this.
+pub fn conductor_width_pt(zoom: f32, pixels_per_point: f32, emphasis: Emphasis) -> f32 {
+    lod::stroke_pt(StrokeRole::Wire, zoom, pixels_per_point, emphasis)
 }
 
 /// Screen-space paths for a conductor polyline: one mitered path, split
@@ -1025,7 +1019,11 @@ pub fn draw_component(
         .into_iter()
         .map(|(_, terminal)| viewport.schematic_to_screen(terminal))
         .collect::<Vec<_>>();
-    let leads = PinLeads::new(&terminals, conductor_width_pt(scale, ppp, selected), scale);
+    let leads = PinLeads::new(
+        &terminals,
+        conductor_width_pt(scale, ppp, Emphasis::raised_if(selected)),
+        scale,
+    );
 
     // Authored symbols are the sole component-body source. Missing library or
     // instance resolution is rendered as an explicit error marker; it must
@@ -1675,11 +1673,7 @@ pub fn draw_junction(
 ) {
     let ppp = painter.pixels_per_point();
     let pos = viewport.schematic_to_screen(position);
-    let incident_width = conductor_width_pt(
-        viewport.zoom,
-        ppp,
-        paint.incident.emphasis() == Emphasis::Raised,
-    );
+    let incident_width = conductor_width_pt(viewport.zoom, ppp, paint.incident.emphasis());
     let radius = lod::junction_radius_pt(viewport.zoom, incident_width);
 
     if paint.selected {
@@ -1807,7 +1801,7 @@ pub fn draw_no_connect_marks(
 ) {
     let half = drawing_metrics::NO_CONNECT_HALF_WORLD * viewport.zoom.max(0.0);
     let stroke = Stroke::new(
-        conductor_width_pt(viewport.zoom, painter.pixels_per_point(), false),
+        conductor_width_pt(viewport.zoom, painter.pixels_per_point(), Emphasis::Plain),
         colour,
     );
     for terminal in terminals {

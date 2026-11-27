@@ -596,7 +596,11 @@ fn draw_conductor_hover(
     match target {
         PointerTarget::Wire(id) => {
             if let Some(wire) = document.wires.iter().find(|wire| wire.id == id) {
-                let width = super::drawing::conductor_width_pt(viewport.zoom, ppp, false);
+                let width = super::drawing::conductor_width_pt(
+                    viewport.zoom,
+                    ppp,
+                    super::lod::Emphasis::Plain,
+                );
                 draw_hover_halo(painter, viewport, &wire.points, width);
             }
         }
