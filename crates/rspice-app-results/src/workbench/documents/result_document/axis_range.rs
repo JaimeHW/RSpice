@@ -93,12 +93,8 @@ pub(crate) fn shorter_axis_ranges(range: (f64, f64), unit: &str) -> Vec<String> 
 
 /// `(minimum, maximum)` with each end's prefix on its number and the unit
 /// once after both, `−16.97k … 16.97k rad/s`: shorter than each end
-/// carrying its prefixed unit, where a bar or a field has room for the
-/// interval but not for the unit twice.
-pub(crate) fn compact_axis_range(range: (f64, f64), unit: &str) -> String {
-    compact(range, unit, SIGNIFICANT_DIGITS)
-}
-
+/// carrying its prefixed unit, where a field has room for the interval but
+/// not for the unit twice.
 fn compact((minimum, maximum): (f64, f64), unit: &str, digits: i32) -> String {
     let width = (maximum - minimum).abs();
     let end = |value: f64| {

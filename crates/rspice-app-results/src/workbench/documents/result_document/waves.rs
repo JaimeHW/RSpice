@@ -656,14 +656,14 @@ pub fn active_shared_x_status(
         });
     }
     // The pole-zero plane states the span of σ and of jω it shows, in rad/s
-    // on either plane.
+    // on either plane, spelt as its range fields spell them.
     if state.results.session.viewer == super::ResultViewer::PoleZero {
-        use super::axis_range::compact_axis_range;
+        use super::axis_range::format_axis_range;
         return super::pz::drawn_span(state.results_reads()).map(|(sigma, omega)| SharedXStatus {
             span: format!(
                 "\u{3c3} {} \u{b7} j\u{3c9} {}",
-                compact_axis_range(sigma, "rad/s"),
-                compact_axis_range(omega, "rad/s")
+                format_axis_range(sigma, "rad/s"),
+                format_axis_range(omega, "rad/s")
             ),
             zoom: 1.0,
         });
