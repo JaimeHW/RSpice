@@ -14,7 +14,9 @@ use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_branches_into,
 };
 use rspice_ui_kit::plot::{CursorPair, SampleInterpolation, XScale};
-use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, fitted_width};
+use rspice_ui_kit::widgets::table::{
+    CELL_PAD, Cell, Column, DataTable, TABLE_EDGE_INSET, TABLE_ROW_H, fitted_width,
+};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::AtomicUsize;
@@ -101,19 +103,44 @@ pub fn measurement_panel(
     // reading's name on the left, its value right-aligned on its own column.
     // The value column is as wide as the widest value it has shown of these
     // measurements and the name takes the rest, so a name is cut only where
-    // the row really has no room for it, and its hover holds it whole. The
-    // widths are measured from the rows drawn and take effect on the next
-    // frame, as the values themselves are read.
+    // the row really has no room for it, and its hover holds it whole.
     let width_id = ui.id().with("waves.measurements.value-width");
-    let (width_of, value_width) = ui
-        .data(|data| data.get_temp::<(MeasuredOf, f32)>(width_id))
-        .unwrap_or((of, MEASUREMENT_COLUMN_LEAST_W));
-    let columns = [
-        Column::name("Measurement", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
-        Column::number("Value", value_width).unsortable(),
-    ];
+    let stored = ui.data(|data| data.get_temp::<(MeasuredOf, f32)>(width_id));
+    // The value column is the table's last, so its far side keeps the
+    // table's edge inset rather than a cell's padding.
+    let value_column_width = |ui: &Ui, values: &[Cell]| {
+        (fitted_width(ui, "Value", values) + TABLE_EDGE_INSET - CELL_PAD)
+            .max(MEASUREMENT_COLUMN_LEAST_W)
+    };
+    let columns = |value_width: f32| {
+        [
+            Column::name("Measurement", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
+            Column::number("Value", value_width).unsortable(),
+        ]
+    };
     match shown {
         Shown::Measured(measured) => {
+            // New measurements are sized before their first frame from the
+            // rows a screenful of the table can show, so no value is drawn
+            // cut while the column catches up; the rows drawn after that
+            // widen it only if a wider value scrolls in.
+            let value_width = match stored {
+                Some((stored_of, width)) if stored_of == of => width,
+                _ => {
+                    let room = ui.clip_rect().bottom() - ui.cursor().top();
+                    let room = if room.is_finite() {
+                        room.max(0.0)
+                    } else {
+                        ui.ctx().content_rect().height()
+                    };
+                    let rows = ((room / TABLE_ROW_H).ceil() as usize + 1).min(measured.rows);
+                    let values: Vec<Cell> = (0..rows)
+                        .map(|row| Cell::quantity(measured.row(model, row, wording).value))
+                        .collect();
+                    value_column_width(ui, &values)
+                }
+            };
+            let columns = columns(value_width);
             let keep = if window.is_some() {
                 "Keep between the cursors"
             } else {
@@ -163,32 +190,29 @@ pub fn measurement_panel(
                     },
                 );
             });
-            // The same measurements keep the widest value seen, so the
-            // column holds still while the rows scroll; new ones start over.
-            let fitted = fitted_width(ui, "Value", &values).max(MEASUREMENT_COLUMN_LEAST_W);
-            let fitted = if width_of == of {
-                fitted.max(value_width)
-            } else {
-                fitted
-            };
-            if width_of != of || (fitted - value_width).abs() > 0.5 {
+            // The same measurements keep the widest value drawn, so the
+            // column holds still while the rows scroll.
+            let fitted = value_column_width(ui, &values).max(value_width);
+            if stored != Some((of, fitted)) {
                 ui.data_mut(|data| data.insert_temp(width_id, (of, fitted)));
-                if (fitted - value_width).abs() > 0.5 {
-                    ui.ctx().request_repaint();
-                }
+            }
+            if fitted > value_width + 0.5 {
+                ui.ctx().request_repaint();
             }
             kept
         }
         Shown::Measuring(signals) => {
-            let _ = DataTable::new("results.measurements", &columns, 1).show(ui, |_| {
-                vec![
-                    Cell::faint(format!(
-                        "Measuring {signals} signal{}…",
-                        if signals == 1 { "" } else { "s" }
-                    )),
-                    Cell::empty(),
-                ]
-            });
+            let value_width = stored.map_or(MEASUREMENT_COLUMN_LEAST_W, |(_, width)| width);
+            let _ =
+                DataTable::new("results.measurements", &columns(value_width), 1).show(ui, |_| {
+                    vec![
+                        Cell::faint(format!(
+                            "Measuring {signals} signal{}…",
+                            if signals == 1 { "" } else { "s" }
+                        )),
+                        Cell::empty(),
+                    ]
+                });
             None
         }
         Shown::Nothing => None,
