@@ -146,7 +146,7 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                                 )
                                 .show(ui, |ui| {
                                     let tabs = ui.horizontal(|ui| {
-                                        document_tabs(
+                                        let tabs = document_tabs(
                                             ui,
                                             app.session_mut(),
                                             StripTabs {
@@ -157,7 +157,9 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                                             },
                                             height,
                                             fit.cap,
-                                        )
+                                        );
+                                        ui.add_space(trailing_room(&tabs.0, track));
+                                        tabs
                                     });
                                     ui.ctx().accesskit_node_builder(tabs.response.id, |node| {
                                         node.set_role(egui::accesskit::Role::TabList);
@@ -170,6 +172,15 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                         },
                     )
                     .inner;
+                if fit.overflowing {
+                    stand_tabs_whole(ui, app.session(), &documents, &scroll);
+                } else if let Some(active) =
+                    authoritative_active_document(app.session(), &documents)
+                {
+                    // Every tab is in view: the active one is revealed.
+                    let key = egui::Id::new(("workbench.document_tabs.active", &active));
+                    ctx.data_mut(|data| data.insert_temp(revealed_key(), (key, true)));
+                }
                 paint_scroll_fades(ui, &scroll, t.color.bg_panel);
                 if let Some(refusal) = &create {
                     request.create = create_document_button(
@@ -593,7 +604,10 @@ fn paint_scroll_fades(
         .inner_rect
         .with_max_y(scroll.inner_rect.bottom() - 1.0);
     let before = scroll.state.offset.x;
-    let after = scroll.content_size.x - band.width() - before;
+    let after = scroll.content_size.x
+        - trailing_room(&scroll.inner, scroll.inner_rect.width())
+        - band.width()
+        - before;
     let width = STRIP_FADE_WIDTH.min(band.width() * 0.5);
     if before > 0.5 {
         let edge = Rect::from_min_size(band.left_top(), Vec2::new(width, band.height()));
@@ -1156,9 +1170,6 @@ fn document_tabs(
             .inner;
         tab_ids.push(tab.response.id);
         tab_rects.push(tab.response.rect);
-        if selected {
-            reveal_newly_active_tab(ui, &tab.response);
-        }
 
         // A pointer press activates a tab without taking keyboard focus, so
         // the focus ring appears only for a reader who is using the keys.
@@ -1284,19 +1295,137 @@ fn result_document_tab_menu(
     }
 }
 
-/// Scroll the active tab into view when it becomes active, whether by a
-/// press, Ctrl+Tab or the navigator. Only until it is in view: revealing it
-/// every frame would undo every turn of the wheel over the strip, and
-/// revealing it once can stop short while the scroll is still animating.
-fn reveal_newly_active_tab(ui: &Ui, tab: &egui::Response) {
-    let revealed = egui::Id::new("workbench.document_tabs.revealed");
-    if ui.ctx().data(|data| data.get_temp::<egui::Id>(revealed)) == Some(tab.id) {
+/// Where the strip remembers which tab was last made active and whether it
+/// has been brought into view.
+fn revealed_key() -> egui::Id {
+    egui::Id::new("workbench.document_tabs.revealed")
+}
+
+/// The room the strip's scroll keeps after its last tab, `tabs` laid out
+/// along a viewport `width` wide, so that every tab can stand first at its
+/// left edge: none while every tab is in view.
+fn trailing_room(tabs: &[Rect], width: f32) -> f32 {
+    let (Some(first), Some(last)) = (tabs.first(), tabs.last()) else {
+        return 0.0;
+    };
+    let end = last.right() - first.left();
+    if end <= width + 0.5 {
+        return 0.0;
+    }
+    // The first tab whose start leaves every tab after it in view.
+    let start = tabs
+        .iter()
+        .map(|tab| tab.left() - first.left())
+        .find(|start| end - start <= width + 0.5)
+        .unwrap_or(end);
+    (start + width - end).max(0.0)
+}
+
+/// Stand the scrolled strip on a tab's start, so no tab is cut at its left
+/// edge, and bring the active tab into view when it becomes active, whether
+/// by a press, Ctrl+Tab or the navigator. The active tab is brought in only
+/// until it is in view: brought in every frame, it would undo every turn of
+/// the wheel over the strip. While the wheel turns the strip is left alone,
+/// and it settles on a tab's start when the wheel stops.
+fn stand_tabs_whole(
+    ui: &Ui,
+    state: &impl DocumentSession,
+    documents: &[WorkspaceDocument],
+    scroll: &egui::scroll_area::ScrollAreaOutput<Vec<Rect>>,
+) {
+    let viewport = scroll.inner_rect;
+    let wheeling = ui.rect_contains_pointer(viewport)
+        && ui.input(|input| input.smooth_scroll_delta != Vec2::ZERO);
+    if wheeling {
         return;
     }
-    tab.scroll_to_me(None);
-    let viewport = ui.clip_rect();
-    if in_view(viewport, tab.rect) || tab.rect.width() >= viewport.width() {
-        ui.ctx().data_mut(|data| data.insert_temp(revealed, tab.id));
+    let active = authoritative_active_document(state, documents);
+    let index = active
+        .as_ref()
+        .and_then(|active| documents.iter().position(|document| &document.id == active));
+    let key = active
+        .as_ref()
+        .map(|active| egui::Id::new(("workbench.document_tabs.active", active)));
+    let held = ui
+        .ctx()
+        .data(|data| data.get_temp::<(egui::Id, bool)>(revealed_key()));
+    let revealing = key.is_some_and(|key| held != Some((key, true)));
+    let offset = scroll.state.offset.x;
+    let tabs: Vec<(f32, f32)> = scroll
+        .inner
+        .iter()
+        .map(|tab| {
+            let start = tab.left() - viewport.left() + offset;
+            (start, start + tab.width())
+        })
+        .collect();
+    let farthest = (scroll.content_size.x - viewport.width()).max(0.0);
+    let target = whole_tab_offset(
+        &tabs,
+        viewport.width(),
+        offset,
+        index.map(|index| (index, revealing)),
+    )
+    .clamp(0.0, farthest);
+    if (target - offset).abs() > 0.5 {
+        let mut stood = scroll.state;
+        stood.offset.x = target;
+        stood.store(ui.ctx(), scroll.id);
+        ui.ctx().request_repaint();
+    }
+    if let (Some(key), Some(index)) = (key, index) {
+        let shown = tabs.get(index).is_none_or(|(start, end)| {
+            *start >= target - 0.5
+                && (*end <= target + viewport.width() + 0.5 || *start <= target + 0.5)
+        });
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(revealed_key(), (key, shown)));
+    }
+}
+
+/// Where a strip of `tabs`, each its start and end along the scroll, stands
+/// in a viewport `width` wide now at `offset`: on a tab's start, with the
+/// active tab, when `active` says it is being brought into view, all in
+/// view. The tab cut at the left edge goes out of view, unless the active
+/// tab would go with it.
+fn whole_tab_offset(
+    tabs: &[(f32, f32)],
+    width: f32,
+    offset: f32,
+    active: Option<(usize, bool)>,
+) -> f32 {
+    let mut target = offset;
+    let held = active.and_then(|(index, _)| tabs.get(index).copied());
+    if let Some((index, true)) = active
+        && let Some(&(start, end)) = tabs.get(index)
+    {
+        if start < target - 0.5 {
+            target = start;
+        } else if end > target + width + 0.5 {
+            target = tabs
+                .iter()
+                .map(|(start, _)| *start)
+                .find(|start| end - start <= width + 0.5)
+                .unwrap_or(start);
+        }
+    }
+    if tabs.iter().any(|(start, _)| (start - target).abs() <= 0.5) {
+        return target;
+    }
+    let next = tabs
+        .iter()
+        .map(|(start, _)| *start)
+        .find(|start| *start > target);
+    let previous = tabs
+        .iter()
+        .map(|(start, _)| *start)
+        .filter(|start| *start < target)
+        .last();
+    match (next, previous) {
+        (Some(next), _) if held.is_none_or(|(start, _)| start >= next - 0.5) => next,
+        (_, Some(previous)) => previous,
+        (Some(next), None) => next,
+        (None, None) => target,
     }
 }
 
@@ -1601,6 +1730,42 @@ pub fn suffix_width(dirty: bool, closable: bool) -> f32 {
         (true, false) => TAB_CONTENT_GAP + TAB_DIRTY_SIZE,
         // An unsaved tab that closes shows its marker in the close's place.
         (_, true) => TAB_CONTENT_GAP + 2.0 + TAB_CLOSE_SIZE,
+    }
+}
+
+#[cfg(test)]
+mod whole_tab_tests {
+    use super::*;
+
+    const TABS: [(f32, f32); 4] = [(0.0, 100.0), (100.0, 200.0), (200.0, 300.0), (300.0, 400.0)];
+
+    #[test]
+    fn a_tab_cut_at_the_left_edge_goes_out_of_view_unless_it_is_the_active_one() {
+        assert_eq!(whole_tab_offset(&TABS, 250.0, 50.0, None), 100.0);
+        assert_eq!(
+            whole_tab_offset(&TABS, 250.0, 50.0, Some((2, false))),
+            100.0
+        );
+        assert_eq!(whole_tab_offset(&TABS, 250.0, 50.0, Some((0, false))), 0.0);
+    }
+
+    #[test]
+    fn a_tab_made_active_out_of_view_is_brought_in_on_a_tabs_start() {
+        assert_eq!(whole_tab_offset(&TABS, 250.0, 0.0, Some((3, true))), 200.0);
+        assert_eq!(whole_tab_offset(&TABS, 250.0, 200.0, Some((0, true))), 0.0);
+        // Once it is in view, the wheel's place is kept.
+        assert_eq!(
+            whole_tab_offset(&TABS, 250.0, 100.0, Some((3, false))),
+            100.0
+        );
+    }
+
+    #[test]
+    fn the_strip_keeps_room_after_its_last_tab_for_every_tab_to_stand_first() {
+        let rects = TABS
+            .map(|(start, end)| Rect::from_min_max(egui::pos2(start, 0.0), egui::pos2(end, 28.0)));
+        assert_eq!(trailing_room(&rects, 250.0), 50.0);
+        assert_eq!(trailing_room(&rects, 400.0), 0.0);
     }
 }
 
