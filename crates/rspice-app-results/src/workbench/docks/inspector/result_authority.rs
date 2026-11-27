@@ -172,10 +172,10 @@ fn saved_output_status(status: &SavedOutputMaterializationStatus) -> (String, Op
             )),
         ),
         SavedOutputMaterializationStatus::Deferred => (
-            "Deferred".to_owned(),
+            "Not computed".to_owned(),
             Some(
-                "The recipe is retained rather than the samples. Materialize evaluates it \
-                 against this run's retained data."
+                "The run kept the expression, not its samples. Compute evaluates it against \
+                 this run's data."
                     .to_owned(),
             ),
         ),
@@ -192,8 +192,8 @@ fn saved_output_status(status: &SavedOutputMaterializationStatus) -> (String, Op
 /// A deferred output's Materialize, right-aligned in the value column of the
 /// row it acts on. Returns whether it was pressed.
 fn materialize_action(ui: &mut Ui, row: Rect, name: &str) -> bool {
-    let accessible = format!("Materialize {name}");
-    let button = Button::new("Materialize")
+    let accessible = format!("Compute {name}");
+    let button = Button::new("Compute")
         .compact()
         .ghost()
         .accessible_label(&accessible);
@@ -211,7 +211,7 @@ fn materialize_action(ui: &mut Ui, row: Rect, name: &str) -> bool {
             |ui| {
                 button
                     .show(ui)
-                    .on_hover_text("Evaluate this output from the run's retained data.")
+                    .on_hover_text("Evaluate this output from the run's data.")
                     .clicked()
             },
         )

@@ -89,13 +89,13 @@ impl ManifestViewModel {
                     ManifestRow {
                         analysis: task.result_analysis_type().display_name().to_owned(),
                         expansion: result.map_or_else(
-                            || "not retained".to_owned(),
+                            || "not kept".to_owned(),
                             |analysis| expansion_label(analysis.as_ref()),
                         ),
                         tasks: "1".to_owned(),
                         domain_axis: domain_meta(task.result_analysis_type()).axis.to_owned(),
                         stored_values: result.map_or_else(
-                            || "not retained".to_owned(),
+                            || "not kept".to_owned(),
                             |analysis| stored_values_label(analysis.as_ref()),
                         ),
                         precision: result.map_or_else(
@@ -118,9 +118,9 @@ impl ManifestViewModel {
                                     // engine, so it is stated on this row
                                     // rather than only in the run-wide
                                     // qualification line above.
-                                    "retained · preview engine · non-sign-off".to_owned()
+                                    "complete · preview engine · non-sign-off".to_owned()
                                 } else {
-                                    "retained · receipt matched · sign-off unavailable".to_owned()
+                                    "complete · receipt matched · sign-off unavailable".to_owned()
                                 }
                             },
                         ),
@@ -177,7 +177,7 @@ impl ManifestViewModel {
             (Some(_), Err(error)) => format!("blocked · {error}"),
             (None, Ok(())) => "legacy provenance valid".to_owned(),
             (None, Err(_)) if run.provenance().is_none() => {
-                "unsealed · no authoritative provenance".to_owned()
+                "unsealed · no signed provenance".to_owned()
             }
             (None, Err(error)) => format!("blocked · {error}"),
         };
@@ -222,7 +222,7 @@ impl ManifestViewModel {
             run_label: run.label.clone(),
             lifecycle: lifecycle_label(run.lifecycle).to_owned(),
             execution_target: run.execution_target.map_or_else(
-                || "not retained".to_owned(),
+                || "not recorded".to_owned(),
                 |target| target.label().to_owned(),
             ),
             elapsed_time: rspice_vocabulary::quantity::format_elapsed(run.elapsed_time),
@@ -426,9 +426,9 @@ fn stored_values_label<W: AsRef<RetainedWaveform>>(analysis: &AnalysisResult<W>)
     }
     if parts.is_empty() {
         if analysis.success {
-            "no retained values".to_owned()
+            "no values kept".to_owned()
         } else {
-            "failed · no retained values".to_owned()
+            "failed · no values kept".to_owned()
         }
     } else {
         parts.join(" · ")
@@ -672,7 +672,7 @@ fn floquet_manifest_count_label(
     ) {
         format!("{count} complete {noun}")
     } else {
-        format!("{count} retained {noun}; completeness unavailable")
+        format!("{count} {noun}; completeness unavailable")
     }
 }
 
@@ -720,7 +720,7 @@ fn expansion_label<W: AsRef<RetainedWaveform>>(analysis: &AnalysisResult<W>) -> 
             if provenance.authored_source_instance_id() == provenance.source_instance_id() {
                 "single task".to_owned()
             } else {
-                "materialized PVT point".to_owned()
+                "PVT corner".to_owned()
             }
         },
     )
@@ -730,11 +730,11 @@ const fn missing_result_status(lifecycle: SimulationRunLifecycle) -> &'static st
     match lifecycle {
         SimulationRunLifecycle::Preparing
         | SimulationRunLifecycle::Running
-        | SimulationRunLifecycle::Cancelling => "pending · not yet retained",
+        | SimulationRunLifecycle::Cancelling => "pending · not produced yet",
         SimulationRunLifecycle::Failed
         | SimulationRunLifecycle::Aborted
         | SimulationRunLifecycle::Interrupted => "not produced",
-        SimulationRunLifecycle::Completed | SimulationRunLifecycle::LegacyUnknown => "not retained",
+        SimulationRunLifecycle::Completed | SimulationRunLifecycle::LegacyUnknown => "not kept",
     }
 }
 
@@ -771,7 +771,7 @@ fn qualification_label<A>(run: &SimulationRun<A>, provenance_is_valid: bool) -> 
         | SimulationRunLifecycle::Aborted
         | SimulationRunLifecycle::Interrupted => {
             let Some(receipt) = run.prepared_receipt() else {
-                return "unavailable · no retained qualification authority · non-sign-off"
+                return "unavailable · no qualification record · non-sign-off"
                     .to_owned();
             };
             if !provenance_is_valid {
@@ -797,14 +797,14 @@ const fn inventory_title(lifecycle: SimulationRunLifecycle) -> &'static str {
         SimulationRunLifecycle::Completed
         | SimulationRunLifecycle::Failed
         | SimulationRunLifecycle::Aborted
-        | SimulationRunLifecycle::Interrupted => "Retained analysis inventory",
+        | SimulationRunLifecycle::Interrupted => "Analysis inventory",
     }
 }
 
 const fn inventory_status(lifecycle: SimulationRunLifecycle) -> &'static str {
     match lifecycle {
         SimulationRunLifecycle::LegacyUnknown => {
-            "legacy manifest · mutability authority unavailable"
+            "legacy manifest · lock state unknown"
         }
         SimulationRunLifecycle::Preparing
         | SimulationRunLifecycle::Running
@@ -896,9 +896,9 @@ mod tests {
         );
         assert_eq!(
             manifest.qualification,
-            "unavailable · no retained qualification authority · non-sign-off"
+            "unavailable · no qualification record · non-sign-off"
         );
-        assert_eq!(manifest.inventory_title, "Retained analysis inventory");
+        assert_eq!(manifest.inventory_title, "Analysis inventory");
     }
     #[test]
     fn active_manifest_never_claims_to_be_frozen_or_qualified() {
@@ -981,7 +981,7 @@ mod tests {
         );
         assert_eq!(
             manifest.rows[0].eligibility,
-            "retained · preview engine · non-sign-off"
+            "complete · preview engine · non-sign-off"
         );
     }
     #[test]
@@ -1036,7 +1036,7 @@ mod tests {
         );
         assert_eq!(
             manifest.rows[0].eligibility,
-            "retained · receipt matched · sign-off unavailable"
+            "complete · receipt matched · sign-off unavailable"
         );
     }
     #[test]

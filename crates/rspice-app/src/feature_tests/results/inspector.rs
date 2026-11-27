@@ -714,14 +714,14 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output() {
             .find(|(_, node)| node.label() == Some("output_voltage") && node.value().is_some())
             .and_then(|(_, node)| node.value().map(str::to_owned))
     };
-    assert_eq!(row_value(&nodes).as_deref(), Some("Deferred"));
+    assert_eq!(row_value(&nodes).as_deref(), Some("Not computed"));
     let materialize = nodes
         .iter()
         .find(|(_, node)| {
-            node.role() == Role::Button && node.label() == Some("Materialize output_voltage")
+            node.role() == Role::Button && node.label() == Some("Compute output_voltage")
         })
         .map(|(id, _)| *id)
-        .expect("the deferred output's row offers Materialize");
+        .expect("the deferred output's row offers Compute");
 
     pass(
         &mut app,
@@ -761,8 +761,8 @@ fn materialize_in_the_run_section_evaluates_a_deferred_output() {
     assert!(
         !nodes
             .iter()
-            .any(|(_, node)| node.label() == Some("Materialize output_voltage")),
-        "a materialized output offers Materialize again"
+            .any(|(_, node)| node.label() == Some("Compute output_voltage")),
+        "a materialized output offers Compute again"
     );
 }
 
