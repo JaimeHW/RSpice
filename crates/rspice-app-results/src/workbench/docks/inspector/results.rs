@@ -357,10 +357,12 @@ fn active_result_pane(
     // already on the sheet tab above.
     let tokens = Tokens::get(ui.ctx());
     let facts = crate::workbench::documents::result_document::active_pane_facts(&tokens, state);
+    // A unit-scoped pane names its unit on a row of its own: on the
+    // section's head, a lone "V" or "A" read as a stray letter, not a unit.
     section_header(
         ui,
         "Active pane",
-        Some(facts.unit.as_deref().unwrap_or_else(|| viewer.label())),
+        facts.unit.is_none().then(|| viewer.label()),
     );
     // The pane names the analysis it draws, which on a sheet outside the
     // waveform stack is not the one the run's analysis selector points at,
@@ -373,6 +375,9 @@ fn active_result_pane(
                 |place| format!("{place} \u{b7} {analysis}"),
             );
     property_row(ui, "Pane", &pane);
+    if let Some(unit) = facts.unit.as_deref() {
+        property_row(ui, "Unit", unit);
+    }
     if let Some(scale) = facts.scale {
         property_row(ui, "Scale", scale);
     }
