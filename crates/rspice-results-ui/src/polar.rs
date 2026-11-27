@@ -1302,8 +1302,13 @@ fn register_rows(
             dash()
         }
     });
+    // A change reads on the SI ladder: two magnitudes a hair apart differ
+    // by `−2.663 n`, not `−2.663e−9`.
+    let change = |value: f64, unit: &str| {
+        rspice_results::number_format::fmt_change_reading(value, unit, digits)
+    };
     let magnitude_delta = pair.map_or_else(dash, |(a, b)| {
-        fmt_column_reading(locus.magnitude(b) - locus.magnitude(a), &locus.unit, digits)
+        change(locus.magnitude(b) - locus.magnitude(a), &locus.unit)
     });
     let decibel_delta = pair.map_or_else(dash, |(a, b)| {
         let (first, second) = (locus.magnitude(a), locus.magnitude(b));
@@ -1353,17 +1358,13 @@ fn register_rows(
             "Re",
             at(samples.a, &real),
             at(samples.b, &real),
-            pair.map_or_else(dash, |(a, b)| {
-                fmt_column_reading(locus.real[b] - locus.real[a], "", digits)
-            }),
+            pair.map_or_else(dash, |(a, b)| change(locus.real[b] - locus.real[a], "")),
         ),
         (
             "Im",
             at(samples.a, &imaginary),
             at(samples.b, &imaginary),
-            pair.map_or_else(dash, |(a, b)| {
-                fmt_column_reading(locus.imag[b] - locus.imag[a], "", digits)
-            }),
+            pair.map_or_else(dash, |(a, b)| change(locus.imag[b] - locus.imag[a], "")),
         ),
         (
             "Group delay",
@@ -1426,61 +1427,78 @@ fn group_delay_seconds(locus: &PolarLocus, a: usize, b: usize) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
-/// The register's inset from the panel edges.
-const REGISTER_EDGE: f32 = 12.0;
 /// The air between two register columns.
 const REGISTER_GAP: f32 = 10.0;
+/// The least air between two register columns: the gaps narrow to it before
+/// a name is let wrap.
+const REGISTER_GAP_MIN: f32 = 6.0;
 
 /// The four-column register: measure, A, B, Δ. Each value column is as wide
 /// as its widest reading, a gap from the next and right-aligned; the name
-/// column takes what is left and wraps a name that will not fit on a line.
+/// column takes what is left. A name keeps one line while the gaps can
+/// narrow for it, and only past that breaks between its words. Every row
+/// stands at one height.
 fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
     let t = Tokens::get(ui.ctx());
     let c = &t.color;
     let width = ui.available_width();
-    let inner = (width - 2.0 * REGISTER_EDGE).max(1.0);
+    let inset = rspice_ui_kit::panels::panel_inset(ui);
+    let inner = (width - 2.0 * inset).max(1.0);
     let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     // Sans: the Δ head is not in the bundled mono face.
     let head_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
     let name_font = theme::sans(tokens::FS_1, FontWeight::Regular);
     let header = ["A", "B", "\u{394}"];
 
-    let (name_width, columns) = {
+    let (gap, columns, names, row_height) = {
         let painter = ui.painter();
         let measure = |text: &str, font: &egui::FontId| {
             painter
                 .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
                 .size()
-                .x
         };
-        let mut columns = header.map(|label| measure(label, &head_font));
+        let mut columns = header.map(|label| measure(label, &head_font).x);
         for (_, a, b, delta) in rows {
             for (column, value) in [a, b, delta].into_iter().enumerate() {
-                columns[column] = columns[column].max(measure(value, &value_font));
+                columns[column] = columns[column].max(measure(value, &value_font).x);
             }
         }
+        let readings: f32 = columns.iter().sum();
+        let widest_name = rows
+            .iter()
+            .map(|row| measure(row.0, &name_font).x)
+            .fold(0.0_f32, f32::max);
+        let gap = ((inner - readings - widest_name) / 3.0).clamp(REGISTER_GAP_MIN, REGISTER_GAP);
         // A name keeps at least its longest word; past that the readings
         // give way, each by the same share, and clip.
         let longest_word = rows
             .iter()
             .flat_map(|row| row.0.split(' '))
-            .map(|word| measure(word, &name_font))
+            .map(|word| measure(word, &name_font).x)
             .fold(0.0_f32, f32::max);
-        let readings: f32 = columns.iter().sum();
-        let name_width = (inner - readings - REGISTER_GAP * 3.0).max(longest_word);
-        let room = (inner - name_width - REGISTER_GAP * 3.0).max(0.0);
+        let name_width = (inner - readings - gap * 3.0).max(longest_word);
+        let room = (inner - name_width - gap * 3.0).max(0.0);
         if readings > room && readings > 0.0 {
             for column in &mut columns {
                 *column *= room / readings;
             }
         }
-        (name_width, columns)
+        let names = rows
+            .iter()
+            .map(|row| broken_between_words(row.0, name_width, |text| measure(text, &name_font).x))
+            .collect::<Vec<_>>();
+        let tallest = names
+            .iter()
+            .map(|name| measure(name, &name_font).y)
+            .fold(0.0_f32, f32::max);
+        let row_height = (tallest + 8.0).max(rspice_ui_kit::panels::PANEL_ROW_H);
+        (gap, columns, names, row_height)
     };
-    // Each value column's right edge, from the register's left inset.
+    // Each value column's right edge, from the row's left.
     let mut rights = [0.0_f32; 3];
-    let mut edge = REGISTER_EDGE + name_width;
+    let mut edge = inset + inner - columns.iter().sum::<f32>() - gap * 3.0;
     for (right, column) in rights.iter_mut().zip(columns) {
-        edge += REGISTER_GAP + column;
+        edge += gap + column;
         *right = edge;
     }
 
@@ -1503,15 +1521,9 @@ fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
         );
     }
 
-    for (index, (name, a, b, delta)) in rows.iter().enumerate() {
-        let name_galley = ui.painter().layout(
-            (*name).to_owned(),
-            name_font.clone(),
-            c.text_dim,
-            name_width,
-        );
-        let height = (name_galley.size().y + 8.0).max(25.0);
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
+    for (index, ((name, a, b, delta), shown)) in rows.iter().zip(&names).enumerate() {
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(width, row_height), Sense::hover());
         response.widget_info(|| {
             WidgetInfo::labeled(
                 WidgetType::Label,
@@ -1529,12 +1541,11 @@ fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
             continue;
         }
         let painter = ui.painter();
-        painter.galley(
-            egui::pos2(
-                rect.left() + REGISTER_EDGE,
-                rect.center().y - name_galley.size().y * 0.5,
-            ),
-            name_galley,
+        painter.text(
+            egui::pos2(rect.left() + inset, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            shown,
+            name_font.clone(),
             c.text_dim,
         );
         for ((right, column), value) in rights.iter().zip(columns).zip([a, b, delta]) {
@@ -1558,6 +1569,26 @@ fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
             );
         }
     }
+}
+
+/// `name` broken into lines no wider than `width` between its words, each
+/// line starting on a word: no line opens with the space it was broken at.
+/// A name that fits is returned whole.
+fn broken_between_words(name: &str, width: f32, measure: impl Fn(&str) -> f32) -> String {
+    if measure(name) <= width {
+        return name.to_owned();
+    }
+    let mut lines: Vec<String> = Vec::new();
+    for word in name.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if measure(&format!("{line} {word}")) <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_owned()),
+        }
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -1751,6 +1782,22 @@ mod tests {
             RadiusRule::resolve(PolarRadius::Magnitude, 1.3, false).within_unit_circle(1.3);
         assert!((active.ceiling - 1.5).abs() < 1.0e-9, "{active:?}");
         assert!(active.emphasizes_unit_circle());
+    }
+
+    /// A name too wide for its column breaks between its words, and no line
+    /// opens with the space it was broken at.
+    #[test]
+    fn a_register_name_breaks_between_words_with_no_leading_space() {
+        let chars = |text: &str| text.chars().count() as f32;
+        assert_eq!(
+            broken_between_words("Group delay", 11.0, chars),
+            "Group delay"
+        );
+        assert_eq!(
+            broken_between_words("Magnitude dB", 9.0, chars),
+            "Magnitude\ndB"
+        );
+        assert_eq!(broken_between_words("a b c", 3.0, chars), "a b\nc");
     }
 
     /// Group delay at each cursor is the local phase slope, so a constant

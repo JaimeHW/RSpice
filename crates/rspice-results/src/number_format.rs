@@ -293,6 +293,18 @@ pub fn fmt_column_reading(value: f64, unit: &str, significant_digits: usize) -> 
     joined(&number, prefix, unit)
 }
 
+/// A change between two readings on the SI ladder, even with no unit: two
+/// magnitudes a hair apart differ by `−2.663 n`, not `−2.663e−9`. A unit
+/// that takes no prefix reads as [`fmt_column_reading`] reads it.
+#[must_use]
+pub fn fmt_change_reading(value: f64, unit: &str, significant_digits: usize) -> String {
+    if !unit.is_empty() && !unit_takes_prefix(unit) {
+        return fmt_column_reading(value, unit, significant_digits);
+    }
+    let (number, prefix) = significant_number(value, significant_digits, true, Zeros::Keep);
+    joined(&number, prefix, unit)
+}
+
 /// [`fmt_column_reading`] with an explicit sign on a positive value, for a
 /// change or a margin: `+1.50 dB`, `−600.0 µV`, and zero unsigned.
 #[must_use]
@@ -1475,6 +1487,17 @@ mod tests {
             "\u{2265} 39.5 dB \u{b7} 38 beyond"
         ));
         assert!(!leaves_prefix_slot_blank("101 measured \u{b7} 38 failing"));
+    }
+
+    #[test]
+    fn a_change_reads_on_the_si_ladder_with_or_without_a_unit() {
+        assert_eq!(fmt_change_reading(-2.663e-9, "", 4), "\u{2212}2.663 n");
+        assert_eq!(fmt_change_reading(0.04774, "", 4), "47.74 m");
+        assert_eq!(fmt_change_reading(1.5e-3, "V", 4), "1.500 mV");
+        assert_eq!(
+            fmt_change_reading(-2.5, "dB", 4),
+            fmt_column_reading(-2.5, "dB", 4)
+        );
     }
 
     /// A statistic far below its samples' spread is their rounding, read as
