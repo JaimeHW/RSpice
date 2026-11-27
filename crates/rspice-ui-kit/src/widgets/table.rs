@@ -245,6 +245,21 @@ pub fn least_width(columns: &[Column]) -> f32 {
 /// mark: a column sized from what it holds. A page measures it when its
 /// rows change, not on every frame.
 pub fn fitted_width<'c>(ui: &Ui, head: &str, cells: impl IntoIterator<Item = &'c Cell>) -> f32 {
+    fitted_width_at(ui, head, cells, crate::tokens::FS_0)
+}
+
+/// The width a column of a table drawn as [`DataTable::plain_rows`] takes
+/// to show each of `cells` whole, at a fact row's size: no head to fit.
+pub fn fitted_plain_width<'c>(ui: &Ui, cells: impl IntoIterator<Item = &'c Cell>) -> f32 {
+    fitted_width_at(ui, "", cells, crate::tokens::FS_1)
+}
+
+fn fitted_width_at<'c>(
+    ui: &Ui,
+    head: &str,
+    cells: impl IntoIterator<Item = &'c Cell>,
+    size: f32,
+) -> f32 {
     let head = ui
         .painter()
         .layout_no_wrap(
@@ -259,7 +274,7 @@ pub fn fitted_width<'c>(ui: &Ui, head: &str, cells: impl IntoIterator<Item = &'c
         + 2.0 * CELL_PAD;
     cells
         .into_iter()
-        .map(|cell| body::whole_width(ui, cell))
+        .map(|cell| body::whole_width(ui, cell, size))
         .fold(head, f32::max)
 }
 
@@ -707,6 +722,9 @@ pub struct DataTable<'a> {
     /// take under a coarse pointer; none elsewhere.
     lead_gutter: f32,
     kind: Kind,
+    /// Drawn as a panel's rows of facts are: no rule between its columns,
+    /// its words at a fact row's size and its rows at their height.
+    plain_rows: bool,
     /// The table takes the keyboard this frame.
     focus: bool,
     /// A row can be dragged out under a fine pointer.
@@ -989,6 +1007,7 @@ impl<'a> DataTable<'a> {
             multi: false,
             lead_gutter: 0.0,
             kind: Kind::Grid,
+            plain_rows: false,
             focus: false,
             drags: false,
             drops: false,
@@ -1091,6 +1110,15 @@ impl<'a> DataTable<'a> {
         self
     }
 
+    /// Draw a list's or a tree's rows as a panel's fact rows read: no rule
+    /// between the columns, which no heads name, and the words at a fact
+    /// row's size and each row at its height, so the rows read on from the
+    /// facts around them. Size its columns with [`fitted_plain_width`].
+    pub fn plain_rows(mut self) -> Self {
+        self.plain_rows = true;
+        self
+    }
+
     /// Take the keyboard this frame, as a column browser's list does when
     /// the reader moves into it from its neighbour. Only a table with state
     /// holds the keyboard.
@@ -1174,6 +1202,12 @@ impl<'a> DataTable<'a> {
         } else {
             self.bands = &[];
             LineHeights::list(&t)
+        };
+        // Plain rows stand among a panel's fact rows, as tall as they are.
+        let row_h = if self.plain_rows {
+            crate::panels::property_row_height(ui)
+        } else {
+            row_h
         };
         let mut editor = self.editor.take();
         let mut state = self.state.take();

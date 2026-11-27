@@ -40,11 +40,11 @@ const STATE_GAP: f32 = 12.0;
 /// with the gap before it, then its unsaved dot and trailing mark, inside a
 /// cell's padding. A state is given at most half the cell, so a cell whose
 /// state outweighs its words is as wide as twice its state.
-pub(super) fn whole_width(ui: &Ui, cell: &Cell) -> f32 {
+pub(super) fn whole_width(ui: &Ui, cell: &Cell, size: f32) -> f32 {
     let font = if cell.mono {
-        theme::mono(tokens::FS_0, FontWeight::Regular)
+        theme::mono(size, FontWeight::Regular)
     } else {
-        theme::sans(tokens::FS_0, FontWeight::Regular)
+        theme::sans(size, FontWeight::Regular)
     };
     let width = |text: String| {
         ui.painter()
@@ -360,7 +360,7 @@ impl DataTable<'_> {
                 &format!("table.cell.{}", self.page_column(column_index)),
                 cell_rect,
             );
-            if column_index > 0 {
+            if column_index > 0 && !self.plain_rows {
                 ui.painter().with_clip_rect(clip).vline(
                     cell_rect.left(),
                     cell_rect.y_range(),
@@ -383,10 +383,15 @@ impl DataTable<'_> {
                 );
                 span.max = (span.max - LEAD_ICON_SIDE - LEAD_ICON_GAP).max(span.min);
             }
-            let font = if cell.mono {
-                theme::mono(tokens::FS_0, FontWeight::Regular)
+            let size = if self.plain_rows {
+                tokens::FS_1
             } else {
-                theme::sans(tokens::FS_0, FontWeight::Regular)
+                tokens::FS_0
+            };
+            let font = if cell.mono {
+                theme::mono(size, FontWeight::Regular)
+            } else {
+                theme::sans(size, FontWeight::Regular)
             };
             // A state stands at the right end, left of any trailing mark, as
             // wide as its words up to half the cell; the cell's own words
