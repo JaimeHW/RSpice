@@ -372,6 +372,102 @@ fn a_saved_reference_reads_its_kept_segment_and_a_missing_one_names_its_file() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// Two projects keep segments of the same rows. While the first's file waits for its check, the
+/// second, opened with its own file deleted, reads its result as missing, not as being checked:
+/// a check says whether its own file is there, never another project's. The first reads its
+/// result once its check ends.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_check_of_another_folders_file_of_the_same_rows_never_hides_a_missing_one() {
+    use crate::waveform::{StoredWindow, WaveformValues, WindowLead};
+    use rspice_results_store::{FileIo, PlaceWays, kept_segment_name, place_segment};
+
+    let root = std::env::temp_dir().join(format!(
+        "rspice-results-scoped-check-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let schema = Schema {
+        x: Axis {
+            name: "time".to_owned(),
+            unit: "s".to_owned(),
+        },
+        signals: vec![Signal::new("v(scoped)", "V", SignalKind::Real)],
+    };
+    let x: Vec<f64> = (0..500).map(|row| row as f64 / 500.0).collect();
+    let values: Vec<f64> = x.iter().map(|&t| (t * 11.0).cos() + 0.25).collect();
+    let run_path = root.join("transient-0.rsr");
+    let mut writer = SegmentWriter::create(
+        FileIo::create(&run_path).unwrap(),
+        &schema,
+        &RunMeta::default(),
+    )
+    .unwrap();
+    writer.push_rows(&x, &values).unwrap();
+    let (receipt, _) = writer.finish(RunStatus::Completed).unwrap();
+    let segment = Arc::new(Segment::temporary(
+        StoreReader::open_file(&run_path).unwrap(),
+        run_path,
+    ));
+    let stored = WaveformValues::stored(
+        SegmentColumn::new(segment.clone(), Some(0), "v(scoped)".to_owned()),
+        StoredWindow {
+            first: 0,
+            rows: segment.rows(),
+            lead: WindowLead::None,
+        },
+    )
+    .unwrap();
+    let column = ColumnReference::of(&stored).unwrap();
+    let first = root.join("first").join("results").join("first");
+    let second = root.join("second").join("results").join("second");
+    std::fs::create_dir_all(&second).unwrap();
+    place_segment(
+        segment.path(),
+        &first,
+        &receipt.digest,
+        PlaceWays::ALL,
+        &std::sync::atomic::AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap();
+    drop((stored, segment));
+    let first_file = first.join(kept_segment_name(&receipt.digest));
+    defer_check(UncheckedSegment {
+        digest: receipt.digest,
+        path: first_file.clone(),
+        replace_from: None,
+    });
+    let _ = take_unchecked_segments();
+
+    let opened = |folder: &std::path::Path| {
+        opening_unchecked(|| reading_segments_from(vec![folder.to_path_buf()], || column.values()))
+            .unwrap()
+    };
+    let missing = opened(&second);
+    let failure = missing
+        .read_range(0..missing.len())
+        .expect_err("the second project's segment is gone");
+    assert!(
+        failure
+            .to_string()
+            .contains("deleted or moved outside RSpice"),
+        "the check of the first project's file stood in for the second's: {failure}"
+    );
+
+    assert!(awaiting_check(&first_file), "the first's check has not run");
+    let checked = opened(&first);
+    assert_eq!(
+        checked.read_range(0..checked.len()).unwrap(),
+        values,
+        "the first project reads its result once its own check ends"
+    );
+    assert!(!awaiting_check(&first_file));
+    drop((missing, checked));
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 /// A file under a kept segment's name is the segment only when its stored bits hash to the
 /// digest: a damaged one reads as missing, never as the run's numbers, and the intact file put
 /// back is found again.

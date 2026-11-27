@@ -161,6 +161,23 @@ pub fn checking(digest: [u8; 32]) -> bool {
         .any(|held| held.segment.digest.0 == digest)
 }
 
+/// Whether the file of digest `digest` that a reader of a file keeping its segments in `scope`
+/// reads is waiting for or under its check: one those folders hold under the digest's name, or,
+/// for a reader of no file in particular, any. The check of another project's file of the same
+/// rows says nothing of whether this one's is there.
+pub(super) fn checking_in(scope: Option<&[PathBuf]>, digest: Digest) -> bool {
+    let Some(scope) = scope else {
+        return checking(digest.0);
+    };
+    let name = rspice_results_store::kept_segment_name(&digest);
+    let awaiting = awaiting();
+    scope.iter().any(|folder| {
+        awaiting
+            .get(&folder.join(&name))
+            .is_some_and(|held| held.segment.digest.0 == digest.0)
+    })
+}
+
 /// The file of digest `digest` waiting for or under its check, if one is: where a save copies
 /// the segment from while the check runs, without reading it first.
 pub fn file_being_checked(digest: [u8; 32]) -> Option<PathBuf> {

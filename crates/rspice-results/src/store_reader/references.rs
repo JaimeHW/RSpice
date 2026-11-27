@@ -14,6 +14,12 @@ use rspice_results_store::Digest;
 
 use super::pending_sources::{CheckingColumn, CheckingEvents};
 use super::{MissingSegment, Segment, SegmentColumn, SegmentEvents, kept_segment};
+
+/// Whether the segment of `digest` the file being read names is being checked: its own file in
+/// the folders it keeps them in, not another file of the same rows elsewhere.
+fn checking_here(digest: Digest) -> bool {
+    super::checks::checking_in(super::reading_scope().as_deref(), digest)
+}
 use crate::events::points::{EventHistorySource, EventPoint, EventPoints};
 use crate::waveform::{ColumnSource, StoredWindow, WaveformValues, WindowLead};
 
@@ -140,7 +146,7 @@ impl ColumnReference {
         let column_digest = self.stated_column_digest()?;
         let source: Arc<dyn ColumnSource> = match kept_segment(digest) {
             Some(segment) => segment_column(segment, digest, self.column, self.column_rows)?,
-            None if super::checking(digest.0) => CheckingColumn::new(
+            None if checking_here(digest) => CheckingColumn::new(
                 digest,
                 self.column,
                 self.column_rows,
@@ -245,7 +251,7 @@ impl EventsReference {
         let from = self.from.unwrap_or(f64::NEG_INFINITY);
         let source: Arc<dyn EventHistorySource> = match kept_segment(digest) {
             Some(segment) => segment_events(segment, self.signal)?,
-            None if super::checking(digest.0) => CheckingEvents::new(
+            None if checking_here(digest) => CheckingEvents::new(
                 digest,
                 self.signal,
                 self.changes,

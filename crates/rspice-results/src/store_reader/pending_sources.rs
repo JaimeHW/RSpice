@@ -57,7 +57,7 @@ impl<S: ?Sized> Opened<S> {
         }
         let opened = match kept_segment_in(self.scope.as_deref(), self.digest) {
             Some(segment) => open(segment),
-            None if checks::checking(self.digest.0) => {
+            None if checks::checking_in(self.scope.as_deref(), self.digest) => {
                 return Err(crate::waveform::CHECKING_READ.to_owned());
             }
             None => Err(unread(self.digest)),
