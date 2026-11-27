@@ -1377,8 +1377,10 @@ def rawfile_import_streams(browser):
             browser.click(step, "button")
     finally:
         browser.cdp("Page.setInterceptFileChooserDialog", {"enabled": False})
-    # The review is a window, and stays open, showing the commit, until the run is added.
-    wait_for(lambda: not any(c["label"] == "Import result dataset" and c["role"] == "window"
+    # The review is a dialog, and the commit's progress a window: both are gone once the run is
+    # added.
+    wait_for(lambda: not any(c["label"] == "Import result dataset"
+                             and c["role"] in ("dialog", "window")
                              for c in controls(browser.snapshot())), "the import committed", 60)
     browser.capture("rawfile-imported")
     workers = import_workers(browser)
