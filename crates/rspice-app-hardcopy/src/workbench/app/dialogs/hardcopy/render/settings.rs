@@ -778,7 +778,13 @@ fn margins_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) {
     let unit = unit_label(draft.display_unit);
     rows.held(index == 2, "", |ui, width| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        let field = ((width - 3.0 * 4.0) / 4.0).floor();
+        let unit_width = ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(unit.to_owned(), theme::field_mono(), egui::Color32::WHITE)
+                .size()
+                .x
+        });
+        let field = ((width - unit_width - 4.0 * 4.0) / 4.0).floor();
         for (lead, name, value) in [
             ("T", "Top margin", &mut draft.margin_top),
             ("R", "Right margin", &mut draft.margin_right),
@@ -790,10 +796,16 @@ fn margins_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) {
                 egui::Id::new(("hardcopy-margin", lead)),
                 value,
                 field,
-                (lead, unit),
+                (lead, ""),
                 name,
             );
         }
+        let t = Tokens::get(ui.ctx());
+        ui.label(
+            egui::RichText::new(unit)
+                .font(theme::field_mono())
+                .color(t.color.text_dim),
+        );
     });
 }
 
