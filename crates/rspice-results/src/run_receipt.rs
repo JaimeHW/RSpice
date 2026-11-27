@@ -645,10 +645,10 @@ impl PreparedRunReceipt {
     /// The preview-engine analyses this run executed.
     ///
     /// What disqualifies a run from sign-off, and it is a property of the
-    /// *engine* rather than of the design: a preview solver
-    /// ships connected and produces real numbers, but has not cleared the
-    /// evidence bar a production kind has. The tag on each authenticated task
-    /// is what survives into a sealed receipt, so it is what this reads.
+    /// *engine* rather than of the design: a preview solver ships connected
+    /// and produces real numbers, but has not cleared the evidence bar a
+    /// production kind has. The tag on each authenticated task is what
+    /// survives into a sealed receipt, so it is what this reads.
     #[must_use]
     pub fn preview_engine_kinds(&self) -> Vec<CanonicalAnalysisKind> {
         let mut kinds = Vec::new();
