@@ -2096,7 +2096,7 @@ mod tests {
         );
         let update = output.platform_output.accesskit_update?;
         update.nodes.iter().find_map(|(_, node)| {
-            (node.label().as_deref() == Some(label) && !node.is_disabled())
+            (node.label() == Some(label) && !node.is_disabled())
                 .then(|| node.bounds())
                 .flatten()
                 .map(|bounds| {
