@@ -169,6 +169,55 @@ fn decoration_bands_are_reserved_from_printable_geometry() {
     assert!(geometry.content_rect().height < geometry.printable_rect().height);
 }
 
+/// A range publishes some of the pages. Each keeps the number and place it
+/// has among all of them, the count a header reads is still all of them,
+/// and a range past the last page stops at it.
+#[test]
+fn a_page_range_keeps_each_page_numbered_among_all_of_them() {
+    let extent = ContentExtent::try_new(
+        Length::from_micrometres(800_000),
+        Length::from_micrometres(100_000),
+    )
+    .unwrap();
+    let setup = || one_to_one_setup(TilingMode::Automatic, Length::from_micrometres(10_000));
+    let whole = HardcopyPlan::compile(source(), setup(), extent).unwrap();
+    let total = whole.pagination().total_page_count();
+    assert!(total >= 3, "the drawing takes {total} pages");
+    let ranged = |first, last| {
+        let setup = setup()
+            .with_page_range(Some(PageRange::try_new(first, last).unwrap()))
+            .unwrap();
+        HardcopyPlan::compile(source(), setup, extent).unwrap()
+    };
+    let middle = ranged(2, 3);
+    let pages = middle.pagination().pages();
+    assert_eq!(
+        pages.iter().map(|page| page.number()).collect::<Vec<_>>(),
+        [2, 3]
+    );
+    assert_eq!(
+        pages[0].coordinate(),
+        whole.pagination().pages()[1].coordinate()
+    );
+    assert_eq!(middle.pagination().total_page_count(), total);
+    let tail = ranged(total, total + 5);
+    assert_eq!(
+        tail.pagination()
+            .pages()
+            .iter()
+            .map(|page| page.number())
+            .collect::<Vec<_>>(),
+        [total]
+    );
+}
+
+#[test]
+fn a_page_range_starts_at_page_one_and_runs_forwards() {
+    assert!(PageRange::try_new(0, 2).is_err());
+    assert!(PageRange::try_new(3, 2).is_err());
+    assert!(PageRange::try_new(2, 2).is_ok());
+}
+
 #[test]
 fn automatic_pagination_is_row_major_with_engineering_coordinates() {
     let setup = one_to_one_setup(TilingMode::Automatic, Length::from_micrometres(10_000));
