@@ -1004,12 +1004,10 @@ fn analysis_words(
 /// point, as a deck's `.temp 50` makes: the summary's Temperature row
 /// states that temperature, and the inventory does not list it again.
 fn states_one_temperature(run: &crate::state::SimulationRun, index: usize) -> bool {
-    use rspice_results::family_metadata::AnalysisResultFamilyMetadata as Family;
-    matches!(
-        run.analyses.get(index).and_then(|analysis| analysis.family_metadata.as_ref()),
-        Some(Family::Parametric { target, sweep_values, .. })
-            if sweep_values.len() == 1 && target.eq_ignore_ascii_case("temp")
-    )
+    run.analyses
+        .get(index)
+        .and_then(|analysis| analysis.family_metadata.as_ref())
+        .is_some_and(|family| family.states_one_temperature())
 }
 
 /// The point `analysis` solved at, in the words that tell it from `run`'s

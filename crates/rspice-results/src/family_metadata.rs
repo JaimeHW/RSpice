@@ -118,6 +118,18 @@ pub enum AnalysisResultFamilyMetadata {
 }
 
 impl AnalysisResultFamilyMetadata {
+    /// Whether the family is a temperature "sweep" of one point, as a
+    /// deck's `.temp 50` makes: the run's one temperature, which its facts
+    /// state, and no family a reader opens.
+    #[must_use]
+    pub fn states_one_temperature(&self) -> bool {
+        matches!(
+            self,
+            Self::Parametric { target, sweep_values, .. }
+                if sweep_values.len() == 1 && target.eq_ignore_ascii_case("temp")
+        )
+    }
+
     /// What the family's individual members measured, one entry per member.
     ///
     /// Empty is the normal answer for most families and for every result
