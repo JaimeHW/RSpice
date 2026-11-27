@@ -64,22 +64,6 @@ pub fn model_editor_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layou
         "Validate model",
         layout,
     );
-    toolbar_text_command(
-        ui,
-        app,
-        ModelsCommand::ModelRunQualificationTests.key(),
-        WorkbenchIcon::Run,
-        "Run qualification tests",
-        layout,
-    );
-    toolbar_text_command(
-        ui,
-        app,
-        ModelsCommand::ModelCompareRelease.key(),
-        WorkbenchIcon::Compare,
-        "Compare with release",
-        layout,
-    );
 }
 
 pub fn models_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {

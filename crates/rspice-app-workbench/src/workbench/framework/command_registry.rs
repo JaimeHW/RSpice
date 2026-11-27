@@ -675,7 +675,6 @@ pub mod ids {
         MEASUREMENT_LIBRARY = "measurement-library";
         MODELS_CATALOG = "models-catalog";
         MODELS_WORKSPACE = "models";
-        MODEL_QUALIFICATION = "model-qualification";
         NETLIST_WORKSPACE = "netlist";
         NEW_CELL = "new-cell";
         NEW_PROJECT = "new-project";

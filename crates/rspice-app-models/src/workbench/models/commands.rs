@@ -1,7 +1,6 @@
 //! The commands the models feature declares, as the registry lists them: the
 //! Models & PDKs workspace's pages, the model browser, the device-model
-//! editor and its workflows, measurement correlation, and the PDK and model
-//! library paths.
+//! editor and its workflows, and the PDK and model library paths.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -21,33 +20,26 @@ pub enum ModelsCommand {
     ModelNew,
     ModelCreateProjectCopy,
     ModelEditor,
-    ModelCorrelation,
     ModelSaveRevision,
     ModelValidate,
-    ModelRunQualificationTests,
-    ModelCompareRelease,
     PdkSettings,
     RescanModelLibraries,
 }
 
 impl ModelsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 13] = [
         Self::Page(ModelsPage::Models),
         Self::Page(ModelsPage::Symbols),
         Self::Page(ModelsPage::Corners),
         Self::Page(ModelsPage::Bins),
         Self::Page(ModelsPage::Include),
-        Self::Page(ModelsPage::Qualification),
         Self::ModelBrowser,
         Self::ModelNew,
         Self::ModelCreateProjectCopy,
         Self::ModelEditor,
-        Self::ModelCorrelation,
         Self::ModelSaveRevision,
         Self::ModelValidate,
-        Self::ModelRunQualificationTests,
-        Self::ModelCompareRelease,
         Self::PdkSettings,
         Self::RescanModelLibraries,
     ];
@@ -60,16 +52,12 @@ impl ModelsCommand {
             Self::Page(ModelsPage::Corners) => CommandKey::new("corner-sections"),
             Self::Page(ModelsPage::Bins) => CommandKey::new("model-bins"),
             Self::Page(ModelsPage::Include) => CommandKey::new("include-graph"),
-            Self::Page(ModelsPage::Qualification) => ids::MODEL_QUALIFICATION,
             Self::ModelBrowser => CommandKey::new("model-browser"),
             Self::ModelNew => CommandKey::new("model-new"),
             Self::ModelCreateProjectCopy => CommandKey::new("model-create-project-copy"),
             Self::ModelEditor => CommandKey::new("model-editor"),
-            Self::ModelCorrelation => CommandKey::new("model-correlation"),
             Self::ModelSaveRevision => CommandKey::new("model-save-revision"),
             Self::ModelValidate => CommandKey::new("model-validate"),
-            Self::ModelRunQualificationTests => CommandKey::new("model-run-tests"),
-            Self::ModelCompareRelease => CommandKey::new("model-compare"),
             Self::PdkSettings => ids::PDK_SETTINGS,
             Self::RescanModelLibraries => CommandKey::new("rescan-model-libraries"),
         }
@@ -82,11 +70,10 @@ impl ModelsCommand {
     }
 
     /// What the command declares about itself. Every one is in the palette,
-    /// has no binding of its own and needs an open project, except
-    /// measurement correlation, which says why it cannot open instead. The
-    /// pages commit a pending inspector edit before they navigate, and the
-    /// commands that write the project or its model libraries wait for a
-    /// project operation in flight.
+    /// has no binding of its own and needs an open project. The pages commit
+    /// a pending inspector edit before they navigate, and the commands that
+    /// write the project or its model libraries wait for a project operation
+    /// in flight.
     pub const fn declared_spec(self) -> CommandSpec {
         let page = CommandFlags::PALETTE_VISIBLE
             .with(CommandFlags::REQUIRES_OPEN_PROJECT, true)
@@ -101,16 +88,12 @@ impl ModelsCommand {
             Self::Page(ModelsPage::Corners) => ("Corners & sections", page),
             Self::Page(ModelsPage::Bins) => ("Bins & geometry", page),
             Self::Page(ModelsPage::Include) => ("Include graph", page),
-            Self::Page(ModelsPage::Qualification) => ("Model qualification", page),
             Self::ModelBrowser => ("Model browser…", open),
             Self::ModelNew => ("New model…", writes),
             Self::ModelCreateProjectCopy => ("Create editable project copy", writes),
             Self::ModelEditor => ("Edit model…", writes),
-            Self::ModelCorrelation => ("Measurement correlation…", CommandFlags::PALETTE_VISIBLE),
             Self::ModelSaveRevision => ("Save model revision", writes),
             Self::ModelValidate => ("Validate model", open),
-            Self::ModelRunQualificationTests => ("Run qualification tests", writes),
-            Self::ModelCompareRelease => ("Compare with release", open),
             Self::PdkSettings => ("PDK and model paths…", open),
             Self::RescanModelLibraries => ("Rescan model libraries", writes),
         };

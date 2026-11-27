@@ -1395,10 +1395,7 @@ const PUBLIC_MODULES: &[(&str, &[(&str, &str)])] = &[
             ("lib.rs", "document_bar"),
             ("lib.rs", "documents"),
             ("lib.rs", "inspector"),
-            ("lib.rs", "model_correlation"),
-            ("lib.rs", "model_correlation_controller"),
             ("lib.rs", "model_editor"),
-            ("lib.rs", "model_qualification"),
             ("lib.rs", "models"),
             ("lib.rs", "navigator"),
             ("lib.rs", "pdk_settings"),
@@ -2603,7 +2600,6 @@ const PAINTED_UI_CRATES: &[&str] = &[
 /// all — and this is what was left.
 const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-models/src/workbench/surfaces/model_editor.rs::dialog_subheading",
-    "rspice-app-models/src/workbench/surfaces/model_editor.rs::release_no_candidate_row",
     "rspice-app-models/src/workbench/surfaces/model_editor.rs::section_header",
     "rspice-app-models/src/workbench/surfaces/model_editor.rs::specialist_header",
     "rspice-app-models/src/workbench/surfaces/model_editor.rs::table_empty",
@@ -2613,7 +2609,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-models/src/workbench/surfaces/models/manager/bins.rs::map_legend",
     "rspice-app-models/src/workbench/surfaces/models/manager/detail.rs::origin_property",
     "rspice-app-models/src/workbench/surfaces/models/manager/include.rs::include_closure_graph",
-    "rspice-app-models/src/workbench/surfaces/models/manager/qualification_page.rs::closure_ledger",
     "rspice-app-models/src/workbench/surfaces/models/manager/symbols.rs::detail_table_header",
     "rspice-app-results/src/workbench/docks/inspector/results.rs::trace_colour_row",
     "rspice-app-simulate/src/workbench/surfaces/simulate.rs::analysis_group_header",

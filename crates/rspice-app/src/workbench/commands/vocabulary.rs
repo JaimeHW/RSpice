@@ -437,11 +437,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ModelsCommand::ModelNew.key(),
     ModelsCommand::ModelCreateProjectCopy.key(),
     ModelsCommand::ModelEditor.key(),
-    ModelsCommand::ModelCorrelation.key(),
     ModelsCommand::ModelSaveRevision.key(),
     ModelsCommand::ModelValidate.key(),
-    ModelsCommand::ModelRunQualificationTests.key(),
-    ModelsCommand::ModelCompareRelease.key(),
     WorkbenchCommand::ZoomIn.key(),
     WorkbenchCommand::ZoomOut.key(),
     WorkbenchCommand::ZoomFit.key(),
@@ -785,7 +782,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ModelsCommand::Page(ModelsPage::Corners).key(),
     ModelsCommand::Page(ModelsPage::Bins).key(),
     ModelsCommand::Page(ModelsPage::Include).key(),
-    ModelsCommand::Page(ModelsPage::Qualification).key(),
     ModelsCommand::ModelBrowser.key(),
     ModelsCommand::PdkSettings.key(),
     ModelsCommand::RescanModelLibraries.key(),
@@ -823,13 +819,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
 /// the key of the command it names now. Shortcut profiles those builds wrote
 /// keep their bindings; nothing else about resolution is fuzzy.
 const LEGACY_ALIASES: &[(&str, CommandKey)] = &[
-    // `model-metadata-audit` shipped as the portable identity for this tab
-    // before the mockup-defined Qualification workspace replaced the
-    // temporary audit.
-    (
-        "model-metadata-audit",
-        ModelsCommand::Page(ModelsPage::Qualification).key(),
-    ),
     ("fit-canvas", WorkbenchCommand::ZoomFit.key()),
     ("export-waveforms", ResultsCommand::ExportWaveformsCsv.key()),
     // The cursor manager's slots became the linked-cursors toggle, so a

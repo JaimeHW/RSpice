@@ -1,4 +1,4 @@
-//! The review workflows: save, validate, and run a qualification pass.
+//! The review workflows: save and validate.
 //!
 //! Each workflow presents the exact rows a reviewer needs to decide, and none
 //! of them commits anything until that decision is made. A validation row
@@ -17,9 +17,6 @@ pub(super) fn show_inspection_dialogs(
     new_section_dialog(ctx, cx, records);
     correlation_matrix_dialog(ctx, cx, records);
     temperature_preview_dialog(ctx, cx, records);
-    qualification_plan_dialog(ctx, cx, records);
-    promotion_review_dialog(ctx, cx, records);
-    release_comparison_dialog(ctx, cx, records);
 }
 
 pub(super) fn show_model_editor_workflow(
@@ -37,9 +34,6 @@ pub(super) fn show_model_editor_workflow(
         ModelEditorWorkflow::ValidateCandidate => {
             validation_review_workflow(ctx, cx, records, &request);
         }
-        ModelEditorWorkflow::RunQualification => {
-            qualification_run_workflow(ctx, cx, records, &request);
-        }
     }
 }
 
@@ -48,9 +42,8 @@ pub(super) fn save_revision_workflow(
     cx: &mut Cx<'_, ModelsFeature>,
     request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
 ) {
-    let writable = cx.platform.project_lifecycle.is_open()
-        && !cx.model.safe_mode.project_read_only()
-        && cx.state.model_editor.qualification_execution.is_none();
+    let writable =
+        cx.platform.project_lifecycle.is_open() && !cx.model.safe_mode.project_read_only();
     let dirty = cx
         .state
         .model_editor
@@ -64,7 +57,7 @@ pub(super) fn save_revision_workflow(
     .primary_enabled(writable && dirty)
     .secondary("Cancel")
     .show(ctx, |ui| {
-        workflow_purpose_note(ui, "Saving creates one new model revision. Existing releases and qualification results are never changed.");
+        workflow_purpose_note(ui, "Saving creates one new, undoable model revision.");
         dialog_subheading(ui, "Candidate revision contract");
         render_table(
             ui,
@@ -81,7 +74,7 @@ pub(super) fn save_revision_workflow(
                 if cx.model.safe_mode.project_read_only() {
                     "The project is open read-only. Inspection remains available, but this revision cannot be saved."
                 } else {
-                    "Finish or cancel the active qualification run before saving this revision."
+                    "No project is open, so this revision cannot be saved."
                 },
             );
         } else if !dirty {
@@ -149,14 +142,6 @@ pub(super) fn save_review_rows(cx: &Cx<'_, ModelsFeature>) -> Vec<Vec<DisplayCel
             DisplayCell::plain(definition_delta),
         ],
         vec![
-            DisplayCell::plain("Qualification delta"),
-            DisplayCell::plain(if draft.qualification_is_dirty() {
-                "changed · retained with this revision"
-            } else {
-                "unchanged"
-            }),
-        ],
-        vec![
             DisplayCell::plain("Publication"),
             DisplayCell::plain("guarded project transaction · undoable revision"),
         ],
@@ -174,7 +159,7 @@ pub(super) fn validation_review_workflow(
         "Validate model candidate",
         if prepared { "Close report" } else { "Run validation" },
     )
-    .description("Check the source, parameter schema, physical bounds, qualification structure, and saved platform results without changing the model definition.")
+    .description("Check the source, parameter schema and physical bounds without changing the model definition.")
     .size(DialogSize::Transaction)
     .fixed_height(470.0)
     ;
@@ -210,7 +195,7 @@ pub(super) fn validation_review_body(
 ) {
     workflow_purpose_note(
         ui,
-        "Validation applies to this candidate source and the current project revision. A failed check cannot be accepted for release.",
+        "Validation applies to this candidate source and the current project revision. A failed check blocks the save.",
     );
     dialog_subheading(ui, "Validation report");
     render_table(
@@ -266,11 +251,6 @@ pub(super) fn validation_review_rows(
     let valid = cx.state.model_editor.validation.is_some();
     let definition_valid =
         records.metadata_error.is_none() && cx.state.model_editor.diagnostics.is_empty();
-    let qualification_valid = records.qualification_error.is_none();
-    let qualification = qualification_totals(cx, records);
-    let parity_complete = qualification.total > 0
-        && qualification.desktop_passed == qualification.total
-        && qualification.wasm_passed == qualification.total;
     vec![
         validation_row(
             "Source identity and digest",
@@ -290,26 +270,6 @@ pub(super) fn validation_review_rows(
             },
             definition_valid,
         ),
-        validation_row(
-            "Qualification contract",
-            if qualification_valid {
-                "persisted structure valid"
-            } else {
-                "qualification structure invalid"
-            },
-            qualification_valid,
-        ),
-        validation_row(
-            "Desktop / WebAssembly parity",
-            &format!(
-                "{} / {} desktop · {} / {} WebAssembly",
-                qualification.desktop_passed,
-                qualification.total,
-                qualification.wasm_passed,
-                qualification.total
-            ),
-            parity_complete,
-        ),
     ]
 }
 
@@ -325,142 +285,6 @@ pub(super) fn validation_row(check: &str, observed: &str, passed: bool) -> Vec<D
                 MetricTone::Warning
             },
         ),
-    ]
-}
-
-pub(super) fn qualification_run_workflow(
-    ctx: &egui::Context,
-    cx: &mut Cx<'_, ModelsFeature>,
-    records: &PersistedModelRecords,
-    request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
-) {
-    let runnable = crate::workbench::models::command_availability(
-        ModelsCommand::ModelRunQualificationTests,
-        cx,
-    )
-    .is_available();
-    let choice = Dialog::new("Run model qualification tests", "Queue qualification tests")
-    .description("Confirm the saved source, the suites to run, the runtime target, and how results are kept before starting.")
-    .size(DialogSize::Transaction)
-    .fixed_height(430.0)
-    .primary_enabled(runnable)
-    .secondary("Cancel")
-    .show(ctx, |ui| {
-        workflow_purpose_note(ui, "Qualification keeps only complete suite runs. Cross-platform results come only from Desktop and WebAssembly runs of the same source.");
-        dialog_subheading(ui, "Execution contract");
-        render_table(
-            ui,
-            "model-qualification-run-contract",
-            &[("Field", 0.34), ("Reviewed value", 0.66)],
-            &qualification_run_rows(cx, records),
-            "No executable qualification plan is available.",
-        );
-        if let Some(error) = request.error.as_deref() {
-            blocker_note(ui, error);
-        } else if !runnable {
-            let reason = match crate::workbench::models::command_availability(
-                ModelsCommand::ModelRunQualificationTests,
-                cx,
-            ) {
-                CommandAvailability::Disabled(reason) => reason,
-                CommandAvailability::Available | CommandAvailability::Hidden => {
-                    "Qualification is unavailable in this context."
-                }
-            };
-            blocker_note(ui, reason);
-        }
-    });
-    match choice {
-        DialogChoice::Primary if runnable => {
-            match crate::workbench::documents::model_editor::start_qualification_execution(
-                &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
-            ) {
-                Ok(()) => close_model_editor_workflow(),
-                Err(error) => set_model_editor_workflow_error(error),
-            }
-        }
-        DialogChoice::Secondary | DialogChoice::Cancelled => close_model_editor_workflow(),
-        DialogChoice::None | DialogChoice::Primary | DialogChoice::Ghost => {}
-    }
-}
-
-pub(super) fn qualification_run_rows(
-    cx: &Cx<'_, ModelsFeature>,
-    _records: &PersistedModelRecords,
-) -> Vec<Vec<DisplayCell>> {
-    let Some(draft) = cx.state.model_editor.draft.as_ref() else {
-        return Vec::new();
-    };
-    let Ok(source) = ModelSourceEvidenceBinding::try_new_project_bound(
-        draft.model_name.clone(),
-        draft.source_id,
-        draft.base_source_digest,
-        draft.base_source_revision,
-    ) else {
-        return Vec::new();
-    };
-    let exact_suites = draft
-        .qualification
-        .exact_suites_for_source(&source)
-        .unwrap_or_default();
-    let vectors = exact_suites
-        .iter()
-        .map(|suite| suite.vectors.len())
-        .sum::<usize>();
-    let exact_evidence = exact_suites
-        .iter()
-        .flat_map(|suite| {
-            draft
-                .qualification
-                .evidence
-                .iter()
-                .filter(|evidence| evidence.validate_bound(suite, &source).is_ok())
-        })
-        .count();
-    let target = if cfg!(target_arch = "wasm32") {
-        "WebAssembly runtime"
-    } else {
-        "Local desktop runtime"
-    };
-    vec![
-        vec![
-            DisplayCell::plain("Model scope"),
-            DisplayCell::mono(format!(
-                "{} · r{}",
-                draft.model_name,
-                draft.base_source_revision.get()
-            )),
-        ],
-        vec![
-            DisplayCell::plain("Executable expansion"),
-            DisplayCell::plain(format!(
-                "{} suite(s) · {vectors} vector(s)",
-                exact_suites.len()
-            )),
-        ],
-        vec![
-            DisplayCell::plain("Runtime target"),
-            DisplayCell::plain(target),
-        ],
-        vec![
-            DisplayCell::plain("Validation"),
-            DisplayCell::plain(if cx.state.model_editor.validation.is_some() {
-                ""
-            } else {
-                "not validated"
-            }),
-        ],
-        vec![
-            DisplayCell::plain("Saved results"),
-            DisplayCell::plain(format!(
-                "{} existing cross-platform record(s) · completed suites are locked",
-                exact_evidence
-            )),
-        ],
-        vec![
-            DisplayCell::plain("Promotion policy"),
-            DisplayCell::plain("independent review required after completion"),
-        ],
     ]
 }
 

@@ -1,8 +1,7 @@
 //! Tests for the editor document's atomicity guarantees.
 //!
-//! The recurring assertion is completeness: a qualification pass publishes
-//! only a whole platform run, and candidate creation and promotion either
-//! happen entirely or not at all.
+//! The recurring assertion is completeness: a save publishes the whole
+//! candidate or nothing, and never rewrites a model it was not editing.
 
 use super::*;
 use crate::workbench::models::tests::{harness, model_editor_parts, save_open_model_candidate};
@@ -208,7 +207,6 @@ fn selected_fragment_save_preserves_adjacent_models_and_include_graph() {
             "pch_owned",
             resolved.model_digest,
             &changed,
-            &resolved.qualification,
         )
         .expect("replace exact included model fragment");
     assert_eq!(commit.after.source_edges, before.source_edges);
@@ -256,7 +254,7 @@ fn selected_fragment_save_preserves_adjacent_models_and_include_graph() {
 }
 
 #[test]
-fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
+fn editing_one_model_preserves_a_sectioned_sibling_revision() {
     let (mut manager, _root, _child, _first_source, _second_source) = multi_model_include_library();
 
     let first = resolve_project_model_for_editor(&manager, "multi-owned", "nch_owned")
@@ -273,7 +271,6 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
                 .clone()
                 .expect("model source identity"),
         ],
-        qualification: ModelSectionQualification::Unqualified,
     });
     manager
         .replace_project_model_revision_in_library(
@@ -284,81 +281,15 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
             "nch_owned",
             first.model_digest,
             &sectioned,
-            &first.qualification,
         )
         .expect("publish sectioned first model");
+    let sibling = resolve_project_model_for_editor(&manager, "multi-owned", "nch_owned")
+        .expect("resolve sectioned sibling");
 
-    let mut app = harness();
-    app.open_project_session();
-    app.model.model_library_manager = manager;
-    let project_revision = app.model.workspace.content.project.revision();
-    app.state
-        .model_editor
-        .open(
-            &app.model.model_library_manager,
-            "multi-owned",
-            "nch_owned",
-            project_revision,
-        )
-        .expect("open sectioned sibling");
-    populate_operating_point_suite(&mut app.state.model_editor);
-    app.state.model_editor.qualification_authoring.model_section = "TT".to_owned();
-    assert!(app.state.model_editor.commit_qualification_suite());
-    start_qualification_execution(&mut model_editor_parts(&mut app))
-        .expect("start desktop qualification");
-    advance_qualification_execution(&mut model_editor_parts(&mut app));
-
-    let draft = app
-        .state
-        .model_editor
-        .draft
-        .as_mut()
-        .expect("qualified sibling draft");
-    let desktop = draft.qualification.platform_runs[0].clone();
-    let mut webassembly = desktop.clone();
-    webassembly.platform = QualificationPlatform::WebAssembly;
-    for vector in &mut webassembly.vector_outcomes {
-        vector.outcome.platform = QualificationPlatform::WebAssembly;
-    }
-    draft
-        .qualification
-        .upsert_platform_run_atomically(webassembly)
-        .expect("retain WebAssembly parity run");
-    let source = desktop.source.clone();
-    let evidence = draft
-        .qualification
-        .assemble_and_upsert_evidence_atomically("tt-evidence", "dc-op", &source)
-        .expect("assemble exact section evidence");
-    let evidence_digest = evidence.content_digest().expect("evidence digest");
-    draft
-        .qualification
-        .validate_exact_section_evidence_digest(&source, "TT", evidence_digest)
-        .expect("exact TT evidence");
-    draft.metadata.sections[0].qualification = ModelSectionQualification::Qualified {
-        evidence_digest: Some(evidence_digest.to_string()),
-    };
-    let sibling_metadata = draft.metadata.clone();
-    let sibling_qualification = draft.qualification.clone();
-    let sibling_revision = draft.base_source_revision;
-    let sibling_digest = draft.base_source_digest;
-    let sibling_source_id = draft.source_id;
-    let library = app
-        .model
-        .model_library_manager
-        .get_library_mut("multi-owned")
-        .expect("multi-model library");
-    library
-        .model_definition_metadata
-        .insert("nch_owned".to_owned(), sibling_metadata.clone());
-    library
-        .model_qualification
-        .insert("nch_owned".to_owned(), sibling_qualification.clone());
-
-    let mut manager = app.model.model_library_manager.clone();
     let second = resolve_project_model_for_editor(&manager, "multi-owned", "pch_owned")
         .expect("resolve editable sibling");
     let mut changed_second = second.definition.clone();
-    changed_second.base.description = "Edited without touching qualified sibling".to_owned();
+    changed_second.base.description = "Edited without touching the sectioned sibling".to_owned();
     manager
         .replace_project_model_revision_in_library(
             "multi-owned",
@@ -368,29 +299,16 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
             "pch_owned",
             second.model_digest,
             &changed_second,
-            &second.qualification,
         )
         .expect("edit only second model");
 
     let retained = resolve_project_model_for_editor(&manager, "multi-owned", "nch_owned")
-        .expect("qualified sibling remains resolvable");
-    assert_eq!(retained.source_id, sibling_source_id);
-    assert_eq!(retained.model_revision, sibling_revision);
-    assert_eq!(retained.model_digest, sibling_digest);
-    assert_eq!(retained.definition.metadata, sibling_metadata);
-    assert_eq!(retained.qualification, sibling_qualification);
-    assert!(retained.library_revision > first.library_revision);
-    let retained_source = ModelSourceEvidenceBinding::try_new_project_bound(
-        "nch_owned",
-        retained.source_id,
-        retained.model_digest,
-        retained.model_revision,
-    )
-    .expect("retained source binding");
-    retained
-        .qualification
-        .validate_exact_section_evidence_digest(&retained_source, "TT", evidence_digest)
-        .expect("untouched qualified section evidence remains exact");
+        .expect("sectioned sibling remains resolvable");
+    assert_eq!(retained.source_id, sibling.source_id);
+    assert_eq!(retained.model_revision, sibling.model_revision);
+    assert_eq!(retained.model_digest, sibling.model_digest);
+    assert_eq!(retained.definition.metadata, sibling.definition.metadata);
+    assert!(retained.library_revision > sibling.library_revision);
 }
 
 #[test]
@@ -505,7 +423,6 @@ fn editor_validation_is_revision_bound_and_reports_typed_input_errors() {
                 },
                 draft.base_definition.metadata.clone(),
             ),
-            &draft.qualification,
         )
         .expect("advance model source");
     assert!(!editor.validate_candidate(&manager, ObjectRevision::INITIAL));
@@ -545,31 +462,6 @@ fn semantic_delta_is_deterministic_across_numeric_and_string_parameters() {
     assert_eq!(delta.added_parameters, ["pclm"]);
     assert_eq!(delta.removed_parameters, ["version_tag"]);
     assert_eq!(delta.changed_parameters, ["vth0"]);
-}
-
-#[test]
-fn definition_and_qualification_dirty_state_are_independent() {
-    let (_, mut editor) = opened_editor();
-    let draft = editor.draft.as_mut().expect("draft");
-    assert!(!draft.definition_is_dirty());
-    assert!(!draft.qualification_is_dirty());
-    assert!(!draft.is_dirty());
-
-    draft.qualification.schema_version = draft.qualification.schema_version.wrapping_add(1);
-    assert!(!draft.definition_is_dirty());
-    assert!(draft.qualification_is_dirty());
-    assert!(draft.is_dirty());
-
-    draft.qualification = draft.base_qualification.clone();
-    draft
-        .parameters
-        .iter_mut()
-        .find(|parameter| parameter.name == "vth0")
-        .expect("parameter")
-        .value = "0.5".to_owned();
-    assert!(draft.definition_is_dirty());
-    assert!(!draft.qualification_is_dirty());
-    assert!(draft.is_dirty());
 }
 
 #[test]
@@ -665,7 +557,6 @@ fn inherited_value_edit_requires_an_explicit_target_section() {
         parent: None,
         overrides: BTreeMap::new(),
         model_files: vec![source_identity],
-        qualification: ModelSectionQualification::Unqualified,
     });
     draft
         .metadata
@@ -713,7 +604,6 @@ fn explicit_override_value_edit_updates_its_section_delta() {
         parent: None,
         overrides: BTreeMap::from([("vth0".to_owned(), original)]),
         model_files: vec![source_identity],
-        qualification: ModelSectionQualification::Unqualified,
     });
     draft
         .metadata
@@ -998,14 +888,13 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
                 ParameterValue::Numeric(FiniteF64::new(0.5).expect("finite fixture")),
             )]),
             model_files: Vec::new(),
-            qualification: crate::state::model_library::ModelSectionQualification::Unqualified,
         });
 
     let mut app = harness();
     app.open_project_session();
     app.model
         .model_library_manager
-        .create_project_model_revision("sectioned", &revision, &ModelQualificationState::default())
+        .create_project_model_revision("sectioned", &revision)
         .expect("create sectioned revision");
     let project_revision = app.model.workspace.content.project.revision();
     app.state
@@ -1053,418 +942,6 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
         .expect("materialize saved section")
         .join("\n");
     assert!(cards.contains("VTH0=0.5"), "{cards}");
-}
-
-fn populate_operating_point_suite(editor: &mut ModelEditorState) {
-    editor.begin_qualification_suite();
-    let authoring = &mut editor.qualification_authoring;
-    authoring.suite_id = "dc-op".to_owned();
-    authoring.suite_name = "DC operating point".to_owned();
-    authoring.vector_id = "nominal".to_owned();
-    authoring.vector_name = "Nominal bias".to_owned();
-    authoring.executable_input =
-        "V1 out 0 1\nR1 out 0 1k\nMbind 0 0 0 0 nch_owned\n.op\n.end\n".to_owned();
-    authoring.quantity = "v(out)".to_owned();
-    authoring.probe_target = "out".to_owned();
-    authoring.expected = "1".to_owned();
-    authoring.absolute_tolerance = "1e-9".to_owned();
-    authoring.relative_tolerance = "1e-9".to_owned();
-}
-
-#[test]
-fn qualification_suite_authoring_is_atomic_and_source_bound() {
-    let (_manager, mut editor) = opened_editor();
-    populate_operating_point_suite(&mut editor);
-    assert!(
-        editor.commit_qualification_suite(),
-        "{:?}",
-        editor.qualification_authoring.error
-    );
-    let draft = editor.draft.as_ref().expect("draft");
-    assert_eq!(draft.qualification.suites.len(), 1);
-    let vector = &draft.qualification.suites[0].vectors[0];
-    assert_eq!(vector.source.model_id, draft.model_name);
-    assert_eq!(vector.source.source_digest, draft.base_source_digest);
-    assert!(draft.qualification_is_dirty());
-
-    populate_operating_point_suite(&mut editor);
-    editor.qualification_authoring.vector_id = "nominal-second".to_owned();
-    editor.qualification_authoring.vector_name = "Nominal bias second".to_owned();
-    assert!(editor.commit_qualification_suite());
-    let suite = &editor.draft.as_ref().expect("draft").qualification.suites[0];
-    assert_eq!(suite.vectors.len(), 2);
-    assert_eq!(suite.revision, ObjectRevision::new(2).expect("revision"));
-
-    populate_operating_point_suite(&mut editor);
-    editor.qualification_authoring.expected = "not-a-number".to_owned();
-    assert!(!editor.commit_qualification_suite());
-    assert_eq!(
-        editor
-            .draft
-            .as_ref()
-            .expect("draft retained")
-            .qualification
-            .suites
-            .len(),
-        1
-    );
-    assert_eq!(
-        editor
-            .draft
-            .as_ref()
-            .expect("draft retained")
-            .qualification
-            .suites[0]
-            .vectors
-            .len(),
-        2
-    );
-    assert!(editor.qualification_authoring.error.is_some());
-}
-
-#[test]
-fn advanced_qualification_authoring_builds_executable_analysis_contracts() {
-    let (_manager, mut editor) = opened_editor();
-
-    populate_operating_point_suite(&mut editor);
-    {
-        let fields = &mut editor.qualification_authoring;
-        fields.suite_id = "ac-cv".to_owned();
-        fields.suite_name = "AC and capacitance".to_owned();
-        fields.analysis = QualificationAuthoringAnalysis::AcSweep;
-        fields.frequencies = "1e3, 1e4".to_owned();
-        fields.probe = QualificationAuthoringProbe::AcEffectiveCapacitance;
-        fields.probe_target = "V1".to_owned();
-        fields.excitation_magnitude = "1".to_owned();
-        fields.sample = QualificationAuthoringSample::FirstFrequencyPoint;
-        fields.executable_input =
-            "V1 out 0 DC 0 AC 1\nR1 out 0 1k\nMbind 0 0 0 0 nch_owned\n.end\n".to_owned();
-        fields.expected = "0".to_owned();
-    }
-    assert!(
-        editor.commit_qualification_suite(),
-        "{:?}",
-        editor.qualification_authoring.error
-    );
-
-    editor.begin_qualification_suite();
-    {
-        let fields = &mut editor.qualification_authoring;
-        fields.suite_id = "noise".to_owned();
-        fields.suite_name = "Noise".to_owned();
-        fields.vector_id = "noise-nominal".to_owned();
-        fields.vector_name = "Nominal output noise".to_owned();
-        fields.executable_input = "V1 input 0 DC 0 AC 1\nR1 input out 1k\nR2 out 0 1k\nMbind out input 0 0 nch_owned\n.end\n".to_owned();
-        fields.analysis = QualificationAuthoringAnalysis::Noise;
-        fields.frequencies = "1000".to_owned();
-        fields.noise_output_node = "out".to_owned();
-        fields.noise_input_source = "V1".to_owned();
-        fields.noise_temperature_kelvin = "300.15".to_owned();
-        fields.quantity = "onoise".to_owned();
-        fields.probe = QualificationAuthoringProbe::NoiseOutputDensity;
-        fields.sample = QualificationAuthoringSample::FirstFrequencyPoint;
-        fields.expected = "0".to_owned();
-        fields.absolute_tolerance = "1".to_owned();
-        fields.relative_tolerance = "0".to_owned();
-    }
-    assert!(editor.commit_qualification_suite());
-
-    editor.begin_qualification_suite();
-    {
-        let fields = &mut editor.qualification_authoring;
-        fields.suite_id = "transient".to_owned();
-        fields.suite_name = "Transient".to_owned();
-        fields.vector_id = "transient-nominal".to_owned();
-        fields.vector_name = "Nominal waveform".to_owned();
-        fields.executable_input = "V1 out 0 DC 1\nMbind out out 0 0 nch_owned\n.end\n".to_owned();
-        fields.analysis = QualificationAuthoringAnalysis::Transient;
-        fields.transient_stop_time = "1e-6".to_owned();
-        fields.transient_max_step = "1e-7".to_owned();
-        fields.quantity = "v(out)".to_owned();
-        fields.probe = QualificationAuthoringProbe::TransientNodeVoltage;
-        fields.probe_target = "out".to_owned();
-        fields.sample = QualificationAuthoringSample::LastTimePoint;
-        fields.expected = "1".to_owned();
-        fields.absolute_tolerance = "1e-8".to_owned();
-        fields.relative_tolerance = "1e-8".to_owned();
-    }
-    assert!(editor.commit_qualification_suite());
-
-    let suites = &editor.draft.as_ref().unwrap().qualification.suites;
-    assert!(suites.iter().any(|suite| matches!(
-        suite.vectors[0].analysis,
-        QualificationAnalysis::AcSweep { .. }
-    )));
-    assert!(suites.iter().any(|suite| matches!(
-        suite.vectors[0].analysis,
-        QualificationAnalysis::Noise { .. }
-    )));
-    assert!(suites.iter().any(|suite| matches!(
-        suite.vectors[0].analysis,
-        QualificationAnalysis::Transient { .. }
-    )));
-}
-
-#[test]
-fn cooperative_qualification_publishes_only_a_complete_platform_run() {
-    let mut app = harness();
-    app.open_project_session();
-    app.model
-        .model_library_manager
-        .create_project_model("owned-models", &definition())
-        .expect("create model");
-    let revision = app.model.workspace.content.project.revision();
-    app.state
-        .model_editor
-        .open(
-            &app.model.model_library_manager,
-            "owned-models",
-            "nch_owned",
-            revision,
-        )
-        .expect("open editor");
-    populate_operating_point_suite(&mut app.state.model_editor);
-    assert!(
-        app.state.model_editor.commit_qualification_suite(),
-        "{:?}",
-        app.state.model_editor.qualification_authoring.error
-    );
-    assert!(start_qualification_execution(&mut model_editor_parts(&mut app)).is_ok());
-    assert!(
-        app.state
-            .model_editor
-            .draft
-            .as_ref()
-            .expect("draft")
-            .qualification
-            .platform_runs
-            .is_empty()
-    );
-
-    advance_qualification_execution(&mut model_editor_parts(&mut app));
-    assert!(app.state.model_editor.qualification_execution.is_none());
-    let draft = app.state.model_editor.draft.as_ref().expect("draft");
-    assert_eq!(draft.qualification.platform_runs.len(), 1);
-    assert!(draft.qualification.evidence.is_empty());
-    assert!(draft.qualification_is_dirty());
-}
-
-#[test]
-fn selected_vector_rerun_executes_only_its_complete_suite() {
-    let mut app = harness();
-    app.open_project_session();
-    app.model
-        .model_library_manager
-        .create_project_model("owned-models", &definition())
-        .unwrap();
-    let revision = app.model.workspace.content.project.revision();
-    app.state
-        .model_editor
-        .open(
-            &app.model.model_library_manager,
-            "owned-models",
-            "nch_owned",
-            revision,
-        )
-        .unwrap();
-    populate_operating_point_suite(&mut app.state.model_editor);
-    assert!(app.state.model_editor.commit_qualification_suite());
-    populate_operating_point_suite(&mut app.state.model_editor);
-    {
-        let fields = &mut app.state.model_editor.qualification_authoring;
-        fields.suite_id = "dc-second".to_owned();
-        fields.suite_name = "Second DC suite".to_owned();
-        fields.vector_id = "second-vector".to_owned();
-        fields.vector_name = "Second vector".to_owned();
-    }
-    assert!(app.state.model_editor.commit_qualification_suite());
-
-    start_qualification_vector_execution(
-        &mut model_editor_parts(&mut app),
-        "dc-second",
-        "second-vector",
-    )
-    .unwrap();
-    assert_eq!(
-        app.state
-            .model_editor
-            .qualification_execution
-            .as_ref()
-            .unwrap()
-            .suite_ids,
-        vec!["dc-second".to_owned()]
-    );
-    assert!(cancel_qualification_execution(&mut model_editor_parts(
-        &mut app
-    )));
-    assert!(
-        start_qualification_vector_execution(
-            &mut model_editor_parts(&mut app),
-            "dc-second",
-            "missing-vector"
-        )
-        .is_err()
-    );
-}
-
-fn populate_complete_promotion_candidate(editor: &mut ModelEditorState) {
-    let digest = ContentDigest::from_bytes([0x5a; 32]).to_string();
-    let fields = &mut editor.promotion_candidate;
-    fields.model_description_id = "model-description".to_owned();
-    fields.model_description_digest.clone_from(&digest);
-    fields.parameter_reference_id = "parameter-reference".to_owned();
-    fields.parameter_reference_digest.clone_from(&digest);
-    fields.qualification_report_id = "qualification-report".to_owned();
-    fields.qualification_report_digest.clone_from(&digest);
-    fields.license_id = "commercial-project-license".to_owned();
-    fields.license_expression = "LicenseRef-RSpice-Project".to_owned();
-    fields.license_scope = LicenseScope::OrganizationInternal;
-    fields.commercial_use_allowed = true;
-    fields.license_reviewed = true;
-    fields.license_notice_id = "license-notice".to_owned();
-    fields.license_notice_digest.clone_from(&digest);
-    fields.consumer_change = ConsumerChange::NoImpact;
-    fields.consumer_summary = "No known consumer behavior change".to_owned();
-    fields.consumer_reviewed = true;
-    fields.desktop_compatibility = CompatibilityDisposition::Compatible;
-    fields.desktop_evidence_id = "desktop-compatibility".to_owned();
-    fields.desktop_evidence_digest.clone_from(&digest);
-    fields.webassembly_compatibility = CompatibilityDisposition::Compatible;
-    fields.webassembly_evidence_id = "wasm-compatibility".to_owned();
-    fields.webassembly_evidence_digest.clone_from(&digest);
-    fields.existing_projects_compatibility = CompatibilityDisposition::Compatible;
-    fields.compatibility_reviewed = true;
-    fields.model_owner_id = "model-owner".to_owned();
-    fields.qualification_approver_id = "independent-qualification-reviewer".to_owned();
-}
-
-#[test]
-fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
-    let mut app = harness();
-    app.open_project_session();
-    app.model
-        .model_library_manager
-        .create_project_model("owned-models", &definition())
-        .expect("create model");
-    let revision = app.model.workspace.content.project.revision();
-    app.state
-        .model_editor
-        .open(
-            &app.model.model_library_manager,
-            "owned-models",
-            "nch_owned",
-            revision,
-        )
-        .expect("open editor");
-    populate_operating_point_suite(&mut app.state.model_editor);
-    assert!(app.state.model_editor.commit_qualification_suite());
-    assert!(start_qualification_execution(&mut model_editor_parts(&mut app)).is_ok());
-    advance_qualification_execution(&mut model_editor_parts(&mut app));
-
-    let draft = app.state.model_editor.draft.as_mut().expect("draft");
-    let desktop = draft.qualification.platform_runs[0].clone();
-    let mut webassembly = desktop.clone();
-    webassembly.platform = QualificationPlatform::WebAssembly;
-    for vector in &mut webassembly.vector_outcomes {
-        vector.outcome.platform = QualificationPlatform::WebAssembly;
-    }
-    draft
-        .qualification
-        .upsert_platform_run_atomically(webassembly)
-        .expect("retain exact WebAssembly run");
-    let source = desktop.source.clone();
-    draft
-        .qualification
-        .assemble_and_upsert_evidence_atomically("dc-op-evidence", "dc-op", &source)
-        .expect("assemble exact parity evidence");
-
-    let exact_evidence_id = draft.qualification.evidence[0].id.clone();
-    let mut foreign_identity_evidence = draft.qualification.evidence[0].clone();
-    foreign_identity_evidence.id = "foreign-source-evidence".to_owned();
-    foreign_identity_evidence.source.source_id = Some(ModelSourceId::new());
-    draft
-        .qualification
-        .evidence
-        .insert(0, foreign_identity_evidence);
-
-    app.state.model_editor.begin_promotion_review();
-    assert_eq!(
-        app.state.model_editor.promotion_candidate.evidence_id, exact_evidence_id,
-        "promotion prefill must include source_id in its exact-source projection"
-    );
-    app.state
-        .model_editor
-        .draft
-        .as_mut()
-        .expect("draft")
-        .qualification
-        .evidence
-        .retain(|evidence| evidence.id != "foreign-source-evidence");
-    populate_complete_promotion_candidate(&mut app.state.model_editor);
-    assert!(app.state.model_editor.commit_release_candidate());
-    let candidate = app
-        .state
-        .model_editor
-        .draft
-        .as_ref()
-        .expect("draft")
-        .qualification
-        .candidates
-        .first()
-        .expect("candidate")
-        .clone();
-    assert!(candidate.checklist.is_complete());
-    assert!(!candidate.definition_source.is_empty());
-    assert!(candidate.definition_metadata.is_some());
-
-    let before_duplicate = app
-        .state
-        .model_editor
-        .draft
-        .as_ref()
-        .expect("draft")
-        .qualification
-        .clone();
-    app.state.model_editor.promotion_candidate.candidate_id = "conflicting-candidate".to_owned();
-    assert!(!app.state.model_editor.commit_release_candidate());
-    assert_eq!(
-        app.state
-            .model_editor
-            .draft
-            .as_ref()
-            .expect("draft")
-            .qualification,
-        before_duplicate
-    );
-
-    let invalid_correlation = ModelCorrelationState {
-        schema_version: u32::MAX,
-        ..ModelCorrelationState::default()
-    };
-    assert!(
-        !app.state
-            .model_editor
-            .commit_promotion(&candidate.identity.id, &invalid_correlation),
-        "the authoritative promotion transaction must fail closed when retained correlation state is invalid"
-    );
-    assert!(
-        app.state
-            .model_editor
-            .commit_promotion(&candidate.identity.id, &ModelCorrelationState::default())
-    );
-    let qualification = &app
-        .state
-        .model_editor
-        .draft
-        .as_ref()
-        .expect("draft")
-        .qualification;
-    assert_eq!(qualification.releases.len(), 1);
-    assert_eq!(qualification.promotions.len(), 1);
-    assert_eq!(
-        qualification.releases[0].definition_metadata,
-        candidate.definition_metadata
-    );
 }
 
 /// Authenticating once must not weaken the gate.

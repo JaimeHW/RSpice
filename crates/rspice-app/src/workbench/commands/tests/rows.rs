@@ -33,7 +33,6 @@ use rspice_app_workbench::workbench::framework::host::Host;
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.
 pub(crate) const LEGACY_ALIASES: &[(&str, &str)] = &[
-    ("model-metadata-audit", "model-qualification"),
     ("fit-canvas", "canvas-fit-sheet"),
     ("export-waveforms", "export-results"),
     ("cursor-manager", "toggle-linked-cursors"),

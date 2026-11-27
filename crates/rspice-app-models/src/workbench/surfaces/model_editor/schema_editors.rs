@@ -52,7 +52,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature
     );
     dialog_subheading(ui, "Process-section value override");
     if sections.is_empty() || parameters.is_empty() {
-        promotion_note(
+        field_note(
             ui,
             None,
             if sections.is_empty() {
@@ -64,7 +64,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature
         return;
     }
 
-    let [section_rect, parameter_rect, value_rect] = qualification_three_rects(ui);
+    let [section_rect, parameter_rect, value_rect] = three_field_rects(ui);
     let mut selection_changed = false;
     {
         let editor = &mut cx.state.model_editor;
@@ -92,7 +92,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature
             .model_editor
             .refresh_parameter_schema_override_editor();
     }
-    qualification_text_field(
+    labelled_text_field(
         ui,
         value_rect,
         "Section value",
@@ -141,7 +141,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature
         .model_editor
         .parameter_schema_override_error
         .clone();
-    promotion_note(
+    field_note(
         ui,
         error.as_deref(),
         if override_exists {
@@ -781,6 +781,111 @@ pub(super) fn temperature_plot(
         Align2::RIGHT_BOTTOM,
         format!("{minimum_y:.6e}"),
         theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+}
+
+/// A labelled field row: the label over its control.
+const FIELD_ROW_H: f32 = 54.0;
+
+/// Three equal field columns on one row.
+fn three_field_rects(ui: &mut Ui) -> [Rect; 3] {
+    let width = ui.available_width().max(1.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, FIELD_ROW_H), Sense::hover());
+    let gap = 10.0;
+    let column_width = ((width - gap * 2.0) / 3.0).max(1.0);
+    [
+        Rect::from_min_size(rect.min, Vec2::new(column_width, rect.height())),
+        Rect::from_min_size(
+            Pos2::new(rect.left() + column_width + gap, rect.top()),
+            Vec2::new(column_width, rect.height()),
+        ),
+        Rect::from_min_max(
+            Pos2::new(rect.left() + (column_width + gap) * 2.0, rect.top()),
+            rect.max,
+        ),
+    ]
+}
+
+/// One labelled single-line text field in `rect`.
+fn labelled_text_field(
+    ui: &mut Ui,
+    rect: Rect,
+    label: &str,
+    value: &mut String,
+    monospace: bool,
+    enabled: bool,
+) {
+    let t = Tokens::get(ui.ctx());
+    ui.painter().text(
+        rect.left_top(),
+        Align2::LEFT_TOP,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        if enabled {
+            t.color.text_dim
+        } else {
+            t.color.text_faint
+        },
+    );
+    let field_rect = Rect::from_min_max(
+        Pos2::new(rect.left(), rect.top() + 18.0),
+        Pos2::new(
+            rect.right(),
+            (rect.top() + 18.0 + t.metrics.ctl_h).min(rect.bottom()),
+        ),
+    );
+    let mut field = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(field_rect)
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    let mut edit = egui::TextEdit::singleline(value);
+    if monospace {
+        edit = edit.font(crate::ui::theme::field_mono());
+    }
+    let response = field
+        .add_enabled_ui(enabled, |ui| ui.add_sized(field_rect.size(), edit))
+        .inner;
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label);
+    });
+}
+
+/// The note under a schema form: its error when it has one, otherwise what the
+/// form's state means.
+fn field_note(ui: &mut Ui, error: Option<&str>, detail: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width().max(1.0), 52.0),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    bottom_rule(ui, rect, t.color.border);
+    let inner = rect.shrink2(Vec2::new(10.0, 8.0));
+    let mut text_left = inner.left();
+    let mut wrap = inner.width();
+    if error.is_some() {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                Pos2::new(text_left + MARK_SIDE * 0.5, inner.top() + MARK_SIDE * 0.5),
+                Vec2::splat(MARK_SIDE),
+            ),
+            Problem::Failure,
+        );
+        text_left += MARK_ADVANCE;
+        wrap = (wrap - MARK_ADVANCE).max(1.0);
+    }
+    let galley = ui.painter().layout(
+        error.unwrap_or(detail).to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        wrap,
+    );
+    ui.painter().with_clip_rect(inner).galley(
+        Pos2::new(text_left, inner.top()),
+        galley,
         t.color.text_dim,
     );
 }

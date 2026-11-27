@@ -1,4 +1,4 @@
-//! Commands over device models: the editor, the library scan, qualification.
+//! Commands over device models: the editor and the library scan.
 //!
 //! Selection authority is what these share. A model command names exactly one
 //! coherent, project-owned definition or it is unavailable — it never opens on
@@ -167,10 +167,6 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
         app.availability(ModelsCommand::ModelSaveRevision.key()),
         CommandAvailability::Disabled("the project is open read-only")
     );
-    assert_eq!(
-        app.availability(ModelsCommand::ModelRunQualificationTests.key()),
-        CommandAvailability::Disabled("qualification cannot run while the project is read-only")
-    );
     assert!(
         app.availability(ModelsCommand::ModelValidate.key())
             .is_available()
@@ -182,85 +178,4 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
         Some(ModelEditorWorkflow::ValidateCandidate)
     );
     close_model_editor_workflow();
-}
-
-#[test]
-fn qualification_command_requires_a_suite_for_the_exact_open_source() {
-    use std::collections::BTreeMap;
-
-    use crate::state::model_library::ProjectModelDefinition;
-
-    let mut app = harness();
-    app.open_project_session();
-    app.model
-        .model_library_manager
-        .create_project_model(
-            "command-qualification-owned",
-            &ProjectModelDefinition {
-                name: "qualification_nch".to_owned(),
-                spice_type: "NMOS".to_owned(),
-                description: "Qualification command fixture".to_owned(),
-                numeric_parameters: BTreeMap::from([("level".to_owned(), 1.0)]),
-                string_parameters: BTreeMap::new(),
-            },
-        )
-        .expect("create project model");
-    let project_revision = app.model.workspace.content.project.revision();
-    app.state
-        .model_editor
-        .open(
-            &app.model.model_library_manager,
-            "command-qualification-owned",
-            "qualification_nch",
-            project_revision,
-        )
-        .expect("open editor");
-    app.state.model_editor.begin_qualification_suite();
-    let authoring = &mut app.state.model_editor.qualification_authoring;
-    authoring.suite_id = "dc-op".to_owned();
-    authoring.suite_name = "DC operating point".to_owned();
-    authoring.vector_id = "nominal".to_owned();
-    authoring.vector_name = "Nominal bias".to_owned();
-    authoring.executable_input =
-        "V1 out 0 1\nR1 out 0 1k\nMbind 0 0 0 0 qualification_nch\n.op\n.end\n".to_owned();
-    authoring.quantity = "v(out)".to_owned();
-    authoring.probe_target = "out".to_owned();
-    authoring.expected = "1".to_owned();
-    authoring.absolute_tolerance = "1e-9".to_owned();
-    authoring.relative_tolerance = "1e-9".to_owned();
-    assert!(app.state.model_editor.commit_qualification_suite());
-    assert!(
-        app.state
-            .model_editor
-            .validate_candidate(&app.model.model_library_manager, project_revision)
-    );
-    assert!(
-        app.availability(ModelsCommand::ModelRunQualificationTests.key())
-            .is_available()
-    );
-
-    app.state
-        .model_editor
-        .draft
-        .as_mut()
-        .expect("draft")
-        .qualification
-        .suites[0]
-        .vectors[0]
-        .source
-        .source_id = Some(crate::product::ModelSourceId::new());
-    assert!(
-        app.state
-            .model_editor
-            .draft
-            .as_ref()
-            .expect("draft")
-            .qualification
-            .validate_for_model("qualification_nch")
-            .is_ok()
-    );
-    assert!(
-        !app.availability(ModelsCommand::ModelRunQualificationTests.key())
-            .is_available()
-    );
 }

@@ -1,31 +1,21 @@
 //! Device-model specialist surface.
 //!
 //! The surface is a projection over the transactional editor state and the
-//! persisted model-definition/qualification domains. It never supplies sample
-//! model facts when those records are absent, and it does not turn a review
-//! affordance into a release or qualification mutation.
+//! persisted model-definition domain. It never supplies sample model facts
+//! when those records are absent.
 
-mod promotion;
-mod qualification;
 mod schema_editors;
 mod workflows;
 
-use promotion::*;
-use qualification::*;
 use schema_editors::*;
 use workflows::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use egui::{Align, Align2, Color32, Id, Layout, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui::{Align, Align2, Color32, Layout, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::state::model_library::{
-    ApprovalDecision, CompatibilityDisposition, ConsumerChange, LicenseScope, LookupInterpolation,
-    ModelDefinitionMetadata, ModelQualificationState, ModelReleaseCandidate,
-    ModelSectionQualification, ModelSourceEvidenceBinding, ParameterDefinition, ParameterSource,
-    QualificationAnalysis, QualificationPlatform, QualificationPlatformRun, QualificationProbe,
-    QualificationSample, QualificationSuite, QualificationVector,
-    QualificationVectorDispositionCause, QualificationVectorRequiredAction,
+    LookupInterpolation, ModelDefinitionMetadata, ParameterDefinition, ParameterSource,
     StatisticalDistribution, StatisticalHierarchyScope, TemperatureExtrapolationPolicy,
     TemperatureLawRepresentation,
 };
@@ -36,12 +26,7 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::models::ModelsFeature;
 
 use super::super::design_system::{self, WorkbenchIcon};
-use crate::workbench::documents::model_editor::{
-    ModelComparisonDisposition, ModelEditorSection, ModelParameterKind,
-    QualificationAuthoringAnalysis, QualificationAuthoringProbe, QualificationAuthoringSample,
-};
-use crate::workbench::framework::command_registry::CommandAvailability;
-use crate::workbench::models::commands::ModelsCommand;
+use crate::workbench::documents::model_editor::{ModelEditorSection, ModelParameterKind};
 use crate::workbench::models::model_editor_workflow::{
     ModelEditorWorkflow, active_model_editor_workflow, close_model_editor_workflow,
     prepare_model_editor_workflow, request_model_editor_workflow, set_model_editor_workflow_error,
@@ -62,12 +47,6 @@ const NAV_ROW_H: f32 = 36.0;
 const SECTION_HEADER_H: f32 = 51.0;
 const TABLE_HEADER_H: f32 = 27.0;
 const TABLE_MIN_W: f32 = 760.0;
-const QUALIFICATION_FIELD_ROW_H: f32 = 54.0;
-const QUALIFICATION_MULTILINE_ROW_H: f32 = 118.0;
-const QUALIFICATION_STATUS_H: f32 = 86.0;
-const QUALIFICATION_ERROR_H: f32 = 50.0;
-const QUALIFICATION_PLAN_STATE_ID: &str = "model-editor-qualification-plan-state";
-const RELEASE_FACT_ROW_H: f32 = 35.0;
 
 /// Side of a problem mark painted in front of one of this surface's values,
 /// and the advance from its left edge to where the text after it begins.
@@ -83,8 +62,6 @@ enum SurfaceAction {
     OpenNewSection,
     OpenCorrelationMatrix,
     OpenTemperaturePreview,
-    OpenQualificationPlan,
-    OpenPromotionReview,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +71,7 @@ struct SectionSpec {
     action_label: Option<&'static str>,
 }
 
-const SECTION_SPECS: [SectionSpec; 6] = [
+const SECTION_SPECS: [SectionSpec; 4] = [
     SectionSpec {
         section: ModelEditorSection::Parameters,
         title: "Typed parameters, inheritance, units, and bounds",
@@ -115,24 +92,12 @@ const SECTION_SPECS: [SectionSpec; 6] = [
         title: "Temperature equations, interpolation, and valid range",
         action_label: Some("Plot temperature law…"),
     },
-    SectionSpec {
-        section: ModelEditorSection::Tests,
-        title: "Golden vectors, platform parity, and regression",
-        action_label: Some("Qualification plan…"),
-    },
-    SectionSpec {
-        section: ModelEditorSection::Release,
-        title: "Documentation, review, compatibility, and promotion",
-        action_label: None,
-    },
 ];
 
 #[derive(Debug, Clone)]
 struct PersistedModelRecords {
     metadata: Option<ModelDefinitionMetadata>,
-    qualification: Option<ModelQualificationState>,
     metadata_error: Option<String>,
-    qualification_error: Option<String>,
 }
 
 /// What a verdict column says about one row.
@@ -146,60 +111,6 @@ enum MetricTone {
     Neutral,
     Warning,
     Error,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct QualificationRow {
-    suite: String,
-    vectors: String,
-    desktop: String,
-    wasm: String,
-    reference_error: DisplayCell,
-    status: DisplayCell,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum QualificationDeleteTarget {
-    #[default]
-    None,
-    Vector,
-    Suite,
-}
-
-/// Dialog-local qualification selection and transaction buffers. These values
-/// are presentation state only: persisted suite, vector, evidence, and
-/// disposition records remain owned by the qualification domain.
-#[derive(Debug, Clone)]
-struct QualificationPlanUiState {
-    selected_suite_id: String,
-    selected_vector_id: String,
-    edit_open: bool,
-    edit_name: String,
-    delete_target: QualificationDeleteTarget,
-    disposition_open: bool,
-    disposition_id: String,
-    disposition_reason: String,
-    disposition_cause: QualificationVectorDispositionCause,
-    disposition_action: QualificationVectorRequiredAction,
-    action_error: Option<String>,
-}
-
-impl Default for QualificationPlanUiState {
-    fn default() -> Self {
-        Self {
-            selected_suite_id: String::new(),
-            selected_vector_id: String::new(),
-            edit_open: false,
-            edit_name: String::new(),
-            delete_target: QualificationDeleteTarget::None,
-            disposition_open: false,
-            disposition_id: String::new(),
-            disposition_reason: String::new(),
-            disposition_cause: QualificationVectorDispositionCause::Failed,
-            disposition_action: QualificationVectorRequiredAction::Rerun,
-            action_error: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,17 +149,6 @@ impl DisplayCell {
             mark: None,
         }
     }
-
-    /// A cell outside a verdict column that still has to be noticed: the mark
-    /// carries the severity and the words stay the colour of every other cell.
-    fn problem(value: impl Into<String>, problem: Problem) -> Self {
-        Self {
-            text: value.into(),
-            mono: false,
-            tone: MetricTone::Neutral,
-            mark: Some(problem),
-        }
-    }
 }
 
 impl ModelsFeature {
@@ -260,12 +160,6 @@ impl ModelsFeature {
 }
 
 fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
-    crate::workbench::documents::model_editor::advance_qualification_execution(
-        &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
-    );
-    if cx.state.model_editor.qualification_execution.is_some() {
-        ui.ctx().request_repaint();
-    }
     let t = Tokens::get(ui.ctx());
     let size = ui.available_size().max(Vec2::splat(1.0));
     let (viewport, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -370,13 +264,10 @@ fn persisted_records(cx: &Cx<'_, ModelsFeature>) -> PersistedModelRecords {
     let Some(draft) = cx.state.model_editor.draft.as_ref() else {
         return PersistedModelRecords {
             metadata: None,
-            qualification: None,
             metadata_error: None,
-            qualification_error: None,
         };
     };
     let metadata = Some(draft.metadata.clone());
-    let qualification = Some(draft.qualification.clone());
     let metadata_error = draft.definition().err().map(|diagnostics| {
         diagnostics
             .into_iter()
@@ -384,16 +275,9 @@ fn persisted_records(cx: &Cx<'_, ModelsFeature>) -> PersistedModelRecords {
             .collect::<Vec<_>>()
             .join("; ")
     });
-    let qualification_error = draft
-        .qualification
-        .validate_for_model(&draft.name)
-        .err()
-        .map(|error| error.to_string());
     PersistedModelRecords {
         metadata,
-        qualification,
         metadata_error,
-        qualification_error,
     }
 }
 
@@ -505,12 +389,6 @@ fn candidate_status(
             Some(Problem::Failure),
         ));
     }
-    if let Some(error) = records.qualification_error.as_ref() {
-        return Some((
-            format!("qualification invalid · {error}"),
-            Some(Problem::Failure),
-        ));
-    }
     let editor = &cx.state.model_editor;
     if let Some(diagnostic) = editor.diagnostics.first() {
         return Some((diagnostic.message.clone(), Some(Problem::Failure)));
@@ -575,22 +453,13 @@ fn navigation_meta(
                 .map_or(0, |metadata| metadata.sections.len())
                 .to_string(),
         ),
-        // Vectors that passed wherever they ran: a pass this browser recorded
-        // counts as surely as one recorded on a desktop.
-        ModelEditorSection::Tests => {
-            let qualification = qualification_totals(cx, records);
-            Some(format!("{}/{}", qualification.passed, qualification.total))
-        }
-        ModelEditorSection::Statistics
-        | ModelEditorSection::Temperature
-        | ModelEditorSection::Release => None,
+        ModelEditorSection::Statistics | ModelEditorSection::Temperature => None,
     }
 }
 
 /// The aggregate a section owns but cannot state in any one of its rows. A fact
 /// the rows already carry is never repeated in the header.
 fn section_header_fact(
-    cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     section: ModelEditorSection,
 ) -> Option<String> {
@@ -602,68 +471,10 @@ fn section_header_fact(
                 "{declared} declared · {inherited} inherited · {overridden} override"
             ))
         }
-        ModelEditorSection::Tests => {
-            // Suite rows state desktop and WebAssembly runs one suite at a
-            // time; runtime parity is a property of the candidate as a whole.
-            // The detail after it was the Tests table's own Status column.
-            let qualification = qualification_totals(cx, records);
-            Some(format!(
-                "{} / {} WebAssembly",
-                qualification.wasm_passed, qualification.total
-            ))
-        }
         ModelEditorSection::Sections
         | ModelEditorSection::Statistics
-        | ModelEditorSection::Temperature
-        | ModelEditorSection::Release => None,
+        | ModelEditorSection::Temperature => None,
     }
-}
-
-/// What the Tests section counts, read off the recorded platform runs bound
-/// to the open source.
-///
-/// Each platform's run is its own record: a browser session records a
-/// WebAssembly run and no desktop one, and a desktop session the reverse.
-/// Cross-platform evidence exists only once both have run, so counting from
-/// it said "0 / 1" beside a row that had just passed in the browser.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct QualificationTotals {
-    total: usize,
-    /// Vectors that ran on at least one platform and failed on none.
-    passed: usize,
-    desktop_passed: usize,
-    wasm_passed: usize,
-}
-
-fn qualification_totals(
-    cx: &Cx<'_, ModelsFeature>,
-    records: &PersistedModelRecords,
-) -> QualificationTotals {
-    let mut totals = QualificationTotals {
-        total: 0,
-        passed: 0,
-        desktop_passed: 0,
-        wasm_passed: 0,
-    };
-    let Some(qualification) = records.qualification.as_ref() else {
-        return totals;
-    };
-    totals.total = qualification
-        .suites
-        .iter()
-        .map(|suite| suite.vectors.len())
-        .sum();
-    if records.qualification_error.is_some() {
-        return totals;
-    }
-    let source = cx.state.model_editor.draft.as_ref();
-    for suite in &qualification.suites {
-        let runs = SuiteRuns::bound(qualification, suite, source);
-        totals.passed += runs.verdict().passed;
-        totals.desktop_passed += passed_on(runs.desktop);
-        totals.wasm_passed += passed_on(runs.wasm);
-    }
-    totals
 }
 
 fn workspace_body(
@@ -841,8 +652,6 @@ fn render_section(
                 ModelEditorSection::Sections => sections_table(ui, records),
                 ModelEditorSection::Statistics => statistics_table(ui, records),
                 ModelEditorSection::Temperature => temperature_table(ui, records),
-                ModelEditorSection::Tests => qualification_table(ui, cx, records),
-                ModelEditorSection::Release => release_panel(ui, cx, records, action),
             }
         });
 }
@@ -883,7 +692,7 @@ fn section_header(
     );
     // The section's aggregate shares the kicker line: it is elided first so the
     // kicker gives up width to it rather than overprinting it.
-    let fact = section_header_fact(cx, records, spec.section);
+    let fact = section_header_fact(records, spec.section);
     let fact_galley = fact.as_ref().map(|text| {
         let font = theme::mono(tokens::FS_0, FontWeight::Regular);
         let text = design_system::elide_text(ui, text, &font, (copy_rect.width() * 0.66).max(1.0));
@@ -1000,16 +809,6 @@ fn section_action_state(
             }),
             Some("A valid temperature law is required before plotting."),
             SurfaceAction::OpenTemperaturePreview,
-        ),
-        ModelEditorSection::Tests => (
-            records.qualification.is_some(),
-            Some("An open model candidate is required."),
-            SurfaceAction::OpenQualificationPlan,
-        ),
-        ModelEditorSection::Release => (
-            false,
-            Some("Release review is owned by the Release panel."),
-            SurfaceAction::OpenPromotionReview,
         ),
     }
 }
@@ -1175,12 +974,11 @@ fn parameter_source_label(source: &ParameterSource) -> String {
 }
 
 fn sections_table(ui: &mut Ui, records: &PersistedModelRecords) {
-    const COLUMNS: [(&str, f32); 5] = [
-        ("Section", 0.16),
-        ("Parent", 0.16),
-        ("Overrides", 0.14),
-        ("Model files", 0.30),
-        ("Qualification", 0.24),
+    const COLUMNS: [(&str, f32); 4] = [
+        ("Section", 0.20),
+        ("Parent", 0.20),
+        ("Overrides", 0.16),
+        ("Model files", 0.44),
     ];
     let rows = records.metadata.as_ref().map_or_else(Vec::new, |metadata| {
         metadata
@@ -1192,7 +990,6 @@ fn sections_table(ui: &mut Ui, records: &PersistedModelRecords) {
                     DisplayCell::plain(section.parent.as_deref().unwrap_or("base")),
                     DisplayCell::mono(section.overrides.len().to_string()),
                     DisplayCell::plain(model_files_label(&section.model_files)),
-                    section_qualification(&section.qualification),
                 ]
             })
             .collect()
@@ -1204,29 +1001,6 @@ fn sections_table(ui: &mut Ui, records: &PersistedModelRecords) {
         &rows,
         "No persisted process-section metadata is available for this model.",
     );
-}
-
-/// Where one process section stands.
-///
-/// This is a definition table, not a results table, so the column states each
-/// section's recorded state in the same words and the same ink. The two that
-/// stop a promotion carry a mark instead of a tone, and the digest behind a
-/// qualified section is not a fact anyone reads off a row.
-fn section_qualification(value: &ModelSectionQualification) -> DisplayCell {
-    match value {
-        ModelSectionQualification::Unqualified => DisplayCell::plain("unqualified"),
-        ModelSectionQualification::Pending => DisplayCell::plain("pending"),
-        ModelSectionQualification::Qualified { evidence_digest } => {
-            if evidence_digest.is_some() {
-                DisplayCell::plain("qualified")
-            } else {
-                DisplayCell::problem("record missing", Problem::Failure)
-            }
-        }
-        ModelSectionQualification::Failed { summary } => {
-            DisplayCell::problem(format!("failed · {summary}"), Problem::Failure)
-        }
-    }
 }
 
 fn model_files_label(files: &[crate::state::model_library::ModelFileIdentity]) -> String {
@@ -1369,485 +1143,6 @@ fn interpolation_label(value: LookupInterpolation) -> &'static str {
     }
 }
 
-fn qualification_table(ui: &mut Ui, cx: &Cx<'_, ModelsFeature>, records: &PersistedModelRecords) {
-    const COLUMNS: [(&str, f32); 6] = [
-        ("Suite", 0.18),
-        ("Vectors", 0.12),
-        ("Desktop", 0.17),
-        ("WASM", 0.17),
-        ("Reference error", 0.18),
-        ("Status", 0.18),
-    ];
-    let rows = qualification_rows(cx, records)
-        .into_iter()
-        .map(|row| {
-            vec![
-                DisplayCell::plain(row.suite),
-                DisplayCell::mono(row.vectors),
-                DisplayCell::plain(row.desktop),
-                DisplayCell::plain(row.wasm),
-                row.reference_error,
-                row.status,
-            ]
-        })
-        .collect::<Vec<_>>();
-    render_table(
-        ui,
-        "model-editor-qualification-table",
-        &COLUMNS,
-        &rows,
-        "No golden-vector suites or platform results are saved for this model.",
-    );
-}
-
-fn qualification_rows(
-    cx: &Cx<'_, ModelsFeature>,
-    records: &PersistedModelRecords,
-) -> Vec<QualificationRow> {
-    let Some(state) = records.qualification.as_ref() else {
-        return Vec::new();
-    };
-    let source = cx.state.model_editor.draft.as_ref();
-    state
-        .suites
-        .iter()
-        .map(|suite| {
-            let total = suite.vectors.len();
-            let runs = SuiteRuns::bound(state, suite, source);
-            let verdict = runs.verdict();
-            // The suite's verdict, from what its platforms recorded. A suite
-            // that passed is the normal case and reads in the same ink as the
-            // rest of its row; a suite with failures is the one the column
-            // exists to find. A state too broken to read is not a verdict at
-            // all, so it carries a mark.
-            let status = if records.qualification_error.is_some() {
-                DisplayCell::problem("unreadable", Problem::Failure)
-            } else if verdict.failed > 0 {
-                DisplayCell::toned(format!("{} failed", verdict.failed), MetricTone::Error)
-            } else if verdict.passed == 0 {
-                DisplayCell::plain(NOT_RUN)
-            } else if verdict.passed < total {
-                DisplayCell::plain(format!("{} / {total} pass", verdict.passed))
-            } else {
-                DisplayCell::plain("pass")
-            };
-            QualificationRow {
-                suite: suite.name.clone(),
-                vectors: total.to_string(),
-                desktop: platform_run_summary(runs.desktop),
-                wasm: platform_run_summary(runs.wasm),
-                // A measured error is a number and is set like one; the words
-                // for its absence are the same words, in the same face, as
-                // every other column's.
-                reference_error: runs.worst_relative_error().map_or_else(
-                    || DisplayCell::plain(NOT_RUN),
-                    |worst| DisplayCell::mono(format_percentage(worst)),
-                ),
-                status,
-            }
-        })
-        .collect()
-}
-
-/// What every column of the Tests table says of a platform, a measurement or
-/// a suite that has not run.
-const NOT_RUN: &str = "not run";
-
-/// One suite's recorded platform runs, bound to the open source.
-#[derive(Debug, Clone, Copy)]
-struct SuiteRuns<'a> {
-    desktop: Option<&'a QualificationPlatformRun>,
-    wasm: Option<&'a QualificationPlatformRun>,
-}
-
-/// How a suite's vectors stand across the platforms that ran them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SuiteVerdict {
-    /// Ran on at least one platform and failed on none.
-    passed: usize,
-    /// Failed on at least one platform.
-    failed: usize,
-}
-
-impl<'a> SuiteRuns<'a> {
-    fn bound(
-        state: &'a ModelQualificationState,
-        suite: &QualificationSuite,
-        draft: Option<&crate::workbench::documents::model_editor::ModelEditorDraft>,
-    ) -> Self {
-        Self {
-            desktop: bound_platform_run(state, suite, draft, QualificationPlatform::Desktop),
-            wasm: bound_platform_run(state, suite, draft, QualificationPlatform::WebAssembly),
-        }
-    }
-
-    fn runs(self) -> impl Iterator<Item = &'a QualificationPlatformRun> {
-        self.desktop.into_iter().chain(self.wasm)
-    }
-
-    fn verdict(self) -> SuiteVerdict {
-        let mut vectors: BTreeMap<String, bool> = BTreeMap::new();
-        for outcome in self.runs().flat_map(|run| &run.vector_outcomes) {
-            let passed = vectors
-                .entry(outcome.vector_id.to_ascii_lowercase())
-                .or_insert(true);
-            *passed &= outcome.outcome.passed;
-        }
-        let passed = vectors.values().filter(|passed| **passed).count();
-        SuiteVerdict {
-            passed,
-            failed: vectors.len() - passed,
-        }
-    }
-
-    fn worst_relative_error(self) -> Option<f64> {
-        self.runs()
-            .flat_map(|run| &run.vector_outcomes)
-            .flat_map(|outcome| &outcome.outcome.references)
-            .map(|reference| reference.relative_error.get())
-            .max_by(f64::total_cmp)
-    }
-}
-
-/// Vectors one platform's run passed.
-fn passed_on(run: Option<&QualificationPlatformRun>) -> usize {
-    run.map_or(0, |run| {
-        run.vector_outcomes
-            .iter()
-            .filter(|outcome| outcome.outcome.passed)
-            .count()
-    })
-}
-
-fn bound_platform_run<'a>(
-    state: &'a ModelQualificationState,
-    suite: &QualificationSuite,
-    draft: Option<&crate::workbench::documents::model_editor::ModelEditorDraft>,
-    platform: QualificationPlatform,
-) -> Option<&'a QualificationPlatformRun> {
-    let draft = draft?;
-    if draft.definition_is_dirty() {
-        return None;
-    }
-    exact_platform_run(
-        state,
-        suite,
-        &draft.model_name,
-        draft.source_id,
-        draft.base_source_digest,
-        draft.base_source_revision,
-        platform,
-    )
-}
-
-fn exact_platform_run<'a>(
-    state: &'a ModelQualificationState,
-    suite: &QualificationSuite,
-    model_id: &str,
-    source_id: crate::product::ModelSourceId,
-    source_digest: crate::product::ContentDigest,
-    source_revision: crate::product::ObjectRevision,
-    platform: QualificationPlatform,
-) -> Option<&'a QualificationPlatformRun> {
-    let mut matches = state.platform_runs.iter().filter(|run| {
-        run.platform == platform
-            && run.suite_id.eq_ignore_ascii_case(&suite.id)
-            && run.suite_revision == suite.revision
-            && run.source.model_id.eq_ignore_ascii_case(model_id)
-            && run.source.source_id == Some(source_id)
-            && run.source.source_digest == source_digest
-            && run.source.source_revision == source_revision
-    });
-    let first = matches.next()?;
-    matches.next().is_none().then_some(first)
-}
-
-fn platform_run_summary(run: Option<&QualificationPlatformRun>) -> String {
-    run.map_or_else(
-        || NOT_RUN.to_owned(),
-        |run| format!("{} pass", passed_on(Some(run))),
-    )
-}
-
-fn format_percentage(value: f64) -> String {
-    format!("{:.4}%", value * 100.0)
-}
-
-fn release_panel(
-    ui: &mut Ui,
-    cx: &Cx<'_, ModelsFeature>,
-    records: &PersistedModelRecords,
-    action: &mut Option<SurfaceAction>,
-) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let candidate = current_candidate(cx, records);
-    let split = width >= 720.0;
-    let left_w = if split { width * 0.5 } else { width };
-    let facts = release_facts(candidate);
-    let facts_h = facts.len().max(1) as f32 * RELEASE_FACT_ROW_H;
-    let note_h = 154.0;
-    let height = if split {
-        facts_h.max(note_h)
-    } else {
-        facts_h + note_h
-    };
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let facts_rect = Rect::from_min_max(
-        rect.min,
-        Pos2::new(
-            rect.left() + left_w,
-            if split {
-                rect.bottom()
-            } else {
-                rect.top() + facts_h
-            },
-        ),
-    );
-    let note_rect = if split {
-        Rect::from_min_max(Pos2::new(facts_rect.right(), rect.top()), rect.max)
-    } else {
-        Rect::from_min_max(Pos2::new(rect.left(), facts_rect.bottom()), rect.max)
-    };
-    ui.painter().rect_filled(facts_rect, 0.0, t.color.bg_panel);
-    ui.painter().rect_filled(note_rect, 0.0, t.color.bg_panel);
-    if split {
-        ui.painter().vline(
-            facts_rect.right(),
-            facts_rect.y_range(),
-            Stroke::new(1.0, t.color.border),
-        );
-    } else {
-        ui.painter().hline(
-            note_rect.x_range(),
-            note_rect.top(),
-            Stroke::new(1.0, t.color.border),
-        );
-    }
-    let mut facts_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(facts_rect)
-            .layout(Layout::top_down(Align::Min)),
-    );
-    facts_ui.spacing_mut().item_spacing = Vec2::ZERO;
-    if facts.is_empty() {
-        release_no_candidate_row(&mut facts_ui);
-    }
-    for (label, value) in facts {
-        release_fact_row(&mut facts_ui, &label, &value);
-    }
-
-    let note_clip = note_rect.shrink2(Vec2::new(12.0, 10.0));
-    let note = "Promotion creates a new read-only model revision. Existing projects stay pinned until their dependency is updated and qualification is reviewed.";
-    let galley = ui.painter().layout(
-        note.to_owned(),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-        note_clip.width(),
-    );
-    ui.painter()
-        .with_clip_rect(note_clip)
-        .galley(note_clip.min, galley, t.color.text_dim);
-    let button_rect = Rect::from_min_size(
-        Pos2::new(note_clip.left(), note_rect.bottom() - 48.0),
-        Vec2::new(170.0, Tokens::get(ui.ctx()).metrics.ctl_h),
-    );
-    let mut button_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(button_rect)
-            .layout(Layout::left_to_right(Align::Center)),
-    );
-    let base_enabled = cx
-        .state
-        .model_editor
-        .draft
-        .as_ref()
-        .is_some_and(|draft| !draft.definition_is_dirty())
-        && records.qualification_error.is_none();
-    action_button(
-        &mut button_ui,
-        "Review model promotion",
-        170.0,
-        base_enabled,
-        Some("Save a valid model definition and repair any qualification diagnostics first."),
-        SurfaceAction::OpenPromotionReview,
-        action,
-    );
-}
-
-fn exact_passing_evidence_available(
-    cx: &Cx<'_, ModelsFeature>,
-    records: &PersistedModelRecords,
-) -> bool {
-    let Some(draft) = cx.state.model_editor.draft.as_ref() else {
-        return false;
-    };
-    if draft.definition_is_dirty() {
-        return false;
-    }
-    let Ok(source) = ModelSourceEvidenceBinding::try_new_project_bound(
-        draft.model_name.clone(),
-        draft.source_id,
-        draft.base_source_digest,
-        draft.base_source_revision,
-    ) else {
-        return false;
-    };
-    let Some(qualification) = records.qualification.as_ref() else {
-        return false;
-    };
-    let Ok(suites) = qualification.exact_suites_for_source(&source) else {
-        return false;
-    };
-    !suites.is_empty()
-        && suites.into_iter().all(|suite| {
-            qualification
-                .evidence
-                .iter()
-                .any(|evidence| evidence.passed && evidence.validate_bound(suite, &source).is_ok())
-        })
-}
-
-fn current_candidate<'a>(
-    cx: &'a Cx<'_, ModelsFeature>,
-    _records: &PersistedModelRecords,
-) -> Option<&'a ModelReleaseCandidate> {
-    let draft = cx.state.model_editor.draft.as_ref()?;
-    if draft.definition_is_dirty() {
-        return None;
-    }
-    let mut matches = draft.qualification.candidates.iter().filter(|candidate| {
-        candidate
-            .identity
-            .model_id
-            .eq_ignore_ascii_case(&draft.model_name)
-            && candidate.source.source_id == Some(draft.source_id)
-            && candidate.source.source_digest == draft.base_source_digest
-            && candidate.source.source_revision == draft.base_source_revision
-    });
-    let first = matches.next()?;
-    matches.next().is_none().then_some(first)
-}
-
-/// What the four release gates stand at, for a candidate that exists.
-///
-/// With no candidate open there is one fact, not four: the panel states it on
-/// its own line rather than writing "no release candidate" into every row of
-/// a table whose rows have nothing to read off.
-fn release_facts(candidate: Option<&ModelReleaseCandidate>) -> Vec<(String, String)> {
-    let Some(candidate) = candidate else {
-        return Vec::new();
-    };
-    let documentation = if candidate.documentation.validate_complete().is_ok() {
-        "complete".to_owned()
-    } else {
-        format!(
-            "{} required documents declared",
-            candidate.documentation.declarations.len()
-        )
-    };
-    let license = candidate.license.as_ref().map_or_else(
-        || "not declared".to_owned(),
-        |license| {
-            format!(
-                "{} · {}",
-                license.expression,
-                license_scope_label(license.scope)
-            )
-        },
-    );
-    let impact = candidate.consumer_impact.as_ref().map_or_else(
-        || "not assessed".to_owned(),
-        |impact| {
-            format!(
-                "{} consumers · {}",
-                impact.affected_consumer_ids.len(),
-                consumer_change_label(impact.change)
-            )
-        },
-    );
-    let compatibility = candidate.compatibility.as_ref().map_or_else(
-        || "not assessed".to_owned(),
-        |compatibility| {
-            let ready = candidate
-                .consumer_impact
-                .as_ref()
-                .is_some_and(|impact| compatibility.validate_for_release(impact).is_ok());
-            let declared = compatibility.platforms.len();
-            let unresolved = compatibility
-                .platforms
-                .iter()
-                .filter(|platform| platform.disposition != CompatibilityDisposition::Compatible)
-                .count();
-            if ready {
-                "desktop and WebAssembly declared".to_owned()
-            } else {
-                format!("{declared}/2 platforms declared · {unresolved} incompatible")
-            }
-        },
-    );
-    vec![
-        ("Documentation".to_owned(), documentation),
-        ("License".to_owned(), license),
-        ("Consumer impact".to_owned(), impact),
-        ("Compatibility".to_owned(), compatibility),
-    ]
-}
-
-fn consumer_change_label(value: ConsumerChange) -> &'static str {
-    match value {
-        ConsumerChange::NoImpact => "no impact",
-        ConsumerChange::Compatible => "compatible",
-        ConsumerChange::Breaking => "breaking",
-    }
-}
-
-fn license_scope_label(value: LicenseScope) -> &'static str {
-    match value {
-        LicenseScope::FoundryProject => "foundry project",
-        LicenseScope::OrganizationInternal => "organization internal",
-        LicenseScope::Redistributable => "redistributable",
-    }
-}
-
-fn release_fact_row(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, RELEASE_FACT_ROW_H), Sense::hover());
-    bottom_rule(ui, rect, t.color.border);
-    let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + 11.0, rect.top()),
-        Pos2::new(rect.left() + rect.width() * 0.38, rect.bottom()),
-    );
-    let value_rect = Rect::from_min_max(
-        Pos2::new(label_rect.right() + 8.0, rect.top()),
-        Pos2::new(rect.right() - 10.0, rect.bottom()),
-    );
-    paint_cell(ui, label_rect, &DisplayCell::plain(label));
-    paint_cell(ui, value_rect, &DisplayCell::plain(value));
-}
-
-/// The one line the release column shows when no candidate has been created.
-fn release_no_candidate_row(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, RELEASE_FACT_ROW_H), Sense::hover());
-    bottom_rule(ui, rect, t.color.border);
-    let inner = Rect::from_min_max(
-        Pos2::new(rect.left() + 11.0, rect.top()),
-        Pos2::new(rect.right() - 10.0, rect.bottom()),
-    );
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let text = design_system::elide_text(ui, "No release candidate", &font, inner.width());
-    ui.painter().with_clip_rect(inner).text(
-        inner.left_center(),
-        Align2::LEFT_CENTER,
-        text,
-        font,
-        t.color.text_dim,
-    );
-}
-
 fn apply_action(cx: &mut Cx<'_, ModelsFeature>, action: SurfaceAction) {
     match action {
         SurfaceAction::SelectSection(section) => {
@@ -1865,139 +1160,6 @@ fn apply_action(cx: &mut Cx<'_, ModelsFeature>, action: SurfaceAction) {
         SurfaceAction::OpenTemperaturePreview => {
             cx.state.model_editor.temperature_preview_open = true;
         }
-        SurfaceAction::OpenQualificationPlan => {
-            cx.state.model_editor.qualification_plan_open = true;
-        }
-        SurfaceAction::OpenPromotionReview => {
-            cx.state.model_editor.begin_promotion_review();
-        }
-    }
-}
-
-fn release_comparison_dialog(
-    ctx: &egui::Context,
-    cx: &mut Cx<'_, ModelsFeature>,
-    records: &PersistedModelRecords,
-) {
-    if !cx.state.model_editor.comparison_open {
-        return;
-    }
-    let releases = records
-        .qualification
-        .as_ref()
-        .map(|state| {
-            state
-                .releases
-                .iter()
-                .map(|release| {
-                    (
-                        release.identity.id.clone(),
-                        release.identity.version.clone(),
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if cx.state.model_editor.comparison_release_id.is_empty()
-        && let Some((release_id, _)) = releases.first()
-    {
-        cx.state.model_editor.comparison_release_id = release_id.clone();
-    }
-    let selected_release = cx.state.model_editor.comparison_release_id.clone();
-    let comparison = cx.state.model_editor.draft.as_ref().map_or_else(
-        || Err("No project-owned model candidate is open".to_owned()),
-        |draft| draft.compare_release(&selected_release),
-    );
-    let choice = Dialog::new("Compare model with approved release", "Close")
-    .description("Compare the open candidate with a released revision, using the saved source and qualification results.")
-    .size(DialogSize::Transaction)
-    .fixed_height(680.0)
-    .show(ctx, |ui| {
-        let (selector_rect, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width().max(1.0), 48.0),
-            Sense::hover(),
-        );
-        ui.painter().text(
-            selector_rect.left_top(),
-            Align2::LEFT_TOP,
-            "Approved release",
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            Tokens::get(ui.ctx()).color.text_dim,
-        );
-        let field_rect = Rect::from_min_max(
-            Pos2::new(selector_rect.left(), selector_rect.top() + 18.0),
-            selector_rect.max,
-        );
-        let selected_label = releases
-            .iter()
-            .find(|(id, _)| id.eq_ignore_ascii_case(&selected_release))
-            .map_or("No retained release".to_owned(), |(id, version)| {
-                format!("{id} · {version}")
-            });
-        let mut selector = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(field_rect)
-                .layout(Layout::left_to_right(Align::Center)),
-        );
-        let response = crate::ui::widgets::Combo::from_id_salt("model-release-comparison-selector")
-            .selected_text(selected_label)
-            .width(field_rect.width())
-            .show_ui(&mut selector, |ui| {
-                for (id, version) in &releases {
-                    ui.selectable_value(
-                        &mut cx.state.model_editor.comparison_release_id,
-                        id.clone(),
-                        format!("{id} · {version}"),
-                    );
-                }
-            });
-        ui.ctx()
-            .accesskit_node_builder(response.response.id, |node| {
-                node.set_label("Approved model release to compare");
-            });
-
-        const COLUMNS: [(&str, f32); 5] = [
-            ("Parameter / behavior", 0.22),
-            ("Approved release", 0.20),
-            ("Candidate", 0.20),
-            ("Effect", 0.22),
-            ("Status", 0.16),
-        ];
-        let rows = comparison.as_ref().map_or_else(
-            |_| Vec::new(),
-            |rows| {
-                rows.iter()
-                .map(|row| {
-                    let (status, tone) = match row.disposition {
-                        ModelComparisonDisposition::Unchanged => ("unchanged", MetricTone::Neutral),
-                        ModelComparisonDisposition::Improved => ("improved", MetricTone::Neutral),
-                        ModelComparisonDisposition::Review => ("review", MetricTone::Warning),
-                        ModelComparisonDisposition::Blocking => ("blocking", MetricTone::Error),
-                    };
-                    vec![
-                        DisplayCell::mono(&row.item),
-                        DisplayCell::mono(&row.released),
-                        DisplayCell::mono(&row.candidate),
-                        DisplayCell::plain(&row.effect),
-                        DisplayCell::toned(status, tone),
-                    ]
-                })
-                .collect()
-            },
-        );
-        render_table(
-            ui,
-            "model-editor-release-comparison",
-            &COLUMNS,
-            &rows,
-            comparison.as_ref().err().map_or(
-                "No released model revision is saved for comparison.",
-                String::as_str,
-            ),
-        );
-    });
-    if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        cx.state.model_editor.comparison_open = false;
     }
 }
 

@@ -858,7 +858,6 @@ const TOOLS_MENU: &[MenuEntry] = &[
     models(ModelsCommand::ModelNew).access('W'),
     models(ModelsCommand::ModelEditor).access('E'),
     models(ModelsCommand::ModelCreateProjectCopy).access('C'),
-    models(ModelsCommand::ModelCorrelation).access('M'),
     models(ModelsCommand::PdkSettings).access('P'),
     models(ModelsCommand::RescanModelLibraries).access('R'),
     Separator,
@@ -1085,8 +1084,6 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
         return match command {
             ModelsCommand::ModelSaveRevision => Some(WorkbenchIcon::Save),
             ModelsCommand::RescanModelLibraries => Some(WorkbenchIcon::Refresh),
-            ModelsCommand::ModelCompareRelease => Some(WorkbenchIcon::Compare),
-            ModelsCommand::ModelRunQualificationTests => Some(WorkbenchIcon::Run),
             _ => None,
         };
     }

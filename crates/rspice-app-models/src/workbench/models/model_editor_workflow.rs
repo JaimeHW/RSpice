@@ -118,9 +118,6 @@ pub(super) fn selected_model_for_project_copy<'a>(
     if reads.model.safe_mode.project_read_only() {
         return Err("the project is open read-only");
     }
-    if reads.editor.qualification_execution.is_some() {
-        return Err("a model qualification run is active");
-    }
     if reads
         .editor
         .draft
@@ -139,7 +136,6 @@ pub(super) fn selected_model_for_project_copy<'a>(
 pub(crate) enum ModelEditorWorkflow {
     SaveRevision,
     ValidateCandidate,
-    RunQualification,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -88,11 +88,7 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
         },
         SurfaceId::ModelEditor => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui governed project-owned device-model definition editor",
-            evidence_boundary: "A selected single-card model owned by the project can be opened, edited through its parameter, section, statistical, temperature, and qualification forms, checked by the parser, compared with saved releases, and saved as a source revision or a results-only revision. Qualification runs on this desktop or browser build and compares only a matching saved pair of results. Promotion stays blocked until the source's results, declarations, compatibility checks, and independent approvals are complete. Built-in and external sources stay read-only.",
-        },
-        SurfaceId::ModelCorrelation => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui project-owned measurement-correlation workspace",
-            evidence_boundary: "Read-only CSV measurement sets, the source and simulation each comparison came from, unit-aware alignment and metrics, saved residuals, outlier decisions that can only be added to, independent review records, and handoff to qualification all work against the project history. Correlation results never promote a model or turn a failed qualification vector into a pass.",
+            evidence_boundary: "A selected single-card model owned by the project can be opened, edited through its parameter, section, statistical, and temperature forms, checked by the parser, and saved as a source revision. Built-in and external sources stay read-only.",
         },
         SurfaceId::LibraryCellviewManager => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned library, cellview, symbol, and component-form authoring workspace",
@@ -174,7 +170,6 @@ mod tests {
                 SurfaceId::Netlist,
                 SurfaceId::ReportAuthoring,
                 SurfaceId::ModelEditor,
-                SurfaceId::ModelCorrelation,
                 SurfaceId::LibraryCellviewManager,
                 SurfaceId::ProjectLauncher,
                 SurfaceId::Preferences,

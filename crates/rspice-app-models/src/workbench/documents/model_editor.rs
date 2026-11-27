@@ -5,38 +5,22 @@
 //! text-entry buffers, validation evidence, and section/dialog presentation.
 
 mod operations;
-mod qualification_run;
-mod release_candidate;
+mod parameters;
 
 pub use operations::*;
-pub use qualification_run::*;
-// Crate-private: `release_candidate` exposes only `pub(super)` helpers, which
-// the sibling modules reach through `use super::*`.
-use release_candidate::*;
+// Crate-private: `parameters` exposes only `pub(super)` helpers.
+use parameters::*;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
-use crate::services::model_qualification::{
-    QualificationExecutionProgress, QualificationExecutionSession, QualificationExecutionStep,
-};
 use crate::state::model_library::{
-    ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
-    ConsumerImpactAssessment, CorrelationMatrix, DocumentReference, DocumentationDeclaration,
-    DocumentationSet, FiniteBounds, FiniteF64, FiniteValue, LicenseDeclaration, LicenseScope,
-    ModelCorrelationState, ModelDefinitionMetadata, ModelFileIdentity, ModelLibrary,
-    ModelLibraryManager, ModelQualificationState, ModelReleaseCandidate, ModelReleaseIdentity,
-    ModelSectionDefinition, ModelSectionQualification, ModelSourceAuthority,
-    ModelSourceEvidenceBinding, ParameterDataType, ParameterDefinition, ParameterSource,
-    ParameterValue, PlatformCompatibilityEvidence, ProjectModelDefinition,
-    ProjectModelRevisionDefinition, PromotionApproval, PromotionApprovalRole,
-    QualificationAnalysis, QualificationErrorCode, QualificationOutputDefinition,
-    QualificationPlatform, QualificationProbe, QualificationReference, QualificationSample,
-    QualificationSuite, QualificationVector, QualificationVectorDisposition,
-    QualificationVectorDispositionCause, QualificationVectorRequiredAction,
-    ReleaseCandidateIdentity, RequiredDocumentation,
+    CorrelationMatrix, FiniteBounds, FiniteF64, ModelDefinitionMetadata, ModelFileIdentity,
+    ModelLibrary, ModelLibraryManager, ModelSectionDefinition, ModelSourceAuthority,
+    ParameterDataType, ParameterDefinition, ParameterSource, ParameterValue,
+    ProjectModelDefinition, ProjectModelRevisionDefinition,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -49,19 +33,15 @@ pub enum ModelEditorSection {
     Sections,
     Statistics,
     Temperature,
-    Tests,
-    Release,
 }
 
 impl ModelEditorSection {
     #[cfg(test)]
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 4] = [
         Self::Parameters,
         Self::Sections,
         Self::Statistics,
         Self::Temperature,
-        Self::Tests,
-        Self::Release,
     ];
 
     #[must_use]
@@ -71,8 +51,6 @@ impl ModelEditorSection {
             Self::Sections => "Sections",
             Self::Statistics => "Statistics",
             Self::Temperature => "Temperature",
-            Self::Tests => "Tests",
-            Self::Release => "Release",
         }
     }
 }
@@ -81,280 +59,6 @@ impl ModelEditorSection {
 pub enum ModelParameterKind {
     Numeric,
     String,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum QualificationAuthoringAnalysis {
-    #[default]
-    DcOperatingPoint,
-    DcSweep,
-    AcSweep,
-    Noise,
-    Transient,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum QualificationAuthoringProbe {
-    #[default]
-    NodeVoltage,
-    BranchCurrent,
-    DcObservable,
-    SweepValue,
-    AcNodeVoltageMagnitude,
-    AcNodeVoltagePhaseDegrees,
-    AcNodeVoltageReal,
-    AcNodeVoltageImaginary,
-    AcBranchCurrentMagnitude,
-    AcBranchCurrentPhaseDegrees,
-    AcBranchCurrentReal,
-    AcBranchCurrentImaginary,
-    AcEffectiveCapacitance,
-    FrequencyValue,
-    NoiseOutputDensity,
-    NoiseInputReferredDensity,
-    NoiseOutputAmplitude,
-    NoiseInputReferredAmplitude,
-    TransientNodeVoltage,
-    TransientBranchCurrent,
-    TimeValue,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-// The unparsed form of `QualificationSample`, which it has to spell the same
-// way to be recognisable as the same choice.
-#[allow(clippy::enum_variant_names)]
-pub enum QualificationAuthoringSample {
-    #[default]
-    OperatingPoint,
-    FirstSweepPoint,
-    LastSweepPoint,
-    SweepPoint,
-    FirstFrequencyPoint,
-    LastFrequencyPoint,
-    FrequencyPoint,
-    FirstTimePoint,
-    LastTimePoint,
-    TimePoint,
-}
-
-/// Stable text buffers for one atomic suite/vector authoring transaction.
-/// Parsing occurs only when the user commits, so focus and validation cannot
-/// resize or replace neighboring form controls.
-#[derive(Debug, Clone, Default)]
-pub struct QualificationAuthoringDraft {
-    pub suite_id: String,
-    pub suite_name: String,
-    pub vector_id: String,
-    pub vector_name: String,
-    /// Empty selects the top-level base card; otherwise this is the exact
-    /// named project-model section executed by the vector.
-    pub model_section: String,
-    pub executable_input: String,
-    pub analysis: QualificationAuthoringAnalysis,
-    pub sweep_source: String,
-    pub sweep_start: String,
-    pub sweep_stop: String,
-    pub sweep_step: String,
-    /// Comma- or whitespace-separated, strictly increasing positive hertz.
-    pub frequencies: String,
-    pub noise_output_node: String,
-    pub noise_output_reference: String,
-    pub noise_input_source: String,
-    pub noise_temperature_kelvin: String,
-    pub transient_stop_time: String,
-    pub transient_max_step: String,
-    pub quantity: String,
-    pub probe: QualificationAuthoringProbe,
-    pub probe_target: String,
-    pub excitation_magnitude: String,
-    pub sample: QualificationAuthoringSample,
-    pub sample_index: String,
-    pub expected: String,
-    pub absolute_tolerance: String,
-    pub relative_tolerance: String,
-    pub error: Option<String>,
-}
-
-/// Fixed-buffer authoring state for the governed release-candidate contract.
-/// The dialog never mutates persisted qualification state until every entered
-/// document, declaration, compatibility record, and independent decision can
-/// be constructed and validated as one exact source-bound candidate.
-#[derive(Debug, Clone)]
-pub struct PromotionCandidateDraft {
-    pub candidate_id: String,
-    pub candidate_version: String,
-    pub suite_id: String,
-    pub evidence_id: String,
-    pub model_description_id: String,
-    pub model_description_digest: String,
-    pub parameter_reference_id: String,
-    pub parameter_reference_digest: String,
-    pub qualification_report_id: String,
-    pub qualification_report_digest: String,
-    pub license_id: String,
-    pub license_expression: String,
-    pub license_scope: LicenseScope,
-    pub commercial_use_allowed: bool,
-    pub redistribution_allowed: bool,
-    pub license_reviewed: bool,
-    pub license_notice_id: String,
-    pub license_notice_digest: String,
-    pub consumer_change: ConsumerChange,
-    pub consumer_summary: String,
-    pub affected_consumer_ids: String,
-    pub migration_plan_id: String,
-    pub migration_plan_digest: String,
-    pub consumer_reviewed: bool,
-    pub desktop_compatibility: CompatibilityDisposition,
-    pub desktop_evidence_id: String,
-    pub desktop_evidence_digest: String,
-    pub webassembly_compatibility: CompatibilityDisposition,
-    pub webassembly_evidence_id: String,
-    pub webassembly_evidence_digest: String,
-    pub existing_projects_compatibility: CompatibilityDisposition,
-    pub compatibility_reviewed: bool,
-    pub model_owner_id: String,
-    pub model_owner_decision: ApprovalDecision,
-    pub model_owner_decision_revision: String,
-    pub qualification_approver_id: String,
-    pub qualification_approver_decision: ApprovalDecision,
-    pub qualification_approver_decision_revision: String,
-    pub error: Option<String>,
-}
-
-impl Default for PromotionCandidateDraft {
-    fn default() -> Self {
-        Self {
-            candidate_id: String::new(),
-            candidate_version: String::new(),
-            suite_id: String::new(),
-            evidence_id: String::new(),
-            model_description_id: String::new(),
-            model_description_digest: String::new(),
-            parameter_reference_id: String::new(),
-            parameter_reference_digest: String::new(),
-            qualification_report_id: String::new(),
-            qualification_report_digest: String::new(),
-            license_id: String::new(),
-            license_expression: String::new(),
-            license_scope: LicenseScope::OrganizationInternal,
-            commercial_use_allowed: false,
-            redistribution_allowed: false,
-            license_reviewed: false,
-            license_notice_id: String::new(),
-            license_notice_digest: String::new(),
-            consumer_change: ConsumerChange::NoImpact,
-            consumer_summary: String::new(),
-            affected_consumer_ids: String::new(),
-            migration_plan_id: String::new(),
-            migration_plan_digest: String::new(),
-            consumer_reviewed: false,
-            desktop_compatibility: CompatibilityDisposition::Compatible,
-            desktop_evidence_id: String::new(),
-            desktop_evidence_digest: String::new(),
-            webassembly_compatibility: CompatibilityDisposition::Compatible,
-            webassembly_evidence_id: String::new(),
-            webassembly_evidence_digest: String::new(),
-            existing_projects_compatibility: CompatibilityDisposition::Compatible,
-            compatibility_reviewed: false,
-            model_owner_id: String::new(),
-            model_owner_decision: ApprovalDecision::Approved,
-            model_owner_decision_revision: "1".to_owned(),
-            qualification_approver_id: String::new(),
-            qualification_approver_decision: ApprovalDecision::Approved,
-            qualification_approver_decision_revision: "1".to_owned(),
-            error: None,
-        }
-    }
-}
-
-impl PromotionCandidateDraft {
-    fn from_candidate(candidate: &ModelReleaseCandidate) -> Self {
-        let mut value = Self {
-            candidate_id: candidate.identity.id.clone(),
-            candidate_version: candidate.identity.version.clone(),
-            suite_id: candidate.suite_id.clone(),
-            evidence_id: candidate.evidence_id.clone(),
-            ..Self::default()
-        };
-        for declaration in &candidate.documentation.declarations {
-            let id = declaration.document.id.clone();
-            let digest = declaration.document.digest.to_string();
-            match declaration.kind {
-                RequiredDocumentation::ModelDescription => {
-                    value.model_description_id = id;
-                    value.model_description_digest = digest;
-                }
-                RequiredDocumentation::ParameterReference => {
-                    value.parameter_reference_id = id;
-                    value.parameter_reference_digest = digest;
-                }
-                RequiredDocumentation::QualificationReport => {
-                    value.qualification_report_id = id;
-                    value.qualification_report_digest = digest;
-                }
-            }
-        }
-        if let Some(license) = &candidate.license {
-            value.license_id.clone_from(&license.license_id);
-            value.license_expression.clone_from(&license.expression);
-            value.license_scope = license.scope;
-            value.commercial_use_allowed = license.commercial_use_allowed;
-            value.redistribution_allowed = license.redistribution_allowed;
-            value.license_reviewed = license.reviewed;
-            value.license_notice_id.clone_from(&license.notice.id);
-            value.license_notice_digest = license.notice.digest.to_string();
-        }
-        if let Some(impact) = &candidate.consumer_impact {
-            value.consumer_change = impact.change;
-            value.consumer_summary.clone_from(&impact.summary);
-            value.affected_consumer_ids = impact.affected_consumer_ids.join(", ");
-            value.consumer_reviewed = impact.reviewed;
-            if let Some(plan) = &impact.migration_plan {
-                value.migration_plan_id.clone_from(&plan.id);
-                value.migration_plan_digest = plan.digest.to_string();
-            }
-        }
-        if let Some(compatibility) = &candidate.compatibility {
-            value.existing_projects_compatibility = compatibility.existing_projects;
-            value.compatibility_reviewed = compatibility.reviewed;
-            for platform in &compatibility.platforms {
-                match platform.platform {
-                    QualificationPlatform::Desktop => {
-                        value.desktop_compatibility = platform.disposition;
-                        value.desktop_evidence_id.clone_from(&platform.evidence.id);
-                        value.desktop_evidence_digest = platform.evidence.digest.to_string();
-                    }
-                    QualificationPlatform::WebAssembly => {
-                        value.webassembly_compatibility = platform.disposition;
-                        value
-                            .webassembly_evidence_id
-                            .clone_from(&platform.evidence.id);
-                        value.webassembly_evidence_digest = platform.evidence.digest.to_string();
-                    }
-                }
-            }
-        }
-        for approval in &candidate.approvals {
-            match approval.role {
-                PromotionApprovalRole::ModelOwner => {
-                    value.model_owner_id.clone_from(&approval.approver_id);
-                    value.model_owner_decision = approval.decision;
-                    value.model_owner_decision_revision =
-                        approval.decision_revision.get().to_string();
-                }
-                PromotionApprovalRole::QualificationApprover => {
-                    value
-                        .qualification_approver_id
-                        .clone_from(&approval.approver_id);
-                    value.qualification_approver_decision = approval.decision;
-                    value.qualification_approver_decision_revision =
-                        approval.decision_revision.get().to_string();
-                }
-            }
-        }
-        value
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -390,23 +94,6 @@ pub struct ModelDefinitionDelta {
     pub changed_parameters: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelComparisonDisposition {
-    Unchanged,
-    Improved,
-    Review,
-    Blocking,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelReleaseComparisonRow {
-    pub item: String,
-    pub released: String,
-    pub candidate: String,
-    pub effect: String,
-    pub disposition: ModelComparisonDisposition,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedEditableProjectModel {
     pub(crate) source_id: ModelSourceId,
@@ -415,7 +102,6 @@ pub(crate) struct ResolvedEditableProjectModel {
     pub(crate) model_digest: ContentDigest,
     pub(crate) source_path: PathBuf,
     pub(crate) definition: ProjectModelRevisionDefinition,
-    pub(crate) qualification: ModelQualificationState,
 }
 
 #[cfg(test)]
@@ -451,8 +137,7 @@ pub(crate) struct VerifiedProjectClosure<'a> {
 /// resolve more than one model from the same library must call this once and
 /// pass the result to [`resolve_project_model_in_closure`]; calling the
 /// combined [`resolve_project_model_for_editor`] in a loop re-digests the whole
-/// closure per model, which is how the qualification page came to hash a
-/// library once per model per frame.
+/// closure per model.
 pub(crate) fn verify_project_library_closure<'a>(
     library: &'a ModelLibrary,
     library_name: &str,
@@ -647,11 +332,6 @@ pub(crate) fn resolve_project_model_in_closure(
         model_digest,
         source_path,
         definition,
-        qualification: library
-            .model_qualification
-            .get(model_name)
-            .cloned()
-            .unwrap_or_default(),
     })
 }
 
@@ -681,8 +361,7 @@ pub struct ModelEditorDraft {
     /// Revision of the entire retained library closure used only for
     /// optimistic concurrency and stale-library detection.
     pub base_library_revision: ObjectRevision,
-    /// Independent revision of this model's canonical fragment. Qualification
-    /// suites, evidence, and releases bind to this revision.
+    /// Independent revision of this model's canonical fragment.
     pub base_source_revision: ObjectRevision,
     pub base_source_digest: ContentDigest,
     /// Exact retained closure member containing this model's canonical card.
@@ -695,9 +374,7 @@ pub struct ModelEditorDraft {
     pub description: String,
     pub parameters: Vec<ModelParameterDraft>,
     pub metadata: ModelDefinitionMetadata,
-    pub qualification: ModelQualificationState,
     base_definition: ProjectModelRevisionDefinition,
-    base_qualification: ModelQualificationState,
 }
 
 /// Serializable recovery payload for an unsaved project-model candidate.
@@ -720,7 +397,6 @@ pub struct ModelEditorRecoveryDraft {
     description: String,
     parameters: Vec<ModelParameterDraft>,
     metadata: ModelDefinitionMetadata,
-    qualification: ModelQualificationState,
 }
 
 impl ModelEditorRecoveryDraft {
@@ -740,7 +416,6 @@ impl ModelEditorRecoveryDraft {
             description: draft.description.clone(),
             parameters: draft.parameters.clone(),
             metadata: draft.metadata.clone(),
-            qualification: draft.qualification.clone(),
         }
     }
 
@@ -787,9 +462,7 @@ impl ModelEditorRecoveryDraft {
             description: self.description,
             parameters: self.parameters,
             metadata: self.metadata,
-            qualification: self.qualification,
             base_definition: base.base_definition,
-            base_qualification: base.base_qualification,
         })
     }
 }
@@ -808,7 +481,6 @@ impl ModelEditorDraft {
         let digest = resolved.model_digest;
         let source_path = resolved.source_path;
         let metadata = resolved.definition.metadata.clone();
-        let qualification = resolved.qualification;
         let base_definition = resolved.definition;
         let mut parameters = metadata
             .parameters
@@ -855,9 +527,7 @@ impl ModelEditorDraft {
             description: base_definition.base.description.clone(),
             parameters,
             metadata,
-            qualification: qualification.clone(),
             base_definition,
-            base_qualification: qualification,
         })
     }
 
@@ -1031,13 +701,8 @@ impl ModelEditorDraft {
     }
 
     #[must_use]
-    pub fn qualification_is_dirty(&self) -> bool {
-        self.qualification != self.base_qualification
-    }
-
-    #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.definition_is_dirty() || self.qualification_is_dirty()
+        self.definition_is_dirty()
     }
 
     pub fn validate(
@@ -1068,14 +733,6 @@ impl ModelEditorDraft {
                 message: error.to_string(),
             }]
         })?;
-        self.qualification
-            .validate_for_model(&definition.base.name)
-            .map_err(|error| {
-                vec![ModelFieldDiagnostic {
-                    field: error.path,
-                    message: error.message,
-                }]
-            })?;
         Ok(ModelValidationEvidence {
             source_digest,
             source_revision: self.base_source_revision,
@@ -1117,300 +774,6 @@ impl ModelEditorDraft {
             changed_parameters,
         })
     }
-
-    /// Compare the exact open definition with one immutable promoted release.
-    /// The release must retain canonical source bytes whose digest matches its
-    /// source identity; a legacy identity-only record fails closed rather than
-    /// fabricating parameter values.
-    pub fn compare_release(
-        &self,
-        release_id: &str,
-    ) -> Result<Vec<ModelReleaseComparisonRow>, String> {
-        if self.definition_is_dirty() {
-            return Err("Save the model definition before comparing it with a release".to_owned());
-        }
-        self.qualification
-            .validate_for_model(&self.model_name)
-            .map_err(|error| error.to_string())?;
-        let release = self
-            .qualification
-            .releases
-            .iter()
-            .find(|release| release.identity.id.eq_ignore_ascii_case(release_id))
-            .ok_or_else(|| format!("Model release '{release_id}' does not exist"))?;
-        if release.definition_source.is_empty() {
-            return Err(format!(
-                "Release '{}' has no saved copy of its definition, so its values cannot be compared",
-                release.identity.id
-            ));
-        }
-        let released_metadata = release.definition_metadata.as_ref().ok_or_else(|| {
-            format!(
-                "Release '{}' has no saved definition details, so its parameters cannot be compared",
-                release.identity.id
-            )
-        })?;
-        let source = rspice_core::netlist::decode_source_bytes(&release.definition_source)
-            .map_err(|error| format!("Released definition source cannot be decoded: {error}"))?;
-        let mut parser = rspice_core::library::LibParser::new(Path::new("."));
-        let parsed = parser.parse_string(&source);
-        if !parsed.is_ok() || parsed.top_level_models.len() != 1 {
-            return Err(format!(
-                "Released definition source is not one valid top-level model: {}",
-                parsed
-                    .errors
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ));
-        }
-        let released = &parsed.top_level_models[0];
-        let candidate = self.definition().map_err(|diagnostics| {
-            diagnostics
-                .into_iter()
-                .map(|diagnostic| format!("{}: {}", diagnostic.field, diagnostic.message))
-                .collect::<Vec<_>>()
-                .join("; ")
-        })?;
-
-        let release_source_matches = release
-            .source
-            .model_id
-            .eq_ignore_ascii_case(&self.model_name)
-            && release.source.source_id == Some(self.source_id)
-            && release.source.source_revision == self.base_source_revision
-            && release.source.source_digest == self.base_source_digest;
-        let mut rows = vec![ModelReleaseComparisonRow {
-            item: "Source revision".to_owned(),
-            released: format!(
-                "r{} · {}",
-                release.source.source_revision.get(),
-                release.source.source_digest
-            ),
-            candidate: format!(
-                "r{} · {}",
-                self.base_source_revision.get(),
-                self.base_source_digest
-            ),
-            effect: if release_source_matches {
-                "same source".to_owned()
-            } else {
-                "source revision changed".to_owned()
-            },
-            disposition: if release_source_matches {
-                ModelComparisonDisposition::Unchanged
-            } else {
-                ModelComparisonDisposition::Review
-            },
-        }];
-        for (item, before, after) in [
-            (
-                "Model identity",
-                released.name.clone(),
-                candidate.base.name.clone(),
-            ),
-            (
-                "SPICE model type",
-                format!("{:?}", released.model_type).to_ascii_uppercase(),
-                candidate.base.spice_type.to_ascii_uppercase(),
-            ),
-            (
-                "Description",
-                released.description.clone().unwrap_or_default(),
-                candidate.base.description.clone(),
-            ),
-        ] {
-            let unchanged = before == after;
-            rows.push(ModelReleaseComparisonRow {
-                item: item.to_owned(),
-                released: before,
-                candidate: after,
-                effect: if unchanged {
-                    "unchanged".to_owned()
-                } else {
-                    "definition changed".to_owned()
-                },
-                disposition: if unchanged {
-                    ModelComparisonDisposition::Unchanged
-                } else {
-                    ModelComparisonDisposition::Review
-                },
-            });
-        }
-
-        let mut released_parameters = BTreeMap::<String, (String, String, Option<f64>)>::new();
-        for (name, value) in &released.parameters {
-            released_parameters.insert(
-                name.to_ascii_lowercase(),
-                (name.clone(), value.to_string(), Some(*value)),
-            );
-        }
-        for (name, value) in &released.string_params {
-            released_parameters.insert(
-                name.to_ascii_lowercase(),
-                (name.clone(), value.clone(), None),
-            );
-        }
-        let mut candidate_parameters = BTreeMap::<String, (String, String, Option<f64>)>::new();
-        for (name, value) in &candidate.base.numeric_parameters {
-            candidate_parameters.insert(
-                name.to_ascii_lowercase(),
-                (name.clone(), value.to_string(), Some(*value)),
-            );
-        }
-        for (name, value) in &candidate.base.string_parameters {
-            candidate_parameters.insert(
-                name.to_ascii_lowercase(),
-                (name.clone(), value.clone(), None),
-            );
-        }
-        let names = released_parameters
-            .keys()
-            .chain(candidate_parameters.keys())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        for key in names {
-            let before = released_parameters.get(&key);
-            let after = candidate_parameters.get(&key);
-            let item = after
-                .or(before)
-                .map_or_else(|| key.clone(), |value| value.0.clone());
-            let (released_value, candidate_value, effect, disposition) = match (before, after) {
-                (Some(before), Some(after)) if before.1 == after.1 => (
-                    before.1.clone(),
-                    after.1.clone(),
-                    "unchanged".to_owned(),
-                    ModelComparisonDisposition::Unchanged,
-                ),
-                (Some(before), Some(after)) => {
-                    let effect = match (before.2, after.2) {
-                        (Some(before), Some(after)) if before != 0.0 => {
-                            format!("{:+.6}%", (after - before) / before.abs() * 100.0)
-                        }
-                        (Some(before), Some(after)) => format!("{:+.6e}", after - before),
-                        _ => "value changed".to_owned(),
-                    };
-                    (
-                        before.1.clone(),
-                        after.1.clone(),
-                        effect,
-                        ModelComparisonDisposition::Review,
-                    )
-                }
-                (None, Some(after)) => (
-                    "—".to_owned(),
-                    after.1.clone(),
-                    "parameter added".to_owned(),
-                    ModelComparisonDisposition::Review,
-                ),
-                (Some(before), None) => (
-                    before.1.clone(),
-                    "—".to_owned(),
-                    "parameter removed".to_owned(),
-                    ModelComparisonDisposition::Review,
-                ),
-                (None, None) => continue,
-            };
-            rows.push(ModelReleaseComparisonRow {
-                item,
-                released: released_value,
-                candidate: candidate_value,
-                effect,
-                disposition,
-            });
-        }
-
-        append_typed_metadata_comparison_rows(&mut rows, released_metadata, &candidate.metadata)?;
-
-        let released_evidence = self
-            .qualification
-            .evidence
-            .iter()
-            .find(|evidence| evidence.id.eq_ignore_ascii_case(&release.evidence_id));
-        let current_evidence = self
-            .qualification
-            .candidates
-            .iter()
-            .filter(|candidate| {
-                candidate
-                    .source
-                    .model_id
-                    .eq_ignore_ascii_case(&self.model_name)
-                    && candidate.source.source_id == Some(self.source_id)
-                    && candidate.source.source_digest == self.base_source_digest
-                    && candidate.source.source_revision == self.base_source_revision
-            })
-            .filter_map(|candidate| {
-                self.qualification.evidence.iter().find(|evidence| {
-                    evidence.id.eq_ignore_ascii_case(&candidate.evidence_id)
-                        && evidence
-                            .source
-                            .model_id
-                            .eq_ignore_ascii_case(&self.model_name)
-                        && evidence.source.source_id == Some(self.source_id)
-                        && evidence.source.source_digest == self.base_source_digest
-                        && evidence.source.source_revision == self.base_source_revision
-                })
-            })
-            .collect::<Vec<_>>();
-        if let (Some(released_evidence), [current_evidence]) =
-            (released_evidence, current_evidence.as_slice())
-        {
-            let released_summary = qualification_evidence_summary(released_evidence);
-            let current_summary = qualification_evidence_summary(current_evidence);
-            let disposition = match (released_evidence.passed, current_evidence.passed) {
-                (false, true) => ModelComparisonDisposition::Improved,
-                (true, false) => ModelComparisonDisposition::Blocking,
-                _ if released_summary == current_summary => ModelComparisonDisposition::Unchanged,
-                _ => ModelComparisonDisposition::Review,
-            };
-            rows.push(ModelReleaseComparisonRow {
-                item: "Runtime qualification".to_owned(),
-                released: released_summary.clone(),
-                candidate: current_summary.clone(),
-                effect: if released_summary == current_summary {
-                    "unchanged".to_owned()
-                } else {
-                    "qualification disposition changed".to_owned()
-                },
-                disposition,
-            });
-            append_numerical_evidence_rows(&mut rows, released_evidence, current_evidence);
-        }
-        Ok(rows)
-    }
-}
-
-/// Runtime-only state for one cooperative qualification pass. A completed
-/// suite is committed to the draft only after its final vector succeeds or
-/// fails with a complete, validated platform record. Partial vectors never
-/// escape this session.
-#[derive(Debug, Clone)]
-pub struct ModelQualificationExecution {
-    suite_ids: Vec<String>,
-    suite_index: usize,
-    source: ModelSourceEvidenceBinding,
-    session: QualificationExecutionSession,
-    pub progress: QualificationExecutionProgress,
-    pub assembled_evidence: usize,
-}
-
-impl ModelQualificationExecution {
-    #[must_use]
-    pub fn current_suite_id(&self) -> &str {
-        &self.suite_ids[self.suite_index]
-    }
-
-    #[must_use]
-    pub const fn completed_suites(&self) -> usize {
-        self.suite_index
-    }
-
-    #[must_use]
-    pub fn total_suites(&self) -> usize {
-        self.suite_ids.len()
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1420,8 +783,6 @@ pub struct ModelEditorState {
     pub draft: Option<ModelEditorDraft>,
     pub diagnostics: Vec<ModelFieldDiagnostic>,
     pub validation: Option<ModelValidationEvidence>,
-    pub comparison_open: bool,
-    pub comparison_release_id: String,
     pub parameter_schema_open: bool,
     pub parameter_schema_section: String,
     pub parameter_schema_parameter: String,
@@ -1436,17 +797,6 @@ pub struct ModelEditorState {
     pub correlation_matrix_edits: Vec<Vec<Vec<String>>>,
     pub correlation_matrix_error: Option<String>,
     pub temperature_preview_open: bool,
-    pub qualification_plan_open: bool,
-    pub qualification_authoring_open: bool,
-    pub qualification_authoring: QualificationAuthoringDraft,
-    pub promotion_review_open: bool,
-    pub promotion_candidate: PromotionCandidateDraft,
-    pub promotion_record_id: String,
-    pub promotion_release_id: String,
-    pub promotion_release_version: String,
-    pub promotion_error: Option<String>,
-    pub qualification_execution: Option<ModelQualificationExecution>,
-    pub qualification_execution_notice: Option<String>,
 }
 
 impl ModelEditorState {
@@ -1704,7 +1054,6 @@ impl ModelEditorState {
             parent,
             overrides: BTreeMap::new(),
             model_files: vec![source_identity],
-            qualification: ModelSectionQualification::Unqualified,
         };
         let previous = draft.metadata.sections.clone();
         draft.metadata.sections.push(section);
@@ -1905,485 +1254,6 @@ impl ModelEditorState {
                 false
             }
         }
-    }
-
-    pub fn begin_qualification_suite(&mut self) {
-        self.qualification_authoring = QualificationAuthoringDraft::default();
-        self.qualification_authoring_open = true;
-    }
-
-    pub fn begin_promotion_review(&mut self) {
-        let mut candidate = PromotionCandidateDraft::default();
-        let mut retained_candidate_identity = None;
-        if let Some(draft) = self.draft.as_ref() {
-            candidate.candidate_id = format!(
-                "{}-candidate-r{}",
-                draft.model_name,
-                draft.base_source_revision.get()
-            );
-            candidate.candidate_version =
-                format!("candidate-r{}", draft.base_source_revision.get());
-            if let Some(evidence) = draft.qualification.evidence.iter().find(|evidence| {
-                evidence
-                    .source
-                    .model_id
-                    .eq_ignore_ascii_case(&draft.model_name)
-                    && evidence.source.source_id == Some(draft.source_id)
-                    && evidence.source.source_digest == draft.base_source_digest
-                    && evidence.source.source_revision == draft.base_source_revision
-                    && evidence.passed
-            }) {
-                candidate.suite_id.clone_from(&evidence.suite_id);
-                candidate.evidence_id.clone_from(&evidence.id);
-            }
-            if let Some(retained_candidate) =
-                draft.qualification.candidates.iter().find(|candidate| {
-                    candidate
-                        .source
-                        .model_id
-                        .eq_ignore_ascii_case(&draft.model_name)
-                        && candidate.source.source_id == Some(draft.source_id)
-                        && candidate.source.source_digest == draft.base_source_digest
-                        && candidate.source.source_revision == draft.base_source_revision
-                })
-            {
-                candidate = PromotionCandidateDraft::from_candidate(retained_candidate);
-                retained_candidate_identity = Some((
-                    retained_candidate.identity.id.clone(),
-                    retained_candidate.identity.version.clone(),
-                    draft.model_name.clone(),
-                    draft.base_source_revision,
-                ));
-            }
-        }
-        self.promotion_candidate = candidate;
-        if let Some((candidate_id, candidate_version, model_name, revision)) =
-            retained_candidate_identity
-        {
-            self.promotion_record_id = format!("{candidate_id}-promotion");
-            self.promotion_release_id = format!("{model_name}-release-r{}", revision.get());
-            self.promotion_release_version = candidate_version;
-        } else {
-            self.promotion_record_id.clear();
-            self.promotion_release_id.clear();
-            self.promotion_release_version.clear();
-        }
-        self.promotion_error = None;
-        self.promotion_review_open = true;
-    }
-
-    /// Create one complete governed release candidate from the dialog's fixed
-    /// buffers. Every document and approval is parsed before a cloned
-    /// qualification aggregate is touched; invalid input leaves the draft
-    /// byte-for-byte unchanged.
-    pub fn commit_release_candidate(&mut self) -> bool {
-        if self.qualification_execution.is_some() {
-            self.promotion_candidate.error = Some(
-                "Finish or cancel the active qualification run before creating a release candidate"
-                    .to_owned(),
-            );
-            return false;
-        }
-        let Some(draft) = self.draft.as_mut() else {
-            self.promotion_candidate.error =
-                Some("No project-owned model candidate is open".to_owned());
-            return false;
-        };
-        if draft.definition_is_dirty() {
-            self.promotion_candidate.error = Some(
-                "Save the model definition before creating a source-bound release candidate"
-                    .to_owned(),
-            );
-            return false;
-        }
-        let fields = self.promotion_candidate.clone();
-        let result = build_release_candidate(draft, &fields);
-        let candidate = match result {
-            Ok(candidate) => candidate,
-            Err(error) => {
-                self.promotion_candidate.error = Some(error);
-                return false;
-            }
-        };
-        let mut qualification = draft.qualification.clone();
-        let exact_candidate_indices = qualification
-            .candidates
-            .iter()
-            .enumerate()
-            .filter_map(|(index, retained)| {
-                (retained
-                    .source
-                    .model_id
-                    .eq_ignore_ascii_case(&draft.model_name)
-                    && retained.source.source_id == Some(draft.source_id)
-                    && retained.source.source_digest == draft.base_source_digest
-                    && retained.source.source_revision == draft.base_source_revision)
-                    .then_some(index)
-            })
-            .collect::<Vec<_>>();
-        match exact_candidate_indices.as_slice() {
-            [] => qualification.candidates.push(candidate.clone()),
-            [index]
-                if qualification.promotions.iter().any(|promotion| {
-                    promotion
-                        .candidate_identity
-                        .id
-                        .eq_ignore_ascii_case(&qualification.candidates[*index].identity.id)
-                }) =>
-            {
-                self.promotion_candidate.error =
-                    Some("This release candidate is already promoted and cannot change".to_owned());
-                return false;
-            }
-            [index]
-                if qualification.candidates[*index]
-                    .identity
-                    .id
-                    .eq_ignore_ascii_case(&candidate.identity.id) =>
-            {
-                qualification.candidates[*index] = candidate.clone();
-            }
-            [..] => {
-                self.promotion_candidate.error = Some(
-                    "This model source already has a different or ambiguous release candidate; repair the qualification record before continuing"
-                        .to_owned(),
-                );
-                return false;
-            }
-        }
-        qualification.candidates.sort_by(|left, right| {
-            left.identity
-                .id
-                .to_ascii_lowercase()
-                .cmp(&right.identity.id.to_ascii_lowercase())
-                .then_with(|| left.identity.id.cmp(&right.identity.id))
-        });
-        if let Err(error) = qualification.validate_for_model(&draft.model_name) {
-            self.promotion_candidate.error = Some(error.to_string());
-            return false;
-        }
-        draft.qualification = qualification;
-        self.promotion_candidate.error = None;
-        self.promotion_record_id = format!("{}-promotion", candidate.identity.id);
-        self.promotion_release_id = format!(
-            "{}-release-r{}",
-            draft.model_name,
-            draft.base_source_revision.get()
-        );
-        self.promotion_release_version = fields.candidate_version;
-        self.qualification_execution_notice = Some(
-            "Governed release candidate retained. Review its derived checklist, promote it, then save the qualification revision to publish the transaction."
-                .to_owned(),
-        );
-        true
-    }
-
-    /// Promote the selected, fully qualified candidate through the domain's
-    /// atomic release transaction. No release or audit record survives a
-    /// failed gate, duplicate identity, or stale source binding.
-    pub fn commit_promotion(
-        &mut self,
-        candidate_id: &str,
-        correlation: &ModelCorrelationState,
-    ) -> bool {
-        if self.qualification_execution.is_some() {
-            self.promotion_error = Some(
-                "Finish or cancel the active qualification run before promoting a model".to_owned(),
-            );
-            return false;
-        }
-        let Some(draft) = self.draft.as_mut() else {
-            self.promotion_error = Some("No project-owned model candidate is open".to_owned());
-            return false;
-        };
-        if draft.definition_is_dirty() {
-            self.promotion_error = Some(
-                "Save the model definition before promoting a source-bound candidate".to_owned(),
-            );
-            return false;
-        }
-        let source = match ModelSourceEvidenceBinding::try_new_project_bound(
-            &draft.model_name,
-            draft.source_id,
-            draft.base_source_digest,
-            draft.base_source_revision,
-        ) {
-            Ok(source) => source,
-            Err(error) => {
-                self.promotion_error =
-                    Some(format!("Model promotion cannot verify its source: {error}"));
-                return false;
-            }
-        };
-        if let Err(error) = correlation.require_release_approval(&draft.model_name, &source) {
-            self.promotion_error = Some(format!(
-                "Model promotion is blocked by measurement correlation: {error}"
-            ));
-            return false;
-        }
-        let identity = ModelReleaseIdentity {
-            id: self.promotion_release_id.clone(),
-            model_id: draft.model_name.clone(),
-            version: self.promotion_release_version.clone(),
-        };
-        let (definition_source, definition_metadata) = match draft
-            .definition()
-            .map_err(|diagnostics| {
-                diagnostics
-                    .into_iter()
-                    .map(|diagnostic| format!("{}: {}", diagnostic.field, diagnostic.message))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            })
-            .and_then(|definition| {
-                let source = definition
-                    .canonical_source()
-                    .map_err(|error| error.to_string())?;
-                Ok((source.into_bytes(), definition.metadata))
-            }) {
-            Ok(definition) => definition,
-            Err(error) => {
-                self.promotion_error = Some(error);
-                return false;
-            }
-        };
-        let mut qualification = draft.qualification.clone();
-        let Some(candidate) = qualification
-            .candidates
-            .iter_mut()
-            .find(|candidate| candidate.identity.id.eq_ignore_ascii_case(candidate_id))
-        else {
-            self.promotion_error = Some(format!(
-                "Release candidate '{candidate_id}' no longer exists"
-            ));
-            return false;
-        };
-        candidate.definition_source = definition_source;
-        candidate.definition_metadata = Some(definition_metadata);
-        if let Err(error) = qualification.validate_for_model(&draft.model_name) {
-            self.promotion_error = Some(error.to_string());
-            return false;
-        }
-        match qualification.promote_candidate_atomically(
-            self.promotion_record_id.clone(),
-            identity,
-            candidate_id,
-        ) {
-            Ok(()) => {
-                draft.qualification = qualification;
-                self.promotion_review_open = false;
-                self.promotion_error = None;
-                self.qualification_execution_notice = Some(
-                    "Model release promoted in the candidate. Save the qualification revision to keep the release and its audit record."
-                        .to_owned(),
-                );
-                true
-            }
-            Err(error) => {
-                self.promotion_error = Some(error.to_string());
-                false
-            }
-        }
-    }
-
-    /// Add one exact executable suite/vector contract atomically. Invalid
-    /// fields leave the retained qualification aggregate byte-for-byte intact.
-    pub fn commit_qualification_suite(&mut self) -> bool {
-        let result = self.build_qualification_suite();
-        let mut suite = match result {
-            Ok(suite) => suite,
-            Err(error) => {
-                self.qualification_authoring.error = Some(error);
-                return false;
-            }
-        };
-        let Some(draft) = self.draft.as_mut() else {
-            self.qualification_authoring.error =
-                Some("No project-owned model candidate is open".to_owned());
-            return false;
-        };
-        let mut qualification = draft.qualification.clone();
-        if let Some(existing_index) = qualification
-            .suites
-            .iter()
-            .position(|existing| existing.id.eq_ignore_ascii_case(&suite.id))
-        {
-            let existing = qualification.suites[existing_index].clone();
-            if existing.name != suite.name {
-                self.qualification_authoring.error = Some(format!(
-                    "Suite ID '{}' already belongs to '{}'; use that suite's name when adding a vector",
-                    existing.id, existing.name
-                ));
-                return false;
-            }
-            if qualification
-                .evidence
-                .iter()
-                .any(|evidence| evidence.suite_id.eq_ignore_ascii_case(&existing.id))
-                || qualification
-                    .candidates
-                    .iter()
-                    .any(|candidate| candidate.suite_id.eq_ignore_ascii_case(&existing.id))
-            {
-                self.qualification_authoring.error = Some(format!(
-                    "Suite '{}' has recorded runs or release candidates and cannot change; create a suite with a new ID",
-                    existing.id
-                ));
-                return false;
-            }
-            let mut vectors = existing.vectors;
-            vectors.append(&mut suite.vectors);
-            let revision = match existing.revision.next() {
-                Ok(revision) => revision,
-                Err(error) => {
-                    self.qualification_authoring.error = Some(error.to_string());
-                    return false;
-                }
-            };
-            suite = match QualificationSuite::try_new(existing.id, existing.name, revision, vectors)
-            {
-                Ok(suite) => suite,
-                Err(error) => {
-                    self.qualification_authoring.error = Some(error.to_string());
-                    return false;
-                }
-            };
-            qualification
-                .platform_runs
-                .retain(|run| !run.suite_id.eq_ignore_ascii_case(&suite.id));
-            qualification.suites[existing_index] = suite;
-        } else {
-            qualification.suites.push(suite);
-        }
-        qualification.suites.sort_by(|left, right| {
-            left.id
-                .to_ascii_lowercase()
-                .cmp(&right.id.to_ascii_lowercase())
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        if let Err(error) = qualification.validate_for_model(&draft.model_name) {
-            self.qualification_authoring.error = Some(error.to_string());
-            return false;
-        }
-        draft.qualification = qualification;
-        self.qualification_authoring_open = false;
-        self.qualification_authoring = QualificationAuthoringDraft::default();
-        self.qualification_execution_notice = Some(
-            "Qualification suite or vector added to the candidate. Save the qualification revision to retain it."
-                .to_owned(),
-        );
-        true
-    }
-
-    fn require_idle_qualification_draft(&mut self) -> Result<&mut ModelEditorDraft, String> {
-        if self.qualification_execution.is_some() {
-            return Err(
-                "Finish or cancel the active qualification run before editing its plan".to_owned(),
-            );
-        }
-        self.draft
-            .as_mut()
-            .ok_or_else(|| "No project-owned model candidate is open".to_owned())
-    }
-
-    /// Replace/edit one retained vector through the domain's atomic,
-    /// revision-advancing transaction.
-    pub fn replace_qualification_vector(
-        &mut self,
-        suite_id: &str,
-        vector_id: &str,
-        replacement: QualificationVector,
-    ) -> Result<(), String> {
-        let draft = self.require_idle_qualification_draft()?;
-        draft
-            .qualification
-            .replace_vector_atomically(suite_id, vector_id, replacement)
-            .map_err(|error| error.to_string())?;
-        self.qualification_execution_notice = Some(format!(
-            "Qualification vector '{vector_id}' was replaced; earlier unsaved runs of its suite were invalidated."
-        ));
-        Ok(())
-    }
-
-    pub fn delete_qualification_vector(
-        &mut self,
-        suite_id: &str,
-        vector_id: &str,
-    ) -> Result<(), String> {
-        let draft = self.require_idle_qualification_draft()?;
-        draft
-            .qualification
-            .delete_vector_atomically(suite_id, vector_id)
-            .map_err(|error| error.to_string())?;
-        self.qualification_execution_notice = Some(format!(
-            "Qualification vector '{vector_id}' was retired from suite '{suite_id}'."
-        ));
-        Ok(())
-    }
-
-    pub fn delete_qualification_suite(&mut self, suite_id: &str) -> Result<(), String> {
-        let draft = self.require_idle_qualification_draft()?;
-        draft
-            .qualification
-            .delete_suite_atomically(suite_id)
-            .map_err(|error| error.to_string())?;
-        self.qualification_execution_notice = Some(format!(
-            "Qualification suite '{suite_id}' was deleted; recorded runs and releases are unchanged."
-        ));
-        Ok(())
-    }
-
-    pub fn record_qualification_vector_disposition(
-        &mut self,
-        disposition_id: impl Into<String>,
-        suite_id: &str,
-        vector_id: &str,
-        cause: QualificationVectorDispositionCause,
-        required_action: QualificationVectorRequiredAction,
-        reason: impl Into<String>,
-    ) -> Result<QualificationVectorDisposition, String> {
-        let draft = self.require_idle_qualification_draft()?;
-        let current_source = ModelSourceEvidenceBinding::try_new_project_bound(
-            draft.model_name.clone(),
-            draft.source_id,
-            draft.base_source_digest,
-            draft.base_source_revision,
-        )
-        .map_err(|error| error.to_string())?;
-        let disposition = draft
-            .qualification
-            .record_vector_disposition_atomically(
-                rspice_model_library::qualification::QualificationVectorDispositionInput {
-                    disposition_id: disposition_id.into(),
-                    suite_id,
-                    vector_id,
-                    current_source: &current_source,
-                    cause,
-                    required_action,
-                    reason: reason.into(),
-                },
-            )
-            .map_err(|error| error.to_string())?;
-        self.qualification_execution_notice = Some(format!(
-            "Vector disposition '{}' was recorded; it blocks release and does not waive the failure.",
-            disposition.id
-        ));
-        Ok(disposition)
-    }
-
-    pub fn resolve_qualification_vector_rerun(
-        &mut self,
-        disposition_id: &str,
-    ) -> Result<(), String> {
-        let draft = self.require_idle_qualification_draft()?;
-        draft
-            .qualification
-            .resolve_vector_disposition_by_rerun_atomically(disposition_id)
-            .map_err(|error| error.to_string())?;
-        self.qualification_execution_notice = Some(format!(
-            "Vector disposition '{disposition_id}' was closed by passing Desktop and WebAssembly reruns."
-        ));
-        Ok(())
     }
 }
 

@@ -135,7 +135,7 @@ fn attach_library_to_active_plan(model: &mut Model, library: &str) -> Result<(),
 
 /// Why the editor cannot take a newly created project model now, naming
 /// `what` is being created: no project, a read-only one, a project operation
-/// in flight, a qualification run, or an unsaved candidate it would replace.
+/// in flight, or an unsaved candidate it would replace.
 fn creation_refusal(parts: &ModelEditorParts<'_>, what: &str) -> Result<(), String> {
     if !parts.platform.project_lifecycle.is_open() {
         return Err(format!("Open a project before creating {what}"));
@@ -149,12 +149,6 @@ fn creation_refusal(parts: &ModelEditorParts<'_>, what: &str) -> Result<(), Stri
         return Err(format!(
             "Wait for the current project operation before creating {what}"
         ));
-    }
-    if parts.editor.qualification_execution.is_some() {
-        return Err(
-            "Finish or cancel the active model qualification run before creating another model"
-                .to_owned(),
-        );
     }
     if let Some(open) = parts.editor.draft.as_ref()
         && open.is_dirty()
@@ -214,11 +208,7 @@ pub fn create_new_project_model_and_open(
     let project_library_name =
         available_project_copy_library_name(&parts.model.model_library_manager, name);
     let mut candidate = parts.model.model_library_manager.clone();
-    let commit = candidate.create_project_model_revision(
-        &project_library_name,
-        &definition,
-        &ModelQualificationState::default(),
-    )?;
+    let commit = candidate.create_project_model_revision(&project_library_name, &definition)?;
     let project_model_name = commit.model_name.clone();
     let expected_project_revision = parts
         .model
@@ -305,12 +295,6 @@ pub fn open_project_model(
     library_name: &str,
     model_name: &str,
 ) -> Result<(), String> {
-    if parts.editor.qualification_execution.is_some() {
-        return Err(
-            "Finish or cancel the active model qualification run before opening another model"
-                .to_owned(),
-        );
-    }
     if let Some(open) = parts.editor.draft.as_ref()
         && open.is_dirty()
     {
@@ -372,9 +356,8 @@ pub fn validate_open_candidate(parts: &mut ModelEditorParts<'_>) -> bool {
 }
 
 /// Publish the open candidate as one guarded project/model revision and then
-/// reopen the committed revision as the new immutable editing base. A
-/// revision that changes the model's definition drops the run's preflight
-/// and the run it prepared.
+/// reopen the committed revision as the new immutable editing base. Saving
+/// drops the run's preflight and the run it prepared.
 pub fn save_open_candidate(
     parts: &mut ModelEditorParts<'_>,
     preflight: &mut PreflightDialogState,
@@ -385,11 +368,6 @@ pub fn save_open_candidate(
     }
     if parts.model.safe_mode.project_read_only() {
         return Err("Model revision cannot be saved while the project is read-only".to_owned());
-    }
-    if parts.editor.qualification_execution.is_some() {
-        return Err(
-            "Model revision cannot be saved while qualification execution is active".to_owned(),
-        );
     }
     let draft = parts
         .editor
@@ -409,49 +387,26 @@ pub fn save_open_candidate(
             .collect::<Vec<_>>()
             .join("; ")
     })?;
-    let definition_changed = definition != draft.base_definition;
     let mut candidate = parts.model.model_library_manager.clone();
-    let commit = if definition_changed {
-        candidate.replace_project_model_revision_in_library(
-            &draft.library_name,
-            draft.source_id,
-            draft.base_library_revision,
-            draft.base_source_revision,
-            &draft.model_name,
-            draft.base_source_digest,
-            &definition,
-            &draft.qualification,
-        )?
-    } else {
-        candidate.replace_project_model_qualification(
-            &draft.library_name,
-            draft.source_id,
-            draft.base_library_revision,
-            draft.base_source_revision,
-            draft.base_source_digest,
-            &draft.model_name,
-            &draft.qualification,
-        )?
-    };
-    let description = if definition_changed {
-        format!(
-            "save model revision {}/{}",
-            commit.library_name, commit.model_name
-        )
-    } else {
-        format!(
-            "save model qualification {}/{}",
-            commit.library_name, commit.model_name
-        )
-    };
+    let commit = candidate.replace_project_model_revision_in_library(
+        &draft.library_name,
+        draft.source_id,
+        draft.base_library_revision,
+        draft.base_source_revision,
+        &draft.model_name,
+        draft.base_source_digest,
+        &definition,
+    )?;
+    let description = format!(
+        "save model revision {}/{}",
+        commit.library_name, commit.model_name
+    );
     let committed_revision =
         parts
             .model
             .publish_project_model_candidate(candidate, commit, description)?;
-    if definition_changed {
-        preflight.invalidate();
-        run_controller.clear_prepared_run();
-    }
+    preflight.invalidate();
+    run_controller.clear_prepared_run();
     crate::workbench::models::workspace_state::select_library_or_prompt(
         parts.model,
         parts.workbench,
@@ -479,16 +434,11 @@ pub fn save_open_candidate(
             format!("Saved the model revision, but the editor could not reopen it: {error}"),
         );
     }
-    let saved_kind = if definition_changed {
-        "model revision"
-    } else {
-        "model qualification"
-    };
     parts.model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!(
-            "Saved {saved_kind} {}/{} at project revision {}.",
+            "Saved model revision {}/{} at project revision {}.",
             draft.library_name,
             definition.base.name,
             committed_revision.get()
