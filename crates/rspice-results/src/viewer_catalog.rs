@@ -302,7 +302,7 @@ mod tests {
             viewer_compatibility("viewer-bode", empty),
             ViewerCompatibility::MissingAnalysis {
                 accepted_analysis_ids: &[
-                    "ac", "stb", "noise", "pac", "pnoise", "pstb", "qpac", "qpnoise"
+                    "ac", "stb", "noise", "pac", "pnoise", "pstb", "hbnoise", "qpac", "qpnoise"
                 ],
             }
         );

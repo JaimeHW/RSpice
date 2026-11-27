@@ -1141,4 +1141,24 @@ mod tests {
             }
         }
     }
+
+    /// Every analysis whose spectrum the noise sheet draws is offered that
+    /// sheet: the catalogue's bode viewer accepts what its renderer draws,
+    /// a harmonic-balance noise run as well as a small-signal one.
+    #[test]
+    fn every_noise_spectrum_the_noise_sheet_draws_is_offered_it() {
+        for analysis_type in [
+            AnalysisType::Noise,
+            AnalysisType::Pnoise,
+            AnalysisType::Hbnoise,
+        ] {
+            let analysis = AnalysisResult::new(1, analysis_type, "noise").with_waveforms(vec![
+                RetainedTrace::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 2.0e-18], "#fff"),
+            ]);
+            assert!(
+                sheets_of(&analysis).any(|viewer| viewer.id == "viewer-bode"),
+                "the noise sheet draws {analysis_type:?} but is not offered for it"
+            );
+        }
+    }
 }
