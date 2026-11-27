@@ -238,6 +238,9 @@ impl ShellCommand {
                 "no project is open"
             }
             Self::RevertActiveDocument => "active document has no changes to revert",
+            Self::CloseActiveDocument if app.state.workbench.workspace == Workspace::Results => {
+                "the run's tab never closes"
+            }
             Self::CloseActiveDocument => "no closable document is active",
             Self::DetachDocument => "no active document is available to detach",
             Self::MoveDocumentToWindow => {

@@ -20,6 +20,21 @@ use rspice_app_workbench::workbench::state::{
 };
 
 mod edit_target;
+
+/// The tab in front in Results when it is one that closes: a saved result
+/// document's. The run's tab never closes, so Close is off while it is in
+/// front.
+fn results_front_tab(
+    state: &AppState,
+) -> Option<rspice_app_workbench::workbench::state::WorkspaceDocumentId> {
+    if state.workbench.workspace != Workspace::Results {
+        return None;
+    }
+    rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(state)
+        .into_iter()
+        .find(|document| document.active && document.closable)
+        .map(|document| document.id)
+}
 mod enablement;
 mod registry;
 mod veriloga_commits;
@@ -100,7 +115,22 @@ impl ShellCommand {
                 }
             }
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
-            Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
+            // In Results, Close closes the tab in front, as every tabbed
+            // tool does; elsewhere it closes the active cell view.
+            Self::CloseActiveDocument => match results_front_tab(&app.state) {
+                Some(document) => {
+                    let documents =
+                        rspice_app_workbench::workbench::chrome::document_bar::visible_documents(
+                            &app.state,
+                        );
+                    rspice_app_workbench::workbench::chrome::document_bar::close_document(
+                        &mut app.state,
+                        &document,
+                        &documents,
+                    );
+                }
+                None => file_action(app, FileMenuAction::CloseActiveDocument),
+            },
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::ToggleFullScreen => {
                 if app.state.workbench.full_screen_presentation {

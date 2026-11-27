@@ -255,12 +255,17 @@ impl Desk {
 
     /// Press `key` and draw the frames it takes.
     fn press(&mut self, key: egui::Key) {
+        self.chord(key, egui::Modifiers::NONE);
+    }
+
+    /// Press `key` with `modifiers` held and draw the frames it takes.
+    fn chord(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
         self.frame(vec![egui::Event::Key {
             key,
             physical_key: None,
             pressed: true,
             repeat: false,
-            modifiers: egui::Modifiers::NONE,
+            modifiers,
         }]);
         self.settle();
     }
@@ -319,7 +324,7 @@ impl Desk {
         let nodes = self.nodes();
         let (button, _) = nodes
             .iter()
-            .find(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
+            .find(|(_, node)| pressable(node) && node.label() == Some(label))
             .unwrap_or_else(|| panic!("{label} is offered"));
         self.click(*button);
     }
@@ -330,7 +335,7 @@ impl Desk {
         let nodes = self.nodes();
         let (button, _) = nodes
             .iter()
-            .filter(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
+            .filter(|(_, node)| pressable(node) && node.label() == Some(label))
             .filter_map(|(id, node)| Some((*id, node.bounds()?.y0)))
             .filter(|(_, y)| *y >= f64::from(top))
             .min_by(|(_, above), (_, below)| above.total_cmp(below))
@@ -611,6 +616,64 @@ fn the_run_tab_leads_and_the_tab_commands_work_on_the_strip() {
         assert_eq!(desk.shown_document(), None);
         assert_eq!(desk.shown(), Some(first[1]));
     }
+}
+
+/// Whether `node` is something a reader presses: a button, or a menu's
+/// item.
+fn pressable(node: &Node) -> bool {
+    matches!(node.role(), Role::Button | Role::MenuItem)
+}
+
+/// File ▸ Close and Ctrl+W close the document tab in front, as every
+/// tabbed tool does, and keep the document; on the run's tab, which never
+/// closes, Close is off and says why.
+#[test]
+fn close_shuts_the_document_tab_in_front_and_is_off_on_the_runs_tab() {
+    let Bench {
+        mut desk,
+        first,
+        saved,
+        ..
+    } = bench();
+    let run = desk.name_of(first[1]);
+    assert_eq!(desk.shown_document(), None);
+    assert_eq!(
+        ShellCommand::CloseActiveDocument.availability(&desk.app),
+        CommandAvailability::Disabled("the run's tab never closes")
+    );
+
+    desk.click_tab("Bias");
+    assert_eq!(desk.shown_document(), Some(saved));
+    assert_eq!(
+        ShellCommand::CloseActiveDocument.availability(&desk.app),
+        CommandAvailability::Available
+    );
+    desk.chord(
+        egui::Key::W,
+        egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        },
+    );
+    assert_eq!(strip_tabs::labels(&desk.nodes()), [run.clone()]);
+    let content = &desk.app.state.model.workspace.content;
+    assert!(
+        content.visualization_document(saved).is_some(),
+        "closing the tab deleted the document"
+    );
+    assert_eq!(
+        desk.shown(),
+        Some(first[1]),
+        "the run's tab is not in front"
+    );
+
+    let document = WorkspaceDocumentId::VisualizationDocument(saved);
+    assert!(activate_document(&mut desk.app.state, &document));
+    assert_eq!(strip_tabs::labels(&desk.nodes()), [run.as_str(), "Bias"]);
+    desk.run(ShellCommand::CloseActiveDocument.key());
+    assert_eq!(strip_tabs::labels(&desk.nodes()), [run]);
+    assert_eq!(desk.shown_document(), None);
 }
 
 /// The data browser lists data only: runs, their analyses and signals, on

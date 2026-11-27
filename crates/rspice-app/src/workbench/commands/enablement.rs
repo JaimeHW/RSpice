@@ -25,6 +25,7 @@ impl ShellCommand {
             }
             Self::CloseActiveDocument => {
                 rspice_app_services::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
+                    || results_front_tab(state).is_some()
             }
             Self::RepeatLastCommand => {
                 active_schematic_editor(app)
