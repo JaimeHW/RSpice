@@ -41,7 +41,7 @@ impl MonteCarloMeanConfidence {
         if self.successful_samples != samples
             || self.conditional_on_successful_trials != (failures != 0)
         {
-            return Err("mean confidence population disagrees with the retained trials".into());
+            return Err("mean confidence population disagrees with the trials".into());
         }
         if matches!(self.method, MonteCarloMeanMethod::PercentileBootstrap { resamples, .. } if resamples < 2)
         {

@@ -45,13 +45,13 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
         let names = self
             .result_payload
             .as_ref()
-            .ok_or("native scalar units require an analysis payload")?
+            .ok_or("native scalar units need the analysis results")?
             .scalar_evidence_names();
         if names.is_empty()
             || units.len() != names.len()
             || names.iter().any(|name| !units.contains_key(name))
         {
-            return Err("native scalar units do not match the payload's scalar roster".into());
+            return Err("native scalar units do not match the analysis scalars".into());
         }
         for unit in units.values() {
             unit.validate()?;

@@ -178,7 +178,7 @@ impl DcMismatchEvidence {
     /// would present a cumulative share that means nothing.
     pub fn validate(&self) -> Result<(), String> {
         if self.output.trim().is_empty() {
-            return Err("DC mismatch evidence has no output probe".to_owned());
+            return Err("DC mismatch result has no output probe".to_owned());
         }
         let expected_unit = if self.output.trim_start().starts_with("I(") {
             "A"
@@ -202,7 +202,7 @@ impl DcMismatchEvidence {
         .iter()
         .any(|value| !value.is_finite())
         {
-            return Err("DC mismatch evidence has a non-finite quantity".to_owned());
+            return Err("DC mismatch result has a non-finite quantity".to_owned());
         }
         if self.sigma_multiplier <= 0.0 {
             return Err(format!(
@@ -211,16 +211,16 @@ impl DcMismatchEvidence {
             ));
         }
         if self.sigma_total < 0.0 || self.sigma_mismatch < 0.0 || self.sigma_process < 0.0 {
-            return Err("DC mismatch evidence has a negative standard deviation".to_owned());
+            return Err("DC mismatch result has a negative standard deviation".to_owned());
         }
         if !(0.0..=1.0).contains(&self.threshold) {
             return Err(format!(
-                "DC mismatch retained shares above {}, which is not a variance share in [0, 1]",
+                "DC mismatch kept shares above {}, which is not a variance share in [0, 1]",
                 self.threshold
             ));
         }
         if !self.include_mismatch && !self.include_process {
-            return Err("DC mismatch evidence selects neither statistical scope".to_owned());
+            return Err("DC mismatch result selects neither statistical scope".to_owned());
         }
         let parts = self.sigma_mismatch.powi(2) + self.sigma_process.powi(2);
         let total = self.sigma_total.powi(2);
@@ -232,14 +232,14 @@ impl DcMismatchEvidence {
         }
         if self.retained_contributors() > self.evaluated_contributors {
             return Err(format!(
-                "DC mismatch retained {} of {} evaluated contributors",
+                "DC mismatch kept {} of {} evaluated contributors",
                 self.retained_contributors(),
                 self.evaluated_contributors
             ));
         }
         if self.contributor_limit > 0 && self.retained_contributors() > self.contributor_limit {
             return Err(format!(
-                "DC mismatch retained {} contributors against a limit of {}",
+                "DC mismatch kept {} contributors against a limit of {}",
                 self.retained_contributors(),
                 self.contributor_limit
             ));

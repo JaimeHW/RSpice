@@ -23,7 +23,7 @@ impl FamilyMemberMeasurements {
             return Ok(());
         }
         let invalid = || {
-            "Monte Carlo sequence evidence disagrees with the retained trial population".to_owned()
+            "Monte Carlo trial sequence disagrees with the trials".to_owned()
         };
         if requested == 0
             || members.len() != requested

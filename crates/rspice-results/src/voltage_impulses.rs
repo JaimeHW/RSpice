@@ -19,7 +19,7 @@ impl VoltageImpulseHistoryEvidence {
             || self.start_time_s < 0.0
             || self.stop_time_s < self.start_time_s
         {
-            return Err("voltage impulses have an invalid retained time extent".into());
+            return Err("voltage impulses have an invalid time span".into());
         }
         let mut nodes = std::collections::HashSet::new();
         for trace in &self.traces {

@@ -153,7 +153,7 @@ impl FamilyManifest {
                 for variable in variables {
                     if variable.samples.len() != *runs_completed {
                         return Err(format!(
-                            "Monte Carlo variable '{}' has {} retained samples for {runs_completed} completed runs",
+                            "Monte Carlo variable '{}' has {} samples for {runs_completed} completed runs",
                             variable.name,
                             variable.samples.len()
                         ));
@@ -285,7 +285,7 @@ impl FamilyManifest {
             Ok(())
         } else {
             Err(format!(
-                "family contains {} retained points but the source waveform contains {sample_count} samples",
+                "family has {} points but the source signal has {sample_count} samples",
                 self.points.len()
             ))
         }

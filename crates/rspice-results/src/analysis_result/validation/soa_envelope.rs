@@ -13,7 +13,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
     let envelope = evaluation
         .envelope
         .as_ref()
-        .ok_or("Missing SOA curve evidence")?;
+        .ok_or("Missing SOA curve data")?;
     if time.is_empty() {
         return Err("SOA current curve requires accepted samples".into());
     }
@@ -23,7 +23,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
         .pulse_width_s
         .is_some_and(|width| width < time[time.len() - 1] - time[0])
     {
-        return Err("SOA pulse rating is shorter than the retained window".into());
+        return Err("SOA pulse rating is shorter than the saved window".into());
     }
     let parameter = evaluation.parameter.runtime_parameter();
     let limits = super::soa_derating::trace(
@@ -56,7 +56,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
             || !same_retained_float(limits[i], limit)
         {
             return Err(
-                "SOA current/voltage curve contradicts its retained voltage, limit or stress"
+                "SOA current/voltage curve contradicts its voltage, limit or stress"
                     .into(),
             );
         }
@@ -72,7 +72,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
             || !same_retained_float(evaluation.worst_actual_value, stress[worst])
             || !same_retained_float(evaluation.limit_value, limits[worst]))
     {
-        return Err("SOA current/voltage curve does not retain its exact worst utilization".into());
+        return Err("SOA current/voltage curve is missing its exact worst utilization".into());
     }
     Ok(events)
 }

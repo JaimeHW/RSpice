@@ -8,7 +8,7 @@ pub(super) fn validate_report<W: AsRef<RetainedWaveform>>(
     waves: &[W],
 ) -> Result<(), String> {
     if source.time != time {
-        return Err("SOA source history contradicts its retained observation axis".into());
+        return Err("SOA source history contradicts its time axis".into());
     }
     // The reporting view is asked of the reader service whole: the history holds every
     // observation in memory, so a view of it fits there too.

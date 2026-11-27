@@ -176,7 +176,7 @@ impl TransientConvergenceEvidence {
         self.transient.validate()?;
         if self.transient.time_basis.is_none() {
             return Err(
-                "Transient convergence evidence is missing its source time basis".to_owned(),
+                "Transient convergence data is missing its time basis".to_owned(),
             );
         }
         if let Some(initialization) = &self.initialization {

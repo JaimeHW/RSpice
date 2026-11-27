@@ -37,7 +37,7 @@ where
             )
         }) {
             let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload else {
-                return Err("saved-output DC members require exact sweep evidence".to_owned());
+                return Err("saved-output DC members need the DC sweep results".to_owned());
             };
             evidence.validate()?;
         }
@@ -83,16 +83,16 @@ where
                 .is_some_and(|source| receipt.analysis_id != source.source_instance_id())
             {
                 return Err(
-                    "saved-output analysis identity does not match result provenance".to_owned(),
+                    "saved output belongs to a different analysis".to_owned(),
                 );
             }
             for (name, count) in receipt.status.materialized_waveforms() {
                 if self.success && receipt.save_policy == SavedOutputPolicy::FailureDiagnosticsOnly
                 {
-                    return Err("saved-output receipt materializes failure-only data on a successful analysis".to_owned());
+                    return Err("a failure-only saved output holds data from a successful analysis".to_owned());
                 }
                 let waveform = waveforms.get(name).ok_or_else(|| {
-                    format!("saved-output receipt names absent materialized waveform '{name}'")
+                    format!("saved output names signal '{name}', which is missing")
                 })?;
                 if usize::try_from(count).ok() != Some(waveform.x.len()) {
                     return Err(format!(
@@ -105,7 +105,7 @@ where
                     let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload
                     else {
                         return Err(
-                            "saved-output DC members require exact sweep evidence".to_owned()
+                            "saved-output DC members need the DC sweep results".to_owned()
                         );
                     };
                     if self.analysis_type != AnalysisType::DcSweep
@@ -167,7 +167,7 @@ where
                 SavedOutputMaterializationStatus::Deferred
                     if receipt.save_policy != SavedOutputPolicy::OnDemandFromRetainedState =>
                 {
-                    return Err("saved-output receipt defers a save policy that requires immediate materialization".to_owned());
+                    return Err("saved output was left to compute later, but its save setting needs it computed during the run".to_owned());
                 }
                 SavedOutputMaterializationStatus::Unavailable { reason }
                     if reason.trim().is_empty() =>
@@ -193,7 +193,7 @@ where
             && !axis.same_as(source.x)
         {
             return Err(
-                "saved-output DC raw members differ from the retained solved primary axis"
+                "saved-output DC members differ from the solved primary sweep axis"
                     .to_owned(),
             );
         }

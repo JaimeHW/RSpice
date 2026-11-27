@@ -146,14 +146,14 @@ impl SensitivityStudyEvidence {
     /// would rank numbers that answer no question.
     pub fn validate(&self) -> Result<(), String> {
         if self.output.trim().is_empty() {
-            return Err("sensitivity study evidence has no output probe".to_owned());
+            return Err("sensitivity study has no output probe".to_owned());
         }
         if self.filter.chars().any(char::is_control) {
             return Err("sensitivity study filter contains a control character".to_owned());
         }
         let points = self.point_count();
         if points == 0 {
-            return Err("sensitivity study evidence was solved at no points".to_owned());
+            return Err("sensitivity study was solved at no points".to_owned());
         }
         if let SensitivityBasisEvidence::Ac {
             frequencies_hz,
@@ -177,7 +177,7 @@ impl SensitivityStudyEvidence {
             }
             if output.len() != points {
                 return Err(format!(
-                    "sensitivity study retained {} nominal outputs for {points} frequencies",
+                    "sensitivity study kept {} nominal outputs for {points} frequencies",
                     output.len()
                 ));
             }

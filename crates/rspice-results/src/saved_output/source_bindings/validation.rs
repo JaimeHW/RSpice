@@ -21,9 +21,9 @@ impl SavedOutputSourceBindings {
         J: Iterator<Item = DcTraceView<'a>> + Clone,
     {
         let expected = saved_output_references(receipt.output_kind, &receipt.source_expression)?
-            .ok_or_else(|| "this saved-output kind cannot carry source bindings".to_owned())?;
+            .ok_or_else(|| "this kind of saved output cannot name source signals".to_owned())?;
         if expected.iter().ne(self.references.keys()) {
-            return Err("saved-output bindings do not match the expression references".to_owned());
+            return Err("saved-output sources do not match the signals its expression names".to_owned());
         }
         let family = match &analysis.result_payload {
             Some(AnalysisResultPayload::DcSweep { evidence })
@@ -57,7 +57,7 @@ impl SavedOutputSourceBindings {
                 );
             }
             SavedOutputAxis::DcFamily if family.is_none() => {
-                return Err("saved-output DC axis requires exact family evidence".to_owned());
+                return Err("saved-output DC axis needs the DC sweep family".to_owned());
             }
             SavedOutputAxis::Waveform { name }
                 if name.is_empty()
@@ -65,7 +65,7 @@ impl SavedOutputSourceBindings {
                     || analysis.dc_op.is_some()
                     || (deferred || basis.is_some()) && !retained(name) =>
             {
-                return Err("saved-output axis does not identify retained analysis data".to_owned());
+                return Err("saved-output axis does not name data the analysis kept".to_owned());
             }
             _ => {}
         }
@@ -81,19 +81,19 @@ impl SavedOutputSourceBindings {
                         || (deferred || basis.is_some()) && !retained(name) =>
                 {
                     return Err(
-                        "saved-output source does not identify retained analysis data".to_owned(),
+                        "saved-output source does not name data the analysis kept".to_owned(),
                     );
                 }
                 SavedOutputBoundSource::DcQuantity { quantity } => {
                     let evidence = family.ok_or_else(|| {
-                        "saved-output DC source requires exact family evidence".to_owned()
+                        "saved-output DC source needs the DC sweep family".to_owned()
                     })?;
                     let physical = evidence.quantities.get(*quantity).ok_or_else(|| {
                         "saved-output DC quantity index is out of bounds".to_owned()
                     })?;
                     if (physical.unit() == "A") != current {
                         return Err(
-                            "saved-output DC binding changes the voltage/current namespace"
+                            "saved-output DC source switches between a voltage and a current"
                                 .to_owned(),
                         );
                     }
@@ -108,7 +108,7 @@ impl SavedOutputSourceBindings {
                             != evidence.member_count()
                     {
                         return Err(
-                            "deferred saved-output source has missing DC members".to_owned()
+                            "saved output left to compute later is missing DC members".to_owned()
                         );
                     }
                 }

@@ -62,7 +62,7 @@ impl MonteCarloCheckpointEvidence {
         )
         .map_err(|error| error.to_string())?;
         if checkpoint.completed_trials() == 0 {
-            return Err("a retained Monte Carlo checkpoint must contain committed trials".into());
+            return Err("a saved Monte Carlo checkpoint must contain finished trials".into());
         }
         Ok(Self {
             digest: checkpoint_digest(&bytes),

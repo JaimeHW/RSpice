@@ -73,7 +73,7 @@ impl SoaDurationEvidence {
                 || cumulative.final_exposure_s < 0.0
                 || cumulative.final_exposure_s > cumulative.peak_exposure_s)
         {
-            return Err("SOA cumulative duration evidence is invalid".into());
+            return Err("SOA cumulative duration result is invalid".into());
         }
         if !self.minimum_duration_s.is_finite()
             || self.minimum_duration_s <= 0.0
@@ -87,7 +87,7 @@ impl SoaDurationEvidence {
                 .checked_add(self.rejected_excursions)
                 .is_none_or(|count| self.clipped_excursions > count)
         {
-            return Err("SOA duration evidence is invalid".into());
+            return Err("SOA duration result is invalid".into());
         }
         Ok(())
     }

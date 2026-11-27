@@ -515,7 +515,7 @@ impl AnalysisResultPayload {
         match self {
             Self::Stb { response } => {
                 if analysis_type != AnalysisType::Stb {
-                    return Err("STB payload belongs to a different analysis type".into());
+                    return Err("STB results belong to a different analysis type".into());
                 }
                 response
                     .validate_with_abort(
@@ -526,7 +526,7 @@ impl AnalysisResultPayload {
             }
             Self::Qpnoise { response } => {
                 if analysis_type != AnalysisType::Qpnoise {
-                    return Err("QPNOISE payload belongs to a different analysis type".into());
+                    return Err("QPNOISE results belong to a different analysis type".into());
                 }
                 response
                     .validate_retained_payload_with_abort(
@@ -537,7 +537,7 @@ impl AnalysisResultPayload {
             }
             Self::Qpxf { response } => {
                 if analysis_type != AnalysisType::Qpxf {
-                    return Err("QPXF payload belongs to a different analysis type".into());
+                    return Err("QPXF results belong to a different analysis type".into());
                 }
                 response
                     .validate_retained_payload_with_abort(
@@ -548,7 +548,7 @@ impl AnalysisResultPayload {
             }
             Self::Qpac { response } => {
                 if analysis_type != AnalysisType::Qpac {
-                    return Err("QPAC payload belongs to a different analysis type".into());
+                    return Err("QPAC results belong to a different analysis type".into());
                 }
                 response
                     .validate_retained_payload_with_abort(
@@ -559,7 +559,7 @@ impl AnalysisResultPayload {
             }
             Self::Qpss { operating_point } => {
                 if analysis_type != AnalysisType::Qpss {
-                    return Err("QPSS payload belongs to a different analysis type".into());
+                    return Err("QPSS results belong to a different analysis type".into());
                 }
                 operating_point
                     .validate_retained_payload_with_abort(
@@ -571,7 +571,7 @@ impl AnalysisResultPayload {
 
             Self::DcSweep { evidence } => {
                 if analysis_type != AnalysisType::DcSweep {
-                    return Err("DC sweep evidence belongs to a different analysis type".to_owned());
+                    return Err("DC sweep results belong to a different analysis type".to_owned());
                 }
                 evidence.validate()?;
             }
@@ -594,17 +594,17 @@ impl AnalysisResultPayload {
             } => {
                 if analysis_type != AnalysisType::DcOp {
                     return Err(format!(
-                        "operating-point payload does not match analysis type {analysis_type:?}"
+                        "operating-point results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 if !temperature_celsius.is_finite() || *temperature_celsius <= -273.15 {
-                    return Err("operating-point payload has an invalid temperature".to_owned());
+                    return Err("operating-point results have an invalid temperature".to_owned());
                 }
                 if *initial_guess == OperatingPointInitialGuessEvidence::PreviousCompatible
                     && previous_state.is_none()
                 {
                     return Err(
-                        "compatible-circuit OP startup has no retained previous-state identity"
+                        "compatible-circuit OP startup does not name the previous solution"
                             .to_owned(),
                     );
                 }
@@ -649,11 +649,11 @@ impl AnalysisResultPayload {
                         .any(|name| name.is_empty() || name.trim() != name)
                 {
                     return Err(
-                        "operating-point retained MNA state is incomplete or invalid".to_owned(),
+                        "operating-point solver state is incomplete or invalid".to_owned(),
                     );
                 }
                 if *run_point_count == 0 || *run_point_index >= *run_point_count {
-                    return Err("operating-point retained run-point position is invalid".to_owned());
+                    return Err("operating-point run-point position is invalid".to_owned());
                 }
                 match (run_point_supply_voltage, run_point_nominal_supply_voltage) {
                     (None, None) => {}
@@ -664,7 +664,7 @@ impl AnalysisResultPayload {
                             && *nominal > 0.0 => {}
                     _ => {
                         return Err(
-                            "operating-point retained PVT supply evidence is invalid".to_owned()
+                            "operating-point PVT supply values are invalid".to_owned()
                         );
                     }
                 }
@@ -678,19 +678,19 @@ impl AnalysisResultPayload {
             } => {
                 if analysis_type != AnalysisType::PoleZero {
                     return Err(format!(
-                        "pole-zero payload does not match analysis type {analysis_type:?}"
+                        "pole-zero results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 validate_complex_values(poles, "pole")?;
                 validate_complex_values(zeros, "zero")?;
                 if !pole_evidence.is_consistent_with_count(poles.len()) {
                     return Err(
-                        "pole-zero pole evidence is inconsistent with retained roots".to_owned(),
+                        "pole-zero pole check disagrees with the poles".to_owned(),
                     );
                 }
                 if !zero_evidence.is_consistent_with_count(zeros.len()) {
                     return Err(
-                        "pole-zero zero evidence is inconsistent with retained roots".to_owned(),
+                        "pole-zero zero check disagrees with the zeros".to_owned(),
                     );
                 }
                 if gain.is_some_and(|gain| !gain.is_finite()) {
@@ -710,7 +710,7 @@ impl AnalysisResultPayload {
             } => {
                 if analysis_type != AnalysisType::Pss {
                     return Err(format!(
-                        "PSS Floquet payload does not match analysis type {analysis_type:?}"
+                        "PSS Floquet results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 PssFloquetRef {
@@ -746,7 +746,7 @@ impl AnalysisResultPayload {
             } => {
                 if analysis_type != AnalysisType::Pstb {
                     return Err(format!(
-                        "PSTB payload does not match analysis type {analysis_type:?}"
+                        "PSTB results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 PstbRef {
@@ -776,7 +776,7 @@ impl AnalysisResultPayload {
             } => {
                 if analysis_type != AnalysisType::Sensitivity {
                     return Err(format!(
-                        "sensitivity payload does not match analysis type {analysis_type:?}"
+                        "sensitivity results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 require_non_empty(output, "sensitivity output")?;
@@ -813,7 +813,7 @@ impl AnalysisResultPayload {
             Self::SensitivityStudy { evidence } => {
                 if analysis_type != AnalysisType::Sensitivity {
                     return Err(format!(
-                        "sensitivity study payload does not match analysis type {analysis_type:?}"
+                        "sensitivity study results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 evidence.validate()?;
@@ -821,7 +821,7 @@ impl AnalysisResultPayload {
             Self::DcMismatch { evidence } => {
                 if analysis_type != AnalysisType::DcMismatch {
                     return Err(format!(
-                        "DC mismatch payload does not match analysis type {analysis_type:?}"
+                        "DC mismatch results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 evidence.validate()?;
@@ -835,7 +835,7 @@ impl AnalysisResultPayload {
                         | AnalysisType::DcMismatch
                 ) {
                     return Err(format!(
-                        "scalar result payload does not match analysis type {analysis_type:?}"
+                        "scalar results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 for (name, value) in values {
@@ -862,7 +862,7 @@ impl AnalysisResultPayload {
             } => {
                 if analysis_type != AnalysisType::Tf {
                     return Err(format!(
-                        "transfer-function payload does not match analysis type {analysis_type:?}"
+                        "transfer-function results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 TransferFunctionRef {
@@ -888,11 +888,11 @@ impl AnalysisResultPayload {
             } => {
                 if analysis_type != AnalysisType::Soa {
                     return Err(format!(
-                        "SOA payload does not match analysis type {analysis_type:?}"
+                        "SOA results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 if evaluations.is_empty() {
-                    return Err("SOA payload contains no evaluated-rule evidence".to_owned());
+                    return Err("SOA results contain no evaluated rules".to_owned());
                 }
                 let derated_rules = evaluations
                     .iter()
@@ -950,7 +950,7 @@ impl AnalysisResultPayload {
                             .is_none()
                             || evaluation.derating.is_some()
                         {
-                            return Err("SOA current/voltage evidence requires a positive current cap and an Id/Ic/Ia rule in amperes".into());
+                            return Err("An SOA current/voltage curve needs a positive current cap and an Id/Ic/Ia rule in amperes".into());
                         }
                     }
                     if evaluation.limit_value < 0.0
@@ -969,7 +969,7 @@ impl AnalysisResultPayload {
                         || evaluation.sample_count == 0
                     {
                         return Err(format!(
-                            "SOA evaluation for '{}' has invalid sampling evidence",
+                            "SOA evaluation for '{}' has an invalid sample count or time",
                             evaluation.device_id
                         ));
                     }
@@ -1027,7 +1027,7 @@ impl AnalysisResultPayload {
                         || violation.actual_value < 0.0
                     {
                         return Err(format!(
-                            "SOA violation for '{}' has invalid magnitude evidence",
+                            "SOA violation for '{}' has an invalid magnitude",
                             violation.device_id
                         ));
                     }
@@ -1079,7 +1079,7 @@ impl AnalysisResultPayload {
             } => {
                 if analysis_type != AnalysisType::Transient {
                     return Err(format!(
-                        "event payload does not match analysis type {analysis_type:?}"
+                        "event results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 crate::events::validate_event_history(
@@ -1096,7 +1096,7 @@ impl AnalysisResultPayload {
                 // adding a second family that renders the same fact.
                 if analysis_type != AnalysisType::Fourier {
                     return Err(format!(
-                        "recorded FFT payload does not match analysis type {analysis_type:?}"
+                        "recorded FFT results do not match analysis type {analysis_type:?}"
                     ));
                 }
                 spectrum.validate()?;

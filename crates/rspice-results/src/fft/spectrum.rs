@@ -168,17 +168,17 @@ impl FftMetricsEvidence {
             self.sfdr_db,
         ] {
             if !value.is_finite() {
-                return Err("FFT metric evidence contains a non-finite figure".into());
+                return Err("FFT metrics contain a non-finite figure".into());
             }
         }
         if self.sfdr_spur_bin.is_none() != self.sfdr_spur_frequency_hz.is_none() {
-            return Err("FFT spur evidence states a bin without its frequency".into());
+            return Err("FFT spur result states a bin without its frequency".into());
         }
         if self
             .sfdr_spur_frequency_hz
             .is_some_and(|frequency| !frequency.is_finite() || frequency < 0.0)
         {
-            return Err("FFT spur evidence has an invalid frequency".into());
+            return Err("FFT spur result has an invalid frequency".into());
         }
         for (position, harmonic) in self.largest_harmonics.iter().enumerate() {
             if harmonic.rank != position + 1 {
@@ -279,20 +279,20 @@ impl FftSpectrumEvidence {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.output.trim().is_empty() {
-            return Err("FFT spectrum evidence has no resolved output".into());
+            return Err("FFT spectrum has no resolved output".into());
         }
         if !matches!(
             self.physical_type.as_str(),
             "voltage" | "current" | "parameter"
         ) {
             return Err(format!(
-                "FFT spectrum evidence names an unknown physical quantity class '{}'",
+                "FFT spectrum names an unknown physical quantity class '{}'",
                 self.physical_type
             ));
         }
         if self.point_count < 4 || !self.point_count.is_power_of_two() {
             return Err(
-                "FFT spectrum evidence has a transform length that is not a power of two of at \
+                "FFT spectrum has a transform length that is not a power of two of at \
                  least four"
                     .into(),
             );
@@ -302,7 +302,7 @@ impl FftSpectrumEvidence {
             || !self.stop_time_s.is_finite()
             || self.stop_time_s <= self.start_time_s
         {
-            return Err("FFT spectrum evidence has an invalid record interval".into());
+            return Err("FFT spectrum has an invalid record interval".into());
         }
         let expected_interval = (self.stop_time_s - self.start_time_s) / self.point_count as f64;
         if !self.sample_interval_s.is_finite()
@@ -310,7 +310,7 @@ impl FftSpectrumEvidence {
                 > expected_interval.abs() * 1.0e-12
         {
             return Err(
-                "FFT spectrum evidence sample spacing does not match its record and length".into(),
+                "FFT spectrum sample spacing does not match its record and length".into(),
             );
         }
         let expected_resolution = 1.0 / (self.stop_time_s - self.start_time_s);
@@ -318,16 +318,16 @@ impl FftSpectrumEvidence {
             || (self.frequency_resolution_hz - expected_resolution).abs()
                 > expected_resolution.abs() * 1.0e-12
         {
-            return Err("FFT spectrum evidence bin width does not match its record".into());
+            return Err("FFT spectrum bin width does not match its record".into());
         }
         if !self.coherent_gain.is_finite() || self.coherent_gain <= 0.0 {
-            return Err("FFT spectrum evidence has an invalid coherent gain".into());
+            return Err("FFT spectrum has an invalid coherent gain".into());
         }
         if !self.alpha.is_finite() {
-            return Err("FFT spectrum evidence has a non-finite ALFA".into());
+            return Err("FFT spectrum has a non-finite ALFA".into());
         }
         if self.window.trim().is_empty() || self.window.to_ascii_uppercase() != self.window {
-            return Err("FFT spectrum evidence has no canonical window keyword".into());
+            return Err("FFT spectrum has no recognised window keyword".into());
         }
         let nyquist_bin = self.point_count / 2;
         if self.fundamental_bin == 0
@@ -335,7 +335,7 @@ impl FftSpectrumEvidence {
             || self.maximum_metric_bin > nyquist_bin
             || self.maximum_metric_bin < self.minimum_metric_bin
         {
-            return Err("FFT spectrum evidence has inconsistent metric bins".into());
+            return Err("FFT spectrum has inconsistent metric bins".into());
         }
         // The engine owns the incomplete-history rule; restate it by calling it.
         self.status.core().validate_history(
@@ -345,7 +345,7 @@ impl FftSpectrumEvidence {
         )?;
         if let Some(metrics) = &self.metrics {
             if !self.status.is_complete() {
-                return Err("an incomplete FFT cannot retain metrics".into());
+                return Err("an incomplete FFT cannot have metrics".into());
             }
             metrics.validate()?;
             if metrics

@@ -225,10 +225,10 @@ impl DcSweepEvidence {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.source.trim().is_empty() || self.source.trim() != self.source {
-            return Err("DC sweep evidence has an invalid primary source".to_owned());
+            return Err("DC sweep result has an invalid primary source".to_owned());
         }
         if self.quantities.is_empty() {
-            return Err("DC sweep evidence has no solved quantities".to_owned());
+            return Err("DC sweep result has no solved quantities".to_owned());
         }
         let mut identities = HashSet::with_capacity(self.quantities.len());
         for quantity in &self.quantities {
@@ -240,24 +240,24 @@ impl DcSweepEvidence {
                     && (name == "0" || name.eq_ignore_ascii_case("gnd")))
             {
                 return Err(
-                    "DC sweep evidence has an invalid or duplicate solved quantity".to_owned(),
+                    "DC sweep result has an invalid or duplicate solved quantity".to_owned(),
                 );
             }
         }
         if let DcSweepFamily::Nested { source, values } = &self.family {
             if source.trim().is_empty() || source.trim() != source || values.is_empty() {
                 return Err(
-                    "Nested DC evidence is missing its secondary source or points".to_owned(),
+                    "Nested DC sweep is missing its secondary source or points".to_owned(),
                 );
             }
             if source.eq_ignore_ascii_case(&self.source) {
                 return Err(
-                    "Nested DC evidence must name distinct primary and secondary sources"
+                    "Nested DC sweep must name distinct primary and secondary sources"
                         .to_owned(),
                 );
             }
             if values.iter().any(|value| !value.is_finite()) {
-                return Err("Nested DC evidence contains a non-finite coordinate".to_owned());
+                return Err("Nested DC sweep has a non-finite coordinate".to_owned());
             }
         }
         if let DcCurveSelection::Saved(curves) = &self.selection {

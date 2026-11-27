@@ -26,7 +26,7 @@ pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
             .waveforms
             .iter()
             .find(|wave| wave.name == name)
-            .ok_or_else(|| format!("SOA is missing retained source trace '{name}'"))?;
+            .ok_or_else(|| format!("SOA is missing source trace '{name}'"))?;
         if source.time != time || wave.values.len() != time.len() || wave.unit != unit {
             return Err(format!(
                 "SOA source trace '{name}' has invalid coverage or units"
@@ -39,7 +39,7 @@ pub(super) fn trace<'a, W: AsRef<RetainedWaveform>>(
         .iter()
         .map(AsRef::as_ref)
         .find(|wave| wave.name == name)
-        .ok_or_else(|| format!("SOA derating is missing retained trace '{name}'"))?;
+        .ok_or_else(|| format!("SOA derating is missing trace '{name}'"))?;
     let invalid =
         || format!("SOA derating trace '{name}' has an invalid axis, unit or sample coverage");
     if wave.y.len() != time.len()
@@ -121,7 +121,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
             || !same_retained_float(evaluation.limit_value, limits[worst]))
     {
         return Err(format!(
-            "SOA derating for '{}' does not retain the exact point of highest utilization",
+            "SOA derating for '{}' is missing the exact point of highest utilization",
             evaluation.device_id
         ));
     }

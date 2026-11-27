@@ -73,7 +73,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
     .map_err(rspice_core::SimulationError::from)
     .map_err(|error| error.to_string())?;
     if scan.evidence != duration {
-        return Err("SOA duration summary contradicts its retained samples".into());
+        return Err("SOA duration summary contradicts its samples".into());
     }
     let verdicts: Vec<_> = (0..time.len())
         .map(|i| {
@@ -108,7 +108,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
         || !same_retained_float(time[worst], evaluation.worst_time_s)
         || !same_retained_float(limits.at(worst), evaluation.limit_value)
     {
-        return Err("SOA duration-qualified worst point contradicts its retained samples".into());
+        return Err("SOA duration-qualified worst point contradicts its samples".into());
     }
     let events = verdicts
         .iter()

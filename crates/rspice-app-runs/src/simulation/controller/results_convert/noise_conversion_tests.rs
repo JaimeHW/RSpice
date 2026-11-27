@@ -488,6 +488,6 @@ fn phase_noise_with_no_captured_carrier_is_refused_rather_than_labelled_with_a_g
     );
     assert_eq!(
         result.validate_retained_evidence(),
-        Err("phase-noise evidence is missing its retained carrier frequency".to_owned()),
+        Err("phase-noise result is missing its carrier frequency".to_owned()),
     );
 }

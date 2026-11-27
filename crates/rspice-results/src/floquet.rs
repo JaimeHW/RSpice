@@ -210,7 +210,7 @@ impl PssFloquetRef<'_> {
         )?;
         if verdict != expected_verdict {
             return Err(
-                "PSS stability verdict is inconsistent with its Floquet evidence".to_owned(),
+                "PSS stability verdict disagrees with its Floquet multipliers".to_owned(),
             );
         }
         Ok(())
@@ -258,7 +258,7 @@ impl PstbRef<'_> {
             converged,
         } = self;
         if !converged {
-            return Err("PSTB payload is from an orbit that did not converge".to_owned());
+            return Err("PSTB results come from an orbit that did not converge".to_owned());
         }
         if !period_s.is_finite()
             || period_s <= 0.0
@@ -357,7 +357,7 @@ impl PstbRef<'_> {
                 .flatten();
             if mode.subharmonic_order != detected_order {
                 return Err(format!(
-                    "PSTB Floquet mode {index} has inconsistent subharmonic evidence"
+                    "PSTB Floquet mode {index} has an inconsistent subharmonic order"
                 ));
             }
             if let Some(order) = detected_order {

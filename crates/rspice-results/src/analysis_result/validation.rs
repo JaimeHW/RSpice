@@ -60,17 +60,17 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
         for waveform in self.waveforms.iter().map(AsRef::as_ref) {
             let name = waveform.name.trim();
             if name.is_empty() || waveform.name.chars().any(char::is_control) {
-                return Err("retained waveform requires a non-empty control-free name".to_owned());
+                return Err("a signal needs a name without control characters".to_owned());
             }
             if !waveform_names.insert(waveform.name.as_str()) {
                 return Err(format!(
-                    "retained waveform name '{}' is duplicated",
+                    "signal name '{}' appears twice",
                     waveform.name
                 ));
             }
             if waveform.x.len() != waveform.y.len() {
                 return Err(format!(
-                    "retained waveform '{}' has {} coordinates but {} values",
+                    "signal '{}' has {} coordinates but {} values",
                     waveform.name,
                     waveform.x.len(),
                     waveform.y.len()
@@ -84,7 +84,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     || y.iter().any(|value| value.is_infinite()))
             {
                 return Err(format!(
-                    "retained waveform '{}' contains a non-finite coordinate or infinite value",
+                    "signal '{}' has a non-finite coordinate or an infinite value",
                     waveform.name
                 ));
             }
@@ -100,7 +100,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                 && !pxf::verified_group_delay(self, waveform)
             {
                 return Err(format!(
-                    "native retained waveform '{}' contains an unavailable sample without import attribution or verified derived evidence",
+                    "signal '{}' has a missing sample that neither an import nor a derived calculation explains",
                     waveform.name
                 ));
             }
@@ -110,7 +110,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                 .is_some_and(|unit| unit.trim().is_empty() || unit.chars().any(char::is_control))
             {
                 return Err(format!(
-                    "retained waveform '{}' has an invalid engineering unit",
+                    "signal '{}' has an invalid engineering unit",
                     waveform.name
                 ));
             }
@@ -119,14 +119,14 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     || complex.source_name.chars().any(char::is_control)
                 {
                     return Err(format!(
-                        "retained waveform '{}' has an invalid complex-source name",
+                        "signal '{}' has an invalid complex-source name",
                         waveform.name
                     ));
                 }
                 if complex.real.len() != waveform.x.len() || complex.imag.len() != waveform.x.len()
                 {
                     return Err(format!(
-                        "retained waveform '{}' complex components do not match its {} coordinates",
+                        "signal '{}' complex components do not match its {} coordinates",
                         waveform.name,
                         waveform.x.len()
                     ));
@@ -137,7 +137,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     && real.iter().chain(imag).any(|value| value.is_infinite())
                 {
                     return Err(format!(
-                        "retained waveform '{}' contains a non-finite complex component",
+                        "signal '{}' has a non-finite complex component",
                         waveform.name
                     ));
                 }
@@ -147,7 +147,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     })
                 {
                     return Err(format!(
-                        "retained waveform '{}' has inconsistent complex sample availability",
+                        "signal '{}' has real and imaginary parts missing at different samples",
                         waveform.name
                     ));
                 }
@@ -166,15 +166,15 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                 for value in values {
                     if !valid_text(&value.name) || !valid_text(&value.unit) {
                         return Err(format!(
-                            "retained {group} requires a valid canonical name and engineering unit"
+                            "each {group} needs a valid name and engineering unit"
                         ));
                     }
                     if !names.insert(value.name.as_str()) {
-                        return Err(format!("retained {group} '{}' is duplicated", value.name));
+                        return Err(format!("{group} '{}' appears twice", value.name));
                     }
                     if !value.value.is_finite() {
                         return Err(format!(
-                            "retained {group} '{}' contains a non-finite value",
+                            "{group} '{}' has a non-finite value",
                             value.name
                         ));
                     }
@@ -183,19 +183,19 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
         }
         if let Some(report) = &self.device_op {
             if !report.labels_resolve() {
-                return Err("retained device operating-point labels do not resolve".to_owned());
+                return Err("device operating-point labels do not resolve".to_owned());
             }
             let mut devices = HashSet::with_capacity(report.entries.len());
             for entry in &report.entries {
                 if !valid_text(&entry.name) || !devices.insert(entry.name.as_str()) {
                     return Err(format!(
-                        "retained device operating-point identity '{}' is invalid or duplicated",
+                        "device operating-point name '{}' is invalid or appears twice",
                         entry.name
                     ));
                 }
                 if entry.params.iter().any(|(_, value)| !value.is_finite()) {
                     return Err(format!(
-                        "retained device operating-point entry '{}' contains a non-finite value",
+                        "device operating-point entry '{}' has a non-finite value",
                         entry.name
                     ));
                 }
@@ -208,7 +208,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                 }) || (noise.noise_figure.is_some()
                     && quantity != rspice_core::analysis::noise::NoiseInputQuantity::Voltage))
             {
-                return Err("Noise input quantity disagrees with its retained evidence".into());
+                return Err("Noise input quantity disagrees with the noise results".into());
             }
             if let Some(conversion) = &noise.conversion {
                 conversion.validate(noise.band)?;
@@ -225,7 +225,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                             .filter(|wave| wave.name == "onoise" || wave.name.starts_with("noise("))
                             .any(|wave| wave.unit.as_deref() != Some(unit))
                     {
-                        return Err("Sampled noise units or result family disagree with the retained sampling evidence".into());
+                        return Err("Sampled noise units or result family disagree with the sampling settings".into());
                     }
                 }
                 if conversion.input_source.trim().is_empty()
@@ -237,7 +237,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                             .any(|wave| wave.name == "inoise"))
                 {
                     return Err(
-                        "Input-referred periodic noise requires a retained input source".into(),
+                        "Input-referred periodic noise needs its input source".into(),
                     );
                 }
                 if !matches!(
@@ -263,7 +263,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         .any(|wave| wave.x.ends() != Some(noise.band))
                 {
                     return Err(
-                        "Periodic-noise curves must cover their retained offset band".into(),
+                        "Periodic-noise curves must cover their offset band".into(),
                     );
                 }
             }
@@ -283,7 +283,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     || !matches
                     || curves.next().is_some()
                 {
-                    return Err("Noise figure must match its retained HBNOISE decibel curve".into());
+                    return Err("Noise figure must match its HBNOISE decibel curve".into());
                 }
                 if noise.band
                     != (
@@ -291,7 +291,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         *figure.frequencies.last().unwrap(),
                     )
                 {
-                    return Err("Noise figure does not cover the retained noise band".into());
+                    return Err("Noise figure does not cover the noise band".into());
                 }
             }
             if !noise.band.0.is_finite()
@@ -305,7 +305,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     .input_rms
                     .is_some_and(|value| !value.is_finite() || value < 0.0)
             {
-                return Err("retained noise summary has an invalid band or RMS total".to_owned());
+                return Err("noise summary has an invalid band or RMS total".to_owned());
             }
             let mut contributors = HashSet::with_capacity(noise.rows.len());
             for row in &noise.rows {
@@ -318,7 +318,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     || !contributors.insert((row.device.as_str(), row.mechanism.as_str()))
                 {
                     return Err(format!(
-                        "retained noise contribution '{} / {}' is invalid or duplicated",
+                        "noise contribution '{} / {}' is invalid or appears twice",
                         row.device, row.mechanism
                     ));
                 }
@@ -333,7 +333,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                 || !measurement_names.insert(measurement.name.as_str())
             {
                 return Err(format!(
-                    "retained measurement identity '{}' is invalid or duplicated",
+                    "measurement name '{}' is invalid or appears twice",
                     measurement.name
                 ));
             }
@@ -353,13 +353,13 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     && (measurement.value.is_none() || measurement.error.is_some()))
             {
                 return Err(format!(
-                    "retained measurement '{}' has contradictory or non-finite evidence",
+                    "measurement '{}' has contradictory or non-finite values",
                     measurement.name
                 ));
             }
             if measurement.value.is_some() != measurement.raw_value.is_some() {
                 return Err(format!(
-                    "retained measurement '{}' must carry its raw value exactly when it carries a published value",
+                    "measurement '{}' must have a raw value exactly when it has a published value",
                     measurement.name
                 ));
             }
@@ -369,13 +369,13 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             };
             if measurement.failure_limit_exceeded != expected_exceeded {
                 return Err(format!(
-                    "retained measurement '{}' FAILVALUE verdict does not match abs(raw_value) >= failure_limit",
+                    "measurement '{}' FAILVALUE verdict does not match abs(raw_value) >= failure_limit",
                     measurement.name
                 ));
             }
             if measurement.failure_limit_exceeded && measurement.passed {
                 return Err(format!(
-                    "retained measurement '{}' cannot pass after its FAILVALUE limit was reached",
+                    "measurement '{}' cannot pass after its FAILVALUE limit was reached",
                     measurement.name
                 ));
             }
@@ -402,7 +402,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
 
         match (&self.family_metadata, &self.result_payload) {
             (None, Some(AnalysisResultPayload::Soa { .. })) => {
-                return Err("SOA payload is missing its retained time axis".to_owned());
+                return Err("SOA results are missing their time axis".to_owned());
             }
             (
                 Some(AnalysisResultFamilyMetadata::Soa { time }),
@@ -491,10 +491,10 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     {
                         let index = time
                             .binary_search_by(|t| t.total_cmp(&violation.time_s))
-                            .map_err(|_| "SOA derating event has no exact retained sample")?;
+                            .map_err(|_| "SOA derating event falls on no saved sample")?;
                         if !same_retained_float(stress[index], violation.actual_value) {
                             return Err(
-                                "SOA derating event contradicts its retained stress sample".into(),
+                                "SOA derating event contradicts its stress sample".into(),
                             );
                         }
                         if duration.as_ref().is_some_and(|duration| {
@@ -529,13 +529,13 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         .is_gt()
                     {
                         return Err(format!(
-                            "SOA event for '{}' exceeds its retained worst point",
+                            "SOA event for '{}' exceeds its worst point",
                             violation.device_id
                         ));
                     }
                     if !contains_retained_coordinate(time, violation.time_s) {
                         return Err(format!(
-                            "SOA event for '{}' does not reference an exact retained sample",
+                            "SOA event for '{}' falls on no saved sample",
                             violation.device_id
                         ));
                     }
@@ -570,14 +570,14 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         let expected_events = derating_traces[&key].2;
                         if derating_event_counts.get(&key).copied().unwrap_or(0) != expected_events
                         {
-                            return Err("SOA derating events do not cover every retained warning/violation sample".into());
+                            return Err("SOA derating events do not cover every warning/violation sample".into());
                         }
                     }
                     let retained_sample_count = u64::try_from(time.len())
-                        .map_err(|_| "SOA time axis exceeds the retained count range".to_owned())?;
+                        .map_err(|_| "SOA time axis has too many samples to count".to_owned())?;
                     if evaluation.sample_count != retained_sample_count {
                         return Err(format!(
-                            "SOA evaluation for '{}' covers {} samples but the retained run has {}",
+                            "SOA evaluation for '{}' covers {} samples but the run has {}",
                             evaluation.device_id,
                             evaluation.sample_count,
                             time.len()
@@ -585,7 +585,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     }
                     if !contains_retained_coordinate(time, evaluation.worst_time_s) {
                         return Err(format!(
-                            "SOA evaluation for '{}' does not reference an exact retained sample",
+                            "SOA evaluation for '{}' falls on no saved sample",
                             evaluation.device_id
                         ));
                     }
@@ -603,7 +603,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             (Some(AnalysisResultFamilyMetadata::Soa { .. }), Some(payload))
                 if !matches!(payload, AnalysisResultPayload::Soa { .. }) =>
             {
-                return Err("SOA metadata has a mismatched retained payload".to_owned());
+                return Err("SOA metadata does not match the results it describes".to_owned());
             }
             _ => {}
         }

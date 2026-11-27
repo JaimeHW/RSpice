@@ -94,13 +94,13 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     || actual.complex != expected.complex
                 {
                     return Err(format!(
-                        "retained trace '{}' differs from its retained numerical evidence",
+                        "trace '{}' differs from its solved values",
                         actual.name
                     ));
                 }
             } else if !authored.contains(actual.name.as_str()) {
                 return Err(format!(
-                    "retained trace '{}' is absent from the solved basis and saved-output receipts",
+                    "trace '{}' is neither a solved quantity nor a saved output",
                     actual.name
                 ));
             }

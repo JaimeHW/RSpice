@@ -143,7 +143,7 @@ impl TransferFunctionRef<'_> {
         }
         if gain.is_none() && input_resistance.is_none() && output_resistance.is_none() {
             return Err(
-                "transfer-function payload contains no requested scalar evidence".to_owned(),
+                "transfer-function results contain none of the requested values".to_owned(),
             );
         }
         for (label, scalar) in [
@@ -161,7 +161,7 @@ impl TransferFunctionRef<'_> {
             && gain.is_some();
         if relative_gain != nominal_input.is_some() || relative_gain != nominal_output.is_some() {
             return Err(
-                "transfer-function nominal values must be present exactly when a relative-normalized gain is retained"
+                "transfer-function nominal values must be present exactly when the gain is relative-normalized"
                     .to_owned(),
             );
         }

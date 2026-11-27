@@ -174,7 +174,7 @@ impl AnalysisResultFamilyMetadata {
         );
         if !compatible {
             return Err(format!(
-                "retained family metadata does not match analysis type {analysis_type:?}"
+                "sweep family details do not match analysis type {analysis_type:?}"
             ));
         }
 
@@ -234,7 +234,7 @@ impl AnalysisResultFamilyMetadata {
                 }
                 if *all_converged && (*failures != 0 || runs_completed != runs_requested) {
                     return Err(
-                        "Monte Carlo all_converged contradicts retained run counts".to_owned()
+                        "Monte Carlo all_converged contradicts the run counts".to_owned()
                     );
                 }
                 let mut names = HashSet::with_capacity(variables.len());
@@ -327,7 +327,7 @@ impl AnalysisResultFamilyMetadata {
                     && carrier_frequency_hz.is_none()
                 {
                     return Err(
-                        "phase-noise evidence is missing its retained carrier frequency".to_owned(),
+                        "phase-noise result is missing its carrier frequency".to_owned(),
                     );
                 }
             }
@@ -398,13 +398,13 @@ fn validate_member_measurements(metadata: &AnalysisResultFamilyMetadata) -> Resu
         );
         if !matches_family {
             return Err(format!(
-                "retained member evidence is not a {expected}: {:?}",
+                "member details are not a {expected}: {:?}",
                 member.member
             ));
         }
         if !seen.insert(member.member.index()) {
             return Err(format!(
-                "family member evidence repeats {expected} {}",
+                "sweep family repeats {expected} {}",
                 member.member.index()
             ));
         }
@@ -423,7 +423,7 @@ fn validate_member_measurements(metadata: &AnalysisResultFamilyMetadata) -> Resu
             }
             if measurement.value.is_some_and(|value| !value.is_finite()) {
                 return Err(format!(
-                    "{expected} {} retained a non-finite '{}'",
+                    "{expected} {} has a non-finite '{}'",
                     member.member.index(),
                     measurement.name
                 ));

@@ -384,7 +384,7 @@ pub fn validate_event_history(
         && current_impulses.is_none()
         && voltage_impulses.is_none()
     {
-        return Err("event payload contains no retained event history".to_owned());
+        return Err("event results contain no event history".to_owned());
     }
     if let Some(history) = current_impulses {
         history.validate()?;
@@ -397,7 +397,7 @@ pub fn validate_event_history(
         require_non_empty(&trace.node_name, "event node identity")?;
         if !seen.insert(trace.node_name.as_str()) {
             return Err(format!(
-                "event node '{}' is retained more than once",
+                "event node '{}' appears more than once",
                 trace.node_name
             ));
         }
@@ -425,7 +425,7 @@ pub fn validate_event_history(
         require_non_empty(&trace.node_name, "event node identity")?;
         if !seen.insert(trace.node_name.as_str()) {
             return Err(format!(
-                "event node '{}' is retained more than once",
+                "event node '{}' appears more than once",
                 trace.node_name
             ));
         }
@@ -482,7 +482,7 @@ fn validate_event_times(node_name: &str, times: impl Iterator<Item = f64>) -> Re
         previous = Some(time);
     }
     if count == 0 {
-        return Err(format!("event node '{node_name}' retained no events"));
+        return Err(format!("event node '{node_name}' kept no events"));
     }
     Ok(())
 }

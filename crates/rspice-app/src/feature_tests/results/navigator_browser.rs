@@ -364,7 +364,7 @@ fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
     )
     .expect_err("mismatched exact vectors must not be truncated");
     assert!(
-        error.contains("retained waveform 'V(out)' has 2 coordinates but 1 values"),
+        error.contains("signal 'V(out)' has 2 coordinates but 1 values"),
         "{error}"
     );
 }
