@@ -482,8 +482,8 @@ impl MeasurementPlan {
             // The whole record's extent is the window's own when there is
             // none.
             let extent = match (self.window, planned.branch) {
-                (None, None) => stats,
-                _ => interval_statistics(&planned.x, &planned.y, &planned.shape, None, None),
+                (None, None) => stats.ok().map(|whole| (whole.min, whole.max)),
+                _ => whole_extent(&planned.x, &planned.y, &planned.shape),
             };
             let measured = MeasuredTrace {
                 trace: planned.trace,
@@ -491,7 +491,7 @@ impl MeasurementPlan {
                 stats,
                 rms: planned.rms,
                 period,
-                extent: extent.ok().map(|whole| (whole.min, whole.max)),
+                extent,
                 first_row: rows,
             };
             rows += measured.rows();
@@ -1034,7 +1034,7 @@ fn interval_statistics(
     window: Option<(f64, f64)>,
     branch: Option<usize>,
 ) -> WindowStats {
-    use rspice_results::measurements::{MeasurementError, measure_interval};
+    use rspice_results::measurements::{MeasurementError, measure_interval_values};
 
     if window.is_some_and(|(a, b)| !a.is_finite() || !b.is_finite()) {
         return Err(MeasurementError::NonFiniteWindow);
@@ -1056,20 +1056,28 @@ fn interval_statistics(
         None => (0..x.len(), shape.is_single_ascending()),
     };
     // A window over an ascending trace measures only the samples in it and
-    // one either side, found by bisection; a stored trace reads just those
-    // rows and keeps none of them.
+    // one either side, found by bisection. A stored trace is read a block
+    // at a time, however long the part measured, and none of it is kept.
     let range = match window {
         Some((a, b)) if ascending => window_rows(x, range, a.min(b), a.max(b)),
         _ => range,
     };
-    // A stored window that cannot be read has no samples to measure.
-    let unread = |_| MeasurementError::IncompleteCoverage { fraction: 0.0 };
-    let xs = x.read_range(range.clone()).map_err(unread)?;
-    if xs.iter().any(|v| !v.is_finite()) {
-        return Err(MeasurementError::NonFiniteAxis);
+    measure_interval_values(x, y, range, window)
+}
+
+/// The least and greatest value of the whole trace, which its readings are
+/// settled against: from the store's summary tile when it is stored, so the
+/// whole column is never read for it, else measured over its samples.
+fn whole_extent(x: &WaveformValues, y: &WaveformValues, shape: &SweepShape) -> Option<(f64, f64)> {
+    if y.is_stored()
+        && let Some(extent) = y.extent_over(x, None)
+        && extent.min <= extent.max
+    {
+        return Some((extent.min, extent.max));
     }
-    let ys = y.read_range(range).map_err(unread)?;
-    measure_interval(&xs, &ys, window)
+    interval_statistics(x, y, shape, None, None)
+        .ok()
+        .map(|whole| (whole.min, whole.max))
 }
 
 /// The mean period of the samples `x` and `y` hold over `window`, or over
@@ -1089,6 +1097,9 @@ fn interval_period(
         || window.is_some_and(|(a, b)| !a.is_finite() || !b.is_finite())
     {
         return None;
+    }
+    if x.is_stored() || y.is_stored() {
+        return stored_period(x, y, window);
     }
     let range = match window {
         Some((a, b)) => window_rows(x, 0..x.len(), a.min(b), a.max(b)),
@@ -1111,6 +1122,80 @@ fn interval_period(
     match FunctionRegistry::dispatch("period", vec![wave]) {
         Ok(RealValue::Scalar(period)) if period.is_finite() && period > 0.0 => Some(period),
         _ => None,
+    }
+}
+
+/// [`interval_period`] of a stored trace: `period()` of it, or of `clip()`
+/// of it over `window`, as the calculator reads a stored trace, a block at
+/// a time.
+fn stored_period(
+    x: &WaveformValues,
+    y: &WaveformValues,
+    window: Option<(f64, f64)>,
+) -> Option<f64> {
+    use rspice_results::calculator::ast::CalculatorExpr;
+    use rspice_results::calculator::evaluator::{CalcValue, RealValue, evaluate};
+
+    let trace = CalculatorExpr::WaveformRef {
+        signal: StoredTrace::NAME.to_owned(),
+        dataset: None,
+    };
+    let measured = match window {
+        Some((a, b)) => CalculatorExpr::FunctionCall {
+            name: "clip".to_owned(),
+            args: vec![
+                trace,
+                CalculatorExpr::Number(a.min(b)),
+                CalculatorExpr::Number(a.max(b)),
+            ],
+        },
+        None => trace,
+    };
+    let period = CalculatorExpr::FunctionCall {
+        name: "period".to_owned(),
+        args: vec![measured],
+    };
+    match evaluate(&period, &StoredTrace { x, y }) {
+        Ok(CalcValue::Real(RealValue::Scalar(period))) if period.is_finite() && period > 0.0 => {
+            Some(period)
+        }
+        _ => None,
+    }
+}
+
+/// One stored trace, for the calculator to measure through its columns.
+struct StoredTrace<'a> {
+    x: &'a WaveformValues,
+    y: &'a WaveformValues,
+}
+
+impl StoredTrace<'_> {
+    const NAME: &'static str = "trace";
+}
+
+impl rspice_results::calculator::evaluator::EvaluationContext for StoredTrace<'_> {
+    /// A stored trace is not read as one value: only through its columns.
+    fn get_waveform(
+        &self,
+        signal: &str,
+        _dataset: Option<&str>,
+    ) -> Result<
+        rspice_results::calculator::evaluator::CalcValue,
+        rspice_results::calculator::evaluator::EvaluationError,
+    > {
+        Err(
+            rspice_results::calculator::evaluator::EvaluationError::IdentifierNotFound(
+                signal.to_owned(),
+            ),
+        )
+    }
+
+    fn stored_columns(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Option<(&WaveformValues, &WaveformValues)> {
+        (signal == Self::NAME && dataset.is_none()).then_some((self.x, self.y))
     }
 }
 
@@ -1172,14 +1257,20 @@ pub fn measurement_values(
             let period = (time && keeps(trace, branch) && stats.is_ok())
                 .then(|| interval_period(&trace.x, &trace.y, &trace.shape, window))
                 .flatten();
-            let extent = trace_interval_statistics(derived, model, trace, None, None);
+            let extent = if trace.y.is_stored() {
+                whole_extent(&trace.x, &trace.y, &trace.shape)
+            } else {
+                trace_interval_statistics(derived, model, trace, None, None)
+                    .ok()
+                    .map(|whole| (whole.min, whole.max))
+            };
             let measured = MeasuredTrace {
                 trace: index,
                 branch,
                 stats,
                 rms: has_rms(trace.kind),
                 period,
-                extent: extent.ok().map(|whole| (whole.min, whole.max)),
+                extent,
                 first_row: rows,
             };
             rows += measured.rows();

@@ -387,3 +387,64 @@ fn a_measurement_row_names_its_trace_as_drawn() {
         "{painted:?}"
     );
 }
+
+/// A stored trace is measured a block at a time: no reading of the panel,
+/// over the whole record or a window, reads its column whole, and each
+/// reads what the same samples held in memory read.
+#[test]
+fn a_stored_trace_is_measured_without_reading_its_column_whole() {
+    use crate::workbench::documents::result_document::test_fixtures::stored_transient;
+    // More rows than a block, so a read of a block is not a read of all.
+    let rows = 3 * rspice_results::waveform::BLOCK_SAMPLES + 5;
+    let x: Vec<f64> = (0..rows).map(|row| row as f64 * 1.0e-8).collect();
+    let y: Vec<f64> = x
+        .iter()
+        .map(|t| 0.25 + (std::f64::consts::TAU * 1.0e5 * t).sin())
+        .collect();
+    let (analysis, columns) = stored_transient(
+        x.clone(),
+        vec![("V(out)".to_owned(), y.clone())],
+        Some([4; 32]),
+    );
+    let mut stored = ResultsTestHost::default();
+    stored.model.simulation.start_run().add_analysis(analysis);
+    stored.model.simulation.complete_run();
+    let mut held = transient(x, y);
+    let readings = |state: &mut ResultsTestHost, window| {
+        let models = cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            &Tokens::default(),
+        );
+        let policy = state.model.preferences.quantity_presentation_policy();
+        readout::measurement_values(
+            &mut state.results.results.session.derived,
+            &models[0],
+            window,
+            4,
+            policy,
+            &rspice_results_ui::waves::as_returned,
+        )
+        .into_iter()
+        .map(|row| (row.label, row.value))
+        .collect::<Vec<_>>()
+    };
+    let whole_reads = || {
+        columns
+            .iter()
+            .map(|column| column.whole_reads())
+            .sum::<u64>()
+    };
+    for window in [None, Some((1.0e-4, 1.5e-3))] {
+        let before = whole_reads();
+        let from_store = readings(&mut stored, window);
+        assert_eq!(
+            whole_reads(),
+            before,
+            "measuring over {window:?} read a column whole"
+        );
+        assert_eq!(from_store.len(), 7, "{from_store:?}");
+        assert_eq!(from_store, readings(&mut held, window), "{window:?}");
+    }
+}
