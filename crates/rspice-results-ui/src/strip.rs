@@ -293,9 +293,6 @@ pub enum LegendGlyph {
     Ring,
     /// A filled dot, for points drawn as dots.
     Dot,
-    /// A hollow bar, for a curve still being evaluated: nothing is drawn
-    /// yet, so the swatch is not filled as a drawn curve's is.
-    Pending,
 }
 
 /// The swatch of a curve still being evaluated, centred on `center`: the
@@ -333,7 +330,6 @@ impl LegendGlyph {
             Self::Dot => {
                 painter.circle_filled(center, 3.5, color);
             }
-            Self::Pending => paint_pending_swatch(painter, center, color),
         }
     }
 }
