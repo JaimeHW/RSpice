@@ -72,6 +72,10 @@ const COLUMN_GAP: f32 = 16.0;
 /// The least height the list keeps, so it holds the kit's empty state whole
 /// when nothing matches.
 const EMPTY_HEIGHT: f32 = 132.0;
+/// How wide the form stands over the documents of any ordinary project,
+/// whatever their names: the columns widen it only when their words need
+/// more.
+const FORM_WIDTH: f32 = 520.0;
 
 /// Draw the form over `rows`, the most recently changed first. A
 /// double-click or Enter on a row opens it, as Open does with the row
@@ -79,10 +83,12 @@ const EMPTY_HEIGHT: f32 = 132.0;
 /// picks another, so Enter opens it at once.
 pub fn show(ctx: &Context, draft: &mut OpenDraft, rows: &[OpenRow]) -> DialogChoice {
     // The columns fit every row, not just the ones the filter keeps, so the
-    // form holds its width while the reader types.
+    // form holds its width while the reader types. The list runs to the
+    // form's edges; the room of the body's insets either side, and any the
+    // form has over its columns, goes to the name.
     let (columns, columns_width) = columns(ctx, rows);
     // The surface's 1 pt border and the body's inset on either side.
-    let width = columns_width + 2.0 * (1.0 + DIALOG_BODY_INSET);
+    let width = (columns_width + 2.0 * (1.0 + DIALOG_BODY_INSET)).max(FORM_WIDTH);
     let needle = draft.filter.trim().to_lowercase();
     let shown = rows
         .iter()
@@ -102,17 +108,26 @@ pub fn show(ctx: &Context, draft: &mut OpenDraft, rows: &[OpenRow]) -> DialogCho
         )
         .size(DialogSize::Transaction)
         .width_from_content(width)
+        .flush_body()
         .overlay_scrollbar()
         .initial_focus(DialogInitialFocus::Control(filter))
         .primary_enabled(draft.chosen().is_some())
         .show_with_initial_body_focus(ctx, |ui| {
-            filter_field(ui, filter, &mut draft.filter);
-            ui.add_space(6.0);
-            let row_height = LineHeights::list(&Tokens::get(ui.ctx())).row;
-            // The list keeps one height whatever the filter keeps: that of
-            // every row, and never less than the empty state's, so the form
-            // keeps the size it opened with while the reader types.
-            let height = (row_height * (rows.len().min(ROWS_IN_VIEW) + 1) as f32).max(EMPTY_HEIGHT);
+            // The filter keeps the body's inset; the list under it runs to
+            // the form's two edges and down to its footer, with no frame of
+            // its own.
+            ui.add_space(DIALOG_BODY_INSET);
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(DIALOG_BODY_INSET as i8, 0))
+                .show(ui, |ui| filter_field(ui, filter, &mut draft.filter));
+            ui.add_space(DIALOG_BODY_INSET);
+            let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
+            // The list is one height however many documents there are and
+            // whatever the filter keeps: its head and as many rows as it
+            // shows before it scrolls, never less than the empty state's. So
+            // the form keeps one size, opened over three documents or
+            // twelve, while the reader types.
+            let height = (lines.head + lines.row * ROWS_IN_VIEW as f32).max(EMPTY_HEIGHT);
             let list = ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
                 ui.set_min_height(height);
                 if shown.is_empty() {
@@ -137,7 +152,7 @@ pub fn show(ctx: &Context, draft: &mut OpenDraft, rows: &[OpenRow]) -> DialogCho
                     DataTable::new(LIST_ID, &columns, shown.len())
                         .state(&mut draft.table)
                         .keys(&keys)
-                        .max_height(row_height * (ROWS_IN_VIEW + 1) as f32)
+                        .max_height(height)
                         .show(ui, |index| {
                             let row = shown[index];
                             vec![
