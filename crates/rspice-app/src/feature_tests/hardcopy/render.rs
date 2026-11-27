@@ -98,8 +98,8 @@ fn no_widget_changes_its_id_as_the_studio_changes() {
         "the studio never resolved a source and an exact page preview"
     );
     record(&render_studio(&ctx, &mut app, viewport));
-    // The custom margins show their four fields in a row that keeps its
-    // place while they are hidden.
+    // The custom margins open their four fields in a row of their own, and
+    // the rows below them move without being renamed.
     for custom in [true, false] {
         app.state.hardcopy.hardcopy.margins_custom = custom;
         record(&render_studio(&ctx, &mut app, viewport));

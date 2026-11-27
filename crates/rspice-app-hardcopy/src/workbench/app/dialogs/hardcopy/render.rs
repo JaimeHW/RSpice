@@ -967,14 +967,6 @@ fn field(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
     });
 }
 
-/// Widths for the two-up form rows.
-///
-/// Measured against the **track**, not the viewport. Keying off the viewport
-/// was the layout's central defect: inside a column each pair was still sized
-/// as though it had the whole dialog, never fit, and wrapped — and a wrapped
-/// row still reserves its full height, which is where the dead band under
-/// every other field came from. When a pair cannot share its track, both
-/// halves take the whole of it and stack deliberately instead.
 /// One row of the settings form: two fields side by side where the track can
 /// hold them, stacked where it cannot.
 ///

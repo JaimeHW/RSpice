@@ -1,11 +1,10 @@
 //! The settings column of the Print and Export dialogs: the choices that make
 //! the page, in five groups of label-left rows beside the page they lay out.
 //!
-//! The column holds the same rows, at the same places, whatever is chosen. A
-//! row that only means something some of the time (a page range where there
-//! is more than one page, the tiling of a drawing too large for one page, the
-//! four margins of a custom page) keeps its place while it is hidden, so
-//! nothing moves under the pointer when it shows. None of these rows
+//! A row that only means something some of the time (a page range where
+//! there is more than one page, the tiling of a drawing too large for one
+//! page, the four margins of a custom page) is drawn only then, and the
+//! groups pack from the top with one gap between them. None of these rows
 //! refreshes the preview itself: the body compares the whole draft before and
 //! after the pass.
 
@@ -17,10 +16,8 @@ pub(super) const SETTINGS_WIDTH: f32 = 420.0;
 const LABEL_WIDTH: f32 = 88.0;
 const LABEL_GAP: f32 = 8.0;
 const ROW_GAP: f32 = 4.0;
-/// The space above a group's caption: at least this, and up to
-/// [`GROUP_GAP_MOST`] where the document's rows leave room for it.
-const GROUP_GAP: f32 = 8.0;
-const GROUP_GAP_MOST: f32 = 20.0;
+/// The space above every group's caption but the first.
+const GROUP_GAP: f32 = 14.0;
 const GROUP_CAPTION_HEIGHT: f32 = 18.0;
 const INSET_X: i8 = 16;
 const INSET_Y: i8 = 10;
@@ -53,21 +50,6 @@ pub(super) fn settings_column(
             .layout(Layout::top_down(Align::Min)),
     );
     column.set_clip_rect(rect.intersect(ui.clip_rect()));
-    // The groups share out the height the rows leave. The rows a document
-    // has are the same whatever is chosen (a row that hides keeps its
-    // place), so the share changes only when the document does.
-    let natural_id = egui::Id::new((
-        "hardcopy-settings-natural",
-        draft.workflow == HardcopyWorkflow::Export,
-    ));
-    let room = height - 2.0 * f32::from(INSET_Y);
-    let gap = ui
-        .data(|data| data.get_temp::<(f32, usize)>(natural_id))
-        .filter(|(_, gaps)| *gaps > 0)
-        .map_or(GROUP_GAP, |(natural, gaps)| {
-            let share = (room - natural) / gaps as f32;
-            share.clamp(GROUP_GAP, GROUP_GAP_MOST).floor()
-        });
     // The rows are authored to fit the column. The scroll area is the
     // fallback for a hostile font scale, not the layout.
     egui::ScrollArea::vertical()
@@ -80,12 +62,8 @@ pub(super) fn settings_column(
                 .show(ui, |ui| {
                     ui.set_width(SETTINGS_WIDTH - 2.0 * f32::from(INSET_X));
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                    let top = ui.cursor().top();
-                    let mut rows = Rows::new(ui, gap);
+                    let mut rows = Rows::new(ui);
                     action = settings_rows(&mut rows, draft);
-                    let gaps = rows.gaps;
-                    let natural = ui.cursor().top() - top - gaps as f32 * gap;
-                    ui.data_mut(|data| data.insert_temp(natural_id, (natural, gaps)));
                 });
         });
     (rect, action)
@@ -131,28 +109,18 @@ fn settings_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) -> BodyAc
 /// Label-left rows on one label column, grouped under captions.
 struct Rows<'u> {
     ui: &'u mut Ui,
-    /// The space above every caption but the first.
-    gap: f32,
-    /// How many of those spaces have been laid out.
-    gaps: usize,
     started: bool,
 }
 
 impl<'u> Rows<'u> {
-    fn new(ui: &'u mut Ui, gap: f32) -> Self {
-        Self {
-            ui,
-            gap,
-            gaps: 0,
-            started: false,
-        }
+    fn new(ui: &'u mut Ui) -> Self {
+        Self { ui, started: false }
     }
 
     /// A caption over a hairline, opening the group of rows after it.
     fn group(&mut self, title: &str) {
         if self.started {
-            self.ui.add_space(self.gap);
-            self.gaps += 1;
+            self.ui.add_space(GROUP_GAP);
         }
         self.started = true;
         let t = Tokens::get(self.ui.ctx());
@@ -234,19 +202,15 @@ impl<'u> Rows<'u> {
             .inner
     }
 
-    /// A row that holds its place whether or not it is shown.
-    fn held<R>(
+    /// A row drawn only where it means something; elsewhere it takes no
+    /// room.
+    fn row_when<R>(
         &mut self,
         shown: bool,
         label: &str,
         control: impl FnOnce(&mut Ui, f32) -> R,
     ) -> Option<R> {
-        if shown {
-            return Some(self.row(label, control));
-        }
-        let height = Tokens::get(self.ui.ctx()).metrics.ctl_h;
-        self.ui.add_space(ROW_GAP + height);
-        None
+        shown.then(|| self.row(label, control))
     }
 }
 
@@ -527,7 +491,7 @@ fn copies_row(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) {
 
 /// A page range only where there is more than one page to choose from.
 fn page_range_row(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState, total: u32) {
-    rows.held(total > 1, "Pages", |ui, width| {
+    rows.row_when(total > 1, "Pages", |ui, width| {
         let mut ranged = usize::from(draft.page_range.is_some());
         let changed = sized(ui, (width * 0.4).min(120.0), |ui| {
             segmented(
@@ -594,10 +558,10 @@ fn format_row(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) {
 }
 
 /// The resolution of a raster file, bounded by what this host can raster
-/// for the page; a vector file has none, and the row keeps its place.
+/// for the page; a vector file has none, and no row.
 fn resolution_row(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) {
     let raster = draft.format.raster_dpi().is_some();
-    rows.held(raster, "Resolution", |ui, _| {
+    rows.row_when(raster, "Resolution", |ui, _| {
         let ceiling = raster_dpi_ceiling(draft);
         let response = number_field(
             ui,
@@ -672,7 +636,12 @@ fn paper_row(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState, action: &mut 
     });
 }
 
+/// The paper's orientation. Where the paper matches each drawing sheet, each
+/// sheet's own orientation applies and there is nothing to choose.
 fn orientation_row(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) {
+    if draft.paper == PaperDraft::MatchAuthoredSheets {
+        return;
+    }
     let options = [
         (Orientation::Landscape, "Landscape"),
         (Orientation::Portrait, "Portrait"),
@@ -776,7 +745,7 @@ fn margins_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) {
         }
     }
     let unit = unit_label(draft.display_unit);
-    rows.held(index == 2, "", |ui, width| {
+    rows.row_when(index == 2, "", |ui, width| {
         ui.spacing_mut().item_spacing.x = 4.0;
         let unit_width = ui.fonts_mut(|fonts| {
             fonts
@@ -879,7 +848,7 @@ fn resolved_percent(draft: &HardcopyDialogState) -> Option<String> {
 /// overlap at each seam and the marks that line the pages up.
 fn tiling_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState, tiled: bool) {
     let mut kind = tiling_key(draft.tiling);
-    rows.held(tiled, "Tiling", |ui, width| {
+    rows.row_when(tiled, "Tiling", |ui, width| {
         let labels = ["Automatic", "Columns × rows", "One page"];
         let selected = match kind {
             0 => labels[0],
@@ -928,7 +897,7 @@ fn tiling_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState, tiled: bool
         },
     };
     let unit = unit_label(draft.display_unit);
-    rows.held(tiled, "Overlap", |ui, _| {
+    rows.row_when(tiled, "Overlap", |ui, _| {
         number_field(
             ui,
             egui::Id::new("hardcopy-overlap"),
@@ -959,10 +928,18 @@ fn content_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState, action: &m
     };
     let mut title_block = shown_title_block;
     let mut watermark = !matches!(draft.watermark, Watermark::None);
-    let mut checks: Vec<(&str, &mut bool)> = vec![
-        ("Title block", &mut title_block),
-        ("Legend", &mut draft.include_legends),
-    ];
+    // A legend is printed from the print mapping's legend entries; a page
+    // with none, or a drawing sheet, has no legend to switch.
+    let legend = sheet.is_none()
+        && draft
+            .print_mapping
+            .entries()
+            .iter()
+            .any(|entry| entry.include_in_legend());
+    let mut checks: Vec<(&str, &mut bool)> = vec![("Title block", &mut title_block)];
+    if legend {
+        checks.push(("Legend", &mut draft.include_legends));
+    }
     if plot {
         checks.push(("Cursors and markers", &mut draft.include_cursors_markers));
         checks.push(("Notes", &mut draft.include_notes));
