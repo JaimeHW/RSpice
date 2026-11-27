@@ -12,8 +12,9 @@ pub fn format_elapsed(seconds: f64) -> String {
     if !seconds.is_finite() || seconds < 0.0 {
         return "not available".to_owned();
     }
-    // No time at all has no resolution to state.
-    if seconds == 0.0 {
+    // No time at all, or less than the millisecond a reading resolves, has
+    // no resolution to state: it reads as zero, the same on every surface.
+    if (seconds * 1_000.0).round() == 0.0 {
         return "0 s".to_owned();
     }
     // Each branch decides on the value it will print, so 59.996 s reads as
@@ -41,7 +42,7 @@ mod tests {
     fn a_span_reads_in_the_largest_units_that_fit() {
         for (seconds, expected) in [
             (0.0, "0 s"),
-            (0.0004, "0.000 s"),
+            (0.0004, "0 s"),
             (0.0434, "0.043 s"),
             (0.9994, "0.999 s"),
             (0.9996, "1.00 s"),
