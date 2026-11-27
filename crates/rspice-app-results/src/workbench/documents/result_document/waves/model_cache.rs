@@ -3,7 +3,9 @@ use super::{ComplexNumberDisplay, ResultsState, SimulationState, StripModel, Tok
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 use rspice_results_ui::derived::DerivedSeries;
 use rspice_results_ui::waves::ProjectionOptions;
-use rspice_results_ui::waves::cache::{ModelCacheInput, ModelsMaker, apply_waveform_visibility};
+use rspice_results_ui::waves::cache::{
+    ModelCacheInput, ModelsMaker, ModelsView, apply_waveform_visibility,
+};
 use std::sync::Arc;
 
 pub(in crate::workbench::documents::result_document) fn cached_models(
@@ -64,11 +66,6 @@ fn built_models(
 ) -> Arc<Vec<StripModel>> {
     results.synchronize_wave_caches(simulation);
     results.reconcile_expression_projection(simulation);
-    let logic = logic_lanes_fingerprint(&results.session);
-    if results.logic_lanes_source != logic {
-        results.models.invalidate();
-        results.logic_lanes_source = logic;
-    }
     let failed = |analysis: super::AnalysisPresentationKey, text: &str| {
         results
             .analysis_expr_cache
@@ -96,7 +93,9 @@ fn built_models(
             })
             .collect();
         routed.sort();
-        rspice_results_ui::waves::stable_hash(&routed)
+        // The `digital()` ones are logic lanes, coloured by their place.
+        let logic = logic_lanes_fingerprint(&results.session);
+        rspice_results_ui::waves::stable_hash(&(routed, logic))
     };
     let failed_texts: std::collections::HashSet<_> = results
         .analysis_expr_cache
@@ -110,6 +109,7 @@ fn built_models(
     let revision = simulation.retained.runs.revision();
     results.models.get_or_build(
         ModelCacheInput {
+            view: ModelsView::drawn(session),
             active_run_idx: simulation.view.active_run_idx,
             overlay_dataset_ids: &overlaid,
             viewer: session.viewer,

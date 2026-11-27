@@ -15,8 +15,33 @@ use rspice_vocabulary::product::DatasetId;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// The view strip models are built for: the quick view, or one pane of a
+/// saved document. Each keeps the models last built for it, so panes that
+/// draw one analysis with other signals ticked do not stand for each other.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ModelsView {
+    #[default]
+    Quick,
+    /// A pane of a saved document, by the pane's serial.
+    Pane(rspice_vocabulary::product::ResultDocumentId, u64),
+}
+
+impl ModelsView {
+    /// The view the session draws: the pane it is drawing, else the quick
+    /// view.
+    pub fn drawn(session: &crate::session::ResultViewerState) -> Self {
+        session
+            .persistent_pane_context
+            .map_or(Self::Quick, |context| {
+                Self::Pane(context.document_id, context.pane_id.get())
+            })
+    }
+}
+
 /// Inputs not already covered by the host's retained-history invalidation.
 pub struct ModelCacheInput<'a> {
+    /// The view the models are drawn in.
+    pub view: ModelsView,
     pub active_run_idx: Option<usize>,
     pub overlay_dataset_ids: &'a [DatasetId],
     pub viewer: ResultViewer,
@@ -47,18 +72,34 @@ pub struct ModelCacheInput<'a> {
 /// and walks all overlay runs, and both the center view and the right panel
 /// ask for them each frame. Retained history is tracked by the host;
 /// this cache also owns the executed-deck identity and presentation inputs.
+///
+/// It holds the models of each view (see [`ModelsView`]): the panes of a
+/// document are drawn in turn over one session, each putting its own ticks,
+/// colours and strips in first, and with one set of models each pane's
+/// rebuilt the other's on every frame, so nothing derived from them, such as
+/// the inspector's measurements, ever finished.
 #[derive(Default, Clone)]
 pub struct ModelsCache {
-    generation: u64,
-    cached: Option<CachedModels>,
+    /// The last generation counted: each build takes the next, whatever its
+    /// view, so no two builds share one.
+    counted: u64,
+    /// The view the models were last asked for.
+    serving: ModelsView,
+    /// The models last built for each view.
+    views: HashMap<ModelsView, CachedModels>,
 }
 
 #[derive(Clone)]
 struct CachedModels {
+    /// The generation of this build.
+    generation: u64,
     fingerprint: u64,
     /// The reader's ticks the models were built from, compared by revision:
     /// hashing a hundred thousand ticks every frame cost more than the frame.
     visibility: rspice_vocabulary::source_revision::SourceRevision,
+    /// Their digest, which another view's ticks put in and taken out again
+    /// leave as it was, where they leave a new revision.
+    ticks: Option<u64>,
     decks: ExecutedDeckArchive,
     models: Arc<Vec<StripModel>>,
     /// The stored axes the models were built without, the reader service
@@ -101,24 +142,43 @@ fn awaiting_axes<'m>(
 }
 
 impl ModelsCache {
-    /// Which generation of strip models is currently held. Anything derived
-    /// from the models keys on this rather than on the data version alone:
-    /// hiding a trace changes the models without changing the dataset.
+    /// Which generation of strip models the view last asked for holds.
+    /// Anything derived from the models keys on this rather than on the data
+    /// version alone: hiding a trace changes the models without changing the
+    /// dataset.
     pub fn generation(&self) -> u64 {
-        self.generation
+        self.views
+            .get(&self.serving)
+            .map_or(self.counted, |cached| cached.generation)
+    }
+
+    /// How many builds of strip models there have been, of every view: a
+    /// test's proof that idle frames build none.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn builds(&self) -> u64 {
+        self.counted
     }
 
     /// Keep the generation across presentation invalidation so dependent
     /// envelopes cannot mistake a rebuilt model for an earlier one.
     pub fn invalidate(&mut self) {
-        self.cached = None;
+        self.views.clear();
     }
 
-    /// The strip models last built, for a reader that has to agree with what
-    /// the strip drew, such as a browser row taking its curve's colour,
-    /// without building them itself.
+    /// Let go of the models of every pane `drawn` says is no longer drawn;
+    /// the quick view's are kept.
+    pub fn keep_views(&mut self, drawn: impl Fn(&ModelsView) -> bool) {
+        self.views
+            .retain(|view, _| *view == ModelsView::Quick || drawn(view));
+    }
+
+    /// The strip models last built for the view last asked for, for a reader
+    /// that has to agree with what the strip drew, such as a browser row
+    /// taking its curve's colour, without building them itself.
     pub fn last_built(&self) -> Option<&[StripModel]> {
-        self.cached.as_ref().map(|cached| cached.models.as_slice())
+        self.views
+            .get(&self.serving)
+            .map(|cached| cached.models.as_slice())
     }
 }
 
@@ -225,14 +285,20 @@ impl ModelsCache {
     {
         let fp = models_fingerprint(&input, tokens);
         let visibility = input.waveform_visibility.revision();
-        if let Some(cached) = self.cached.take_if(|cached| {
+        let ticks = input.waveform_visibility.digest();
+        let view = input.view;
+        self.serving = view;
+        if let Some(mut cached) = self.views.remove(&view).filter(|cached| {
             cached.fingerprint == fp
                 && cached.decks.shares_content_with(executed_decks)
                 && !cached.axis_arrived()
         }) {
-            if cached.visibility == visibility {
+            // The ticks it was built from, or ones another view put in since
+            // and this view's own put back.
+            if cached.visibility == visibility || (ticks.is_some() && cached.ticks == ticks) {
+                cached.visibility = visibility;
                 let models = Arc::clone(&cached.models);
-                self.cached = Some(cached);
+                self.views.insert(view, cached);
                 return models;
             }
             if let Some(models) = self.follow_ticks(cached, &mut input, maker.retick, envelopes) {
@@ -281,14 +347,20 @@ impl ModelsCache {
         let classifying = input.derived.classifications_under_way();
         let models = Arc::new(built);
         self.next_generation(envelopes);
-        self.cached = Some(CachedModels {
-            fingerprint: fp,
-            visibility,
-            decks: executed_decks.clone(),
-            models: Arc::clone(&models),
-            awaiting,
-            classifying,
-        });
+        self.views.insert(
+            view,
+            CachedModels {
+                generation: self.counted,
+                fingerprint: fp,
+                visibility,
+                ticks,
+                decks: executed_decks.clone(),
+                models: Arc::clone(&models),
+                awaiting,
+                classifying,
+            },
+        );
+        self.keep_envelopes(envelopes);
         models
     }
 
@@ -330,23 +402,38 @@ impl ModelsCache {
         awaiting.extend(awaiting_axes(touched.iter().map(|&place| &models[place])));
         let models = Arc::new(models);
         self.next_generation(envelopes);
-        self.cached = Some(CachedModels {
-            fingerprint: cached.fingerprint,
-            visibility: ticks.revision(),
-            decks: cached.decks,
-            models: Arc::clone(&models),
-            awaiting,
-            classifying: input.derived.classifications_under_way(),
-        });
+        self.views.insert(
+            input.view,
+            CachedModels {
+                generation: self.counted,
+                fingerprint: cached.fingerprint,
+                visibility: ticks.revision(),
+                ticks: ticks.digest(),
+                decks: cached.decks,
+                models: Arc::clone(&models),
+                awaiting,
+                classifying: input.derived.classifications_under_way(),
+            },
+        );
+        self.keep_envelopes(envelopes);
         Some(models)
     }
 
     /// Count a new generation of strip models.
     fn next_generation(&mut self, envelopes: &mut extent::FamilyEnvelopeCache) {
-        self.generation = self.generation.wrapping_add(1);
-        if self.generation == 0 {
+        self.counted = self.counted.wrapping_add(1);
+        if self.counted == 0 {
             *envelopes = extent::FamilyEnvelopeCache::default();
         }
+    }
+
+    /// Let go of the envelopes of every build no view holds any more.
+    fn keep_envelopes(&self, envelopes: &mut extent::FamilyEnvelopeCache) {
+        envelopes.keep_generations(|generation| {
+            self.views
+                .values()
+                .any(|cached| cached.generation == generation)
+        });
     }
 }
 

@@ -207,6 +207,13 @@ pub fn show(
             )
         })
         .inner;
+    // Each pane drawn keeps the strip models built for it; those of panes no
+    // longer drawn are let go.
+    state.results.models.keep_views(|view| {
+        page.panes.iter().any(|pane| {
+            *view == rspice_results_ui::waves::cache::ModelsView::Pane(document_id, pane.id.get())
+        })
+    });
 
     // Painting inactive panes temporarily selects their immutable bindings and
     // retained renderers. Restore the actual active pane so the shared readout,

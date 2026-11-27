@@ -638,6 +638,21 @@ pub struct VisibilityOverrides {
     left: Vec<(rspice_vocabulary::source_revision::SourceRevision, usize)>,
     /// The colour each signal the reader put on the plot holds.
     places: PlotPlaces,
+    /// A digest of the ticks themselves, the same for the same ticks
+    /// whatever edits led to them; `None` while a mutable borrow may have
+    /// changed them, until the next edit reads them again.
+    digest: Option<u64>,
+}
+
+/// One tick's share of [`VisibilityOverrides::digest`]: the ticks' digest
+/// is every tick's share combined, so an edit changes it by the tick's old
+/// share and its new one.
+fn tick_digest(key: &SourceWaveformPresentationKey, visible: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    visible.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// The palette place each signal the reader put on the plot holds among the
@@ -711,6 +726,7 @@ impl Clone for VisibilityOverrides {
             edited: Vec::new(),
             left: Vec::new(),
             places: self.places.clone(),
+            digest: self.digest,
         }
     }
 }
@@ -719,6 +735,16 @@ impl VisibilityOverrides {
     /// Equal to an earlier revision while no edit was made since it.
     pub fn revision(&self) -> rspice_vocabulary::source_revision::SourceRevision {
         self.revision.clone()
+    }
+
+    /// A digest of the ticks themselves: the same for the same ticks,
+    /// whatever edits led to them, where the revision is new after any
+    /// edit. Views that draw over one set of ticks each put their own in
+    /// before they draw, so a view drawn again after another asks this to
+    /// know its ticks are as it left them. `None` while unknown, after a
+    /// mutable borrow and until the next edit.
+    pub fn digest(&self) -> Option<u64> {
+        self.digest
     }
 
     /// The reader shows `key`'s signal (`Some(true)`), hides it
@@ -831,24 +857,37 @@ impl VisibilityOverrides {
     }
 
     fn put(&mut self, key: &SourceWaveformPresentationKey, visible: Option<bool>) -> bool {
-        // The ticks copy the key only for a signal they did not hold.
-        let changed = match visible {
+        // The tick it held, when this changes it. The ticks copy the key
+        // only for a signal they did not hold.
+        let was = match visible {
             Some(visible) => match self.overrides.get_mut(key) {
-                Some(held) => std::mem::replace(held, visible) != visible,
+                Some(held) if *held == visible => return false,
+                Some(held) => Some(std::mem::replace(held, visible)),
                 None => {
                     self.overrides.insert(key.clone(), visible);
-                    true
+                    None
                 }
             },
             None => {
                 self.places.release(key);
-                self.overrides.remove(key).is_some()
+                match self.overrides.remove(key) {
+                    Some(held) => Some(held),
+                    None => return false,
+                }
             }
         };
-        if changed {
-            self.note(key.clone());
-        }
-        changed
+        self.digest = Some(match self.digest {
+            Some(digest) => {
+                let old = was.map_or(0, |held| tick_digest(key, held));
+                let new = visible.map_or(0, |visible| tick_digest(key, visible));
+                digest ^ old ^ new
+            }
+            None => self.overrides.iter().fold(0, |digest, (key, visible)| {
+                digest ^ tick_digest(key, *visible)
+            }),
+        });
+        self.note(key.clone());
+        true
     }
 
     /// Record an edit of `key`'s tick, under a new revision when something
@@ -889,6 +928,7 @@ impl std::ops::DerefMut for VisibilityOverrides {
         self.left.clear();
         self.revision.advance();
         self.set_since = None;
+        self.digest = None;
         &mut self.overrides
     }
 }

@@ -5,7 +5,9 @@
 use super::*;
 use crate::session::{VisibilityOverrides, WaveformLook};
 use crate::signal_index::SignalIndices;
-use crate::waves::cache::{ModelCacheInput, ModelsCache, ModelsMaker, apply_waveform_visibility};
+use crate::waves::cache::{
+    ModelCacheInput, ModelsCache, ModelsMaker, ModelsView, apply_waveform_visibility,
+};
 use crate::waves::extent::FamilyEnvelopeCache;
 use rspice_results::result_presentation::{AnalysisPresentationKey, ResultViewer};
 use rspice_results::run::ExecutionTarget;
@@ -44,6 +46,8 @@ fn two_transients(signals: usize) -> Run {
 /// made from, and how many times they were built afresh.
 struct Host<'r> {
     run: &'r Run,
+    /// The view the next models are drawn in.
+    view: ModelsView,
     viewer: ResultViewer,
     cache: ModelsCache,
     derived: DerivedSeries,
@@ -60,6 +64,7 @@ impl<'r> Host<'r> {
     fn new(run: &'r Run) -> Self {
         Self {
             run,
+            view: ModelsView::Quick,
             viewer: ResultViewer::Waves,
             cache: ModelsCache::default(),
             derived: DerivedSeries::default(),
@@ -84,6 +89,7 @@ impl<'r> Host<'r> {
         let decks = &self.decks;
         self.cache.get_or_build(
             ModelCacheInput {
+                view: self.view,
                 active_run_idx: Some(0),
                 overlay_dataset_ids: &[],
                 viewer: self.viewer,
@@ -444,5 +450,60 @@ fn curves_made_on_threads_are_the_ones_made_one_at_a_time() {
             SharedWaveformValues::ptr_eq(&a.x, &b.x) && SharedWaveformValues::ptr_eq(&a.y, &b.y)
         }),
         "a curve made on a thread reads other samples"
+    );
+}
+
+/// Two panes of a document over one analysis, each putting its own ticks in
+/// before it is drawn, as a document's panes are drawn in turn over one
+/// session: each keeps the models built for it, so drawing them in turn on
+/// idle frames builds nothing, and each draws its own ticks.
+#[test]
+fn panes_that_put_their_own_ticks_in_keep_their_own_models() {
+    let run = two_transients(3);
+    let mut host = Host::new(&run);
+    let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    let key = |index: usize| SourceWaveformPresentationKey::new(analysis, format!("V(n{index})"));
+    let document = rspice_vocabulary::product::ResultDocumentId::new();
+    // The first pane plots n1 beside the dataset's n0; the second n2 alone.
+    let panes = [
+        (
+            ModelsView::Pane(document, 1),
+            HashMap::from([(key(1), true)]),
+        ),
+        (
+            ModelsView::Pane(document, 2),
+            HashMap::from([(key(0), false), (key(2), true)]),
+        ),
+    ];
+    let mut ticks = VisibilityOverrides::default();
+    let mut frame = |host: &mut Host<'_>| -> Vec<Vec<String>> {
+        panes
+            .iter()
+            .map(|(view, own)| {
+                ticks.project_analysis(analysis, own.clone());
+                host.view = *view;
+                let models = host.models(&ticks);
+                strip(&models, analysis)
+                    .traces
+                    .iter()
+                    .filter(|trace| trace.visible)
+                    .map(|trace| trace.source_waveform_name.clone())
+                    .collect()
+            })
+            .collect()
+    };
+    let first = frame(&mut host);
+    assert_eq!(
+        first,
+        [vec!["V(n0)", "V(n1)"], vec!["V(n2)"]],
+        "each pane draws its own ticks"
+    );
+    let builds = host.builds;
+    for _ in 0..10 {
+        assert_eq!(frame(&mut host), first);
+    }
+    assert_eq!(
+        host.builds, builds,
+        "a pane drawn after the other built its models again"
     );
 }

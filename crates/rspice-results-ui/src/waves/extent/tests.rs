@@ -75,10 +75,12 @@ fn each_pane_of_a_two_unit_strip_keeps_its_own_envelope() {
         "the panes of one strip evicted each other's envelopes"
     );
 
-    // A new generation of models still empties the cache: the envelope is a
-    // memo of the models, never of the pane identity alone.
+    // A new generation of models reads its own: the envelope is a memo of
+    // the models, never of the pane identity alone. Once no view holds the
+    // previous generation, as the models cache says, its envelopes go.
     let next = family_envelopes(&mut cache, generation + 1, model, &panes[0]);
     assert!(!std::sync::Arc::ptr_eq(&first[0], &next));
+    cache.keep_generations(|held| held == generation + 1);
     assert_eq!(
         cache.entry_count(),
         1,

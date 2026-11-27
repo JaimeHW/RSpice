@@ -242,12 +242,12 @@ fn workspace_frame(
     state: &mut ResultsTestHost,
     controller: &mut crate::simulation::SimulationController,
     document_id: ResultDocumentId,
-) {
+) -> egui::FullOutput {
     use crate::workbench::docks::{inspector, navigator};
     use crate::workbench::documents::result_document::document_edit::compare::compare_availability;
 
     let mut run_details = None;
-    let _ = ctx.run_ui(
+    ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -296,7 +296,7 @@ fn workspace_frame(
                 );
             });
         },
-    );
+    )
 }
 
 /// The work [`super::IDLE_FRAMES`] frames of the workspace do once the first
@@ -426,5 +426,124 @@ fn idle_frames_over_a_strip_of_many_curves_summarise_no_pane_again() {
     assert_eq!(
         columns.memory_views, 0,
         "an idle frame made the strip's curves"
+    );
+}
+
+/// The rows of the inspector's Measurements table a frame drew, as the
+/// reader's assistive technology reads them.
+fn measurement_rows(output: &egui::FullOutput) -> Vec<String> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .map(|update| {
+            update
+                .nodes
+                .iter()
+                .flat_map(|(_, node)| [node.label(), node.value(), node.description()])
+                .flatten()
+                .filter(|text| text.starts_with("Measurement: "))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A document of two panes over one analysis, each listing other signals.
+/// The panes are drawn in turn over one session, each putting its own ticks
+/// in first; on idle frames neither builds its strip models again, so the
+/// inspector's measurements finish, for whichever pane is worked in.
+#[test]
+fn an_idle_two_pane_document_builds_no_models_and_measures_each_pane() {
+    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+
+    let mut state = ResultsTestHost::default();
+    let x: Vec<f64> = (0..400).map(|sample| sample as f64 * 0.25e-9).collect();
+    let signal = |name: &str, amplitude: f64| {
+        let y: Vec<f64> = x
+            .iter()
+            .map(|time| amplitude * (time * 1.0e8).sin())
+            .collect();
+        RetainedTrace::new(name, x.clone(), y, "")
+    };
+    let mut run = crate::state::SimulationRun::new(1);
+    run.lifecycle = crate::state::SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            signal("V(out)", 1.0),
+            signal("V(in)", 0.8),
+            signal("I(V1)", 0.001),
+        ]),
+    );
+    state.model.simulation.retained.runs = vec![run].into();
+    assert!(state.model.simulation.select_run_analysis(0, 0));
+    let mut parts = state.results_parts();
+    create_document::open(&mut parts);
+    parts.create_result_document.layout =
+        rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes;
+    let document_id = create_document::commit(&mut parts).expect("the document is created");
+    state.workbench.activate(Workspace::Results);
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
+    let panes: Vec<_> = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("the project keeps the document")
+        .panes()
+        .iter()
+        .map(|pane| pane.id)
+        .collect();
+    assert_eq!(panes.len(), 2);
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut controller = crate::simulation::SimulationController::new();
+    // The Measurements table's rows once it has measured.
+    let measured = |state: &mut ResultsTestHost,
+                    controller: &mut crate::simulation::SimulationController| {
+        for _ in 0..3_000 {
+            let rows = measurement_rows(&workspace_frame(&ctx, state, controller, document_id));
+            if !rows.is_empty() && !rows.iter().any(|row| row.contains("Measuring")) {
+                return rows;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("the measurements never finished");
+    };
+    let reads = |rows: &[String], signal: &str| {
+        rows.iter()
+            .any(|row| row.contains(&format!("{signal} min")))
+    };
+
+    let first = measured(&mut state, &mut controller);
+    assert!(
+        reads(&first, "V(out)") && reads(&first, "V(in)") && !reads(&first, "I(V1)"),
+        "the first pane measures its voltages: {first:?}"
+    );
+    let builds = state.results.results.models.builds();
+    for _ in 0..10 {
+        workspace_frame(&ctx, &mut state, &mut controller, document_id);
+    }
+    assert_eq!(
+        state.results.results.models.builds(),
+        builds,
+        "an idle frame built the panes' strip models again"
+    );
+
+    // The second pane, worked in, measures its own signal.
+    state
+        .results
+        .results
+        .session
+        .select_persistent_document_pane(document_id, panes[1]);
+    let second = measured(&mut state, &mut controller);
+    assert!(
+        reads(&second, "I(V1)") && !reads(&second, "V(out)"),
+        "the second pane measures its current: {second:?}"
     );
 }

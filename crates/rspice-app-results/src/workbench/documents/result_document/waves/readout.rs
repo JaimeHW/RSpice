@@ -45,6 +45,9 @@ pub(super) fn with_readout<R>(
             presentation.complex_number_display(),
             tokens,
         );
+        // The generation of the models just asked for, which may be a build
+        // of this frame's.
+        models_generation = state.results.models.generation();
         let (models, rows) = with_expression_rows(state, models, tokens);
         // A strip that reads its expressions is another strip whenever one
         // of them is evaluated anew.

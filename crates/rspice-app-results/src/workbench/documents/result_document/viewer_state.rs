@@ -240,9 +240,10 @@ impl ResultsState {
         if unchanged {
             return;
         }
+        // The strip models are keyed by the colours they draw in, so each
+        // pane of a document drawing its own keeps its models.
         colors.retain(|key, _| key.analysis() != analysis);
         colors.extend(desired);
-        self.models.invalidate();
     }
 
     /// Draw `analysis`' traces in the styles and names the view being drawn
@@ -270,9 +271,9 @@ impl ResultsState {
         if unchanged {
             return;
         }
+        // Keyed by the looks as by the colours.
         looks.retain(|key, _| key.analysis() != analysis);
         looks.extend(desired);
-        self.models.invalidate();
     }
 
     /// Draw `key`'s signal with `look` from this frame on: the view that
@@ -334,6 +335,10 @@ impl ResultsState {
             simulation.retained.runs.revision(),
             simulation.view.data_version,
         );
+        let selection = (
+            simulation.view.active_run_idx,
+            simulation.view.active_analysis_idx,
+        );
         if self.wave_cache_source.as_ref() == Some(&source) {
             return;
         }
@@ -344,7 +349,22 @@ impl ResultsState {
             .wave_cache_source
             .as_ref()
             .is_none_or(|(revision, _)| *revision != source.0);
+        // Selecting another run or analysis, and nothing else, moves the
+        // data version by one, as a document's pane on another analysis
+        // does each time it is drawn: the strip models are keyed by the run
+        // they show and hold every analysis of it, and each expression is
+        // kept by its analysis, so both still hold.
+        let reselected = !samples_changed
+            && selection != self.wave_cache_selection
+            && self
+                .wave_cache_source
+                .as_ref()
+                .is_some_and(|(_, version)| version.wrapping_add(1) == source.1);
         self.wave_cache_source = Some(source);
+        self.wave_cache_selection = selection;
+        if reselected {
+            return;
+        }
         self.models.invalidate();
         if samples_changed {
             self.samples_generation = self.samples_generation.wrapping_add(1);

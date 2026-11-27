@@ -1931,11 +1931,11 @@ pub struct ResultsState {
     network_matrix: network_matrix::NetworkMatrixState,
     /// Exact retained history and display version behind waveform caches.
     wave_cache_source: Option<(crate::state::RunHistoryRevision, u64)>,
+    /// The run and analysis shown when the waveform caches were last
+    /// brought up to date.
+    wave_cache_selection: (Option<usize>, Option<usize>),
     /// Fingerprint-keyed strip-model cache for the waves viewer.
     models: rspice_results_ui::waves::cache::ModelsCache,
-    /// The `digital()` expressions the cached strip models carry as logic
-    /// lanes, fingerprinted, so a change to them rebuilds the models.
-    logic_lanes_source: u64,
     /// Cached Bode margins + extremes for the active data version.
     pub bode: Option<BodeDerived>,
     /// Each stability analysis's locus and its stability numbers, read off

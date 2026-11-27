@@ -184,12 +184,16 @@ impl FamilyEnvelopePlan {
 /// family member, every frame, for a picture that had not changed.
 ///
 /// The generation is what makes the map safe to hold: the models are rebuilt
-/// whenever anything an envelope reads changes, so a new generation empties
-/// the map rather than being folded into keys that would accumulate.
+/// whenever anything an envelope reads changes, and each envelope is kept
+/// with the generation it was read from. The models cache lets go of the
+/// envelopes of every generation it no longer holds (see
+/// [`Self::keep_generations`]), so the map holds those of the models of the
+/// views being drawn, each pane of a document its own, and nothing older.
 #[derive(Debug, Clone, Default)]
 pub struct FamilyEnvelopeCache {
-    generation: u64,
-    plans: HashMap<u64, Arc<FamilyEnvelopePlan>>,
+    /// Each envelope by its key, with the generation of models it was read
+    /// from.
+    plans: HashMap<u64, (u64, Arc<FamilyEnvelopePlan>)>,
 }
 
 impl FamilyEnvelopeCache {
@@ -204,6 +208,12 @@ impl FamilyEnvelopeCache {
     #[cfg(any(test, feature = "test-support"))]
     pub fn entry_count(&self) -> usize {
         self.plans.len()
+    }
+
+    /// Let go of the envelopes read from a generation of models `live`
+    /// says is no longer held.
+    pub fn keep_generations(&mut self, live: impl Fn(u64) -> bool) {
+        self.plans.retain(|_, (generation, _)| live(*generation));
     }
 }
 
@@ -233,17 +243,15 @@ pub fn family_envelopes(
     pane: &UnitPane,
 ) -> Arc<FamilyEnvelopePlan> {
     let key = envelope_key(models_generation, model, pane);
-    if cache.generation != models_generation {
-        cache.generation = models_generation;
-        cache.plans.clear();
-    }
-    if let Some(plan) = cache.plans.get(&key) {
+    if let Some((_, plan)) = cache.plans.get(&key) {
         return Arc::clone(plan);
     }
     let built = Arc::new(FamilyEnvelopePlan {
         series: family_envelope_series(model, pane),
     });
-    cache.plans.insert(key, Arc::clone(&built));
+    cache
+        .plans
+        .insert(key, (models_generation, Arc::clone(&built)));
     built
 }
 
