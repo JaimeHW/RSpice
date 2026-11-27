@@ -144,6 +144,7 @@ fn built_models(
             // evidence: the validator reads every column of the run.
             let display_runs = simulation.display_runs();
             let validity = &results.retained_evidence_validity;
+            let checks = &results.evidence_checks;
             let mut built = rspice_results_ui::waves::build_models(
                 &display_runs,
                 &simulation.retained.executed_decks,
@@ -154,6 +155,7 @@ fn built_models(
                     let run = display_runs[0];
                     crate::workbench::documents::result_document::remembered_incomplete_reason(
                         validity,
+                        checks,
                         simulation,
                         run.dataset_id,
                         &run.analyses[index],

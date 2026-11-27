@@ -14,6 +14,7 @@ pub mod create_document;
 pub mod document_edit;
 pub(crate) use document_edit::show as show_document_dialog;
 mod events;
+mod evidence_checks;
 mod eye;
 mod fft;
 mod floquet;
@@ -890,6 +891,19 @@ impl ResultsReads<'_> {
 }
 
 impl ResultsState {
+    /// Whether the evidence of an analysis held in memory is still being
+    /// validated away from the frame.
+    pub fn validating_off_frame(&self) -> bool {
+        self.evidence_checks.checking()
+    }
+
+    /// Wait for the evidence verdicts asked for while the guard is held, as
+    /// a gesture that reads what is shown does.
+    #[must_use = "the verdicts are waited for only while the guard is held"]
+    pub(crate) fn verdicts_waited_for(&self) -> impl Sized + use<> {
+        self.evidence_checks.wait_here()
+    }
+
     /// Whether the table sheet shown holds a table its page can print,
     /// without reading its words; `true` for every other sheet, whose page
     /// reads its own evidence.
@@ -1546,6 +1560,7 @@ pub(crate) fn retained_evidence_verdict_over(
 ) -> Result<(), std::sync::Arc<str>> {
     retained_evidence_verdict_in(
         &results.retained_evidence_validity,
+        &results.evidence_checks,
         &model.simulation,
         analysis,
     )
@@ -1556,6 +1571,7 @@ pub(crate) fn retained_evidence_verdict_over(
 /// the shown run, and the validator reads every column of one.
 fn remembered_incomplete_reason(
     validity: &RetainedMemo<AnalysisPresentationKey, Result<(), std::sync::Arc<str>>>,
+    checks: &evidence_checks::EvidenceChecks,
     simulation: &crate::state::SimulationState,
     dataset_id: DatasetId,
     analysis: &AnalysisResult,
@@ -1566,6 +1582,7 @@ fn remembered_incomplete_reason(
     // A stored trace still being read has not failed.
     retained_evidence_verdict_in(
         validity,
+        checks,
         simulation,
         AnalysisPresentationKey::new(dataset_id, analysis),
     )
@@ -1574,9 +1591,12 @@ fn remembered_incomplete_reason(
 }
 
 /// The validator's verdict on `analysis`, with its reason, from `validity`,
-/// the workspace's memo of it.
+/// the workspace's memo of it. An analysis held in memory too large for a
+/// frame is validated away from it by `checks`, and reads as still being
+/// read until its verdict is in.
 fn retained_evidence_verdict_in(
     validity: &RetainedMemo<AnalysisPresentationKey, Result<(), std::sync::Arc<str>>>,
+    checks: &evidence_checks::EvidenceChecks,
     simulation: &crate::state::SimulationState,
     analysis: AnalysisPresentationKey,
 ) -> Result<(), std::sync::Arc<str>> {
@@ -1594,8 +1614,7 @@ fn retained_evidence_verdict_in(
             else {
                 return Err("The selected result no longer exists in its run.".into());
             };
-            frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
-            resolved.validate_retained_evidence().map_err(Into::into)
+            checks.verdict(simulation, analysis, resolved)
         },
         |verdict| {
             !verdict
@@ -1993,6 +2012,9 @@ pub struct ResultsState {
     /// [`retained_evidence_is_valid`].
     retained_evidence_validity:
         RetainedMemo<AnalysisPresentationKey, Result<(), std::sync::Arc<str>>>,
+    /// The verdicts of analyses held in memory too large for a frame, being
+    /// taken away from it. Transient.
+    evidence_checks: evidence_checks::EvidenceChecks,
     /// Source-aware content digest per dataset; see
     /// [`retained_dataset_digest`].
     dataset_digests: RetainedMemo<DatasetId, crate::product::ContentDigest>,
@@ -2213,6 +2235,7 @@ fn prepare_quick_view(ui: &Ui, state: &mut ResultsParts<'_>) {
     state.results.set_sample_selection(family);
     prepare_viewer_state(state);
     working_view::wake_on_plotted(state, ui.ctx());
+    state.results.evidence_checks.wake_through(ui.ctx());
     working_view::sync(state);
 }
 

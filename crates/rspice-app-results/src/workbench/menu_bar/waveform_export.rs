@@ -225,6 +225,8 @@ pub fn action_export_dataset_with_io(
     io: &(impl ExportWorkflowIo + ?Sized),
     choice: &DatasetExportChoice,
 ) -> Option<ResultExportJob> {
+    // The export takes the verdicts it needs, rather than finding an analysis still validated.
+    let _waited = state.results.verdicts_waited_for();
     let mut displayed = match crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(state.results_reads()) {
         Ok(displayed) => displayed,
         Err(message) => {
@@ -457,6 +459,7 @@ struct PreparedTypedResultCsv {
 /// its TSV data export writes, with the plotted signals. The network matrix
 /// copies the one matrix on screen, as its frequency sample shows it.
 pub(crate) fn active_sheet_values(state: ResultsReads<'_>) -> Result<String, String> {
+    let _waited = state.results.verdicts_waited_for();
     let displayed =
         crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
             state,
