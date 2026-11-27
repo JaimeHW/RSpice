@@ -606,18 +606,7 @@ pub fn active_pane_facts(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Activ
     let (x_extent, y_extent) = active_pane_extents(tokens, state);
     let analysis = active_pane_analysis(tokens, state);
     let unit = active_pane_axis_unit(tokens, state);
-    let key = state.results.session.active_wave_pane.as_ref();
-    let scale = key.map(|key| {
-        // One owner: the pane’s own log-Y flag on ResultsState. This read
-        // used to reach into egui’s persisted memory with a hand-built id,
-        // which is a second copy of a fact and drifts the moment either side
-        // changes its key.
-        if state.results.session.log_y_panes.contains(key) {
-            "logarithmic"
-        } else {
-            "linear"
-        }
-    });
+    let scale = active_pane_log_y(tokens, state).map(scale_name);
     ActivePaneFacts {
         unit,
         x_unit,
@@ -809,6 +798,36 @@ fn active_pane_axis_unit(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Optio
             .map_or_else(|| key.unit.clone(), |model| model.pane_axis_unit(&key.unit)),
     )
     .filter(|unit| !unit.is_empty())
+}
+
+/// Whether the active pane draws its Y on decades. One owner: the pane's
+/// own log-Y flag on ResultsState, read under the key the pane draws by,
+/// which on a strip the reader arranged is its axis' unit, not the strip's
+/// key the active pane is named by.
+fn active_pane_log_y(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Option<bool> {
+    let key = state.results.session.active_wave_pane.clone()?;
+    let presentation = state.results_reads().presentation_policy();
+    let models = cached_models(
+        &state.model.simulation,
+        state.results,
+        presentation.complex_number_display(),
+        tokens,
+    );
+    let drawn = models
+        .iter()
+        .find(|model| model.analysis_key == key.analysis)
+        .and_then(|model| {
+            model
+                .unit_panes()
+                .iter()
+                .find(|pane| pane.unit == key.unit)
+                .map(|pane| pane_log_y(&state.results.session, model, pane))
+        });
+    Some(drawn.unwrap_or_else(|| state.results.session.log_y_panes.contains(&key)))
+}
+
+const fn scale_name(logarithmic: bool) -> &'static str {
+    if logarithmic { "logarithmic" } else { "linear" }
 }
 
 fn active_pane_extents(

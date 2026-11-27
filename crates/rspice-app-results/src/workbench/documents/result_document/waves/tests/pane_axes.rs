@@ -511,6 +511,54 @@ fn a_noise_spectrum_opens_on_decades_and_keeps_the_readers_scale() {
     );
 }
 
+/// The Inspector states the scale a pane draws. A strip the reader arranged
+/// is named by its key, while its decades are kept by its axis' unit: the
+/// Inspector read the key and called a logarithmic power density linear.
+#[test]
+fn an_arranged_strip_states_the_scale_it_draws() {
+    use rspice_results::visualization_document::{SignalForm, Strip, StripAxis, StripMember};
+    let ctx = context(crate::ui::Theme::default());
+    let frequency: Vec<f64> = (0..=40).map(|i| 10f64.powf(f64::from(i) / 10.0)).collect();
+    let psd: Vec<f64> = frequency
+        .iter()
+        .map(|f| 4.0e-16 * (1.0 + 1.0e3 / f))
+        .collect();
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
+            RetainedTrace::new("onoise", frequency, psd, "#fff").with_unit("V^2/Hz"),
+        ]),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.results.results.session.viewer = crate::workbench::ResultViewer::NoiseContrib;
+    let key = analysis(&mut state);
+    state.results.results.session.strip_layouts.insert(
+        key,
+        vec![Strip {
+            key: "strip-1".to_owned(),
+            weight: None,
+            locked: false,
+            axes: vec![StripAxis {
+                unit: "V\u{b2}/Hz".to_owned(),
+                members: vec![StripMember::Signal {
+                    name: "onoise".to_owned(),
+                    form: SignalForm::NoisePower,
+                }],
+            }],
+        }],
+    );
+    state.model.simulation.view.data_version += 1;
+    settled(&ctx, &mut state, FRAME);
+    state.results.results.session.active_wave_pane = Some(WavePanePresentationKey {
+        analysis: key,
+        unit: "strip-1".to_owned(),
+    });
+    let facts = active_pane_facts(&Tokens::default(), &mut state.results_parts());
+    assert_eq!(facts.scale, Some("logarithmic"));
+}
+
 /// A logarithmic pane fits the positive values the window shows: a current
 /// that starts from exactly zero is still offered the axis, and the zero
 /// leaves the fit alone.
