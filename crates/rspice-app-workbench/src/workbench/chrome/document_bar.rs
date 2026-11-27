@@ -127,6 +127,8 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
             } else {
                 fit.tabs_width
             };
+            let tab_menu = (app.workbench().workspace == Workspace::Results)
+                .then(|| result_document_tab_menu_rows(app, ctx));
             let mut request = StripRequest::default();
             ui.horizontal(|ui| {
                 let scroll = ui
@@ -151,6 +153,7 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                                                 documents: &documents,
                                                 closable: &closable,
                                                 natural: &natural,
+                                                menu: tab_menu.as_deref(),
                                             },
                                             height,
                                             fit.cap,
@@ -289,6 +292,10 @@ const CREATE_RESULT_DOCUMENT: &str = "create-result-document";
 /// which a result document's tab offers in its menu.
 const RENAME_RESULT_DOCUMENT: &str = "rename-result-document";
 const DELETE_RESULT_DOCUMENT: &str = "delete-result-document";
+/// The commands that close the document in front and every other one, whose
+/// keys a result document's tab menu shows beside its Close rows.
+const CLOSE_DOCUMENT: &str = "close-document";
+const CLOSE_OTHER_DOCUMENTS: &str = "close-other-documents";
 /// What Results' strip offers at its end.
 const NEW_RESULT_DOCUMENT: &str = "New result document\u{2026}";
 
@@ -1080,6 +1087,8 @@ struct StripTabs<'a> {
     documents: &'a [WorkspaceDocument],
     closable: &'a [bool],
     natural: &'a [f32],
+    /// The rows of a result document's tab menu, in Results.
+    menu: Option<&'a [super::title_bar::menu_entries::MenuRow]>,
 }
 
 /// Draw every tab, at most `cap` wide when the strip has asked them to
@@ -1101,13 +1110,9 @@ fn document_tabs(
         documents,
         closable,
         natural,
+        menu: tab_menu,
     } = tabs;
     let active = authoritative_active_document(state, documents);
-    let read_only = state
-        .model()
-        .safe_mode
-        .project_read_only()
-        .then_some("The project is open read-only");
     let mut menu = None;
     let max_width = cap.map_or(TAB_MAX_WIDTH, |cap| cap.min(TAB_MAX_WIDTH));
     let listened = ui.ctx().accesskit_node_builder(ui.id(), |_| ()).is_some();
@@ -1164,7 +1169,8 @@ fn document_tabs(
             open = Some(document.id.clone());
         }
         if let WorkspaceDocumentId::VisualizationDocument(_) = document.id
-            && let Some(choice) = result_document_tab_menu(&tab.response, read_only)
+            && let Some(rows) = tab_menu
+            && let Some(choice) = result_document_tab_menu(&tab.response, rows)
         {
             menu = Some((document.id.clone(), choice));
         }
@@ -1220,40 +1226,61 @@ fn document_tabs(
     (tab_rects, menu)
 }
 
-/// A saved result document's tab menu: its name, closing it or the others,
-/// and deleting it. Closing never deletes; deleting asks nothing, since
-/// Undo puts the document back, and neither renaming nor deleting is
-/// offered on a project open read-only.
+/// The rows of a saved result document's tab menu: its name, closing it or
+/// the others, and deleting it, each with the key its command is bound to.
+/// Closing never deletes; deleting asks nothing, since Undo puts the
+/// document back, and neither renaming nor deleting is offered on a project
+/// open read-only.
+fn result_document_tab_menu_rows(
+    app: &impl WorkbenchHost,
+    ctx: &egui::Context,
+) -> Vec<super::title_bar::menu_entries::MenuRow> {
+    use super::title_bar::menu_entries::{CommandRow, MenuRow};
+    use crate::state::command_catalog::CommandKey;
+    use crate::workbench::framework::command_registry::CommandAvailability;
+    let platform = crate::workbench::app_state::session::shortcuts::runtime_command_platform(ctx);
+    let editable = if app.model().safe_mode.project_read_only() {
+        CommandAvailability::Disabled("the project is open read-only")
+    } else {
+        CommandAvailability::Available
+    };
+    let row = |command: &'static str, label: &'static str, availability: CommandAvailability| {
+        let command = CommandKey::new(command);
+        MenuRow::Command(CommandRow::new(
+            command,
+            label,
+            app.shortcut_label(command, platform, ctx.os()),
+            availability,
+        ))
+    };
+    vec![
+        row(RENAME_RESULT_DOCUMENT, "Rename\u{2026}", editable),
+        MenuRow::Separator,
+        row(CLOSE_DOCUMENT, "Close", CommandAvailability::Available),
+        row(
+            CLOSE_OTHER_DOCUMENTS,
+            "Close others",
+            CommandAvailability::Available,
+        ),
+        MenuRow::Separator,
+        row(DELETE_RESULT_DOCUMENT, "Delete", editable),
+    ]
+}
+
+/// A saved result document's tab menu of `rows`, drawn as the menu bar
+/// draws its menus, and what the reader chose from it.
 fn result_document_tab_menu(
     tab: &egui::Response,
-    read_only: Option<&'static str>,
+    rows: &[super::title_bar::menu_entries::MenuRow],
 ) -> Option<TabMenuChoice> {
-    let mut choice = None;
-    tab.context_menu(|ui| {
-        let mut item = |ui: &mut Ui, label: &str, enabled: bool, picked: TabMenuChoice| {
-            let response = ui.add_enabled(enabled, egui::Button::new(label));
-            let response = match read_only {
-                Some(refusal) if !enabled => response.on_disabled_hover_text(refusal),
-                _ => response,
-            };
-            if response.clicked() {
-                choice = Some(picked);
-                ui.close();
-            }
-        };
-        item(
-            ui,
-            "Rename\u{2026}",
-            read_only.is_none(),
-            TabMenuChoice::Rename,
-        );
-        ui.separator();
-        item(ui, "Close", true, TabMenuChoice::Close);
-        item(ui, "Close others", true, TabMenuChoice::CloseOthers);
-        ui.separator();
-        item(ui, "Delete", read_only.is_none(), TabMenuChoice::Delete);
-    });
-    choice
+    let choice = super::title_bar::context_menu_over(tab, "Document tab menu", |_| rows.to_vec())?;
+    match choice.command().as_str() {
+        RENAME_RESULT_DOCUMENT => Some(TabMenuChoice::Rename),
+        CLOSE_DOCUMENT => Some(TabMenuChoice::Close),
+        CLOSE_OTHER_DOCUMENTS => Some(TabMenuChoice::CloseOthers),
+        DELETE_RESULT_DOCUMENT => Some(TabMenuChoice::Delete),
+        _ => None,
+    }
 }
 
 /// Scroll the active tab into view when it becomes active, whether by a

@@ -312,6 +312,29 @@ pub struct CommandRow {
     pub access: Option<char>,
 }
 
+impl CommandRow {
+    /// A row of `command` under `label`, with `shortcut` at its right edge
+    /// (empty for none), for a menu a page builds of its own rows.
+    pub fn new(
+        command: CommandKey,
+        label: impl Into<std::borrow::Cow<'static, str>>,
+        shortcut: String,
+        availability: CommandAvailability,
+    ) -> Self {
+        Self {
+            command,
+            label: label.into(),
+            shortcut,
+            availability,
+            checked: None,
+            radio: false,
+            icon: None,
+            action: None,
+            access: None,
+        }
+    }
+}
+
 /// What a menu's rows read from the application: each command's label,
 /// key, availability, check mark and icon, which contexts hold, and the
 /// recently opened files. A host answers all of it; a page that draws a menu

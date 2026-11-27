@@ -117,12 +117,22 @@ pub(super) fn configure_menu_popup(ui: &mut Ui, large_targets: bool, rows: &[Men
 }
 
 /// The source editor's right-click menu over the rows `rows` builds, and the
-/// row the reader chose from it, drawn with the menu bar's own rows and
-/// separators so its row height, text edge and rules match the menus above
-/// it. A long press opens it on touch. `rows` is called only while the menu
-/// is open, so a closed menu reads nothing.
+/// row the reader chose from it: see [`context_menu_over`].
 pub fn source_editor_context_menu_over(
     response: &Response,
+    rows: impl FnOnce(&Context) -> Vec<MenuRow>,
+) -> Option<MenuChoice> {
+    context_menu_over(response, "Source editor menu", rows)
+}
+
+/// A right-click menu over `response` named `label`, of the rows `rows`
+/// builds, and the row the reader chose from it, drawn with the menu bar's
+/// own rows and separators so its row height, text edge and rules match the
+/// menus above it. A long press opens it on touch. `rows` is called only
+/// while the menu is open, so a closed menu reads nothing.
+pub fn context_menu_over(
+    response: &Response,
+    label: &str,
     rows: impl FnOnce(&Context) -> Vec<MenuRow>,
 ) -> Option<MenuChoice> {
     let ctx = response.ctx.clone();
@@ -134,7 +144,7 @@ pub fn source_editor_context_menu_over(
         configure_menu_popup(ui, large_targets, &rows);
         ui.ctx().accesskit_node_builder(popup_id, |node| {
             node.set_role(egui::accesskit::Role::Menu);
-            node.set_label("Source editor menu");
+            node.set_label(label);
         });
         begin_menu_render(ui.ctx(), popup_id);
         let choice = menu_entries::show_menu_rows(ui, &rows);
