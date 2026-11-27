@@ -366,7 +366,9 @@ fn active_result_pane(
     );
     // The pane names the analysis it draws, which on a sheet outside the
     // waveform stack is not the one the run's analysis selector points at,
-    // and, on a document page of several panes, where it sits.
+    // and, on a document page of several panes, where it sits. A family's
+    // pane is named by its span and count, longer than the column: it wraps
+    // onto a second line rather than losing its end.
     let analysis = facts.analysis.as_deref().unwrap_or(&pane_label);
     let pane =
         crate::workbench::documents::result_document::persistent_document::active_pane_place(state)
@@ -374,7 +376,7 @@ fn active_result_pane(
                 || analysis.to_owned(),
                 |place| format!("{place} \u{b7} {analysis}"),
             );
-    property_row(ui, "Pane", &pane);
+    super::super::super::design_system::property_row_whole(ui, "Pane", &pane);
     if let Some(unit) = facts.unit.as_deref() {
         property_row(ui, "Unit", unit);
     }

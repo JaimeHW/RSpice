@@ -352,16 +352,19 @@ impl FamilyMembers {
 
     /// The pane drawing the family, named by its analysis, its span and
     /// its count: `AC · C1 = 1n … 5n (5 members)`. `host_label` is the
-    /// host member's own label, `AC · C1=1nF`.
+    /// host member's own label, `AC · C1=1nF`. The count's number and noun
+    /// are joined by a no-break space, so a name wrapped onto two lines
+    /// breaks before the count, never inside it.
     #[must_use]
     pub fn pane_name(&self, host_label: &str) -> String {
         let base = self
             .members
             .first()
             .map_or(host_label, |(_, label)| host_base(host_label, label));
+        let count = self.count().replacen(' ', "\u{a0}", 1);
         match self.span() {
-            Some(span) => format!("{base} · {span} ({})", self.count()),
-            None => format!("{base} ({})", self.count()),
+            Some(span) => format!("{base} · {span} ({count})"),
+            None => format!("{base} ({count})"),
         }
     }
 }

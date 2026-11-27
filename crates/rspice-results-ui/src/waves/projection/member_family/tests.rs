@@ -726,7 +726,7 @@ fn a_family_is_named_by_its_quantity_and_each_members_value() {
     assert_eq!(family.span().as_deref(), Some("c = 1n \u{2026} 5n"));
     assert_eq!(
         family.pane_name(&run.analyses[0].label),
-        "Sweep · c = 1n \u{2026} 5n (3 members)"
+        "Sweep · c = 1n \u{2026} 5n (3\u{a0}members)"
     );
     assert_eq!(
         family.by_value(),

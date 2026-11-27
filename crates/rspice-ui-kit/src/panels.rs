@@ -1595,6 +1595,25 @@ pub fn property_row_wrapped(ui: &mut Ui, label: &str, text: &str) -> Response {
     response
 }
 
+/// A read-only property row whose value is a name to be read whole: a
+/// [`property_row`] while it fits its column, else wrapped onto the lines it
+/// needs, as [`property_row_wrapped`] wraps a sentence, never elided. A
+/// name that must not break between two words joins them with a no-break
+/// space.
+pub fn property_row_whole(ui: &mut Ui, label: &str, value: &str) -> Response {
+    let columns = RowColumns::of(ui, None);
+    let width = ui
+        .painter()
+        .layout_no_wrap(value.to_owned(), value_face(value), Color32::PLACEHOLDER)
+        .size()
+        .x;
+    if width <= columns.value {
+        property_row(ui, label, value)
+    } else {
+        property_row_wrapped(ui, label, value)
+    }
+}
+
 /// A row's label, in its column: secondary sans, centred on the row, elided
 /// when the column is too narrow for it.
 pub(crate) fn row_label(ui: &Ui, column: Rect, label: &str) {
