@@ -688,6 +688,9 @@ pub struct PlotSpec<'a> {
     /// to put on its top tick label ("unit unknown"). Left out, such an axis
     /// goes unmarked, as a plain number's axis does in ViVA and ADS.
     pub y_without_unit: Option<String>,
+    /// What the Y axis adds after its unit caption, "log" on a logarithmic
+    /// pane's ("V · log"), so its scale reads without a control saying so.
+    pub y_caption_note: Option<&'static str>,
     /// Whether a trackpad pinch zooms both axes about the pointer, as on a
     /// chart read on its own grid (Smith, Nyquist, pole-zero, scatter),
     /// rather than X alone, as on a waveform read against time.
@@ -738,6 +741,7 @@ impl<'a> PlotSpec<'a> {
             x_axis_chrome: true,
             frame: true,
             y_without_unit: None,
+            y_caption_note: None,
             pinch_zooms_both_axes: false,
             significant_digits: 4,
         }
@@ -783,6 +787,14 @@ impl<'a> PlotSpec<'a> {
     #[must_use]
     pub fn with_y_without_unit(mut self, text: impl Into<String>) -> Self {
         self.y_without_unit = Some(text.into());
+        self
+    }
+
+    /// Say `note` after the Y axis' unit caption: see
+    /// [`Self::y_caption_note`].
+    #[must_use]
+    pub fn with_y_caption_note(mut self, note: &'static str) -> Self {
+        self.y_caption_note = Some(note);
         self
     }
 

@@ -982,6 +982,28 @@ fn y_caption_text(spec: &PlotSpec<'_>) -> Option<String> {
         .clone()
         .or_else(|| (!spec.y.unit.is_empty()).then(|| spec.y.unit.clone()))
         .or_else(|| spec.y_without_unit.clone())
+        .or_else(|| spec.y_caption_note.map(|_| String::new()))
+        .map(|text| caption_with_note(text, spec.y_caption_note))
+}
+
+/// What a logarithmic Y axis says after its unit caption.
+pub const LOG_CAPTION_NOTE: &str = "log";
+
+/// `text`, a Y axis' unit caption or the top label that carries its unit,
+/// with the axis' `note` after it ("V · log"), or the note alone where the
+/// axis states no unit.
+pub fn caption_with_note(text: String, note: Option<&str>) -> String {
+    match note {
+        Some(note) if text.is_empty() => note.to_owned(),
+        Some(note) => format!("{text} \u{b7} {note}"),
+        None => text,
+    }
+}
+
+/// The top label of a Y axis whose unit rides on it: the tick's own label
+/// with the unit, and the axis' note after them.
+fn top_label_with_unit(spec: &PlotSpec<'_>, label: &str) -> String {
+    caption_with_note(tick_with_unit(label, &spec.y.unit), spec.y_caption_note)
 }
 
 /// How a Y axis `length` points tall stands its tick labels: a label's
@@ -1048,7 +1070,7 @@ pub fn label_margin(ui: &Ui, spec: &PlotSpec<'_>) -> f32 {
         .iter()
         .map(|(value, label)| {
             if unit_on_tick(spec) && Some(*value) == top {
-                width(tick_with_unit(label, &spec.y.unit))
+                width(top_label_with_unit(spec, label))
             } else {
                 width(label.clone())
             }
@@ -1372,11 +1394,7 @@ pub fn show(
     let topmost = y_labels.len().checked_sub(1);
     for (index, (top, label, galley)) in y_labels.into_iter().enumerate() {
         let galley = if unit_on_tick && Some(index) == topmost {
-            painter.layout_no_wrap(
-                tick_with_unit(label, &spec.y.unit),
-                tick_font.clone(),
-                y_ink,
-            )
+            painter.layout_no_wrap(top_label_with_unit(spec, label), tick_font.clone(), y_ink)
         } else {
             galley
         };
