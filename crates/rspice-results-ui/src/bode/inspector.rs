@@ -70,7 +70,9 @@ pub struct NoiseSpectrumModel {
     pub input_rms_unit: &'static str,
     /// Why there is no input-referred figure, when there is none.
     pub input_absent: Option<&'static str>,
-    pub band: Option<(f64, f64)>,
+    /// The band the figures integrate over, as a range field spells it:
+    /// `1 Hz … 10 MHz`.
+    pub band: String,
     /// An edge's jitter, for a periodic noise run sampled at an edge's
     /// timing: its density is the edge's timing in s²/Hz, not a voltage.
     pub jitter: Option<EdgeJitter>,
@@ -532,7 +534,6 @@ pub fn card_figures(
 pub fn noise_spectrum_right_panel(
     ui: &mut Ui,
     model: Option<&NoiseSpectrumModel>,
-    quantity_policy: &QuantityPresentationPolicy,
     significant_digits: usize,
 ) {
     section_header(ui, "Noise spectrum", None);
@@ -540,12 +541,6 @@ pub fn noise_spectrum_right_panel(
         crate::presentation::panel_note(ui, "No noise spectrum in this run.");
         return;
     };
-    let band = model.band.unwrap_or_else(|| {
-        (
-            model.frequency.first().copied().unwrap_or_default(),
-            model.frequency.last().copied().unwrap_or_default(),
-        )
-    });
     let figure = |value: Option<f64>, unit: &str| {
         (
             value.map_or_else(
@@ -555,15 +550,7 @@ pub fn noise_spectrum_right_panel(
             value.is_some(),
         )
     };
-    let mut rows = vec![(
-        "Band",
-        format!(
-            "{} \u{2026} {}",
-            frequency_readout(quantity_policy, band.0, significant_digits),
-            frequency_readout(quantity_policy, band.1, significant_digits)
-        ),
-        false,
-    )];
+    let mut rows = vec![("Band", model.band.clone(), false)];
     match model.jitter {
         Some(jitter) => {
             let (text, strong) = figure(jitter.rms_s, "s rms");

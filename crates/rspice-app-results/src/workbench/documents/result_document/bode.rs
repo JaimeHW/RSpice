@@ -277,6 +277,10 @@ pub(super) fn build_noise_model(state: ResultsReads<'_>) -> Option<NoiseSpectrum
     let jitter = summary
         .filter(|summary| summary.is_timing())
         .map(|summary| edge_jitter(output, summary));
+    let band = super::waves::hertz_range_text(
+        band.unwrap_or(swept),
+        state.model.preferences.quantity_presentation_policy(),
+    );
     Some(NoiseSpectrumModel {
         frequency,
         total_rms,
@@ -494,7 +498,6 @@ pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut ResultsParts<'
     inspector::noise_spectrum_right_panel(
         ui,
         model.as_ref(),
-        &state.model.preferences.quantity_presentation_policy(),
         significant_digits(state.results_reads()),
     );
 }

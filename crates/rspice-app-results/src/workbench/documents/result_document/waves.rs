@@ -748,7 +748,7 @@ fn x_range_text(
 
 /// An interval of frequencies as the range field spells it, in the
 /// frequency unit the reader chose.
-fn hertz_range_text(
+pub(super) fn hertz_range_text(
     (x0, x1): (f64, f64),
     quantity_policy: crate::quantity::QuantityPresentationPolicy,
 ) -> String {
