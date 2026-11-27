@@ -298,6 +298,38 @@ fn a_hundred_unrelated_curves_are_never_drawn_as_a_band() {
     }
 }
 
+/// Unticking a signal in the data browser keeps every other trace's
+/// envelope: the curves left on the strip are redrawn from what the cache
+/// holds, not reduced again from every sample.
+#[test]
+fn unticking_a_signal_keeps_the_other_traces_envelopes() {
+    use crate::workbench::documents::result_document::browser_plot::set_result_signal_plotted;
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    let mut state = crowded_transient(3, 50_000);
+    // The quietest member is the one the dataset hides: plotted and taken
+    // off again, it moves neither the pane's Y range nor its other curves.
+    let analysis = &mut state.model.simulation.retained.runs[0].analyses[0];
+    analysis.waveforms[0].visible = false;
+    let name = analysis.waveforms[0].name.clone();
+    let key =
+        SourceWaveformPresentationKey::new(super::lanes::strip(&mut state)[0].analysis_key, name);
+    let ctx = new_context();
+    assert_eq!(frame(&ctx, &mut state, Vec::new()).work.rebuilds, 2);
+    set_result_signal_plotted(&mut state.results_parts(), &key, true);
+    assert_eq!(
+        frame(&ctx, &mut state, Vec::new()).work.rebuilds,
+        1,
+        "the ticked signal is the only one reduced"
+    );
+    set_result_signal_plotted(&mut state.results_parts(), &key, false);
+    let unticked = frame(&ctx, &mut state, Vec::new());
+    assert_eq!(
+        (unticked.work.hits, unticked.work.rebuilds),
+        (2, 0),
+        "the untick reduced the curves it left on the strip again"
+    );
+}
+
 /// A strip that strokes more curves than the envelope cache's stale bound —
 /// five panes of sixty — reuses every envelope on its warm and hovered
 /// frames. With a hard 256-entry bound it evicted and rebuilt most of them on

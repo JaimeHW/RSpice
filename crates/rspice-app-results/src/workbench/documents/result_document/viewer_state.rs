@@ -175,8 +175,9 @@ impl ResultsState {
         dataset_default: bool,
     ) {
         if !dataset_default && self.session.waveform_visibility.get(key) == Some(&false) {
+            // Hidden before and hidden after: no trace's samples change, and
+            // every other trace's envelope stays good for it.
             self.session.waveform_visibility.set(key.clone(), None);
-            self.session.cache.invalidate();
         }
     }
 
