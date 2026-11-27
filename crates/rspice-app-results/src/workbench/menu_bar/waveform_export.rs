@@ -446,6 +446,9 @@ pub fn action_export_dataset_with_io(
         };
     }
 
+    if export_format == TabularExportFormat::TouchstoneWhereCompatible {
+        return export_touchstone(state, io, &displayed, signals);
+    }
     // Where this process writes the file, a table of the traces is written
     // on a job as its samples are read, so a stored run of any length
     // exports without a column read whole.
@@ -457,15 +460,7 @@ pub fn action_export_dataset_with_io(
     {
         return delimited::export_delimited_as_read(state, io, &displayed, export_format, signals);
     }
-    let prepared = match prepare_waveform_dataset(
-        state.results_reads(),
-        &displayed,
-        matches!(
-            export_format,
-            TabularExportFormat::TouchstoneWhereCompatible
-        ),
-        signals,
-    ) {
+    let prepared = match prepare_waveform_dataset(state.results_reads(), &displayed, signals) {
         Ok(prepared) => prepared,
         Err(message) => {
             state.prompt(message);
@@ -476,7 +471,9 @@ pub fn action_export_dataset_with_io(
     match export_format {
         TabularExportFormat::Csv => export_csv(state, io, &prepared),
         TabularExportFormat::Tsv => export_tsv(state, io, &prepared),
-        TabularExportFormat::TouchstoneWhereCompatible => export_touchstone(state, io, &prepared),
+        TabularExportFormat::TouchstoneWhereCompatible => {
+            unreachable!("Touchstone dispatches above")
+        }
     }
     None
 }
@@ -515,7 +512,7 @@ pub(crate) fn active_sheet_values(state: ResultsReads<'_>) -> Result<String, Str
         .map_err(|error| error.to_string())?;
         return String::from_utf8(bytes).map_err(|error| error.to_string());
     }
-    let dataset = prepare_waveform_dataset(state, &displayed, false, ExportedSignals::Plotted)?;
+    let dataset = prepare_waveform_dataset(state, &displayed, ExportedSignals::Plotted)?;
     crate::io::WaveformWriter::new(crate::io::WaveformFormat::Tsv)
         .write_text(&dataset)
         .map_err(|error| error.to_string())
@@ -1084,103 +1081,142 @@ fn export_tsv(
     }
 }
 
+/// Touchstone of the displayed network, written on a job once the reader chooses where: its port
+/// count is read from the signals' names on the frame, and the network itself off it.
+///
+/// The file keeps the name the reader typed: a `.ts` file holds version 2, which states each
+/// port's reference; an `.sNp` file for this many ports holds version 1, which every reader of
+/// that name expects, when the network fits it (one reference for every port), and version 2
+/// otherwise, which that name may also hold. A name with neither gains the `.sNp` of the network.
 fn export_touchstone(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
-    dataset: &crate::io::WaveformDataset,
-) {
-    // Validate and serialize before opening a save picker. An incompatible
-    // result never asks the user for a destination it cannot publish.
-    let mut dataset = dataset.clone();
+    displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+    signals: ExportedSignals,
+) -> Option<ResultExportJob> {
+    let member = match displayed_member(state.results_reads(), displayed, signals) {
+        Ok(member) => member,
+        Err(message) => {
+            state.prompt(message);
+            return None;
+        }
+    };
+    let names = member
+        .1
+        .iter()
+        .flat_map(|waveform| match &waveform.complex {
+            Some(complex) => vec![
+                format!("Re({})", complex.source_name),
+                format!("Im({})", complex.source_name),
+            ],
+            None => vec![waveform.name.clone()],
+        })
+        .collect::<Vec<_>>();
+    let chosen = [member];
+    let bytes = members::estimated_bytes(&chosen, 32);
+    let owned = members::OwnedMembers::of(&chosen);
+    // An incompatible result never asks the reader for a destination it cannot publish.
+    let Some(ports) =
+        crate::io::WaveformWriter::touchstone_ports_named(names.iter().map(String::as_str))
+    else {
+        state.prompt(
+            "Touchstone export is not compatible with the active result: it holds no \
+             S-parameter matrix; select CSV export.",
+        );
+        return None;
+    };
+    let network_extension = format!("s{ports}p");
+    let file = members::ExportFile {
+        label: "Touchstone",
+        title: "Export Touchstone",
+        default_name: format!("waveforms.{network_extension}"),
+        filter_name: "Touchstone Files",
+        extension: "ts",
+        mime_type: "text/plain",
+        text: true,
+    };
+    let mut version_two = false;
+    let destination = members::choose_destination(
+        state,
+        io,
+        &file,
+        &[network_extension.as_str(), "ts"],
+        |path| {
+            let extension = path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(str::to_ascii_lowercase);
+            match extension.as_deref() {
+                Some("ts") => version_two = true,
+                Some(extension) if extension == network_extension => {}
+                _ => {
+                    path.set_extension(&network_extension);
+                }
+            }
+        },
+    )?;
+    members::write_export(state, io, &file, destination, bytes, move |out| {
+        let members = owned.members();
+        let member = &members[0];
+        let text = touchstone_text(member.analysis, &member.waveforms, version_two)?;
+        std::io::Write::write_all(out, text.as_bytes()).map_err(|error| error.to_string())?;
+        Ok(text_detail(ports, &text))
+    })
+}
+
+/// The Touchstone text of `waveforms`: version 2 when `version_two` or when the network does not
+/// fit version 1, version 1 otherwise.
+fn touchstone_text(
+    analysis: &rspice_results::analysis_result::AnalysisResult<crate::state::RetainedTrace>,
+    waveforms: &[&crate::state::RetainedTrace],
+    version_two: bool,
+) -> Result<TouchstoneText, String> {
+    let incompatible =
+        |error: &dyn std::fmt::Display| format!("Touchstone export is not compatible with the active result: {error}");
+    let mut dataset = prepare_single_analysis_dataset(analysis, waveforms, true)
+        .map_err(|error| incompatible(&error))?;
+    let write = |dataset: &crate::io::WaveformDataset| {
+        crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone).write_text(dataset)
+    };
     dataset
         .metadata
         .insert("touchstone_version".to_owned(), "2".to_owned());
-    let contents = match crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
-        .write_text(&dataset)
-    {
-        Ok(contents) => contents,
-        Err(error) => {
-            state.prompt(format!(
-                "Touchstone export is not compatible with the active result: {error}"
-            ));
-            return;
+    let mut contents = write(&dataset).map_err(|error| incompatible(&error))?;
+    if !version_two {
+        dataset
+            .metadata
+            .insert("touchstone_version".to_owned(), "1".to_owned());
+        if let Ok(version_one) = write(&dataset) {
+            contents = version_one;
         }
-    };
-    let port_count = crate::io::WaveformWriter::touchstone_port_count(&dataset)
-        .expect("successful Touchstone validation always identifies a port matrix");
-    let network_extension = format!("s{port_count}p");
-    let default_name = format!("waveforms.{network_extension}");
+    }
+    Ok(TouchstoneText {
+        contents,
+        signals: dataset.signal_count(),
+        points: dataset.point_count(),
+    })
+}
 
-    match io.show_save_dialog(SaveDialogConfig {
-        title: "Export Touchstone",
-        default_name: &default_name,
-        filter_name: "Touchstone Files",
-        filter_extensions: &[network_extension.as_str(), "ts"],
-    }) {
-        Ok(Some(mut path)) => {
-            let contents = touchstone_contents_for(&mut path, &network_extension, &dataset)
-                .unwrap_or(contents);
-            let export = io
-                .observe_destination(&path)
-                .and_then(|destination| io.write_text_file_observed(&destination, &contents));
-            match export {
-                Ok(()) => {
-                    let detail = format!(
-                        "{}-port matrix, {} signals, {} points",
-                        port_count,
-                        dataset.signal_count(),
-                        dataset.point_count()
-                    );
-                    note_result_export_success(
-                        state,
-                        crate::workbench::workflows::export_workflow::export_completion_message(
-                            "Touchstone",
-                            &path,
-                            Some(detail),
-                            io,
-                        ),
-                    );
-                }
-                Err(error) => {
-                    state.report_failure("Touchstone export failed", error.to_string());
-                }
-            }
-        }
-        Ok(None) => {}
-        Err(error) => {
-            state.report_failure("Touchstone export failed", error.to_string());
-        }
+/// A Touchstone file's text, and what its completion line says it holds.
+struct TouchstoneText {
+    contents: String,
+    signals: usize,
+    points: usize,
+}
+
+impl std::ops::Deref for TouchstoneText {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.contents
     }
 }
 
-/// The file a Touchstone export writes to `path`, keeping the name the reader typed: a `.ts` file
-/// holds version 2, which states each port's reference; an `.sNp` file for this many ports holds
-/// version 1, which every reader of that name expects, when the network fits it (one reference
-/// for every port), and version 2 otherwise, which that name may also hold. A name with neither
-/// gains the `.sNp` of the network. `None` keeps the version 2 contents already written.
-fn touchstone_contents_for(
-    path: &mut std::path::PathBuf,
-    network_extension: &str,
-    dataset: &crate::io::WaveformDataset,
-) -> Option<String> {
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase);
-    match extension.as_deref() {
-        Some("ts") => return None,
-        Some(extension) if extension == network_extension => {}
-        _ => {
-            path.set_extension(network_extension);
-        }
-    }
-    let mut version_one = dataset.clone();
-    version_one
-        .metadata
-        .insert("touchstone_version".to_owned(), "1".to_owned());
-    crate::io::WaveformWriter::new(crate::io::WaveformFormat::Touchstone)
-        .write_text(&version_one)
-        .ok()
+fn text_detail(ports: usize, text: &TouchstoneText) -> String {
+    format!(
+        "{ports}-port matrix, {} signals, {} points",
+        text.signals, text.points
+    )
 }
 
 /// The traces an export of this analysis carries.
@@ -1262,9 +1298,19 @@ fn failed_run_refusal(run: &crate::state::SimulationRun) -> Option<String> {
 fn prepare_waveform_dataset(
     state: ResultsReads<'_>,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
-    touchstone: bool,
     signals: ExportedSignals,
 ) -> Result<crate::io::WaveformDataset, String> {
+    let (analysis, waveforms) = displayed_member(state, displayed, signals)?;
+    prepare_single_analysis_dataset(analysis, &waveforms, false).map_err(|error| error.to_string())
+}
+
+/// The displayed view's one analysis and the traces of it an export writes, or why there is
+/// nothing to write.
+fn displayed_member<'a>(
+    state: ResultsReads<'a>,
+    displayed: &'a crate::workbench::documents::result_document::view_context::ResolvedResultView,
+    signals: ExportedSignals,
+) -> Result<members::Member<'a>, String> {
     if displayed.analysis_indices.is_empty() {
         return Err(displayed
             .run(state)
@@ -1278,8 +1324,7 @@ fn prepare_waveform_dataset(
     if waveforms.is_empty() && !analysis.waveforms.is_empty() {
         return Err(ALL_TRACES_HIDDEN_MESSAGE.to_owned());
     }
-    prepare_single_analysis_dataset(analysis, &waveforms, touchstone)
-        .map_err(|error| error.to_string())
+    Ok((analysis, waveforms))
 }
 
 /// The displayed analyses as the long-form table takes them.

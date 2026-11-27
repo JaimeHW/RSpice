@@ -16,7 +16,7 @@ use crate::state::{AnalysisResult, RetainedTrace};
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::workflows::export_workflow::{
-    ExportWorkflowIo, SaveDialogConfig, export_completion_message,
+    ExportWorkflowIo, ObservedExportDestination, SaveDialogConfig, export_completion_message,
 };
 use rspice_formats::waveform_io::result::ExportMember;
 
@@ -117,7 +117,7 @@ pub(super) struct ExportFile {
     pub title: &'static str,
     pub default_name: String,
     pub filter_name: &'static str,
-    /// The extension the picker offers and the chosen path is given.
+    /// The extension [`publish_export`]'s picker offers and the chosen path is given.
     pub extension: &'static str,
     pub mime_type: &'static str,
     /// The file is text: a browser download takes it as such.
@@ -134,27 +134,56 @@ pub(super) fn publish_export(
     bytes: u64,
     write: impl FnOnce(&mut dyn Write) -> Result<String, String> + Send + 'static,
 ) -> Option<ResultExportJob> {
-    let failed = format!("{} export failed", file.label);
+    let destination = choose_destination(
+        state,
+        io,
+        &file,
+        &[file.extension],
+        |path: &mut std::path::PathBuf| {
+            crate::io::file_exchange::ensure_file_extension(path, file.extension);
+        },
+    )?;
+    write_export(state, io, &file, destination, bytes, write)
+}
+
+/// Ask where `file` goes, offering `extensions`, with `settle` giving the chosen path the name
+/// the file is written under. `None` when the reader cancels, or the destination cannot be
+/// written, which is said.
+pub(super) fn choose_destination(
+    state: &mut ResultsParts<'_>,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    file: &ExportFile,
+    extensions: &[&str],
+    settle: impl FnOnce(&mut std::path::PathBuf),
+) -> Option<ObservedExportDestination> {
     let destination = match io.show_save_dialog(SaveDialogConfig {
         title: file.title,
         default_name: &file.default_name,
         filter_name: file.filter_name,
-        filter_extensions: &[file.extension],
+        filter_extensions: extensions,
     }) {
         Ok(Some(mut path)) => {
-            crate::io::file_exchange::ensure_file_extension(&mut path, file.extension);
+            settle(&mut path);
             io.observe_destination(&path)
         }
         Ok(None) => return None,
         Err(error) => Err(error),
     };
-    let destination = match destination {
-        Ok(destination) => destination,
-        Err(error) => {
-            state.report_failure(failed, error);
-            return None;
-        }
-    };
+    destination
+        .map_err(|error| state.report_failure(format!("{} export failed", file.label), error))
+        .ok()
+}
+
+/// Write `file` to `destination` with `write`, as [`publish_export`] does once it is chosen.
+pub(super) fn write_export(
+    state: &mut ResultsParts<'_>,
+    io: &(impl ExportWorkflowIo + ?Sized),
+    file: &ExportFile,
+    destination: ObservedExportDestination,
+    bytes: u64,
+    write: impl FnOnce(&mut dyn Write) -> Result<String, String> + Send + 'static,
+) -> Option<ResultExportJob> {
+    let failed = format!("{} export failed", file.label);
     if io.writes_as_it_reads() {
         return Some(start_export_job(file.label, destination, bytes, write));
     }

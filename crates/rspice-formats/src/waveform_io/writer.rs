@@ -62,10 +62,16 @@ impl WaveformWriter {
     /// matrix; it is provided so save workflows can choose the required
     /// `.sNp` extension without re-materializing the matrix.
     pub fn touchstone_port_count(dataset: &WaveformDataset) -> Option<usize> {
-        dataset
-            .signals
-            .iter()
-            .filter_map(|signal| Self::parse_touchstone_signal_name(&signal.name))
+        Self::touchstone_ports_named(dataset.signals.iter().map(|signal| signal.name.as_str()))
+    }
+
+    /// Port count of the network the signals `names` would carry, read from their names alone:
+    /// what a save workflow asks of a result before it reads a sample. `None` when no name is
+    /// an element of a port matrix.
+    pub fn touchstone_ports_named<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<usize> {
+        names
+            .into_iter()
+            .filter_map(Self::parse_touchstone_signal_name)
             .map(|(row, column, _)| row.max(column))
             .max()
     }
