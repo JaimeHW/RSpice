@@ -19,7 +19,6 @@ let runWorkerRequest = null;
 let runVerilogACompileRequest = null;
 let runHardcopyRequest = null;
 let runModelImportRequest = null;
-let runModelQualificationRequest = null;
 let runResultsStoreRequest = null;
 // A results store holds one request at a time: each waits for the one before it.
 let resultsStoreQueue = Promise.resolve();
@@ -443,9 +442,6 @@ async function initializeWorkerModule() {
   if (typeof module.runRspiceUiModelImportRequest !== "function") {
     throw new Error("RSpice worker package is missing its model-import executor.");
   }
-  if (typeof module.runRspiceUiModelQualificationRequest !== "function") {
-    throw new Error("RSpice worker package is missing its model-qualification executor.");
-  }
   if (typeof module.runRspiceUiResultsStoreRequest !== "function") {
     throw new Error("RSpice worker package is missing its results-store executor.");
   }
@@ -453,7 +449,6 @@ async function initializeWorkerModule() {
   runVerilogACompileRequest = module.runRspiceUiVerilogACompileRequest;
   runHardcopyRequest = module.runRspiceUiHardcopyRequest;
   runModelImportRequest = module.runRspiceUiModelImportRequest;
-  runModelQualificationRequest = module.runRspiceUiModelQualificationRequest;
   runResultsStoreRequest = module.runRspiceUiResultsStoreRequest;
   module.installRspiceUiWasmJitDispatcher(dispatchWasmJitEntry);
   wasmJitCapability = await qualifyWasmJitArchitecture(module, wasmExports);
@@ -467,7 +462,6 @@ async function ensureReady() {
       runVerilogACompileRequest = null;
       runHardcopyRequest = null;
       runModelImportRequest = null;
-      runModelQualificationRequest = null;
       runResultsStoreRequest = null;
       primaryWasmExports = null;
       workerModule = null;
@@ -524,25 +518,6 @@ self.addEventListener("message", (event) => {
       } catch (error) {
         postMessage({
           type: "model-import-error",
-          id: message.id ?? 0,
-          error: asErrorMessage(error),
-        });
-      }
-    })();
-    return;
-  }
-  if (message.type === "run-model-qualification") {
-    void (async () => {
-      try {
-        await ensureReady();
-        if (typeof message.request !== "string") {
-          throw new Error("Malformed RSpice model-qualification request transport.");
-        }
-        const response = runModelQualificationRequest(message.request);
-        postMessage({ type: "model-qualification-result", id: message.id, response });
-      } catch (error) {
-        postMessage({
-          type: "model-qualification-error",
           id: message.id ?? 0,
           error: asErrorMessage(error),
         });

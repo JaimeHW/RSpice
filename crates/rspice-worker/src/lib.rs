@@ -1,7 +1,6 @@
-//! Browser worker host for simulation, model qualification, compilation,
-//! hardcopy, source imports, and this browser's results stores; and the
-//! import worker's reader of picked result files, which only its own entry
-//! image reaches.
+//! Browser worker host for simulation, compilation, hardcopy, source
+//! imports, and this browser's results stores; and the import worker's reader
+//! of picked result files, which only its own entry image reaches.
 
 #[cfg(target_arch = "wasm32")]
 mod hardcopy;
@@ -11,8 +10,6 @@ mod import;
 mod jit;
 #[cfg(target_arch = "wasm32")]
 mod model_import;
-#[cfg(target_arch = "wasm32")]
-mod model_qualification;
 #[cfg(target_arch = "wasm32")]
 mod results_store;
 
@@ -81,11 +78,4 @@ pub async fn run_rspice_ui_results_store_request(
     buffers: js_sys::Array,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     results_store::run_request(request, buffers).await
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn run_rspice_ui_model_qualification_request(
-    value: wasm_bindgen::JsValue,
-) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-    model_qualification::run_worker_request_value(value)
 }
