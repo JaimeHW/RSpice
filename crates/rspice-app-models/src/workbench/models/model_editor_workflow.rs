@@ -14,15 +14,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 pub(super) fn model_library_rescan_diagnostic(model: &Model) -> (String, bool) {
     let discovered_files = model.pdk_config.discovered_files.len();
     let scan_errors = &model.pdk_config.scan_errors;
-    let pack_definitions = model.model_library_manager.pack_definition_count();
-    let mut summary = format!(
-        "Found {discovered_files} configured model file(s) and {pack_definitions} shipped pack \
-         part(s)"
-    );
-    let pack_error = model.model_library_manager.spice_pack_error();
-    if let Some(error) = pack_error {
-        summary = format!("{summary}; {error}");
-    }
+    let mut summary = format!("Found {discovered_files} configured model file(s)");
     if !scan_errors.is_empty() {
         summary = format!(
             "{summary}; {} configured path error(s): {}",
@@ -30,7 +22,7 @@ pub(super) fn model_library_rescan_diagnostic(model: &Model) -> (String, bool) {
             scan_errors.join("; ")
         );
     }
-    (summary, pack_error.is_some() || !scan_errors.is_empty())
+    (summary, !scan_errors.is_empty())
 }
 
 /// Resolve the catalog's single selection only when it is an exact,

@@ -9,17 +9,12 @@
 use super::corner_ops::{add_corner, bind_corner_section, delete_corner, edit_corner};
 use super::*;
 
-pub(super) fn render_dialog(
-    ui: &mut Ui,
-    app: &mut ManagerRenderContext<'_>,
-    hub: &hub::HubCatalog,
-) {
+pub(super) fn render_dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let Some(dialog) = app.state.models_view.dialog.clone() else {
         return;
     };
     match dialog {
         ModelsWorkbenchDialog::NewModel { device, name } => new_model(ui, app, device, name),
-        ModelsWorkbenchDialog::HeldCatalog => super::held_catalog::dialog(ui, app, hub),
         #[cfg(target_arch = "wasm32")]
         ModelsWorkbenchDialog::SelectBrowserImportRoot {
             candidates,
@@ -184,97 +179,6 @@ pub(super) fn render_dialog(
                 });
             }
         }
-        ModelsWorkbenchDialog::ConfirmPack {
-            pack_id,
-            attach,
-            release,
-        } => {
-            let (title, primary) = match (release.as_deref(), attach) {
-                (Some(_), _) => ("Install model pack", "Install pack"),
-                (None, true) => ("Attach model pack", "Attach pack"),
-                (None, false) => ("Detach model pack", "Detach pack"),
-            };
-            let blocked = match release.as_deref() {
-                Some(release) => hub::release_install_block_reason(app, release),
-                None => app
-                    .state
-                    .models_view
-                    .model_import_in_progress
-                    .then(|| "Another model-source operation is still running.".to_owned()),
-            };
-            let mut dialog = Dialog::new(title, primary)
-                .description(format!("{title}: {pack_id}"))
-                .size(DialogSize::Transaction)
-                .primary_enabled(blocked.is_none())
-                .ghost("Cancel");
-            if let Some(reason) = blocked.as_deref() {
-                dialog = dialog.hint(reason);
-            }
-            let choice = dialog.show(ui.ctx(), |ui| {
-                if let Some(release) = release.as_deref() {
-                    hub::release_confirmation(ui, &pack_id, release);
-                    return;
-                }
-                ui.label(if attach {
-                    "RSpice will verify the pack entry and add it, with the files it includes, as one undoable project revision."
-                } else {
-                    "RSpice will remove the attached source as one undoable project revision. Existing instance references may become unresolved."
-                });
-                ui.label(RichText::new(&pack_id).monospace().strong());
-            });
-            match choice {
-                DialogChoice::Primary => {
-                    match release.as_deref() {
-                        Some(release) => {
-                            let request = hub::release_request(&pack_id, release);
-                            app.queue_model_hub(request);
-                        }
-                        None if attach => attach_pack(app, &pack_id),
-                        None => detach_pack(app, &pack_id),
-                    }
-                    app.state.models_view.dialog = None;
-                }
-                DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                    app.state.models_view.dialog = None;
-                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
-                }
-                DialogChoice::None => {}
-            }
-        }
-        ModelsWorkbenchDialog::ConfirmPart { pack_id, part_name } => {
-            let busy = app.state.models_view.model_import_in_progress;
-            let mut dialog = Dialog::new("Add shipped part to project", "Add to project")
-                .description(format!(
-                    "Retain {part_name} from {pack_id} into this project as one revision."
-                ))
-                .size(DialogSize::Transaction)
-                .primary_enabled(!busy)
-                .ghost("Cancel");
-            if busy {
-                dialog = dialog.hint("Another model-source operation is still running.");
-            }
-            let choice = dialog.show(ui.ctx(), |ui| {
-                ui.label(
-                    "The installed source file will be parsed, license-checked, pinned by digest, and added as one undoable project revision.",
-                );
-                ui.label(
-                    RichText::new(format!("{part_name} · {pack_id}"))
-                        .monospace()
-                        .strong(),
-                );
-            });
-            match choice {
-                DialogChoice::Primary => {
-                    add_part(app, &pack_id, &part_name);
-                    app.state.models_view.dialog = None;
-                }
-                DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                    app.state.models_view.dialog = None;
-                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
-                }
-                DialogChoice::None => {}
-            }
-        }
         ModelsWorkbenchDialog::AuthorTechnologySymbolVariant {
             package_id,
             source_cell,
@@ -340,7 +244,6 @@ pub(super) fn render_dialog(
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
                     app.state.models_view.dialog = None;
-                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None => {
                     app.state.models_view.dialog =
@@ -448,7 +351,6 @@ pub(super) fn render_dialog(
                 }
                 DialogChoice::Ghost | DialogChoice::Cancelled => {
                     app.state.models_view.dialog = None;
-                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None | DialogChoice::Primary => {
                     app.state.models_view.dialog =
@@ -539,7 +441,6 @@ pub(super) fn render_dialog(
                 app.state.models_view.dialog = None;
             } else if decision == Some(false) {
                 app.state.models_view.dialog = None;
-                app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
             } else {
                 app.state.models_view.dialog = Some(ModelsWorkbenchDialog::AddCorner {
                     library,
@@ -668,7 +569,6 @@ pub(super) fn render_dialog(
                 app.state.models_view.dialog = None;
             } else if decision == Some(false) {
                 app.state.models_view.dialog = None;
-                app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
             } else {
                 app.state.models_view.dialog = Some(ModelsWorkbenchDialog::EditCorner {
                     library,
@@ -712,7 +612,6 @@ pub(super) fn render_dialog(
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
                     app.state.models_view.dialog = None;
-                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None => {}
             }
@@ -803,7 +702,6 @@ pub(super) fn render_dialog(
                 app.state.models_view.dialog = None;
             } else if decision == Some(false) {
                 app.state.models_view.dialog = None;
-                app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
             } else {
                 app.state.models_view.dialog = Some(ModelsWorkbenchDialog::BindCornerSection {
                     library,
@@ -839,7 +737,6 @@ pub(super) fn render_dialog(
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
                     app.state.models_view.dialog = None;
-                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None => {}
             }

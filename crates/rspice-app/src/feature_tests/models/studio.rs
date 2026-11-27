@@ -10,9 +10,7 @@ use egui::Color32;
 use crate::workbench::{RSpiceApp, features};
 use rspice_app_models::workbench::models::ModelsFeature;
 use rspice_app_models::workbench::models::tests::painted_text;
-use rspice_app_models::workbench::models::workspace_state::{
-    ModelsCatalogScope, ModelsOperationalState,
-};
+use rspice_app_models::workbench::models::workspace_state::ModelsCatalogScope;
 use rspice_app_state::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use rspice_app_state::state::{Component, ComponentType, ModelsPage, Point};
 
@@ -216,14 +214,13 @@ fn the_bind_primary_names_the_instance_it_would_bind() {
 
 /// A refused action is stated, once, on the page it was taken from.
 ///
-/// Only the packs view drew a refusal, so a refused corner, symbol, bin or
-/// include action was shown nowhere at all.
+/// A refused corner, symbol, bin or include action used to be shown nowhere
+/// at all.
 #[test]
 fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
     let reason = "the system clock cannot timestamp model validation";
     for (page, scope) in [
         (ModelsPage::Models, ModelsCatalogScope::Project),
-        (ModelsPage::Models, ModelsCatalogScope::InstalledPacks),
         (ModelsPage::Models, ModelsCatalogScope::RSpiceLibrary),
         (ModelsPage::Symbols, ModelsCatalogScope::Project),
         (ModelsPage::Corners, ModelsCatalogScope::Project),
@@ -237,7 +234,6 @@ fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
             .models
             .models_view
             .note_receipt(Err(reason.to_owned()));
-        let consequence = app.state.models.models_view.operational_state.consequence();
         let studio = ModelsStudio::open(app);
         let stated = studio
             .announcements()
@@ -251,11 +247,6 @@ fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
             scope.label(),
             studio.announcements()
         );
-        assert!(
-            studio.announces(|label| label == consequence),
-            "{page:?} / {} says what the refusal left behind",
-            scope.label()
-        );
     }
 
     // An action that worked says nothing.
@@ -266,7 +257,7 @@ fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
         .models_view
         .note_receipt(Ok("validated".to_owned()));
     let studio = ModelsStudio::open(app);
-    assert!(!studio.announces(|label| label == ModelsOperationalState::Ready.consequence()));
+    assert!(!studio.announces(|label| label == "validated"));
 }
 
 /// A parameter states where the card that declares it is written.

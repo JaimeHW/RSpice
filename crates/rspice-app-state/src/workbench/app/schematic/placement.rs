@@ -1,12 +1,12 @@
 //! Arm the schematic's placement cursor from a catalog placement payload: a
-//! frozen cell binding, or either shape a distributed model pack publishes.
-//! Each is an operation on the model alone, so every feature that places a
-//! part arms it the same way.
+//! frozen cell binding, or either shape a library part places as. Each is an
+//! operation on the model alone, so every feature that places a part arms it
+//! the same way.
 
 use rspice_schematic_editor::session::placement::{PendingLibraryCellPlacement, PendingPartModel};
 
 use super::edit_authority::schematic_editor_request_source;
-use crate::state::model_hub::PartPlacement;
+use crate::state::part_placement::PartPlacement;
 use crate::state::{ComponentType, LibraryCellInstance, Tool};
 use crate::workbench::app_state::model::Model;
 
@@ -23,8 +23,9 @@ pub fn arm_cell_instance(model: &mut Model, binding: LibraryCellInstance) -> Str
     label
 }
 
-/// Coordinate either placement shape published by a distributed model pack.
-pub fn arm_pack_part(model: &mut Model, placement: PartPlacement) -> String {
+/// Arm either shape a library part places as: a cell instance over a
+/// subcircuit's ports, or a native device carrying its card.
+pub fn arm_part_placement(model: &mut Model, placement: PartPlacement) -> String {
     let label = placement.armed_label();
     match placement {
         PartPlacement::CellInstance(binding) => {

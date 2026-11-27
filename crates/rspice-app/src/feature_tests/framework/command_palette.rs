@@ -266,9 +266,6 @@ fn test_app() -> RSpiceApp {
             account: rspice_app_cloud::services::cloud_account::CloudAccountService::unconfigured(),
             live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(),
         },
-        model_hub: rspice_app_services::services::model_hub::ModelHubService::unavailable(
-            "This test instance runs without a model-pack store.",
-        ),
         file_workflow_io: Box::new(rspice_app_services::io::NativeFileWorkflowIo),
         read_system_contrast: crate::workbench::system_contrast::read,
         export_workflow_io: Box::new(

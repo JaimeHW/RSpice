@@ -70,12 +70,12 @@ use rspice_app_workbench::workbench::framework::feature::{Execute, held_back};
 use rspice_app_workbench::workbench::framework::host::{Host, InspectorScope};
 use rspice_app_workbench::workbench::framework::requests::{
     self, ApplyPathVariables, ApplyWaveformDefaults, ArmPartPlacement, AskNewSheetFormat,
-    BindComponentModel, CellHousekeeping, ClearSelectedModel, CloseForLiveMirror,
-    ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
-    OpenInVerify, OpenPropertyEditor, OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView,
-    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, RevealModel, RunPlanAnyway,
-    SelectAnalysisInstance, SetFamilyFilter, ShowOnSchematic, ShowProjectDeck,
-    ShowSchematicAnnotations, ShowWaveforms, VoidVerilogAEvidence,
+    BindComponentModel, CellHousekeeping, ClearSelectedModel, CloseForLiveMirror, ExportDataset,
+    FollowSchematicGrid, MarkFailureSites, OpenInDesign, OpenInVerify, OpenPropertyEditor,
+    OpenStimulusDefinition, OpenSymbolAuthoring, PrintActiveView, ProjectFileAction,
+    PromptAfterCommands, RevealExecutedDeck, RevealModel, RunPlanAnyway, SelectAnalysisInstance,
+    SetFamilyFilter, ShowOnSchematic, ShowProjectDeck, ShowSchematicAnnotations, ShowWaveforms,
+    VoidVerilogAEvidence,
 };
 
 /// Whether the command `key` names runs at once while the focused source
@@ -556,7 +556,7 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, ArmPartPlacement(placement)| {
-                rspice_app_state::workbench::app::schematic::placement::arm_pack_part(
+                rspice_app_state::workbench::app::schematic::placement::arm_part_placement(
                     &mut app.state.model,
                     placement,
                 );
@@ -616,25 +616,6 @@ impl RSpiceApp {
             |app, ShowProjectDeck| {
                 SourceFeature::show_project_deck(&mut features::cx(app));
                 app.execute_command_key(ids::NETLIST_WORKSPACE);
-            },
-        );
-        requests::drain(
-            self,
-            |app| &mut app.state.workbench.outbox,
-            |app,
-             ConfirmPackAttach {
-                 part_id,
-                 pack_id,
-                 version,
-             }| {
-                if rspice_app_models::workbench::models::ModelsFeature::confirm_pack_attach(
-                    &mut features::cx(app),
-                    part_id,
-                    pack_id,
-                    version,
-                ) {
-                    app.execute_command_key(ids::MODELS_CATALOG);
-                }
             },
         );
         requests::drain(

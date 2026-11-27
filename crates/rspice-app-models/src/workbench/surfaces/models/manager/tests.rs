@@ -1,9 +1,5 @@
-//! Attribution and detachment both resolve to one project revision.
-//!
 //! A bound consumer is attributed to the *effective* provider rather than to
-//! whichever library happens to declare the name, and detaching a pack takes
-//! every library it attached with it in a single revision — a partial detach
-//! leaves bindings pointing at a provider the project no longer has.
+//! whichever library happens to declare the name.
 
 use super::*;
 use crate::state::model_library::ModelType;
@@ -66,46 +62,6 @@ fn bound_consumers_are_attributed_only_to_the_effective_provider() {
     assert_eq!(beta.usage, None);
     assert_eq!(beta.usage_count, 0);
     assert!(scan.consumer_diagnostics.is_empty());
-}
-
-#[test]
-fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
-    let mut state = harness();
-    for (library_name, model_name) in [("pack-a", "na"), ("pack-b", "nb")] {
-        let mut library = ModelLibrary::new(library_name);
-        library.pack_id = Some("shared-pack".to_owned());
-        library.add_model(DeviceModel::new(model_name, ModelType::Nmos));
-        state.model.model_library_manager.add_library(library);
-    }
-    let initial_revision = state.model.workspace.content.project.revision();
-    let initial_epoch = state.model.design_execution_epoch;
-    let mut pending_actions = Vec::new();
-    let mut render = ManagerRenderContext::over(&mut state, &mut pending_actions);
-
-    detach_pack(&mut render, "shared-pack");
-
-    assert!(
-        render
-            .model
-            .model_library_manager
-            .get_library("pack-a")
-            .is_none()
-    );
-    assert!(
-        render
-            .model
-            .model_library_manager
-            .get_library("pack-b")
-            .is_none()
-    );
-    assert_eq!(
-        render.model.workspace.content.project.revision().get(),
-        initial_revision.get() + 1
-    );
-    assert_eq!(
-        render.model.design_execution_epoch,
-        initial_epoch.wrapping_add(1)
-    );
 }
 
 #[test]

@@ -128,10 +128,6 @@ pub struct RSpiceApp {
     /// What the cloud feature runs: the account session boundary and the
     /// live-session engine that drains it.
     pub(crate) cloud: rspice_app_cloud::workbench::live_session::CloudHandles,
-    /// Distributed model packs: the verified catalog, what is installed, and
-    /// the store a background install writes through. It is outside persisted
-    /// state because it describes this machine, not this project.
-    pub(crate) model_hub: rspice_app_services::services::model_hub::ModelHubService,
     /// File workflow IO backend (native in production, injectable in tests).
     pub(crate) file_workflow_io: Box<dyn rspice_app_services::io::FileWorkflowIo>,
     /// Export workflow IO backend (native in production, injectable in tests).
@@ -262,11 +258,6 @@ impl RSpiceApp {
                 live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(
                 ),
             },
-            // A test opens no real pack store: doing so would make every test
-            // read and write this developer's application-data directory.
-            model_hub: rspice_app_services::services::model_hub::ModelHubService::unavailable(
-                "This test instance runs without a model-pack store.",
-            ),
             file_workflow_io: Box::new(rspice_app_services::io::NativeFileWorkflowIo),
             read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(
@@ -447,24 +438,17 @@ impl RSpiceApp {
             last_window_title: String::new(),
             symbol_library,
             simulation_controller,
-            code: rspice_app_code::workbench::documents::source_editing::SourceHandles { project_id },
+            code: rspice_app_code::workbench::documents::source_editing::SourceHandles {
+                project_id,
+            },
             cloud: rspice_app_cloud::workbench::live_session::CloudHandles {
                 account: rspice_app_cloud::services::cloud_account::CloudAccountService::new(Some(
                     cc.egui_ctx.clone(),
                 )),
-                live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(),
+                live_session: rspice_app_cloud::workbench::live_session::LiveSessionEngine::default(
+                ),
             },
-            // Opening sweeps whatever a killed install left behind. A failure
-            // here is recorded as a reason and nothing else: a machine that
-            // cannot store packs still edits, simulates, and saves. The hub
-            // fetches through the cloud's transports, the only network a
-            // running application has.
-            model_hub: rspice_app_services::services::model_hub::ModelHubService::open(
-                &rspice_app_cloud::services::cloud_account::model_hub_transport::CloudModelHubTransportProvider,
-            ),
-            file_workflow_io: Box::new(
-                rspice_app_services::io::NativeFileWorkflowIo,
-            ),
+            file_workflow_io: Box::new(rspice_app_services::io::NativeFileWorkflowIo),
             read_system_contrast: crate::workbench::system_contrast::read,
             export_workflow_io: Box::new(
                 rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
@@ -568,8 +552,6 @@ impl RSpiceApp {
         }
         #[cfg(target_arch = "wasm32")]
         self.poll_browser_pdk_persistence(ctx);
-        #[cfg(target_arch = "wasm32")]
-        self.poll_browser_pack_restore(ctx);
         self.handle_shortcuts(ctx);
         #[cfg(target_arch = "wasm32")]
         rspice_app_services::workbench::browser::file_import::register_text_import_repaint_context(

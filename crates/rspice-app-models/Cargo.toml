@@ -28,10 +28,6 @@ rspice-model-library.workspace = true
 rspice-formats = { workspace = true, features = ["result-csv"] }
 rspice-simulation-contract.workspace = true
 rspice-simulation.workspace = true
-# Model Hub trust: the crate that signs a pack in RSpice Cloud is the crate
-# that verifies it here, on every target, so one code path reaches every
-# trust verdict.
-rspice-pack.workspace = true
 egui = { version = "0.35.0", default-features = false }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true

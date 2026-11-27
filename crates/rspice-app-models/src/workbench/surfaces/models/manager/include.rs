@@ -77,7 +77,7 @@ pub(super) fn include_page(
         page_empty_state(
             ui,
             "No model-source closure is loaded",
-            "Add a library or attach a pack to see its include graph.",
+            "Add a library to see its include graph.",
         );
         return;
     }

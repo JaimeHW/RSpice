@@ -70,7 +70,7 @@ pub mod workbench {
     pub mod design;
 
     pub mod app {
-        pub(crate) use rspice_app_state::workbench::app::schematic::placement::arm_pack_part;
+        pub(crate) use rspice_app_state::workbench::app::schematic::placement::arm_part_placement;
 
         pub(crate) use actions::property_edit::{
             PropertyFormParts, authoritative_component_property_sheet,

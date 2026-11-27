@@ -32,8 +32,8 @@ use crate::schematic::{
     ComponentCategory, ComponentPaletteEntry, PaletteRow, SupplyPaletteEntry, component_palette,
     device_class_keywords, palette_rows, supply_palette,
 };
-use crate::state::model_hub::{PartPlacement, plan_library_placement, refusal_sentence};
 use crate::state::model_library::{LibraryPart, ModelLibrary, library_part_index};
+use crate::state::part_placement::{PartPlacement, plan_library_placement, refusal_sentence};
 use crate::state::{
     ComponentType, FunctionalPartDescriptor, LibraryCellInstance, LibraryCellPlacementCandidate,
     Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports, engine_only_xspice_devices,
@@ -1317,7 +1317,7 @@ pub fn arm_variant(
     entry: &ComponentPaletteEntry,
     ctx: &egui::Context,
 ) {
-    let _ = crate::workbench::app::arm_pack_part(
+    let _ = crate::workbench::app::arm_part_placement(
         model,
         PartPlacement::NativeDevice {
             component_type: entry.kind,

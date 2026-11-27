@@ -511,11 +511,11 @@ impl Request for ProjectFileAction {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-/// Arm the schematic's placement tool with a part a model pack placed.
+/// Arm the schematic's placement tool with a part a model library holds.
 /// Raised by the models feature, which names the armed part in its own
 /// receipt, and taken straight after the call that raised it.
 #[derive(Clone, Debug)]
-pub struct ArmPartPlacement(pub rspice_app_state::state::model_hub::PartPlacement);
+pub struct ArmPartPlacement(pub rspice_app_state::state::part_placement::PartPlacement);
 
 impl Request for ArmPartPlacement {
     const DRAIN: Drain = Drain::AfterContribution;
@@ -613,21 +613,6 @@ impl Request for ShowOnSchematic {
 pub struct ShowProjectDeck;
 
 impl Request for ShowProjectDeck {
-    const DRAIN: Drain = Drain::AfterContribution;
-}
-
-/// Ask on the Models workspace's catalog to attach the model pack release
-/// `pack_id` `version` that offers the part `part_id`. Raised by the
-/// schematic's component shelf, and taken straight after the call that
-/// raised it.
-#[derive(Clone, Debug)]
-pub struct ConfirmPackAttach {
-    pub part_id: String,
-    pub pack_id: String,
-    pub version: String,
-}
-
-impl Request for ConfirmPackAttach {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 

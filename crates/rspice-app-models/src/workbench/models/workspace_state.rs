@@ -100,44 +100,6 @@ impl ModelsTableSort {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ModelPackFacet {
-    #[default]
-    All,
-    NeedsAttention,
-    Attached,
-    Foundry,
-    Vendor,
-    Community,
-    Redistributable,
-}
-
-impl ModelPackFacet {
-    pub const ALL: [Self; 7] = [
-        Self::All,
-        Self::NeedsAttention,
-        Self::Attached,
-        Self::Foundry,
-        Self::Vendor,
-        Self::Community,
-        Self::Redistributable,
-    ];
-
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::NeedsAttention => "Needs attention",
-            Self::Attached => "Attached",
-            Self::Foundry => "Foundry",
-            Self::Vendor => "Vendor",
-            Self::Community => "Community",
-            Self::Redistributable => "Redistributable",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum RSpicePartFacet {
     #[default]
     All,
@@ -209,289 +171,9 @@ impl RSpicePartFacet {
     }
 }
 
-/// User-visible lifecycle state for the Models & PDKs manager.
-///
-/// Engineering data remains authoritative in the model-library manager. This
-/// runtime-only state describes the last attempted workflow so diagnostics do
-/// not collapse distinct recovery paths into a generic error toast.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ModelsOperationalState {
-    #[default]
-    Ready,
-    InvalidInput,
-    ExecutionError,
-    ReadOnly,
-    Offline,
-    Conflict,
-    Stale,
-    Permission,
-    Entitlement,
-    Cancelled,
-    Corrupted,
-    /// The publisher withdrew what the operation named.
-    ///
-    /// Its own rung because no other one is true of it. The bytes are
-    /// authentic, so it is not `Corrupted`; the licence grants what it always
-    /// did, so it is not `Entitlement`; and nothing about the project or the
-    /// catalog moved under the operation, so it is not `Stale`. What happened
-    /// is that the thing being asked for was recalled, and the only recovery
-    /// is to use something else — which is a consequence no other rung states.
-    Recalled,
-}
-
-impl ModelsOperationalState {
-    /// The registry the coverage tests walk. `label` and `consequence` are
-    /// live — the packs page paints both — but nothing in a shipped frame
-    /// iterates every variant at once, so the array itself stays with the
-    /// tests that do.
-    #[cfg(test)]
-    pub const ALL: [Self; 12] = [
-        Self::Ready,
-        Self::InvalidInput,
-        Self::ExecutionError,
-        Self::ReadOnly,
-        Self::Offline,
-        Self::Conflict,
-        Self::Stale,
-        Self::Permission,
-        Self::Entitlement,
-        Self::Cancelled,
-        Self::Corrupted,
-        Self::Recalled,
-    ];
-
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Ready => "Ready",
-            Self::InvalidInput => "Invalid input",
-            Self::ExecutionError => "Execution error",
-            Self::ReadOnly => "Read-only",
-            Self::Offline => "Offline",
-            Self::Conflict => "Conflict",
-            Self::Stale => "Stale",
-            Self::Permission => "Permission",
-            Self::Entitlement => "Entitlement",
-            Self::Cancelled => "Cancelled",
-            Self::Corrupted => "Corrupted",
-            Self::Recalled => "Recalled",
-        }
-    }
-
-    /// What the failure left behind, and what has to happen next.
-    ///
-    /// This is the half that makes the vocabulary worth having. "Offline" and
-    /// "Conflict" are the same colour and the same length; they differ in
-    /// whether anything changed on this machine and in what the reader does
-    /// about it, and a workspace that prints only the word has told them
-    /// nothing they could not have guessed from the error text.
-    #[must_use]
-    pub const fn consequence(self) -> &'static str {
-        match self {
-            Self::Ready => "Nothing needs a decision.",
-            Self::InvalidInput => {
-                "Nothing was published. Correct the value the operation named and run it again."
-            }
-            Self::ExecutionError => {
-                "Nothing was published. The step that failed names what it was reading."
-            }
-            Self::ReadOnly => {
-                "Nothing was written. Open the project for editing before running this again."
-            }
-            Self::Offline => {
-                "Nothing changed on this machine. Installed packs, project pins and recorded \
-                 results are unaffected."
-            }
-            Self::Conflict => {
-                "Nothing was published. Resolve the contested identity before running this again."
-            }
-            // "against the current project" was the old second sentence, and
-            // it misdirected the two catalog cases outright: a rolled-back or
-            // expired catalog is nothing a reader does anything to the project
-            // about. What is true of every Stale refusal is that the thing it
-            // was decided against has moved on.
-            Self::Stale => {
-                "The candidate was discarded without mutation because the project or catalog \
-                 moved under it. Run it again against what is current now."
-            }
-            Self::Permission => {
-                "Nothing was written. The operating system refused RSpice this location."
-            }
-            Self::Entitlement => {
-                "Nothing was installed. This release's licence does not grant what the operation \
-                 needed."
-            }
-            Self::Cancelled => {
-                "Nothing was published. The operation stopped where it was asked to."
-            }
-            Self::Corrupted => {
-                "The bytes read do not describe what they claim to, so nothing from them entered \
-                 the catalog."
-            }
-            Self::Recalled => {
-                "Nothing changed on this machine. The publisher withdrew this release; anything \
-                 already installed or retained from it keeps working, and nothing new can be \
-                 taken from it."
-            }
-        }
-    }
-
-    /// [`Self::consequence`], for the operation that was attempted.
-    ///
-    /// "Nothing was published" is a sentence about an operation that would
-    /// have published something. Under a failed catalog refresh it told the
-    /// reader something had been held back that never could have been; what a
-    /// refused read leaves is a machine unchanged, and that is what it says.
-    #[must_use]
-    pub fn consequence_of(self, attempted: Option<&ModelsAttemptedOperation>) -> &'static str {
-        if !attempted.is_some_and(|operation| operation.reads_only) {
-            return self.consequence();
-        }
-        match self {
-            Self::InvalidInput => {
-                "Nothing changed on this machine. Correct the value the operation named and run \
-                 it again."
-            }
-            Self::ExecutionError => {
-                "Nothing changed on this machine. The step that failed names what it was reading."
-            }
-            Self::Conflict => {
-                "Nothing changed on this machine. Resolve the contested identity before running \
-                 this again."
-            }
-            Self::Cancelled => {
-                "Nothing changed on this machine. The operation stopped where it was asked to."
-            }
-            other => other.consequence(),
-        }
-    }
-
-    #[must_use]
-    pub fn from_failure(message: &str) -> Self {
-        let normalized = message.to_ascii_lowercase();
-        // Asked first, and deliberately. A recall carries the publisher's own
-        // prose, and that prose is arbitrary: a reason mentioning a licence or
-        // an invalid card would otherwise be classified by the *reason* rather
-        // than by the refusal, and the reader would be told to fix something.
-        if normalized.contains("recalled by its publisher") {
-            return Self::Recalled;
-        }
-        if normalized.contains("invalid")
-            || normalized.contains("must ")
-            || normalized.contains("required")
-        {
-            Self::InvalidInput
-        } else if normalized.contains("read-only") || normalized.contains("not open") {
-            Self::ReadOnly
-        } else if normalized.contains("offline")
-            || normalized.contains("unavailable")
-            // The Model Hub says an unreachable service in exactly these
-            // words. Without this the plainest possible statement of "the
-            // network is down" classified as a generic execution error, which
-            // is the one recovery path it definitely is not.
-            || normalized.contains("could not be reached")
-        {
-            Self::Offline
-        } else if normalized.contains("conflict")
-            || normalized.contains("collision")
-            || normalized.contains("duplicate")
-        {
-            Self::Conflict
-        } else if normalized.contains("stale")
-            || normalized.contains("drift")
-            || normalized.contains("changed on disk")
-        {
-            Self::Stale
-        } else if normalized.contains("permission")
-            || normalized.contains("access denied")
-            // Windows spells the same refusal "Access is denied. (os error 5)",
-            // which classified as a generic execution error and told the reader
-            // to read a diagnostic instead of to fix a directory ACL.
-            || normalized.contains("access is denied")
-        {
-            Self::Permission
-        } else if normalized.contains("license")
-            || normalized.contains("entitlement")
-            || normalized.contains("restricted")
-        {
-            Self::Entitlement
-        } else if normalized.contains("cancel") {
-            Self::Cancelled
-        } else if normalized.contains("corrupt") || normalized.contains("malformed") {
-            Self::Corrupted
-        } else {
-            Self::ExecutionError
-        }
-    }
-}
-
-/// What the last model-source or Model Hub operation was, beside its receipt.
-///
-/// A receipt says what happened; without this it does not say what was being
-/// attempted, and "the pack format refused" is a different sentence depending
-/// on whether the workspace was refreshing a catalog or installing a release.
-/// It is captured where the operation starts, which is the only place that
-/// knows, and it outlives the operation so a failure can still name itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelsAttemptedOperation {
-    /// The operation in the workspace's own words, e.g. `model-catalog
-    /// refresh` or `model-pack install of 'rspice-diodes 1.2.0'`.
-    pub label: String,
-    /// Whether the workspace can re-issue it from this record alone. Only the
-    /// catalog refresh takes no argument a user would have to choose again; an
-    /// install is retried from the release row that named the version, so
-    /// offering a bare "retry" for one would be a button that guesses.
-    pub reissuable: bool,
-    /// The pack this operation puts on the machine, when it is one that does.
-    ///
-    /// One model-catalog operation runs at a time, so this plus
-    /// `model_import_in_progress` is exactly "which pack is landing right
-    /// now" — which is what lets the ledger light the row a reader is waiting
-    /// on rather than every row or none. It is recorded here rather than in a
-    /// field of its own because this record is already written at every start
-    /// and read after every finish, and a second field would be a second
-    /// thing to clear.
-    ///
-    /// `None` for a catalog refresh, a removal, a re-proof and every
-    /// model-source import: none of them puts a release on this machine.
-    pub landing_pack: Option<String>,
-    /// Whether the operation only reads: a catalog refresh or a re-proof,
-    /// which publish nothing whichever way they end. A refusal of one leaves
-    /// this machine as it was, and its consequence says that instead.
-    pub reads_only: bool,
-}
-
-impl ModelsAttemptedOperation {
-    /// A model-source operation: it publishes what it reads, lands no pack,
-    /// and is retried from wherever it was asked for.
-    #[must_use]
-    pub fn model_source(label: impl Into<String>) -> Self {
-        Self {
-            label: label.into(),
-            reissuable: false,
-            landing_pack: None,
-            reads_only: false,
-        }
-    }
-}
-
-/// What re-proving one installed release concluded, this session.
-///
-/// Deliberately not durable. A re-proof is a statement about bytes at one
-/// instant; restoring "verified" from a saved session would be a claim about
-/// a machine that has been running for a week since.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PackReProof {
-    /// The archive verified end to end under the release key and still
-    /// describes the release its directory claims.
-    Verified,
-    /// It did not, in the words the pack format or the store used.
-    Failed(String),
-}
-
 /// Models-manager selections and filters that do not own engineering data.
 /// Stable strings are used only for presentation; every mutation re-resolves
-/// the live library/pack/source identity and fails closed if it changed.
+/// the live library/source identity and fails closed if it changed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelsWorkbenchViewState {
     #[serde(default)]
@@ -499,26 +181,12 @@ pub struct ModelsWorkbenchViewState {
     #[serde(default)]
     pub project_facet: ProjectModelFacet,
     #[serde(default)]
-    pub pack_facet: ModelPackFacet,
-    #[serde(default)]
     pub part_facet: RSpicePartFacet,
     #[serde(default)]
     pub catalog_query: String,
     /// How the project catalog table is ordered.
     #[serde(default)]
     pub catalog_sort: ModelsTableSort,
-    #[serde(default)]
-    pub selected_pack: Option<String>,
-    /// Which shipped-corpus pack the corpus table below the ledger has
-    /// selected.
-    ///
-    /// Its own field, because it is its own table. Both selections lived in
-    /// `selected_pack`, and the corpus detail writes its fallback back to
-    /// state on every frame — so selecting a pack in the ledger was overwritten
-    /// by the corpus table before the next paint, and the ledger's inspector
-    /// silently reverted to its first row.
-    #[serde(default)]
-    pub selected_corpus_pack: Option<String>,
     #[serde(default)]
     pub selected_part: Option<String>,
     /// Zero-based offset into the exact current part-catalog query.
@@ -540,26 +208,6 @@ pub struct ModelsWorkbenchViewState {
     /// sessions must derive health from retained sources, not trust a toast.
     #[serde(skip)]
     pub action_receipt: Option<Result<String, String>>,
-    #[serde(skip)]
-    pub operational_state: ModelsOperationalState,
-    /// What that receipt is about. Set where an operation starts.
-    #[serde(skip)]
-    pub attempted_operation: Option<ModelsAttemptedOperation>,
-    /// Re-proof outcomes keyed `<pack id>@<version>`. An absent entry means
-    /// nothing has re-proved that release since this session started, which is
-    /// a state the pack table names rather than one it hides.
-    #[serde(skip)]
-    pub pack_verification: std::collections::BTreeMap<String, PackReProof>,
-    /// What the catalog states the offered release changes about the held one,
-    /// for the pack the ledger has selected.
-    ///
-    /// Never durable, and never recomputed for a question it has already
-    /// answered: the key inside it names the *digest* of the snapshot both
-    /// release records were read from, so a catalog replaced wholesale cannot
-    /// be handed an answer it did not earn, and a repainting inspector reads
-    /// the value rather than walking two part lists sixty times a second.
-    #[serde(skip)]
-    pub release_diff: Option<crate::state::model_hub::ReleaseDiff>,
     /// One authenticated source import may parse at a time. Parsing is owned
     /// by a native background thread or a dedicated browser worker; these
     /// fields are presentation only and never restore as engineering state.
@@ -567,56 +215,8 @@ pub struct ModelsWorkbenchViewState {
     pub model_import_in_progress: bool,
     #[serde(skip)]
     pub model_import_label: Option<String>,
-    /// Completed fraction of the operation in progress, when its length is
-    /// known in advance. Only a pack download has one, and it comes from the
-    /// signed catalog rather than from the service that serves the bytes.
-    #[serde(skip)]
-    pub model_import_progress: Option<f32>,
     #[serde(skip)]
     pub dialog: Option<ModelsWorkbenchDialog>,
-    /// Which distributed releases the pack table lists.
-    #[serde(default)]
-    pub hub_facet: ModelHubFacet,
-    /// Whether this visit to the catalog already asked to refresh a stale
-    /// catalog.
-    ///
-    /// Opening the catalog refreshes one older than a week, once per visit.
-    /// The latch is what makes it once rather than every frame the page is
-    /// visible, which is the shape a per-frame condition would otherwise have.
-    /// It holds whichever way the refresh ends and is released when a later
-    /// visit begins (see [`Self::catalog_page_frame`]).
-    #[serde(skip)]
-    pub catalog_refresh_requested: bool,
-    /// The last frame the catalog page was drawn, which is how a visit is told
-    /// from the frame after it: a visit is an unbroken run of frames showing
-    /// the page, and the first frame of a later one releases the latch above.
-    #[serde(skip)]
-    pub catalog_page_frame: Option<u64>,
-    /// What the last recall report was about: which catalog, and which pins.
-    ///
-    /// A project pinned to a recalled release is told once per (catalog, pins)
-    /// pair rather than on every frame, and told *again* when either half
-    /// moves — which is what makes opening a second project, or refreshing
-    /// into a catalog that recalls something, a fresh piece of news. Both
-    /// halves are content, so neither a project nor a catalog can present a
-    /// key it did not earn, however it arrived.
-    ///
-    /// Never durable. A saved "already told them" would silence the notice for
-    /// a reader who has not been told anything this session.
-    #[serde(skip)]
-    pub recall_notice: Option<RecallNoticeScope>,
-}
-
-/// What a recall report describes: which catalog, and which project pins.
-///
-/// Both halves, because neither alone identifies the thing reported on. The
-/// catalog half is the snapshot digest, so a refresh that changes the recall
-/// list re-arms the notice; the pin half moves when the project's commitments
-/// do, including when a different project is opened over this one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecallNoticeScope {
-    pub catalog_digest: String,
-    pub pack_pin_key: u64,
 }
 
 impl Default for ModelsWorkbenchViewState {
@@ -624,12 +224,9 @@ impl Default for ModelsWorkbenchViewState {
         Self {
             catalog_scope: ModelsCatalogScope::default(),
             project_facet: ProjectModelFacet::default(),
-            pack_facet: ModelPackFacet::default(),
             part_facet: RSpicePartFacet::default(),
             catalog_query: String::new(),
             catalog_sort: ModelsTableSort::default(),
-            selected_pack: None,
-            selected_corpus_pack: None,
             selected_part: None,
             part_catalog_offset: 0,
             selected_symbol: None,
@@ -639,80 +236,17 @@ impl Default for ModelsWorkbenchViewState {
             include_direct_only: false,
             include_definition_query: String::new(),
             action_receipt: None,
-            operational_state: ModelsOperationalState::Ready,
-            attempted_operation: None,
-            pack_verification: std::collections::BTreeMap::new(),
-            release_diff: None,
             model_import_in_progress: false,
             model_import_label: None,
-            model_import_progress: None,
             dialog: None,
-            hub_facet: ModelHubFacet::default(),
-            catalog_refresh_requested: false,
-            catalog_page_frame: None,
-            recall_notice: None,
         }
     }
 }
 
 impl ModelsWorkbenchViewState {
-    /// Put an action's outcome on the workspace's banner: its receipt, and
-    /// the operational state a failure names.
+    /// Put an action's outcome on the workspace's banner.
     pub fn note_receipt(&mut self, result: Result<String, String>) {
-        self.operational_state = match &result {
-            Ok(_) => ModelsOperationalState::Ready,
-            Err(message) => ModelsOperationalState::from_failure(message),
-        };
         self.action_receipt = Some(result);
-    }
-}
-
-/// Which packs the Model Hub ledger lists.
-///
-/// The ledger always spans installed *and* available packs, because "what this
-/// machine has" and "what the catalog offers" are the same question asked once.
-/// The facet narrows that one list; it never switches between two.
-///
-/// # Why these five, and not the old five
-///
-/// The facets used to name release *states* — `Updatable` and `Incompatible`
-/// were two of them — which made a reader pick the rail entry matching whatever
-/// exception they had already guessed at. The ledger states one exception per
-/// pack in its own column now, so the question a facet answers is the reader's:
-/// what needs me, what is here, what has this design committed to, and what is
-/// on offer. A saved session that named a state facet is restored onto
-/// `NeedsAttention`, which is where both of those exceptions are now reported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ModelHubFacet {
-    #[default]
-    All,
-    /// An update on offer and a release this build cannot run are both
-    /// attention rungs.
-    NeedsAttention,
-    Installed,
-    Pinned,
-    Available,
-}
-
-impl ModelHubFacet {
-    pub const ALL: [Self; 5] = [
-        Self::All,
-        Self::NeedsAttention,
-        Self::Installed,
-        Self::Pinned,
-        Self::Available,
-    ];
-
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::NeedsAttention => "Needs attention",
-            Self::Installed => "Installed",
-            Self::Pinned => "Pinned",
-            Self::Available => "Available",
-        }
     }
 }
 
@@ -724,7 +258,6 @@ impl ModelHubFacet {
 pub enum ModelsCatalogScope {
     #[default]
     Project,
-    InstalledPacks,
     RSpiceLibrary,
 }
 
@@ -733,93 +266,8 @@ impl ModelsCatalogScope {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Project => "Project",
-            Self::InstalledPacks => "Installed packs",
             Self::RSpiceLibrary => "RSpice library",
         }
-    }
-}
-
-/// Everything a distributed-release confirmation states before it acts.
-///
-/// It is a captured projection rather than a live query: the dialog must show
-/// the same release it will install, and re-reading the catalog while the
-/// dialog is open could change the answer between the sentence and the click.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PackReleaseConfirmation {
-    pub name: String,
-    pub version: String,
-    pub spdx: String,
-    pub archive_length: u64,
-    pub parts: usize,
-    pub capabilities: Vec<String>,
-    /// Capabilities this engine build does not offer. Non-empty disables the
-    /// action and is the reason shown for it.
-    pub missing: Vec<String>,
-    /// The one part this confirmation came to add, when it came from the
-    /// component shelf rather than from the pack table.
-    pub part: Option<String>,
-    /// The installed version this replaces, when the action is an update.
-    pub replaces: Option<String>,
-}
-
-impl PackReleaseConfirmation {
-    /// Describes one published release from whatever the session already
-    /// proved about it.
-    ///
-    /// The signed catalog is preferred because it is the only source that
-    /// knows the download size; an installed release whose catalog entry has
-    /// since been withdrawn is still described, from its own PDK manifest,
-    /// so a part already on this machine never becomes undescribable.
-    #[must_use]
-    pub fn for_release(
-        service: &crate::services::model_hub::ModelHubService,
-        pack_id: &str,
-        version: &str,
-        part: Option<String>,
-    ) -> Option<Self> {
-        let hub = service.hub()?;
-        let listed = hub.snapshot().and_then(|snapshot| {
-            snapshot
-                .packs
-                .iter()
-                .find(|pack| pack.id == pack_id)
-                .and_then(|pack| {
-                    pack.releases
-                        .iter()
-                        .find(|release| release.version == version)
-                        .map(|release| (pack, release))
-                })
-        });
-        let missing =
-            |capabilities: &[String]| crate::state::model_hub::missing_capabilities(capabilities);
-        if let Some((pack, release)) = listed {
-            return Some(Self {
-                name: pack.name.clone(),
-                version: release.version.clone(),
-                spdx: release.spdx.clone(),
-                archive_length: release.archive_length,
-                parts: release.parts.len(),
-                capabilities: release.capabilities.clone(),
-                missing: missing(&release.capabilities),
-                part,
-                replaces: None,
-            });
-        }
-        let installed = hub
-            .installed()
-            .iter()
-            .find(|pack| pack.pack_id() == pack_id && pack.version() == version)?;
-        Some(Self {
-            name: installed.manifest.pack.name.clone(),
-            version: installed.version().to_owned(),
-            spdx: installed.manifest.license.spdx.clone(),
-            archive_length: 0,
-            parts: installed.manifest.parts.len(),
-            capabilities: installed.manifest.requires.capabilities.clone(),
-            missing: missing(&installed.manifest.requires.capabilities),
-            part,
-            replaces: None,
-        })
     }
 }
 
@@ -854,30 +302,6 @@ pub enum ModelsWorkbenchDialog {
         /// same card in another library.
         right: Option<(String, String)>,
     },
-    ConfirmPack {
-        pack_id: String,
-        attach: bool,
-        /// The distributed release this confirmation is about, when it is one.
-        ///
-        /// A shipped-corpus attach and a signed-release install are the same
-        /// user decision — "commit this pack to this project" — asked about
-        /// two different objects. One dialog asks it, and this is what makes
-        /// the release case able to state its version, licence, size, and
-        /// capability verdict before the user says yes.
-        release: Option<Box<PackReleaseConfirmation>>,
-    },
-    ConfirmPart {
-        pack_id: String,
-        part_name: String,
-    },
-    /// The Model Hub's reference material, in one place: what the held catalog
-    /// is, the contract it is accepted under, and the last thing this session
-    /// tried to do with it.
-    ///
-    /// It carries no fields because it states nothing the workspace does not
-    /// already hold. Capturing a copy would let the card and the page it was
-    /// opened from disagree after a refresh lands underneath it.
-    HeldCatalog,
     AuthorTechnologySymbolVariant {
         package_id: String,
         source_cell: String,

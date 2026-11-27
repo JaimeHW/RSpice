@@ -202,6 +202,6 @@ fn arm_library_part(
     placement: PartPlacement,
     ctx: &egui::Context,
 ) {
-    let _ = crate::workbench::app::arm_pack_part(model, placement);
+    let _ = crate::workbench::app::arm_part_placement(model, placement);
     finish_shelf_placement(wb, ctx);
 }

@@ -1,13 +1,12 @@
 //! The application's models feature.
 //!
-//! The Models & PDKs workspace (the project's models, the installed packs and
-//! the RSpice library, the Model Hub's shelf and releases, corners and bins),
-//! the device-model editor, PDK authoring and the PDK settings, together with the feature's
-//! commands, its state slot and its registration. It works on the shared
-//! model in `rspice-app-state`, uses the platform services of
-//! `rspice-app-services` and the run tier of `rspice-app-runs`, and registers
-//! with the workbench framework of `rspice-app-workbench`; it reaches no
-//! other feature.
+//! The Models & PDKs workspace (the project's models, the RSpice library,
+//! corners and bins), the device-model editor, PDK authoring and the PDK
+//! settings, together with the feature's commands, its state slot and its
+//! registration. It works on the shared model in `rspice-app-state`, uses the
+//! platform services of `rspice-app-services` and the run tier of
+//! `rspice-app-runs`, and registers with the workbench framework of
+//! `rspice-app-workbench`; it reaches no other feature.
 //!
 //! `rspice-app` re-exports each module at the path it has always had, so the
 //! modules keep the layout they had inside it.
@@ -41,12 +40,6 @@ use rspice_app_services::io;
 use rspice_app_state::{diagnostics, product, quantity, state, time_compat};
 use rspice_app_workbench::ui;
 
-pub mod services {
-    //! The models feature's services, at their application paths.
-
-    pub(crate) use rspice_app_services::services::model_hub;
-}
-
 mod simulation {
     pub(crate) use rspice_app_runs::simulation::controller;
 }
@@ -64,7 +57,7 @@ pub mod workbench {
         /// Arming the schematic's cursor for a part the shelf placed is an
         /// operation on the model, at the path the shelf's documentation and
         /// its cases name it by.
-        pub use rspice_app_state::workbench::app::schematic::placement::arm_pack_part;
+        pub use rspice_app_state::workbench::app::schematic::placement::arm_part_placement;
 
         pub mod dialogs {
             pub mod pdk_settings;

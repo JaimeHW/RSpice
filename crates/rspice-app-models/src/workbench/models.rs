@@ -8,8 +8,6 @@
 pub mod commands;
 pub mod model_editor_workflow;
 #[cfg(target_arch = "wasm32")]
-pub mod pack_persistence;
-#[cfg(target_arch = "wasm32")]
 pub mod pdk_persistence;
 pub mod pdk_workflow;
 pub mod workspace_state;
@@ -26,7 +24,7 @@ use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
     FeatureSurface, NoHandles, Reads,
 };
-use crate::workbench::models::workspace_state::{ModelsWorkbenchDialog, PackReleaseConfirmation};
+use crate::workbench::models::workspace_state::ModelsWorkbenchDialog;
 use crate::workbench::slots::ModelsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use commands::ModelsCommand;
@@ -107,56 +105,9 @@ impl ModelsFeature {
             ctx,
         );
     }
-
-    /// Take the model packs this browser kept, on the frame their restore
-    /// lands: the hub's store takes them, and a pack that does not prove
-    /// goes on the workspace's operation ladder.
-    pub fn poll_browser_pack_restore(cx: &mut Cx<'_, ModelsFeature>, ctx: &egui::Context) {
-        use crate::workbench::models::pack_persistence::{
-            PackRestoreParts, poll_browser_pack_restore,
-        };
-        poll_browser_pack_restore(
-            &mut PackRestoreParts {
-                models_view: &mut cx.state.models_view,
-                model: cx.model,
-                model_hub: cx.handles.model_hub,
-            },
-            ctx,
-        );
-    }
 }
 
 impl ModelsFeature {
-    /// Put up the confirmation of attaching the model pack release
-    /// `pack_id` `version` for its part `part_id`, or say on the status bar
-    /// that the model hub no longer describes that release. Returns whether
-    /// the confirmation is up, for the caller to show the catalog it sits on.
-    pub fn confirm_pack_attach(
-        cx: &mut Cx<'_, ModelsFeature>,
-        part_id: String,
-        pack_id: String,
-        version: String,
-    ) -> bool {
-        let Some(release) = PackReleaseConfirmation::for_release(
-            cx.handles.model_hub,
-            &pack_id,
-            &version,
-            Some(part_id.clone()),
-        ) else {
-            cx.wb.prompt(format!(
-                "The model hub no longer describes {pack_id} {version}, so '{part_id}' cannot be \
-                 added."
-            ));
-            return false;
-        };
-        cx.state.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
-            pack_id,
-            attach: true,
-            release: Some(Box::new(release)),
-        });
-        true
-    }
-
     /// Show the catalog model `model` of `library` on the Models workspace's
     /// catalog, saying on the status bar when the project no longer holds
     /// the library.
@@ -385,7 +336,6 @@ impl CommandSet for ModelsCommand {
                 .open(cx.model.pdk_config.clone()),
             Self::RescanModelLibraries => {
                 crate::state::pdk_config::discover_model_files(&mut cx.model.pdk_config);
-                cx.model.model_library_manager.discover_spice_packs();
                 // Reported here, so the toolbar, the menu and the palette all
                 // say the same. A clean rescan answers the gesture; one that
                 // could not read a library is worth interrupting for.

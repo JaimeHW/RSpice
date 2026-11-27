@@ -16,9 +16,9 @@ use super::*;
 use crate::schematic::{ComponentCategory, component_palette, supply_palette};
 #[cfg(test)]
 use crate::schematic::{PaletteRow, palette_rows};
-#[cfg(test)]
-use crate::state::model_hub::PartPlacement;
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
+#[cfg(test)]
+use crate::state::part_placement::PartPlacement;
 #[cfg(test)]
 use crate::state::{ComponentType, engine_only_xspice_devices};
 #[cfg(test)]

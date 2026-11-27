@@ -49,35 +49,13 @@ pub(super) fn announced_widget(ui: &mut Ui, widget: egui::Label, label: &str) {
     });
 }
 
-/// A refused action on any other manager page, stated on the page it was
-/// taken from: what refused it and what that left behind. Those pages name
+/// A refused action on any manager page, stated on the page it was taken
+/// from: the failure mark and the reason, wrapped to the page. The pages name
 /// their actions in their own toolbars, and offer no retry here.
 pub(super) fn page_refusal(ui: &mut Ui, state: &ModelsState) {
     let Some(Err(reason)) = &state.models_view.action_receipt else {
         return;
     };
-    let operational = state.models_view.operational_state;
-    refusal_frame(
-        ui,
-        operational,
-        operational.consequence_of(state.models_view.attempted_operation.as_ref()),
-        reason,
-        |_| {},
-        |_| {},
-    );
-}
-
-/// A refusal's frame: the failure mark and its state, `beside` them whatever
-/// names the operation, then the reason and its consequence for the operation
-/// it refused, and `after` them whatever offers to run it again.
-pub(super) fn refusal_frame(
-    ui: &mut Ui,
-    state: ModelsOperationalState,
-    consequence: &str,
-    reason: &str,
-    beside: impl FnOnce(&mut Ui),
-    after: impl FnOnce(&mut Ui),
-) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_inset)
@@ -85,22 +63,16 @@ pub(super) fn refusal_frame(
         .inner_margin(egui::Margin::symmetric(12, 7))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
-            ui.spacing_mut().item_spacing.y = 3.0;
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                marked_line(ui, Problem::Failure, state.label());
-                beside(ui);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = MARK_ADVANCE - MARK_SIDE;
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::Vec2::splat(MARK_SIDE), Sense::hover());
+                paint_problem_mark(ui.painter(), rect, Problem::Failure);
+                announced_widget(
+                    ui,
+                    egui::Label::new(RichText::new(reason).small().color(t.color.text)).wrap(),
+                    reason,
+                );
             });
-            announced(
-                ui,
-                RichText::new(reason).small().color(t.color.text),
-                reason,
-            );
-            announced(
-                ui,
-                RichText::new(consequence).small().color(t.color.text_dim),
-                consequence,
-            );
-            after(ui);
         });
 }

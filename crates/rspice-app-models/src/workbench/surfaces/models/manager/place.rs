@@ -1,25 +1,11 @@
-//! What placing one shelf row would actually do.
+//! What placing one shelf row does.
 //!
 //! Browsing parts a schematic cannot receive is a catalogue, not a chooser, so
-//! the shelf offers Place — and Place has to mean the same thing whichever of
-//! the three places on this machine a part came from.
-//!
-//! # One route, entered from two doors
-//!
-//! There is exactly one way a part reaches the cursor:
-//! [`crate::workbench::app::arm_pack_part`], taking a
-//! [`PartPlacement`]. The Model Hub already drives it — `InstallPack { part }`
-//! retains the bytes, publishes the project revision, and arms the cursor last,
-//! in that order, so a placement is never armed against a part the project does
-//! not yet hold. This module does not add a second route; it decides which of
-//! the two doors a row goes through.
-//!
-//! - A definition the project already holds — compiled in, or retained — is
-//!   armed directly. Nothing needs downloading, proving, or publishing.
-//! - A part of an installed release the project has *not* adopted needs its
-//!   bytes retained first, so it is enqueued as the same `InstallPack` request
-//!   the pack confirmation raises. The install step is skipped for a release
-//!   already on this machine, so the round trip is a retention and an arming.
+//! the shelf offers Place. There is exactly one way a part reaches the cursor:
+//! [`crate::workbench::app::arm_part_placement`], taking a [`PartPlacement`]
+//! planned from the loaded library that holds the part. Every row the shelf
+//! lists is in such a library, so nothing needs retaining or publishing before
+//! the cursor is armed.
 //!
 //! # Refusal is a sentence, not a missing button
 //!
@@ -29,72 +15,30 @@
 
 use super::*;
 
-use crate::state::model_hub::{
-    InstalledPack, PartPlacement, plan_library_placement, refusal_sentence,
-};
+use crate::state::part_placement::{PartPlacement, plan_library_placement, refusal_sentence};
 
-use held_parts::{PartOrigin, ShelfRow};
+use shelf::ShelfRow;
 
-/// How one shelf row reaches the cursor.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum PlaceRoute {
-    /// Arm now: the definition is already in this project's catalog.
-    Arm(Box<PartPlacement>),
-    /// Retain the release's part into the project first. The hub operation
-    /// arms the cursor when it completes, which is why nothing is armed here.
-    Retain {
-        pack_id: String,
-        version: String,
-        part: String,
-    },
-}
-
-/// The route this row would take, or why it has none.
+/// The placement this row would arm, or why it has none.
 ///
 /// The error is the sentence a reader sees on the disabled control, so it says
 /// what about *this part* cannot be drawn rather than that something failed.
-pub(super) fn place_route(
-    manager: &ModelLibraryManager,
-    row: &ShelfRow,
-) -> Result<PlaceRoute, String> {
-    match &row.origin {
-        PartOrigin::Foundation { library } | PartOrigin::ProjectRetained { library } => {
-            let library = manager.get_library(library).ok_or_else(|| {
-                format!("Model library '{library}' is no longer loaded in this session.")
-            })?;
-            plan_library_placement(library, &row.hit.name)
-                .map(|placement| PlaceRoute::Arm(Box::new(placement)))
-                .map_err(refusal_sentence)
-        }
-        PartOrigin::InstalledPack { pack_id, version } => Ok(PlaceRoute::Retain {
-            pack_id: pack_id.clone(),
-            version: version.clone(),
-            part: row.hit.name.clone(),
-        }),
-        // The corpus tree is a directory of source files, not a project
-        // closure. A row still classified as one is a definition no loaded
-        // library holds — so there is nothing in this project to place, and
-        // adding the part is what authenticates and retains its bytes. The
-        // shelf offers exactly that, beside this, on the same row.
-        PartOrigin::Corpus => Err(format!(
-            "'{}' is a shipped-corpus definition this project has not added. Add it to the \
-             project first — an instance of source the project does not hold would leave a \
-             schematic that cannot be simulated anywhere else.",
-            row.hit.name
-        )),
-    }
+pub(super) fn plan(manager: &ModelLibraryManager, row: &ShelfRow) -> Result<PartPlacement, String> {
+    let library = manager.get_library(&row.part.library).ok_or_else(|| {
+        format!(
+            "Model library '{}' is no longer loaded in this session.",
+            row.part.library
+        )
+    })?;
+    plan_library_placement(library, &row.part.part_id).map_err(refusal_sentence)
 }
 
 /// Why this session cannot place anything at all right now.
 ///
-/// Separate from [`place_route`] because these are facts about the session, not
-/// about the part: they change with which document is in front and whether the
+/// Separate from [`plan`] because these are facts about the session, not about
+/// the part: they change with which document is in front and whether the
 /// project may be written, and they apply to every row on the page at once.
-pub(super) fn session_block_reason(
-    model: &Model,
-    state: &ModelsState,
-    route: &PlaceRoute,
-) -> Option<&'static str> {
+pub(super) fn session_block_reason(model: &Model) -> Option<&'static str> {
     // A placement is armed on a sheet's cursor, so there has to be a sheet.
     // The active view having no schematic buffer is exactly that condition:
     // a symbol view is in front, and a device has nowhere to land on one.
@@ -106,9 +50,6 @@ pub(super) fn session_block_reason(
     if model.safe_mode.project_read_only() {
         return Some("This project is open read-only, so it cannot receive an instance.");
     }
-    if matches!(route, PlaceRoute::Retain { .. }) && state.models_view.model_import_in_progress {
-        return Some("Another model-source operation is still running.");
-    }
     None
 }
 
@@ -116,8 +57,7 @@ pub(super) fn session_block_reason(
 ///
 /// Runs after the frame, from the workspace's own action queue, because a
 /// placement ends in two things a render borrow cannot reach: the canvas
-/// focus and the workspace receipt. It is the same completion the Model Hub
-/// performs when a retention lands, one operation later.
+/// focus and the workspace receipt.
 pub(super) fn arm(
     wb: &mut WorkbenchSession,
     state: &mut ModelsState,
@@ -135,47 +75,24 @@ pub(super) fn arm(
 
 /// Everything the shelf needs to offer Place on one row.
 ///
-/// Assembled once per painted detail rather than per control so the route is
-/// planned exactly once for the row a reader is looking at.
+/// Assembled once per painted detail rather than per control so the placement
+/// is planned exactly once for the row a reader is looking at.
 pub(super) struct PlaceOffer {
-    pub(super) route: Option<PlaceRoute>,
+    pub(super) placement: Option<Box<PartPlacement>>,
     pub(super) blocked: Option<String>,
 }
 
 impl PlaceOffer {
-    pub(super) fn for_row(
-        model: &Model,
-        state: &ModelsState,
-        installed: &[InstalledPack],
-        row: &ShelfRow,
-    ) -> Self {
-        let manager = &model.model_library_manager;
-        // A retention names a release; if the store no longer holds it, the
-        // route is a promise about something that is gone.
-        if let PartOrigin::InstalledPack { pack_id, version } = &row.origin
-            && !installed
-                .iter()
-                .any(|pack| pack.pack_id() == pack_id && pack.version() == version)
-        {
-            return Self {
-                route: None,
-                blocked: Some(format!(
-                    "{pack_id} {version} is no longer installed on this machine."
-                )),
-            };
-        }
-        match place_route(manager, row) {
+    pub(super) fn for_row(model: &Model, row: &ShelfRow) -> Self {
+        match plan(&model.model_library_manager, row) {
             Err(reason) => Self {
-                route: None,
+                placement: None,
                 blocked: Some(reason),
             },
-            Ok(route) => {
-                let blocked = session_block_reason(model, state, &route).map(str::to_owned);
-                Self {
-                    route: Some(route),
-                    blocked,
-                }
-            }
+            Ok(placement) => Self {
+                placement: Some(Box::new(placement)),
+                blocked: session_block_reason(model).map(str::to_owned),
+            },
         }
     }
 }

@@ -12,7 +12,7 @@ use rspice_app_design::workbench::design::navigator::tests::shelf::{
     draw_component_shelf, retained_model_library,
 };
 use rspice_app_design::workbench::design::navigator::tests::*;
-use rspice_app_state::state::model_hub::PartPlacement;
+use rspice_app_state::state::part_placement::PartPlacement;
 use rspice_app_state::state::{
     ComponentType, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
     engine_only_xspice_devices,

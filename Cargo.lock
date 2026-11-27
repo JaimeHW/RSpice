@@ -5369,7 +5369,6 @@ dependencies = [
  "rspice-core",
  "rspice-formats",
  "rspice-model-library",
- "rspice-pack",
  "rspice-project",
  "rspice-schematic-editor",
  "rspice-simulation",

@@ -1,7 +1,7 @@
 //! The workspace state's wire spellings and the catalog facts its facets
-//! and operational states promise the reader.
+//! promise the reader.
 
-use super::{ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort, RSpicePartFacet};
+use super::{ModelsCatalogSortKey, ModelsTableSort, RSpicePartFacet};
 
 /// Every class the catalog assigns is reachable from a class chip, or is
 /// named here as one nothing offers.
@@ -51,53 +51,4 @@ fn a_second_click_on_the_ordered_column_reverses_it() {
         !sort.descending,
         "a column taken over inherits no direction from the one it replaced"
     );
-}
-
-#[test]
-fn models_failures_map_to_actionable_operational_states() {
-    use ModelsOperationalState as State;
-
-    for (message, expected) in [
-        ("Section name is required", State::InvalidInput),
-        ("Project is read-only", State::ReadOnly),
-        ("Catalog is offline", State::Offline),
-        ("Duplicate model conflict", State::Conflict),
-        ("Source drift detected", State::Stale),
-        ("Access denied by permission policy", State::Permission),
-        ("Pack license is restricted", State::Entitlement),
-        ("Operation cancelled", State::Cancelled),
-        ("Metadata is corrupted", State::Corrupted),
-        ("malformed archive: truncated", State::Corrupted),
-        ("Parser failed", State::ExecutionError),
-        // The three trust refusals the Model Hub raises, in the exact
-        // sentences it writes. A classifier that reads message text is
-        // only as good as the texts it was checked against.
-        (
-            "the model hub offered catalog serial 40, which is stale beside serial 41 this \
-             machine has already accepted; the held catalog was kept",
-            State::Stale,
-        ),
-        (
-            "the held catalog is stale: it expired at 2026-07-01T00:00:00Z, so the hub \
-             offers nothing until it is refreshed",
-            State::Stale,
-        ),
-        (
-            "rspice-opamps 2.0.0 was recalled by its publisher: an invalid bias network was \
-             published under a restricted licence",
-            State::Recalled,
-        ),
-        // The three states this replaces — rollback, partial, recovered —
-        // had classifiers and no producer: nothing that writes a models
-        // receipt could say "rolled back", "partial" or "recovered", so
-        // they were vocabulary the workspace could never reach. They now
-        // land where every other unclassified failure lands.
-        ("Transaction rolled back", State::ExecutionError),
-        (
-            "Import completed with partial results",
-            State::ExecutionError,
-        ),
-    ] {
-        assert_eq!(State::from_failure(message), expected, "{message}");
-    }
 }
