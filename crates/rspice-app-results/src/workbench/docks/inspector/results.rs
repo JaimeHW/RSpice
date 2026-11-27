@@ -382,6 +382,21 @@ fn active_result_pane(
         property_row(ui, "Scale", scale);
     }
     property_row(ui, "Limit mask", facts.limit_mask);
+    // A polar chart has no X or Y interval: its one ruled axis is the
+    // radius, which the sheet bar's radius mode sets.
+    if viewer == rspice_results::result_presentation::ResultViewer::Polar {
+        if let Some(radius) = state
+            .model
+            .simulation
+            .active_analysis()
+            .and_then(|analysis| {
+                rspice_results_ui::polar::radius_summary(analysis, &state.results.session.polar)
+            })
+        {
+            property_row(ui, "Radius", &radius);
+        }
+        return;
+    }
     // Explicit limits, each with its own fit. Comparing two runs on identical
     // axes, or holding a decade while a parameter sweeps, cannot be done by
     // dragging; the fields show the viewport, so no row restates it.

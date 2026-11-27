@@ -112,6 +112,35 @@ pub fn polar_ring_ceiling(peak: f64) -> f64 {
         .unwrap_or(peak)
 }
 
+/// The outer ring and ring count a polar chart rules a linear magnitude to:
+/// the tightest ceiling at or past `peak` that is four to six rings of a
+/// 1-2-2.5-5 step, so the locus fills the chart and every ring lands on a
+/// number a reader can hold. A peak that is not a positive number rules to
+/// five rings out to 1.
+pub fn polar_rings(peak: f64) -> (f64, u32) {
+    if !(peak.is_finite() && peak > 0.0) {
+        return (1.0, 5);
+    }
+    let exponent = peak.log10().floor() as i32;
+    let mut best: Option<(f64, u32)> = None;
+    for decade in [10.0_f64.powi(exponent - 1), 10.0_f64.powi(exponent)] {
+        for mantissa in [1.0, 2.0, 2.5, 5.0] {
+            let step = mantissa * decade;
+            // The tolerance keeps a peak sitting exactly on a ring, 1.0 on a
+            // step of 0.2, from rounding up to one ring more.
+            let rings = (peak / step * (1.0 - 1.0e-12)).ceil().max(1.0);
+            if !(4.0..=6.0).contains(&rings) {
+                continue;
+            }
+            let ceiling = rings * step;
+            if best.is_none_or(|(tightest, _)| ceiling < tightest * (1.0 - 1.0e-12)) {
+                best = Some((ceiling, rings as u32));
+            }
+        }
+    }
+    best.unwrap_or_else(|| (polar_ring_ceiling(peak), 5))
+}
+
 /// The next coarser spacing on the 1–2–5 ladder.
 fn coarser(step: f64) -> f64 {
     let magnitude = 10f64.powf(step.log10().floor());
@@ -806,5 +835,34 @@ mod tests {
         assert!((polar_ring_ceiling(0.04) - 0.05).abs() < 1e-15);
         assert_eq!(polar_ring_ceiling(5.0), 5.0);
         assert_eq!(polar_ring_ceiling(0.0), 1.0);
+    }
+
+    /// The rings fit the locus: four to six of a readable step, out to the
+    /// tightest ceiling at or past the peak.
+    #[test]
+    fn polar_rings_fit_the_peak_in_four_to_six_readable_steps() {
+        let rings = |peak: f64| {
+            let (ceiling, count) = polar_rings(peak);
+            ((ceiling * 1.0e6).round() / 1.0e6, count)
+        };
+        assert_eq!(rings(6.0), (6.0, 6));
+        assert_eq!(rings(7.3), (8.0, 4));
+        assert_eq!(rings(1.0), (1.0, 5));
+        assert_eq!(rings(0.95), (1.0, 5));
+        assert_eq!(rings(1.2), (1.2, 6));
+        assert_eq!(rings(3.3), (4.0, 4));
+        assert_eq!(rings(12.0), (12.0, 6));
+        assert_eq!(rings(0.0), (1.0, 5));
+        for peak in [0.013, 0.37, 2.2, 4.9, 9.99, 47.0, 812.0] {
+            let (ceiling, count) = polar_rings(peak);
+            assert!(
+                ceiling >= peak && (4..=6).contains(&count),
+                "{peak}: {ceiling} in {count}"
+            );
+            assert!(
+                ceiling <= peak * 1.5 + 1.0e-12,
+                "{peak} ruled loosely to {ceiling}"
+            );
+        }
     }
 }

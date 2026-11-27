@@ -252,6 +252,8 @@ pub struct PolarLocus {
     label: String,
     unit: String,
     reference_impedance_ohm: Option<f64>,
+    /// The analysis kind the strip header names, `AC`, `SP`.
+    kind_tag: String,
     x: rspice_results::waveform::HeldColumn,
     real: rspice_results::waveform::HeldColumn,
     imag: rspice_results::waveform::HeldColumn,
@@ -312,6 +314,40 @@ struct RadiusRule {
     ceiling: f64,
     /// Decibels at the outer ring (dB mode).
     ceiling_db: f64,
+    /// Rings drawn out to the outer one, evenly spaced.
+    rings: u32,
+}
+
+/// The dB ruling's rings: one every 10 dB across the window.
+const DECIBEL_RINGS: u32 = 5;
+
+/// The ruling the sheet draws `locus` and its overlays on. Every locus fits;
+/// normalized, each is scaled to its own maximum and the primary's sets the
+/// ring. A passive port's reflection coefficient rules to the unit circle.
+fn ruling(locus: &PolarLocus, overlays: &[PolarLocus], sheet: &PolarSheetState) -> RadiusRule {
+    let peak = if sheet.normalize {
+        locus.peak_magnitude()
+    } else {
+        overlays
+            .iter()
+            .map(PolarLocus::peak_magnitude)
+            .fold(locus.peak_magnitude(), f64::max)
+    };
+    let rule = RadiusRule::resolve(sheet.radius, peak, sheet.normalize);
+    if locus.reference_impedance_ohm.is_some() {
+        rule.within_unit_circle(peak)
+    } else {
+        rule
+    }
+}
+
+/// The radius the sheet rules `analysis` to, as the Inspector states it:
+/// `0 … 1`, `−50 … 0 dB`, and "normalized" when each locus is scaled to its
+/// own maximum. A polar chart has no X or Y interval of its own.
+pub fn radius_summary(analysis: &AnalysisResult, sheet: &PolarSheetState) -> Option<String> {
+    let locus = resolve_locus(analysis, sheet)?;
+    let overlays = resolve_overlays(analysis, sheet);
+    Some(ruling(&locus, &overlays, sheet).summary(&locus.unit))
 }
 
 impl RadiusRule {
@@ -323,16 +359,17 @@ impl RadiusRule {
         };
         match mode {
             PolarRadius::Magnitude => {
-                let ceiling = if normalize {
-                    peak
+                let (ceiling, rings) = if normalize {
+                    (peak, 5)
                 } else {
-                    rspice_results::plot_axis::polar_ring_ceiling(peak)
+                    rspice_results::plot_axis::polar_rings(peak)
                 };
                 Self {
                     mode,
                     normalized: normalize,
                     ceiling,
                     ceiling_db: 0.0,
+                    rings,
                 }
             }
             PolarRadius::Decibels => {
@@ -350,8 +387,47 @@ impl RadiusRule {
                     normalized: normalize,
                     ceiling: peak,
                     ceiling_db,
+                    rings: DECIBEL_RINGS,
                 }
             }
+        }
+    }
+
+    /// A reflection coefficient no larger than one rules to the unit circle:
+    /// the whole disc a passive port can reach, so the reader sees how far
+    /// inside it the locus stays rather than a ring fitted to this sweep.
+    fn within_unit_circle(self, peak: f64) -> Self {
+        if self.mode == PolarRadius::Magnitude
+            && !self.normalized
+            && peak.is_finite()
+            && peak <= 1.0
+        {
+            Self {
+                ceiling: 1.0,
+                rings: 5,
+                ..self
+            }
+        } else {
+            self
+        }
+    }
+
+    /// The radius interval the ruling spans, as the Inspector states it.
+    fn summary(self, unit: &str) -> String {
+        let span = match self.mode {
+            PolarRadius::Magnitude => {
+                format!("0 \u{2026} {}", fmt_si_significant(self.ceiling, unit, 3))
+            }
+            PolarRadius::Decibels => format!(
+                "{} \u{2026} {}",
+                fmt_si_significant((self.ceiling_db - DECIBEL_SPAN).round(), "", 6),
+                fmt_si_significant(self.ceiling_db.round(), "dB", 6)
+            ),
+        };
+        if self.normalized {
+            format!("{span} \u{b7} normalized")
+        } else {
+            span
         }
     }
 
@@ -564,17 +640,7 @@ pub fn show(
 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    // Ruled so every locus fits; normalized, each is scaled to its own
-    // maximum and the primary's sets the ring.
-    let peak = if sheet.normalize {
-        locus.peak_magnitude()
-    } else {
-        overlays
-            .iter()
-            .map(PolarLocus::peak_magnitude)
-            .fold(locus.peak_magnitude(), f64::max)
-    };
-    let rule = RadiusRule::resolve(sheet.radius, peak, sheet.normalize);
+    let rule = ruling(locus, overlays, sheet);
 
     // The legend chips are painted in the mono face, which has no ohm sign,
     // so the retained reference impedance rides the sans subtitle instead.
@@ -606,7 +672,7 @@ pub fn show(
     if let Some(reference) = locus.reference_impedance_ohm {
         subtitle.push_str(&format!(" \u{b7} Z\u{2080} {reference} \u{3a9}"));
     }
-    let header = strip::StripHeader::new("POLAR", &subtitle, &legend)
+    let header = strip::StripHeader::new(&locus.kind_tag, &subtitle, &legend)
         .removable(1..1 + overlays.len())
         .show(ui);
 
@@ -700,6 +766,7 @@ fn locus_of(analysis: &AnalysisResult, quantity: &PolarQuantity) -> Option<Polar
         label: quantity.label.clone(),
         unit: quantity.unit.clone(),
         reference_impedance_ohm: quantity.reference_impedance_ohm,
+        kind_tag: analysis.analysis_type.short_label().to_uppercase(),
         x: waveform.x.fetch_whole().ready()?,
         real: complex.real.fetch_whole().ready()?,
         imag: complex.imag.fetch_whole().ready()?,
@@ -786,9 +853,12 @@ fn paint_canvas(
     // Stack radial labels beside the 90° spoke. Along the horizontal spoke,
     // long SI labels overlapped one another in smaller panes. Thin the labels
     // if even their line heights cannot fit, while retaining every grid ring.
-    let label_stride = ((tokens::FS_0 + 4.0) / (radius / 5.0)).ceil().max(1.0) as i32;
-    for step in 1..=5 {
-        let fraction = f64::from(step) / 5.0;
+    let rings = rule.rings.max(1);
+    let label_stride = ((tokens::FS_0 + 4.0) / (radius / rings as f32))
+        .ceil()
+        .max(1.0) as u32;
+    for step in 1..=rings {
+        let fraction = f64::from(step) / f64::from(rings);
         let emphasized = rule.emphasizes_unit_circle()
             && (rule.ceiling * fraction - 1.0).abs() < rule.ceiling * 1.0e-9;
         painter.circle_stroke(
@@ -800,7 +870,7 @@ fn paint_canvas(
                 grid
             },
         );
-        if (5 - step) % label_stride == 0 {
+        if (rings - step).is_multiple_of(label_stride) {
             painter.text(
                 egui::pos2(centre.x + 5.0, centre.y - radius * fraction as f32 + 3.0),
                 egui::Align2::LEFT_TOP,
@@ -1186,7 +1256,9 @@ pub fn right_panel(
 fn row_hover(name: &str) -> Option<&'static str> {
     match name {
         "Phase" => Some("Principal value; the Δ column unwraps it before differencing."),
-        "Group delay" => Some("The A→B secant −Δφ/2πΔf, not an instantaneous derivative."),
+        "Group delay" => Some(
+            "At A and B, −dφ/2πdf from the neighbouring samples; Δ is the A→B secant −Δφ/2πΔf.",
+        ),
         _ => None,
     }
 }
@@ -1214,6 +1286,10 @@ fn register_rows(
     };
     let phase =
         |index: usize| angle_readout(policy, locus.imag[index].atan2(locus.real[index]), digits);
+    let delay = |index: usize| {
+        group_delay_at(locus, index)
+            .map_or_else(dash, |value| fmt_column_reading(value, "s", digits))
+    };
     let real = |index: usize| fmt_column_reading(locus.real[index], "", digits);
     let imaginary = |index: usize| fmt_column_reading(locus.imag[index], "", digits);
 
@@ -1289,8 +1365,26 @@ fn register_rows(
                 fmt_column_reading(locus.imag[b] - locus.imag[a], "", digits)
             }),
         ),
-        ("Group delay", dash(), dash(), group_delay),
+        (
+            "Group delay",
+            at(samples.a, &delay),
+            at(samples.b, &delay),
+            group_delay,
+        ),
     ]
+}
+
+/// −dφ/2πdf at one sample, from its finite neighbours: the central
+/// difference inside the sweep, one-sided at either end.
+fn group_delay_at(locus: &PolarLocus, index: usize) -> Option<f64> {
+    let before = (0..index)
+        .rev()
+        .find(|sample| locus.is_finite(*sample))
+        .unwrap_or(index);
+    let after = (index + 1..locus.len())
+        .find(|sample| locus.is_finite(*sample))
+        .unwrap_or(index);
+    group_delay_seconds(locus, before, after)
 }
 
 /// Phase from A to B, unwrapped along the retained samples.
@@ -1332,29 +1426,73 @@ fn group_delay_seconds(locus: &PolarLocus, a: usize, b: usize) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
-/// The four-column register: measure, A, B, Δ.
+/// The register's inset from the panel edges.
+const REGISTER_EDGE: f32 = 12.0;
+/// The air between two register columns.
+const REGISTER_GAP: f32 = 10.0;
+
+/// The four-column register: measure, A, B, Δ. Each value column is as wide
+/// as its widest reading, a gap from the next and right-aligned; the name
+/// column takes what is left and wraps a name that will not fit on a line.
 fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
     let t = Tokens::get(ui.ctx());
     let c = &t.color;
     let width = ui.available_width();
-    let inner = (width - 24.0).max(1.0);
-    // Three exact values and their name in a 292 pt panel: the name column
-    // gets what is left after the numbers, not the other way round.
-    let name_width = inner * 0.26;
-    let value_width = ((inner - name_width) / 3.0).max(1.0);
+    let inner = (width - 2.0 * REGISTER_EDGE).max(1.0);
+    let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    // Sans: the Δ head is not in the bundled mono face.
+    let head_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let name_font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let header = ["A", "B", "\u{394}"];
 
-    let header = ["", "A", "B", "\u{394}"];
+    let (name_width, columns) = {
+        let painter = ui.painter();
+        let measure = |text: &str, font: &egui::FontId| {
+            painter
+                .layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        };
+        let mut columns = header.map(|label| measure(label, &head_font));
+        for (_, a, b, delta) in rows {
+            for (column, value) in [a, b, delta].into_iter().enumerate() {
+                columns[column] = columns[column].max(measure(value, &value_font));
+            }
+        }
+        // A name keeps at least its longest word; past that the readings
+        // give way, each by the same share, and clip.
+        let longest_word = rows
+            .iter()
+            .flat_map(|row| row.0.split(' '))
+            .map(|word| measure(word, &name_font))
+            .fold(0.0_f32, f32::max);
+        let readings: f32 = columns.iter().sum();
+        let name_width = (inner - readings - REGISTER_GAP * 3.0).max(longest_word);
+        let room = (inner - name_width - REGISTER_GAP * 3.0).max(0.0);
+        if readings > room && readings > 0.0 {
+            for column in &mut columns {
+                *column *= room / readings;
+            }
+        }
+        (name_width, columns)
+    };
+    // Each value column's right edge, from the register's left inset.
+    let mut rights = [0.0_f32; 3];
+    let mut edge = REGISTER_EDGE + name_width;
+    for (right, column) in rights.iter_mut().zip(columns) {
+        edge += REGISTER_GAP + column;
+        *right = edge;
+    }
+
     let (header_rect, _) = ui.allocate_exact_size(egui::vec2(width, 20.0), Sense::hover());
     if ui.is_rect_visible(header_rect) {
         let painter = ui.painter();
-        for (column, label) in header.iter().enumerate().skip(1) {
-            let left = header_rect.left() + 12.0 + name_width + value_width * (column - 1) as f32;
+        for (right, label) in rights.iter().zip(header) {
             painter.text(
-                egui::pos2(left + value_width - 2.0, header_rect.center().y),
+                egui::pos2(header_rect.left() + right, header_rect.center().y),
                 egui::Align2::RIGHT_CENTER,
-                *label,
-                // Sans: the Δ head is not in the bundled mono face.
-                theme::sans(tokens::FS_0, FontWeight::SemiBold),
+                label,
+                head_font.clone(),
                 c.text_faint,
             );
         }
@@ -1366,7 +1504,14 @@ fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
     }
 
     for (index, (name, a, b, delta)) in rows.iter().enumerate() {
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 25.0), Sense::hover());
+        let name_galley = ui.painter().layout(
+            (*name).to_owned(),
+            name_font.clone(),
+            c.text_dim,
+            name_width,
+        );
+        let height = (name_galley.size().y + 8.0).max(25.0);
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), Sense::hover());
         response.widget_info(|| {
             WidgetInfo::labeled(
                 WidgetType::Label,
@@ -1384,28 +1529,24 @@ fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
             continue;
         }
         let painter = ui.painter();
-        let name_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + 12.0, rect.top()),
-            egui::pos2(rect.left() + 12.0 + name_width, rect.bottom()),
-        );
-        painter.with_clip_rect(name_rect).text(
-            egui::pos2(name_rect.left(), rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            *name,
-            theme::sans(tokens::FS_1, FontWeight::Regular),
+        painter.galley(
+            egui::pos2(
+                rect.left() + REGISTER_EDGE,
+                rect.center().y - name_galley.size().y * 0.5,
+            ),
+            name_galley,
             c.text_dim,
         );
-        for (column, value) in [a, b, delta].into_iter().enumerate() {
-            let left = name_rect.right() + value_width * column as f32;
+        for ((right, column), value) in rights.iter().zip(columns).zip([a, b, delta]) {
             let cell = egui::Rect::from_min_max(
-                egui::pos2(left, rect.top()),
-                egui::pos2(left + value_width - 2.0, rect.bottom()),
+                egui::pos2(rect.left() + right - column, rect.top()),
+                egui::pos2(rect.left() + right, rect.bottom()),
             );
             painter.with_clip_rect(cell).text(
                 egui::pos2(cell.right(), rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 value,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
+                value_font.clone(),
                 c.text,
             );
         }
@@ -1583,8 +1724,59 @@ mod tests {
         // A hundred-fold transfer keeps its ruling but stops claiming a unit
         // circle nobody could see.
         let large = RadiusRule::resolve(PolarRadius::Magnitude, 100.08, false);
-        assert!((large.ceiling - 200.0).abs() < 1.0e-12, "{large:?}");
+        assert!((large.ceiling - 120.0).abs() < 1.0e-9, "{large:?}");
+        assert_eq!(large.rings, 6);
         assert!(!large.emphasizes_unit_circle());
+    }
+
+    /// A locus peaking at six is ruled in six rings of one, not out to ten,
+    /// and a passive port's reflection coefficient is ruled to the unit
+    /// circle however far inside it this sweep stays.
+    #[test]
+    fn the_outer_ring_fits_the_locus_and_a_reflection_rules_to_the_unit_circle() {
+        let fitted = RadiusRule::resolve(PolarRadius::Magnitude, 6.0, false);
+        assert!((fitted.ceiling - 6.0).abs() < 1.0e-9, "{fitted:?}");
+        assert_eq!(fitted.rings, 6);
+        assert_eq!(fitted.summary("V"), "0 \u{2026} 6 V");
+
+        let reflection = RadiusRule::resolve(PolarRadius::Magnitude, 0.62, false);
+        let reflection = reflection.within_unit_circle(0.62);
+        assert!((reflection.ceiling - 1.0).abs() < 1.0e-12, "{reflection:?}");
+        assert_eq!(reflection.rings, 5);
+        assert!(reflection.emphasizes_unit_circle());
+
+        // An active port that reflects more than it receives is ruled to
+        // its own locus, with the unit circle still marked inside it.
+        let active =
+            RadiusRule::resolve(PolarRadius::Magnitude, 1.3, false).within_unit_circle(1.3);
+        assert!((active.ceiling - 1.5).abs() < 1.0e-9, "{active:?}");
+        assert!(active.emphasizes_unit_circle());
+    }
+
+    /// Group delay at each cursor is the local phase slope, so a constant
+    /// delay reads the same at A, at B and across them.
+    #[test]
+    fn group_delay_is_read_at_each_cursor_from_the_local_phase_slope() {
+        let locus = ramp_locus(3.0, 601);
+        let expected = 3.0 / 600.0e6;
+        for index in [0, 300, 600] {
+            let delay = group_delay_at(&locus, index).expect("finite delay");
+            assert!((delay - expected).abs() < 1.0e-15, "{index}: {delay}");
+        }
+        let policy = rspice_vocabulary::quantity::QuantityPresentationPolicy::default();
+        let rows = register_rows(
+            &locus,
+            CursorSamples {
+                a: Some(100),
+                b: Some(500),
+            },
+            &policy,
+            4,
+        );
+        let group = rows.iter().find(|row| row.0 == "Group delay").expect("row");
+        assert_eq!(group.1, fmt_column_reading(expected, "s", 4));
+        assert_eq!(group.2, group.1);
+        assert_eq!(group.3, group.1);
     }
 
     fn ramp_locus(turns: f64, points: usize) -> PolarLocus {
@@ -1602,6 +1794,7 @@ mod tests {
             label: "S21 \u{b7} Port 2 \u{2190} Port 1".to_owned(),
             unit: String::new(),
             reference_impedance_ohm: None,
+            kind_tag: "SP".to_owned(),
             x: x.into(),
             real: real.into(),
             imag: imag.into(),
