@@ -1,10 +1,13 @@
 //! A retained run as the reader handles it in Results: picked in the data
-//! browser and shown under the strip's first tab, stepped through, and kept
+//! browser beside the saved documents it lists, stepped through, and kept
 //! across a save and reopen.
 
+use super::browser_rows;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use rspice_app_results::workbench::chrome::document_bar::results::{result_documents, show_run};
+use crate::workbench::commands::vocabulary::ShellCommand;
+use egui::accesskit::{Action, ActionRequest, Node, NodeId, Role, TreeId};
+use rspice_app_results::workbench::chrome::document_bar::results::{show_run, shown_document};
 use rspice_app_results::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultViewer, working_view,
 };
@@ -17,11 +20,8 @@ use rspice_app_state::state::{
     AnalysisResult, AnalysisType, RetainedTrace, SimulationRunLifecycle,
 };
 use rspice_app_state::workbench::workspace::Workspace;
-use rspice_app_workbench::workbench::chrome::document_bar::{
-    activate_document, close_all_documents, close_document, close_other_documents, cycle_document,
-    document_descriptors, visible_documents,
-};
-use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
+use rspice_app_workbench::workbench::framework::command_registry::{CommandAvailability, ids};
+use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 use rspice_simulation_contract::plan_catalog::SimulationPlanCloneOptions;
 
 const TIME: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
@@ -269,26 +269,68 @@ impl Desk {
         self.settle();
     }
 
-    /// The Results tabs: what each shows and what it is called.
-    fn tabs(&self) -> Vec<(WorkspaceDocumentId, String)> {
-        result_documents(self.app.state.results_reads())
-            .into_iter()
-            .map(|tab| (tab.id, tab.label))
-            .collect()
+    /// The accessibility tree of a settled frame.
+    fn nodes(&mut self) -> Vec<(NodeId, Node)> {
+        let output = self.settle();
+        output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree")
+            .nodes
     }
 
-    /// The document the strip has in front.
-    fn front(&self) -> Option<WorkspaceDocumentId> {
-        document_descriptors(&self.app.state)
-            .into_iter()
-            .find(|document| document.active)
-            .map(|document| document.id)
+    /// Click `node`, as AccessKit's default action does, and draw the
+    /// frames it takes.
+    fn click(&mut self, node: NodeId) {
+        self.frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: node,
+            data: None,
+        })]);
+        self.settle();
+    }
+
+    /// Right-click at `at` with the mouse and draw the frames it takes.
+    fn right_click(&mut self, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.frame(vec![egui::Event::PointerMoved(at)]);
+        self.frame(vec![button(true)]);
+        self.frame(vec![button(false)]);
+        self.settle();
+    }
+
+    /// Choose the button labelled `label`: a menu's item or a form's.
+    fn choose(&mut self, label: &str) {
+        let nodes = self.nodes();
+        let (button, _) = nodes
+            .iter()
+            .find(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
+            .unwrap_or_else(|| panic!("{label} is offered"));
+        self.click(*button);
     }
 
     /// The run Results draws.
     fn shown(&self) -> Option<DatasetId> {
         let simulation = &self.app.state.model.simulation;
         simulation.active_run().map(|run| run.dataset_id)
+    }
+
+    /// The saved document Results shows, if one is.
+    fn shown_document(&self) -> Option<ResultDocumentId> {
+        shown_document(self.app.state.results_reads())
+    }
+
+    /// The label the data browser gives the run of `dataset`.
+    fn label_of(&self, dataset: DatasetId) -> String {
+        let simulation = &self.app.state.model.simulation;
+        let run = simulation.retained.run_by_dataset_id(dataset);
+        run.expect("a retained run").label.clone()
     }
 
     fn name_of(&self, dataset: DatasetId) -> String {
@@ -365,52 +407,6 @@ fn bench() -> Bench {
     }
 }
 
-/// Runs are picked in the data browser, not tabbed: two plans' runs and a
-/// saved document are the browser's tab and the document's.
-#[test]
-fn two_plans_runs_and_a_saved_document_take_two_tabs() {
-    let Bench {
-        desk, first, saved, ..
-    } = bench();
-    let expected = vec![
-        (
-            WorkspaceDocumentId::ResultDataset(first[1]),
-            desk.name_of(first[1]),
-        ),
-        (
-            WorkspaceDocumentId::VisualizationDocument(saved),
-            "Bias".to_owned(),
-        ),
-    ];
-    assert_eq!(desk.tabs(), expected);
-    let strip: Vec<_> = visible_documents(&desk.app.state)
-        .into_iter()
-        .map(|tab| (tab.id, tab.label))
-        .collect();
-    assert_eq!(strip, expected, "the strip draws the same two");
-}
-
-/// A run picked in the browser shows, and the first tab takes its name.
-#[test]
-fn a_run_picked_in_the_browser_shows_under_the_first_tab() {
-    let Bench {
-        mut desk, other, ..
-    } = bench();
-    desk.pick(other);
-    assert_eq!(desk.shown(), Some(other));
-    assert_eq!(
-        desk.front(),
-        Some(WorkspaceDocumentId::ResultDataset(other))
-    );
-    assert_eq!(
-        desk.tabs()[0],
-        (
-            WorkspaceDocumentId::ResultDataset(other),
-            desk.name_of(other)
-        )
-    );
-}
-
 /// Stepping to the plan's other run keeps the sheet, the view's panes and
 /// the X range, and each cursor the other run's X still reaches.
 #[test]
@@ -462,10 +458,6 @@ fn stepping_through_a_plans_runs_keeps_the_panes_the_x_range_and_the_cursors() {
         "Page Down steps to the older run"
     );
     assert_eq!(
-        desk.front(),
-        Some(WorkspaceDocumentId::ResultDataset(older))
-    );
-    assert_eq!(
         desk.app.state.results.results.session.viewer,
         ResultViewer::Waves
     );
@@ -484,101 +476,184 @@ fn stepping_through_a_plans_runs_keeps_the_panes_the_x_range_and_the_cursors() {
     assert_eq!(cursors(&desk), (Some(0.5), None));
 }
 
-/// With a saved document in front, a run picked in the browser brings the
-/// browser's tab forward on it; the browser's tab, chosen again, goes back
-/// to the run it showed.
+/// Results draws no document tabs: neither the run the browser shows nor a
+/// saved document is a tab, and the commands that stepped through or closed
+/// tabs say why they do nothing here.
 #[test]
-fn a_run_picked_over_a_saved_document_shows_under_the_browsers_tab() {
+fn results_draws_no_document_tabs() {
     let Bench {
         mut desk,
         first,
-        saved,
+        other,
         ..
     } = bench();
-    let document = WorkspaceDocumentId::VisualizationDocument(saved);
-    assert!(activate_document(&mut desk.app.state, &document));
-    desk.settle();
-    assert_eq!(desk.front(), Some(document.clone()));
-
-    let browser = WorkspaceDocumentId::ResultDataset(first[1]);
-    assert!(activate_document(&mut desk.app.state, &browser));
-    desk.settle();
-    assert_eq!(
-        desk.front(),
-        Some(browser),
-        "the browser's tab is the way back"
+    let names = [
+        desk.name_of(first[1]),
+        desk.name_of(other),
+        "Bias".to_owned(),
+    ];
+    let nodes = desk.nodes();
+    let tabbed = nodes.iter().find(|(_, node)| {
+        node.role() == Role::Tab
+            && node
+                .label()
+                .is_some_and(|label| names.iter().any(|name| label.starts_with(name.as_str())))
+    });
+    assert!(
+        tabbed.is_none(),
+        "a document is a tab: {:?}",
+        tabbed.map(|(_, node)| node.label())
     );
-    assert_eq!(desk.shown(), Some(first[1]));
-
-    assert!(activate_document(&mut desk.app.state, &document));
-    desk.settle();
-    desk.pick(first[0]);
-    assert_eq!(
-        desk.front(),
-        Some(WorkspaceDocumentId::ResultDataset(first[0]))
-    );
-    assert_eq!(desk.shown(), Some(first[0]));
+    for command in [
+        ShellCommand::PreviousDocument,
+        ShellCommand::NextDocument,
+        ShellCommand::CloseOtherDocuments,
+        ShellCommand::CloseAllDocuments,
+    ] {
+        assert_eq!(
+            command.availability(&desk.app),
+            CommandAvailability::Disabled("Results picks what it shows in the data browser"),
+            "{command:?}"
+        );
+    }
 }
 
-/// The browser's tab has no close control and no close takes it; closing
-/// saved documents' tabs only hides them.
+/// The saved documents are listed above every run, each by its name.
 #[test]
-fn the_browsers_tab_never_closes() {
+fn a_saved_document_is_listed_above_the_runs() {
+    let Bench {
+        mut desk,
+        first,
+        other,
+        ..
+    } = bench();
+    let nodes = desk.nodes();
+    let documents = browser_rows::documents(&nodes);
+    assert_eq!(browser_rows::document_names(&nodes), ["Bias"]);
+    for run in [first[0], first[1], other] {
+        let head = browser_rows::run_head(&nodes, &desk.label_of(run));
+        assert!(
+            documents[0].top < head.top,
+            "the document is listed below {}",
+            head.label
+        );
+    }
+}
+
+/// A document's row shows the document, and then it alone reads as shown;
+/// a run's analysis shows the run again, and the document's row reads as
+/// shown no more.
+#[test]
+fn a_documents_row_shows_it_and_a_runs_analysis_shows_the_run() {
+    let Bench {
+        mut desk,
+        saved,
+        other,
+        ..
+    } = bench();
+    let bias = browser_rows::documents(&desk.nodes())[0].clone();
+    assert!(!bias.shown, "the browser shows a run");
+    desk.click(bias.id);
+    assert_eq!(desk.shown_document(), Some(saved));
+    assert_eq!(
+        browser_rows::shown(&desk.nodes()),
+        ["Bias"],
+        "only the document's row reads as shown"
+    );
+
+    // The other plan's run is folded: open it, then pick its analysis.
+    let label = desk.label_of(other);
+    let head = browser_rows::run_head(&desk.nodes(), &label);
+    desk.click(head.id);
+    let analysis = browser_rows::analysis_under(&desk.nodes(), &label);
+    desk.click(analysis.id);
+    assert_eq!(desk.shown_document(), None);
+    assert_eq!(desk.shown(), Some(other));
+    let nodes = desk.nodes();
+    assert!(!browser_rows::documents(&nodes)[0].shown);
+    assert!(browser_rows::run_head(&nodes, &label).shown);
+}
+
+/// A document's row menu renames the document and deletes it. Deleting asks
+/// nothing, since Undo puts the document back, and Results goes back to the
+/// run the browser showed.
+#[test]
+fn a_documents_row_menu_renames_and_deletes_it() {
     let Bench {
         mut desk,
         first,
         saved,
         ..
     } = bench();
-    let browser = WorkspaceDocumentId::ResultDataset(first[1]);
-    let document = WorkspaceDocumentId::VisualizationDocument(saved);
-    let closable: Vec<_> = document_descriptors(&desk.app.state)
-        .into_iter()
-        .map(|tab| (tab.id, tab.closable))
-        .collect();
-    assert_eq!(
-        closable,
-        vec![(browser.clone(), false), (document.clone(), true)]
-    );
-    let output = desk.settle();
-    let nodes = output
-        .platform_output
-        .accesskit_update
-        .expect("accessibility tree")
-        .nodes;
-    let label = desk.name_of(first[1]);
-    let tab = nodes
-        .iter()
-        .map(|(_, node)| node)
-        .find(|node| {
-            node.role() == egui::accesskit::Role::Tab && node.label() == Some(label.as_str())
-        })
-        .expect("the browser's tab is drawn");
-    assert!(
-        !tab.description().unwrap_or_default().contains("close"),
-        "the tab offers no close: {:?}",
-        tab.description()
-    );
+    let bias = browser_rows::documents(&desk.nodes())[0].clone();
+    desk.right_click(bias.centre);
+    desk.choose("Rename\u{2026}");
+    let Some(ResultDocumentDialog::Rename(mut draft)) =
+        desk.app.state.results.result_document_dialog.clone()
+    else {
+        panic!("Rename opens its form");
+    };
+    assert_eq!(draft.from, "Bias");
+    draft.title = "Bias sweep".to_owned();
+    desk.app.state.results.result_document_dialog = Some(ResultDocumentDialog::Rename(draft));
+    desk.choose("Rename");
+    assert_eq!(browser_rows::document_names(&desk.nodes()), ["Bias sweep"]);
 
-    let strip = visible_documents(&desk.app.state);
-    assert!(!close_document(&mut desk.app.state, &browser, &strip));
-    assert_eq!(close_all_documents(&mut desk.app.state), 1);
-    desk.settle();
-    assert_eq!(desk.tabs()[0].0, browser);
-    assert_eq!(desk.front(), Some(browser.clone()));
-    assert_eq!(visible_documents(&desk.app.state).len(), 1);
-
-    assert!(activate_document(&mut desk.app.state, &document));
-    desk.settle();
-    assert!(cycle_document(&mut desk.app.state, false));
-    assert_eq!(desk.front(), Some(browser));
-    assert_eq!(close_other_documents(&mut desk.app.state), 1);
+    let row = browser_rows::documents(&desk.nodes())[0].clone();
+    desk.right_click(row.centre);
+    desk.choose("Delete");
     let content = &desk.app.state.model.workspace.content;
-    assert!(
-        content.visualization_document(saved).is_some(),
-        "closing a tab keeps its document"
+    assert!(content.visualization_document(saved).is_none());
+    assert!(browser_rows::documents(&desk.nodes()).is_empty());
+    assert_eq!(desk.shown_document(), None);
+    assert_eq!(
+        desk.shown(),
+        Some(first[1]),
+        "the browser's run shows again"
     );
-    assert_eq!(desk.app.state.model.simulation.retained.runs.len(), 3);
+    assert_eq!(
+        desk.app.state.prompt_text(),
+        Some("Deleted Bias sweep. Undo puts it back.")
+    );
+
+    desk.app.execute_command_key(ids::UNDO);
+    assert_eq!(browser_rows::document_names(&desk.nodes()), ["Bias sweep"]);
+}
+
+/// The Datasets tab draws the rows in view and no others: of a hundred and
+/// twenty runs, the newest's row is drawn and the oldest's is not.
+#[test]
+fn the_datasets_tab_draws_only_the_rows_in_view() {
+    const RUNS: usize = 120;
+    let mut state = session_with_a_run();
+    state.model.simulation.retained.retained_dataset_limit = Some(RUNS);
+    state.model.sim_setup.save_policy.retained_dataset_limit = RUNS;
+    for _ in 1..RUNS {
+        run_plan(&mut state, [0.0, 0.2, 0.4, 1.0, 0.1]);
+    }
+    let runs = newest_first(&state);
+    assert_eq!(runs.len(), RUNS);
+    let mut desk = Desk::new(state);
+    let nodes = desk.nodes();
+    let (tab, _) = nodes
+        .iter()
+        .find(|(_, node)| {
+            node.label()
+                .is_some_and(|label| label.starts_with("Datasets,"))
+        })
+        .expect("the Datasets tab");
+    desk.click(*tab);
+    // A run's row answers to its run's id, whatever its place.
+    let drawn = |desk: &Desk, dataset: DatasetId| {
+        desk.ctx
+            .read_response(egui::Id::new(("workbench.results.run-row", dataset)))
+            .is_some()
+    };
+    assert!(drawn(&desk, runs[0]), "the newest run's row is not drawn");
+    assert!(
+        !drawn(&desk, runs[RUNS - 1]),
+        "the oldest run's row is drawn out of view"
+    );
 }
 
 /// A finished run of the plan shown shows, unless the reader picked an
@@ -591,7 +666,6 @@ fn a_new_run_of_the_plan_shown_shows_unless_an_older_run_was_picked() {
     desk.settle();
     let second = newest_first(&desk.app.state)[0];
     assert_eq!(desk.shown(), Some(second), "the new run shows");
-    assert_eq!(desk.tabs()[0].0, WorkspaceDocumentId::ResultDataset(second));
 
     desk.pick(first);
     run_plan(&mut desk.app.state, [0.0, 0.1, 0.2, 0.3, 0.4]);
@@ -599,7 +673,6 @@ fn a_new_run_of_the_plan_shown_shows_unless_an_older_run_was_picked() {
     let third = newest_first(&desk.app.state)[0];
     assert_ne!(third, second);
     assert_eq!(desk.shown(), Some(first), "the run picked stays");
-    assert_eq!(desk.tabs()[0].0, WorkspaceDocumentId::ResultDataset(first));
 
     desk.pick(third);
     run_plan(&mut desk.app.state, [0.0, 0.3, 0.6, 0.9, 1.0]);

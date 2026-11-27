@@ -1,6 +1,7 @@
 //! Creating a result document through a whole application: what the New
 //! result document form opens on and offers, and a commit the project owns.
 
+use super::browser_rows;
 use crate::workbench::RSpiceApp;
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::create_document::*;
@@ -655,6 +656,54 @@ impl ResultsWindow {
             &self.app.state,
         )
     }
+
+    /// Click `node`, as AccessKit's default action does; the last frame's
+    /// nodes.
+    fn click(
+        &mut self,
+        node: egui::accesskit::NodeId,
+    ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+        self.frames(vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: node,
+                data: None,
+            },
+        )]);
+        self.frames(Vec::new())
+    }
+
+    /// Press and release `button` at `at`, as a mouse does.
+    fn press(&mut self, at: egui::Pos2, button: egui::PointerButton) {
+        let event = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        self.frames(vec![egui::Event::PointerMoved(at), event(true)]);
+        self.frames(vec![event(false)]);
+    }
+
+    /// Choose the button labelled `label`: a menu's item.
+    fn choose(&mut self, label: &str) {
+        let nodes = self.frames(Vec::new());
+        let (button, _) = nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+            })
+            .unwrap_or_else(|| panic!("{label} is offered"));
+        self.click(*button);
+    }
+
+    /// The label the data browser gives the window's run.
+    fn run_label(&self) -> String {
+        self.app.state.model.simulation.retained.runs[0]
+            .label
+            .clone()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -668,55 +717,26 @@ fn drawn(
         .any(|(_, node)| node.role() == role && node.label() == Some(label))
 }
 
-/// The document bar's tabs left to right, by where the strip drew them. Its
-/// tabs are the ones that say how they close; the viewer and console tabs
-/// say nothing.
+/// Each saved document's row in the data browser, top to bottom: its name,
+/// and whether it is marked unsaved.
 #[cfg(not(target_arch = "wasm32"))]
-fn document_tabs(
-    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
-) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
-    let mut tabs = nodes
-        .iter()
-        .filter(|(_, node)| {
-            node.role() == egui::accesskit::Role::Tab
-                && node.description().is_some_and(|description| {
-                    description.ends_with("Press Delete to close.")
-                        || description == "Pinned primary document."
-                        || description == "Unsaved changes."
-                })
-        })
-        .filter_map(|(id, node)| Some((node.bounds()?.x0, *id, node.clone())))
-        .collect::<Vec<_>>();
-    tabs.sort_by(|left, right| left.0.total_cmp(&right.0));
-    tabs.into_iter().map(|(_, id, node)| (id, node)).collect()
-}
-
-/// Each drawn document tab's label, and whether it is marked unsaved.
-#[cfg(not(target_arch = "wasm32"))]
-fn tab_marks(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<(String, bool)> {
-    document_tabs(nodes)
-        .iter()
-        .map(|(_, node)| {
-            (
-                node.label().unwrap_or_default().to_owned(),
-                node.description()
-                    .is_some_and(|description| description.starts_with("Unsaved changes")),
-            )
-        })
+fn row_marks(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<(String, bool)> {
+    browser_rows::documents(nodes)
+        .into_iter()
+        .map(|row| (row.label, row.unsaved))
         .collect()
 }
 
 /// What the Results workspace draws, through whole frames of the
 /// application, once a result document is created: the stage draws the
-/// document, the document bar gives it a tab after the dataset's, and the
-/// toolbar's document control agrees with the stage in the same frame.
-/// Closing the tab keeps the saved document and puts the dataset's own viewer
-/// back, and the toolbar's control goes with it.
+/// document, the data browser lists it and its row alone reads as shown, and
+/// the toolbar's document control agrees with the stage in the same frame.
+/// Picking the run's analysis in the browser keeps the saved document and
+/// puts the run's own viewer back, and the toolbar's control goes with it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
-    use egui::accesskit::{Action, ActionRequest, Role, TreeId};
-    use egui::{Event, Key, Modifiers};
+fn a_created_document_is_drawn_and_its_row_reads_as_shown() {
+    use egui::accesskit::Role;
 
     // What only each surface draws: the stage's bar offers to create a
     // document over a dataset's viewer and to add a pane over a document, and
@@ -746,35 +766,14 @@ fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
         drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
         "the toolbar's document control is missing beside the document"
     );
-    let strip = document_tabs(&nodes);
-    let labels = strip
-        .iter()
-        .map(|(_, node)| node.label().unwrap_or_default())
-        .collect::<Vec<_>>();
-    let dataset_label = window.app.state.model.simulation.retained.runs[0]
-        .name()
-        .to_owned();
-    assert_eq!(labels, [dataset_label.as_str(), "Transient review"]);
-    let (document_tab, tab) = &strip[1];
     assert_eq!(
-        tab.is_selected(),
-        Some(true),
-        "the document's tab is not the active one"
+        browser_rows::shown(&nodes),
+        ["Transient review"],
+        "the created document's row is not the one that reads as shown"
     );
 
-    window.frames(vec![Event::AccessKitActionRequest(ActionRequest {
-        action: Action::Focus,
-        target_tree: TreeId::ROOT,
-        target_node: *document_tab,
-        data: None,
-    })]);
-    let nodes = window.frames(vec![Event::Key {
-        key: Key::Delete,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: Modifiers::NONE,
-    }]);
+    let run = window.run_label();
+    let nodes = window.click(browser_rows::analysis_under(&nodes, &run).id);
 
     assert!(
         window
@@ -785,40 +784,107 @@ fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
             .content
             .visualization_document(document_id)
             .is_some(),
-        "closing the tab deleted the saved document"
+        "picking the run deleted the saved document"
     );
     assert!(
         drawn(&nodes, Role::Button, DATASET_STAGE),
-        "the stage does not draw the dataset's viewer after the close"
+        "the stage does not draw the run's viewer once the run is picked"
     );
     assert!(!drawn(&nodes, Role::Button, DOCUMENT_STAGE));
     assert!(
         !drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
-        "the toolbar keeps the closed document's control"
+        "the toolbar keeps the document's control over the run"
     );
-    // The dataset is the one document left, and a strip of one is not drawn.
-    assert!(
-        document_tabs(&nodes).is_empty(),
-        "the closed document still has a tab"
+    assert_eq!(
+        browser_rows::document_names(&nodes),
+        ["Transient review"],
+        "the document is still listed"
     );
+    assert!(!browser_rows::documents(&nodes)[0].shown);
 }
 
-/// An edit to one of two saved documents marks that document's tab and not
-/// the other's, and saving the project clears the mark.
+/// The analysis rows of the strips the frame draws, top to bottom and left
+/// to right: one per pane of a waveform document.
+#[cfg(not(target_arch = "wasm32"))]
+fn analysis_rows(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<egui::Pos2> {
+    let mut rows = nodes
+        .iter()
+        .filter(|(_, node)| node.label() == Some("TR"))
+        .filter_map(|(_, node)| node.bounds())
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| a.y0.total_cmp(&b.y0).then(a.x0.total_cmp(&b.x0)));
+    rows.into_iter()
+        .map(|bounds| {
+            egui::pos2(
+                ((bounds.x0 + bounds.x1) * 0.5) as f32,
+                ((bounds.y0 + bounds.y1) * 0.5) as f32,
+            )
+        })
+        .collect()
+}
+
+/// A press in a document's inactive pane makes it the active pane, and the
+/// menu on a pane's analysis row moves the pane and removes it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn an_edit_marks_only_its_own_document_tab_until_the_project_is_saved() {
+fn a_press_activates_a_pane_and_its_analysis_row_moves_and_removes_it() {
+    use egui::PointerButton;
+    use rspice_app_results::workbench::documents::result_document::persistent_document::ordered_page_panes;
+
+    let mut window = ResultsWindow::new();
+    let document_id = window.create("Transient review").expect("document commits");
+    let panes = |window: &ResultsWindow| {
+        let content = &window.app.state.model.workspace.content;
+        let document = content
+            .visualization_document(document_id)
+            .expect("the saved document");
+        ordered_page_panes(document.panes(), &document.pages()[0])
+            .into_iter()
+            .map(|pane| pane.id)
+            .collect::<Vec<_>>()
+    };
+    let active = |window: &ResultsWindow| {
+        let session = &window.app.state.results.results.session;
+        session.persistent_document_pane(document_id)
+    };
+    let [first, second] = panes(&window)[..] else {
+        panic!("the document has two panes");
+    };
+    assert_eq!(active(&window), Some(first));
+
+    let rows = analysis_rows(&window.frames(Vec::new()));
+    assert_eq!(rows.len(), 2, "each pane draws its analysis row");
+    window.press(rows[1], PointerButton::Primary);
+    assert_eq!(
+        active(&window),
+        Some(second),
+        "a press in the second pane did not make it active"
+    );
+
+    let rows = analysis_rows(&window.frames(Vec::new()));
+    window.press(rows[1], PointerButton::Secondary);
+    window.choose("Move pane earlier");
+    assert_eq!(panes(&window), [second, first]);
+
+    let rows = analysis_rows(&window.frames(Vec::new()));
+    window.press(rows[0], PointerButton::Secondary);
+    window.choose("Remove pane");
+    assert_eq!(panes(&window), [first]);
+}
+
+/// An edit to one of two saved documents puts the unsaved mark on that
+/// document's row in the data browser and not the other's, and saving the
+/// project clears the mark.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_edit_marks_only_its_own_documents_row_until_the_project_is_saved() {
     let mut window = ResultsWindow::new();
     let first = window.create("Review A").expect("A commits");
     window.create("Review B").expect("B commits");
     window.save();
-    let dataset = window.app.state.model.simulation.retained.runs[0]
-        .name()
-        .to_owned();
     assert_eq!(
-        tab_marks(&window.frames(Vec::new())),
+        row_marks(&window.frames(Vec::new())),
         [
-            (dataset.clone(), false),
             ("Review A".to_owned(), false),
             ("Review B".to_owned(), false),
         ]
@@ -843,21 +909,19 @@ fn an_edit_marks_only_its_own_document_tab_until_the_project_is_saved() {
         .expect("A takes the edit");
     assert!(window.project_unsaved());
     assert_eq!(
-        tab_marks(&window.frames(Vec::new())),
+        row_marks(&window.frames(Vec::new())),
         [
-            (dataset.clone(), false),
             ("Review A".to_owned(), true),
             ("Review B".to_owned(), false),
         ],
-        "only the edited document's tab is marked"
+        "only the edited document's row is marked"
     );
 
     window.save();
     assert!(!window.project_unsaved());
     assert_eq!(
-        tab_marks(&window.frames(Vec::new())),
+        row_marks(&window.frames(Vec::new())),
         [
-            (dataset, false),
             ("Review A".to_owned(), false),
             ("Review B".to_owned(), false),
         ],
@@ -877,32 +941,18 @@ fn plot(state: &mut crate::workbench::app_state::AppState, expression: &str) {
     state.results.calculator_panel = panel;
 }
 
-/// An expression the calculator plots is kept by the view in front. On the
-/// dataset's tab the run's working view keeps it: no document tab is marked
-/// and the project reads unsaved. On a saved document's tab that document
-/// keeps it, and its tab alone is marked.
+/// An expression the calculator plots is kept by the view in front. Over
+/// the run the browser picked, the run's working view keeps it: no
+/// document's row is marked and the project reads unsaved. Over a saved
+/// document that document keeps it, and its row alone is marked.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_plotted_expression_is_kept_by_the_view_in_front() {
-    use egui::Event;
-    use egui::accesskit::{Action, ActionRequest, TreeId};
-
     let mut window = ResultsWindow::new();
     let document_id = window.create("Review A").expect("A commits");
-    let dataset = window.app.state.model.simulation.retained.runs[0]
-        .name()
-        .to_owned();
-    let choose_tab = |window: &mut ResultsWindow, index: usize| {
-        let (tab, _) = document_tabs(&window.frames(Vec::new()))[index].clone();
-        window.frames(vec![Event::AccessKitActionRequest(ActionRequest {
-            action: Action::Click,
-            target_tree: TreeId::ROOT,
-            target_node: tab,
-            data: None,
-        })]);
-        window.frames(Vec::new());
-    };
-    choose_tab(&mut window, 0);
+    let run = window.run_label();
+    let nodes = window.frames(Vec::new());
+    window.click(browser_rows::analysis_under(&nodes, &run).id);
     assert!(
         window
             .app
@@ -912,7 +962,7 @@ fn a_plotted_expression_is_kept_by_the_view_in_front() {
             .session
             .persistent_pane_context
             .is_none(),
-        "the dataset's tab shows the run's own view"
+        "the picked run shows its own view"
     );
     window.save();
     assert!(!window.project_unsaved());
@@ -921,13 +971,14 @@ fn a_plotted_expression_is_kept_by_the_view_in_front() {
     assert_eq!(window.app.state.prompt_text(), Some("Plotted V(out)*2"));
     assert!(window.project_unsaved(), "the plotted trace is not unsaved");
     assert_eq!(
-        tab_marks(&window.frames(Vec::new())),
-        [(dataset.clone(), false), ("Review A".to_owned(), false)],
-        "an expression on the run's own view marked a document tab"
+        row_marks(&window.frames(Vec::new())),
+        [("Review A".to_owned(), false)],
+        "an expression on the run's own view marked a document's row"
     );
 
     window.save();
-    choose_tab(&mut window, 1);
+    let nodes = window.frames(Vec::new());
+    window.click(browser_rows::documents(&nodes)[0].id);
     window.save();
     window
         .app
@@ -953,14 +1004,14 @@ fn a_plotted_expression_is_kept_by_the_view_in_front() {
         "the document in front keeps the expression"
     );
     assert_eq!(
-        tab_marks(&window.frames(Vec::new())),
-        [(dataset, false), ("Review A".to_owned(), true)],
+        row_marks(&window.frames(Vec::new())),
+        [("Review A".to_owned(), true)],
         "only the document in front is marked"
     );
 }
 
 /// A create refused after it reached the catalog is rolled back whole: the
-/// document is gone and no tab carries a mark for it.
+/// document is gone and no row carries a mark for it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_rolled_back_create_leaves_no_mark() {
@@ -978,12 +1029,9 @@ fn a_rolled_back_create_leaves_no_mark() {
     assert!(!content.visualization_documents_dirty);
 
     window.app.state.workbench.activate(Workspace::Results);
-    let dataset = window.app.state.model.simulation.retained.runs[0]
-        .name()
-        .to_owned();
     assert_eq!(
-        tab_marks(&window.frames(Vec::new())),
-        [(dataset, false), ("Review A".to_owned(), false)]
+        row_marks(&window.frames(Vec::new())),
+        [("Review A".to_owned(), false)]
     );
 }
 
