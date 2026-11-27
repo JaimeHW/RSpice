@@ -861,25 +861,33 @@ fn drawn(
         .any(|(_, node)| node.role() == role && node.label() == Some(label))
 }
 
+/// Whether a label of `nodes` reads `words`, as AccessKit gives a label's
+/// words: as its value.
+fn stated(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], words: &str) -> bool {
+    nodes
+        .iter()
+        .any(|(_, node)| node.role() == egui::accesskit::Role::Label && node.value() == Some(words))
+}
+
 /// What the Results workspace draws, through whole frames of the
 /// application, once a result document is created: the stage draws the
 /// document, the strip gives it a tab after the run's and brings it forward,
-/// and the toolbar's document control agrees with the stage in the same
-/// frame. The run's tab, chosen again, keeps the saved document and puts the
-/// run's own viewer back, and the toolbar's control goes with it; a middle
-/// click closes the document's tab and keeps the document.
+/// and the document's bar names its state in the same frame. The run's tab,
+/// chosen again, keeps the saved document and puts the run's own viewer
+/// back, and the state goes with the document's bar; a middle click closes
+/// the document's tab and keeps the document.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_created_document_is_drawn_under_a_tab_of_its_own() {
     use egui::accesskit::Role;
 
     // What only a document draws: the stage's bar offers to add a pane over
-    // it, and the toolbar's tracking control exists only beside one. No plan
-    // produced this run, so the control reads Historical. The strip offers a
-    // new document over either.
+    // it, and names the document's state. No plan produced this run, so the
+    // state reads Historical, a statement and not a button. The strip offers
+    // a new document over either.
     const CREATE: &str = "New result document\u{2026}";
     const DOCUMENT_STAGE: &str = "Add a pane to this result document";
-    const DOCUMENT_TOOLBAR: &str = "Historical";
+    const DOCUMENT_STATE: &str = "Historical";
 
     let mut window = ResultsWindow::new();
     let run = window.run_name();
@@ -889,7 +897,7 @@ fn a_created_document_is_drawn_under_a_tab_of_its_own() {
         "the strip offers no new document"
     );
     assert!(!drawn(&nodes, Role::Button, DOCUMENT_STAGE));
-    assert!(!drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR));
+    assert!(!stated(&nodes, DOCUMENT_STATE));
     assert_eq!(
         strip_tabs::labels(&nodes),
         [run.clone()],
@@ -903,8 +911,12 @@ fn a_created_document_is_drawn_under_a_tab_of_its_own() {
         "the stage draws the created document"
     );
     assert!(
-        drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
-        "the toolbar's document control is missing beside the document"
+        stated(&nodes, DOCUMENT_STATE),
+        "the document's bar does not name its state"
+    );
+    assert!(
+        !drawn(&nodes, Role::Button, DOCUMENT_STATE),
+        "the document's state reads as a button"
     );
     let tabs = strip_tabs::tabs(&nodes);
     assert_eq!(
@@ -930,8 +942,8 @@ fn a_created_document_is_drawn_under_a_tab_of_its_own() {
         "the stage keeps the document over the run"
     );
     assert!(
-        !drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
-        "the toolbar keeps the document's control over the run"
+        !stated(&nodes, DOCUMENT_STATE),
+        "the run's tab names the document's state"
     );
     let tabs = strip_tabs::tabs(&nodes);
     assert!(tabs[0].selected && !tabs[1].selected);

@@ -182,12 +182,16 @@ fn archive_control(ui: &mut Ui, archive: DocumentArchive<'_>) -> bool {
                 so it reads without the run history.",
             ),
         ),
-        DocumentArchive::Archived => bar_command(
-            ui,
-            WorkbenchIcon::Save,
-            "Archived",
-            Err("This document holds its runs' samples and reads without the run history."),
-        ),
+        DocumentArchive::Archived => {
+            state_badge(
+                ui,
+                WorkbenchIcon::Save,
+                "Archived",
+                "This document holds its runs' samples and reads without the run history.",
+                Tokens::get(ui.ctx()).color.text_dim,
+            );
+            false
+        }
         DocumentArchive::Unavailable(reason) => {
             bar_command(ui, WorkbenchIcon::Save, "Archive", Err(reason))
         }
@@ -199,15 +203,17 @@ fn archive_control(ui: &mut Ui, archive: DocumentArchive<'_>) -> bool {
 fn tracking_control(ui: &mut Ui, tracking: DocumentTracking) -> bool {
     match tracking {
         DocumentTracking::Untracked => false,
-        DocumentTracking::Historical => bar_command(
-            ui,
-            WorkbenchIcon::History,
-            "Historical",
-            Err(
+        DocumentTracking::Historical => {
+            state_badge(
+                ui,
+                WorkbenchIcon::History,
+                "Historical",
                 "This document still shows the results it was made from, but no completed \
                  run matches the current design and its netlist.",
-            ),
-        ),
+                Tokens::get(ui.ctx()).color.warn,
+            );
+            false
+        }
         DocumentTracking::Latest => bar_command(
             ui,
             WorkbenchIcon::Pin,
@@ -227,6 +233,42 @@ fn tracking_control(ui: &mut Ui, tracking: DocumentTracking) -> bool {
             ),
         ),
     }
+}
+
+/// A state of the document the bar names, not a command: its icon and
+/// words in `ink`, the state's own, on the bar's ground with no hover fill
+/// and nothing to press, and `meaning` as its tooltip.
+fn state_badge(ui: &mut Ui, icon: WorkbenchIcon, label: &str, meaning: &str, ink: egui::Color32) {
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        theme::sans(tokens::FS_1, FontWeight::Regular),
+        ink,
+    );
+    let width = galley.size().x + 36.0;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width, ResultBarMetrics::of(ui).viewer_tab),
+        egui::Sense::hover(),
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, label));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_description(meaning);
+    });
+    if ui.is_rect_visible(rect) {
+        icon.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(rect.left() + 14.0, rect.center().y),
+                egui::vec2(13.0, 13.0),
+            ),
+            ink,
+        );
+        ui.painter().galley(
+            egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y * 0.5),
+            galley,
+            ink,
+        );
+    }
+    response.on_hover_text(meaning);
 }
 
 /// A command of the document's bar, drawn as the bar's other commands are:
