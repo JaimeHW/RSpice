@@ -2145,6 +2145,18 @@ fn leaves_prefix_slot_blank(_text: &str) -> bool {
     false
 }
 
+/// Where a reading's unit starts, by the number formatter's rule; after its
+/// last space in a kit built without the formatter.
+#[cfg(any(feature = "plot", test))]
+fn reading_unit_start(text: &str) -> Option<usize> {
+    rspice_results::number_format::reading_unit_start(text)
+}
+
+#[cfg(not(any(feature = "plot", test)))]
+fn reading_unit_start(text: &str) -> Option<usize> {
+    text.rfind(' ').map(|space| space + 1)
+}
+
 /// [`prefix_slot_width`] for a cell that asked for a slot
 /// ([`Cell::quantity`]); none for any other.
 fn prefix_slot_room(ui: &Ui, text: &str, font: &egui::FontId, prefix_slot: bool) -> f32 {
@@ -2168,10 +2180,10 @@ pub fn reading_layout(
 ) -> egui::text::LayoutJob {
     let format = egui::TextFormat::simple(font, color);
     let mut job = egui::text::LayoutJob::default();
-    match text.rfind(' ').filter(|_| slot > 0.0) {
-        Some(space) => {
-            job.append(&text[..=space], 0.0, format.clone());
-            job.append(&text[space + 1..], slot, format);
+    match reading_unit_start(text).filter(|_| slot > 0.0) {
+        Some(start) => {
+            job.append(&text[..start], 0.0, format.clone());
+            job.append(&text[start..], slot, format);
         }
         None => job.append(text, 0.0, format),
     }

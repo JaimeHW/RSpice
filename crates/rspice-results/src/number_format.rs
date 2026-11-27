@@ -509,7 +509,18 @@ pub fn measured_unit(symbol: &str) -> String {
 /// (`12 display bins`, `38 beyond`) is no unit, so it keeps its one space.
 #[must_use]
 pub fn leaves_prefix_slot_blank(reading: &str) -> bool {
-    let Some((value, unit)) = reading.trim_end().rsplit_once(' ') else {
+    let reading = reading.trim_end();
+    // The unit is the word after the value, a qualifier after it aside:
+    // `V` in `1.144 V rms`.
+    let Some(start) = reading_unit_start(reading) else {
+        return false;
+    };
+    let value = reading[..start].trim_end();
+    let Some(unit) = reading[start..]
+        .split(' ')
+        .next()
+        .filter(|unit| !unit.is_empty())
+    else {
         return false;
     };
     // A unit stands right after a number, a complex one's `j` included.
@@ -561,6 +572,17 @@ pub fn snapped_to_spread(value: f64, spread: f64) -> f64 {
 /// above what summing even millions of samples leaves, far below any
 /// difference a reading at the reader's digits shows.
 const SPREAD_ROUNDING: f64 = 1.0e-12;
+
+/// Where a printed reading's unit starts: after its last space, or, when a
+/// qualifier follows the unit, after the space before the unit, `µV` in
+/// `33.31 µV rms`, so a blank prefix slot stands before the unit and never
+/// between the unit and its qualifier. None for a reading of one word.
+#[must_use]
+pub fn reading_unit_start(reading: &str) -> Option<usize> {
+    let body = reading.trim_end();
+    let body = body.strip_suffix(" rms").unwrap_or(body);
+    body.rfind(' ').map(|space| space + 1)
+}
 
 /// Whether `unit` names a plane angle, which stands against its number.
 pub(crate) fn is_plane_angle(unit: &str) -> bool {
@@ -1608,6 +1630,10 @@ mod tests {
         ));
         assert!(!leaves_prefix_slot_blank("101 measured \u{b7} 38 failing"));
         assert!(!leaves_prefix_slot_blank("4.000a V\u{b2}/Hz"));
+        // A qualifier after the unit is not the unit: `µV rms` is prefixed.
+        assert!(!leaves_prefix_slot_blank("33.31 \u{b5}V rms"));
+        assert!(leaves_prefix_slot_blank("1.144 V rms"));
+        assert_eq!(reading_unit_start("1.144 V rms"), Some(6));
     }
 
     #[test]
