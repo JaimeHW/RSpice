@@ -1496,6 +1496,61 @@ fn fit_joins_the_control_row_at_its_left_end_only_while_the_strip_is_zoomed() {
     );
 }
 
+/// The bar's Zoom in magnifies a document pane's strip, as a pinch on its
+/// plot does: the document keeps the X window it narrowed to through the
+/// frames after it, and the bar's Fit lets the window go again.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_bars_zoom_in_magnifies_a_document_pane_and_its_fit_lets_go() {
+    use egui::accesskit::Role;
+    use rspice_app_state::results::visualization_document::AxisOrientation;
+    let bar_control = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+                       starts: &str,
+                       ends: &str| {
+        nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == Role::Button
+                    && node
+                        .label()
+                        .is_some_and(|label| label.starts_with(starts) && label.ends_with(ends))
+            })
+            .map(|(id, _)| *id)
+    };
+    // The X window the document keeps for its panes, when it keeps one.
+    let window_kept = |window: &ResultsWindow, document| {
+        window
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .visualization_document(document)
+            .expect("the project owns it")
+            .axes()
+            .iter()
+            .any(|axis| axis.orientation == AxisOrientation::Horizontal && axis.range.is_some())
+    };
+    let mut window = ResultsWindow::new();
+    let document = window.create("Transient review").expect("document commits");
+    let nodes = window.settled_frames();
+    assert!(!window_kept(&window, document), "a new document is fitted");
+    let zoom = bar_control(&nodes, "Zoom ", " in 2x").expect("the bar offers Zoom in");
+    window.click(zoom);
+    let nodes = window.settled_frames();
+    assert!(
+        window_kept(&window, document),
+        "the bar's Zoom in narrows the document pane's X window, and it holds"
+    );
+    let fit = bar_control(&nodes, "Fit ", "").expect("the bar offers Fit");
+    window.click(fit);
+    window.settled_frames();
+    assert!(
+        !window_kept(&window, document),
+        "the bar's Fit lets the window go"
+    );
+}
+
 /// An edit to one of two saved documents marks that document's tab and not
 /// the other's, and saving the project clears the mark.
 #[cfg(not(target_arch = "wasm32"))]

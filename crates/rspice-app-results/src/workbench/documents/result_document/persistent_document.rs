@@ -184,6 +184,10 @@ pub fn show(
             return;
         }
         super::show_sheet_bar(ui, state);
+        // What the bar did to the active pane's view, a zoom or a fit, is the
+        // document's at once: each pane projects the document's view over the
+        // session's before it draws, which would undo it.
+        capture_pane_presentation(state, active_pane, viewer);
         crate::ui::plot::set_interaction_mode(
             ui.ctx(),
             state.results.session.plot_tool.interaction_mode(),
