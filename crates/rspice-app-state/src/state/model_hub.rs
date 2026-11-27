@@ -58,7 +58,8 @@ use std::collections::BTreeMap;
 
 use rspice_pack::{PackError, Snapshot, VerifiedPack, decode_snapshot};
 
-pub use placement::{PartPlacement, plan_library_placement, plan_part_placement, refusal_sentence};
+pub use crate::state::part_placement::{PartPlacement, plan_library_placement, refusal_sentence};
+pub use placement::plan_part_placement;
 pub use provider::precedence;
 pub use provider::{ModelHubPartRow, PartProvenance, PartState, missing_capabilities};
 pub use release_diff::{ChangedPart, PartFact, PartStanding, ReleaseDiff, ReleaseDiffKey};

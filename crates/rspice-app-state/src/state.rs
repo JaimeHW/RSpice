@@ -20,6 +20,7 @@ pub mod netlist_diagnostics;
 pub mod notices;
 pub use rspice_design::parameters as params_string;
 pub mod pdk_config;
+pub mod part_placement;
 use rspice_design::physical_layout;
 mod preflight_report;
 mod project_open;
