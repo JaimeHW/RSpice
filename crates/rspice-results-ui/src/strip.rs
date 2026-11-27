@@ -40,10 +40,9 @@ pub(crate) const X_SCALE_LABEL: &str = "log X";
 
 /// The chip that returns a zoomed strip to its automatic view.
 pub(crate) const FIT_LABEL: &str = "Fit";
-pub(crate) const EXPRESSION_ACTION_LABEL: &str = "+ Expression";
+pub(crate) const EXPRESSION_ACTION_LABEL: &str = "+ Calculated trace";
 /// What the expression action's hover says.
-pub(crate) const EXPRESSION_ACTION_TIP: &str =
-    "Add an expression trace, e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))";
+pub(crate) const EXPRESSION_ACTION_TIP: &str = "Add a trace calculated from the run's signals, e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))";
 /// What Fit's hover says.
 pub(crate) const FIT_TIP: &str = "Restore automatic view (double-click the plot does the same)";
 

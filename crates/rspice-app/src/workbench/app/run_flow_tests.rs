@@ -313,7 +313,7 @@ fn the_plot_page_is_one_band_over_its_plot_and_the_drawing_stays_in_sight() {
         page.min - egui::vec2(0.0, CONSOLE_BODY_PADDING_TOP),
         egui::vec2(page.width(), 28.0),
     );
-    for control in ["A|B", "H", "Open in Results"] {
+    for control in ["Cursors", "Y cursors", "Open in Results"] {
         let rect = user.expect(control);
         assert!(
             band.contains(rect.center()),
@@ -624,7 +624,7 @@ fn placing_a_cursor_keeps_the_dock_where_the_reader_left_it() {
         .cursor_tool
         .is_armed()
     {
-        user.click("A|B");
+        user.click("Cursors");
     }
     let page = plot_page(&user);
     user.press(
