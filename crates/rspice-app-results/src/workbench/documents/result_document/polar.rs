@@ -17,6 +17,19 @@ pub(super) fn domain_bar(ui: &mut Ui, context: &mut SheetContext<'_>) -> bool {
     )
 }
 
+/// The frequencies the polar locus spans, lowest to highest: what the
+/// status bar states for a sheet that plots no shared X interval.
+pub(super) fn frequency_span(state: super::ResultsReads<'_>) -> Option<(f64, f64)> {
+    let locus = view::resolve_locus(
+        state.model.simulation.active_analysis()?,
+        &state.results.session.polar,
+    )?;
+    let frequencies = locus.frequencies();
+    let (first, last) = (*frequencies.first()?, *frequencies.last()?);
+    let (low, high) = (first.min(last), first.max(last));
+    (low.is_finite() && high.is_finite() && low < high).then_some((low, high))
+}
+
 fn active_locus(context: &SheetContext<'_>) -> Option<PolarLocus> {
     view::resolve_locus(
         context.simulation.active_analysis()?,

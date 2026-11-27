@@ -651,6 +651,11 @@ pub fn active_shared_x_status(
     tokens: &Tokens,
     state: &mut ResultsParts<'_>,
 ) -> Option<SharedXStatus> {
+    // A distribution or the polar plane plots no shared X interval: the bar
+    // states what that sheet draws instead.
+    if let Some(domain) = own_domain(state.results_reads()) {
+        return domain.map(|span| SharedXStatus { span, zoom: 1.0 });
+    }
     let presentation = state.results_reads().presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let active = state
@@ -679,6 +684,28 @@ pub fn active_shared_x_status(
     })
 }
 
+/// What a sheet that plots no shared X interval states on the bar instead:
+/// the population a distribution draws, or the frequencies the polar locus
+/// spans. `None` for a sheet that plots the shared interval, and
+/// `Some(None)` while one of these sheets has nothing drawn.
+fn own_domain(state: ResultsReads<'_>) -> Option<Option<String>> {
+    use super::ResultViewer;
+    Some(match state.results.session.viewer {
+        ResultViewer::Hist => super::hist::active_histogram(state)
+            .map(|histogram| format!("{} samples", histogram.total_count)),
+        ResultViewer::Scatter | ResultViewer::BoxViolin => super::population::shown(
+            &state.model.simulation,
+            &state.model.workspace,
+            state.results,
+        )
+        .map(|plan| format!("{} trials", plan.trial_count())),
+        ResultViewer::Polar => super::polar::frequency_span(state).map(|span| {
+            hertz_range_text(span, state.model.preferences.quantity_presentation_policy())
+        }),
+        _ => return None,
+    })
+}
+
 /// A strip's X interval as its axis states it: the range field's own
 /// spelling, in the frequency unit the reader chose for a hertz axis.
 fn x_range_text(
@@ -687,13 +714,19 @@ fn x_range_text(
     quantity_policy: crate::quantity::QuantityPresentationPolicy,
 ) -> String {
     if model.x_unit == "Hz" {
-        let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
-        return super::axis_range::format_axis_range(
-            (x0 * scale + offset, x1 * scale + offset),
-            unit,
-        );
+        return hertz_range_text((x0, x1), quantity_policy);
     }
     super::axis_range::format_axis_range((x0, x1), &model.x_unit)
+}
+
+/// An interval of frequencies as the range field spells it, in the
+/// frequency unit the reader chose.
+fn hertz_range_text(
+    (x0, x1): (f64, f64),
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> String {
+    let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
+    super::axis_range::format_axis_range((x0 * scale + offset, x1 * scale + offset), unit)
 }
 
 /// The analysis the active pane belongs to.
