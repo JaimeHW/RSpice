@@ -80,10 +80,10 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
     Frame::NONE.fill(t.color.bg_inset).show(ui, |ui| {
         ui.set_min_size(vec2(width, height));
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        let Some(count) = draft
+        let Some(pages) = draft
             .preview_plan
             .as_ref()
-            .map(|plan| plan.pagination().pages().len().clamp(1, 2))
+            .map(|plan| plan.pagination().pages().len())
         else {
             ui.allocate_ui_with_layout(
                 vec2(width, height),
@@ -94,6 +94,7 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
             );
             return;
         };
+        let (count, tiled) = (pages.clamp(1, 2), pages > 1);
         // The card is sized from the page, not the other way round: the white
         // area is the sheet plus its margin, so the desk never shows a
         // letterboxed page inside a card of some other proportion.
@@ -132,7 +133,7 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
                             preview.page_number() == draft.preview_page.saturating_add(1);
                         if preview_card(
                             ui,
-                            preview,
+                            (preview, tiled),
                             selected,
                             draft.preview_zoom_percent,
                             slot,
@@ -260,8 +261,15 @@ fn preview_facts(draft: &HardcopyDialogState) -> Vec<(&'static str, String)> {
     let pages = draft.preview_plan.as_ref().map(|plan| {
         let pagination = plan.pagination();
         let count = pagination.pages().len();
-        let arrangement = if pagination.sections().is_empty() {
-            format!(" · {} × {} tiles", pagination.columns(), pagination.rows())
+        // One page is the whole drawing, split over nothing.
+        let arrangement = if count == 1 {
+            String::new()
+        } else if pagination.sections().is_empty() {
+            format!(
+                " · {} across, {} down",
+                pagination.columns(),
+                pagination.rows()
+            )
         } else {
             " · split between sections".to_owned()
         };
@@ -340,9 +348,20 @@ fn preview_facts_strip(ui: &mut Ui, facts: &[(&'static str, String)], width: f32
     );
 }
 
+/// A preview page's caption: its number, and where it falls in the grid of
+/// pages a drawing is split over. A page holding the whole drawing is in no
+/// grid, and its grid name ("A1") would read as a paper size.
+fn page_caption(preview: &HardcopyPreviewPage, tiled: bool) -> String {
+    if tiled {
+        format!("Page {} · {}", preview.page_number(), preview.coordinate())
+    } else {
+        format!("Page {}", preview.page_number())
+    }
+}
+
 fn preview_card(
     ui: &mut Ui,
-    preview: &HardcopyPreviewPage,
+    (preview, tiled): (&HardcopyPreviewPage, bool),
     selected: bool,
     zoom_percent: u16,
     texture_slot: usize,
@@ -382,14 +401,10 @@ fn preview_card(
                 ui.add_sized(
                     vec2(inner_width, 18.0),
                     egui::Label::new(
-                        egui::RichText::new(format!(
-                            "Page {} · {}",
-                            preview.page_number(),
-                            preview.coordinate()
-                        ))
-                        .monospace()
-                        .size(tokens::FS_0)
-                        .color(egui::Color32::from_rgb(44, 44, 42)),
+                        egui::RichText::new(page_caption(preview, tiled))
+                            .monospace()
+                            .size(tokens::FS_0)
+                            .color(egui::Color32::from_rgb(44, 44, 42)),
                     )
                     .truncate(),
                 );
@@ -404,7 +419,7 @@ fn preview_card(
         );
     }
     let response = card.response.interact(Sense::click());
-    let label = format!("Page {} · {}", preview.page_number(), preview.coordinate());
+    let label = page_caption(preview, tiled);
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::Button,
