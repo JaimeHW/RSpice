@@ -750,28 +750,54 @@ pub(crate) fn curve_words(name: &str, kind: TraceKind) -> Cow<'_, str> {
         Some((base, member)) => (base, Some(member)),
         None => (name, None),
     };
-    let inside = |function: &str| {
-        base.strip_prefix(function)
-            .and_then(|rest| rest.strip_prefix('('))
-            .and_then(|rest| rest.strip_suffix(')'))
-    };
-    let words = if let Some(signal) = inside("phase") {
-        format!("{signal} phase")
-    } else if let Some(signal) = inside("groupDelay") {
-        format!("{signal} group delay")
-    } else {
-        match kind {
+    let words = match signal_words(base) {
+        Cow::Owned(words) => words,
+        Cow::Borrowed(_) => match kind {
             TraceKind::NoiseDensity if !base.ends_with("density") => format!("{base} density"),
             TraceKind::NoisePower if !base.ends_with("power density") => {
                 format!("{base} power density")
             }
             _ => return Cow::Borrowed(name),
-        }
+        },
     };
     Cow::Owned(match member {
         Some(member) => format!("{words} \u{b7} {member}"),
         None => words,
     })
+}
+
+/// A signal's name as a reader says it: a form the run names as a function
+/// of a signal, `phase(V(out))`, `groupDelay(S21)`, `Re(Loop Gain)`, in
+/// words after the signal, `V(out) phase`, `S21 group delay`, `Loop Gain
+/// real part`. Any other name, an expression of several signals among
+/// them, stands as it is.
+pub fn signal_words(name: &str) -> Cow<'_, str> {
+    const FORMS: [(&str, &str); 4] = [
+        ("phase", "phase"),
+        ("groupDelay", "group delay"),
+        ("Re", "real part"),
+        ("Im", "imaginary part"),
+    ];
+    // The argument is the whole of what is inside the brackets: no bracket
+    // in it closes before its end, as one in `phase(a)-phase(b)` would.
+    let whole = |inside: &str| {
+        inside.chars().try_fold(0_usize, |depth, c| match c {
+            '(' => Some(depth + 1),
+            ')' => depth.checked_sub(1),
+            _ => Some(depth),
+        }) == Some(0)
+    };
+    FORMS
+        .iter()
+        .find_map(|(function, words)| {
+            let signal = name
+                .strip_prefix(function)?
+                .strip_prefix('(')?
+                .strip_suffix(')')
+                .filter(|signal| !signal.is_empty() && whole(signal))?;
+            Some(Cow::Owned(format!("{signal} {words}")))
+        })
+        .unwrap_or(Cow::Borrowed(name))
 }
 
 /// A family member's entry, from the name the legend reads it by: the
@@ -1465,6 +1491,18 @@ mod tests {
                 "onoise power density",
             ),
             ("|V(out)|", TraceKind::MagnitudeDb, "|V(out)|"),
+            ("Re(Loop Gain)", TraceKind::Value, "Loop Gain real part"),
+            (
+                "Im(Loop Gain)",
+                TraceKind::Value,
+                "Loop Gain imaginary part",
+            ),
+            // An expression of two forms is not one form of a signal.
+            (
+                "phase(V(a))-phase(V(b))",
+                TraceKind::Value,
+                "phase(V(a))-phase(V(b))",
+            ),
             (
                 "V(out) group delay",
                 TraceKind::GroupDelay,

@@ -32,6 +32,7 @@ use super::results_tree::{InstanceNode, SignalKind, TreeItem, split_hierarchy};
 use crate::product::ResultDocumentId;
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_app_workbench::workbench::docks::navigator::muted;
+use rspice_results_ui::waves::header::signal_words;
 
 use crate::workbench::documents::result_document::ResultQuantityDrag;
 use crate::workbench::documents::result_document::browser_plot::{
@@ -1023,6 +1024,12 @@ pub(super) fn show_virtualized_result_signals(
     // document's tab is in front, though its pane reads a run, until a row
     // picks the run and brings its tab forward.
     let active_run = active_run.filter(|_| shown_document.is_none());
+    // The Nyquist sheet draws the loop gain's two parts as one locus, and
+    // the pole-zero map its roots: neither draws a row as a curve.
+    let curves_drawn = !matches!(
+        state.results.session.viewer,
+        crate::workbench::ResultViewer::Nyquist | crate::workbench::ResultViewer::PoleZero
+    );
     let rows = list.len();
     let signal_rows = list.quantity_rows;
 
@@ -1248,19 +1255,27 @@ pub(super) fn show_virtualized_result_signals(
                             let signal = &signal;
                             let shown = notations.display(&signal.name);
                             // Under an instance a row names the signal inside
-                            // it; the instance rows above it carry the path.
+                            // it; the instance rows above it carry the path. A
+                            // form of a signal reads in the legend's words.
                             let label = if in_tree {
-                                split_hierarchy(&shown).leaf
+                                signal_words(&split_hierarchy(&shown).leaf).into_owned()
                             } else {
-                                shown.to_string()
+                                signal_words(&shown).into_owned()
                             };
-                            let color = plotted_signal_color(
-                                last_strip_models(state),
-                                &Tokens::get(ui.ctx()).color.traces,
-                                analysis.presentation_key,
-                                signal.waveform_index,
-                                &signal.color,
-                            );
+                            let shown = signal_words(&shown);
+                            // A row reads in its curve's colour, or in none
+                            // on a sheet that draws it as no curve of its
+                            // own: the Nyquist locus is drawn of the loop
+                            // gain's two parts together.
+                            let color = curves_drawn.then(|| {
+                                plotted_signal_color(
+                                    last_strip_models(state),
+                                    &Tokens::get(ui.ctx()).color.traces,
+                                    analysis.presentation_key,
+                                    signal.waveform_index,
+                                    &signal.color,
+                                )
+                            });
                             let signal_selected = selected_trace.is_some_and(|selected| {
                                 selected.analysis_key() == analysis.presentation_key
                                     && selected.source_name() == signal.name
@@ -2317,7 +2332,7 @@ fn result_quantity_row(
     label: RowLabel<'_>,
     meta: &str,
     value: Option<&str>,
-    color: egui::Color32,
+    color: Option<egui::Color32>,
     selected: bool,
     visible: bool,
 ) -> SignalRowResponses {
@@ -2433,7 +2448,11 @@ fn result_quantity_row(
         rect,
         text_left,
         label.name,
-        if visible { color } else { c.text_dim },
+        match (visible, color) {
+            (true, Some(color)) => color,
+            (true, None) => c.text,
+            (false, _) => c.text_dim,
+        },
         right_text.map(|text| {
             (
                 text,

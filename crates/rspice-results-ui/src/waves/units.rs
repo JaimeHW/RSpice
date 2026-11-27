@@ -123,6 +123,16 @@ pub fn browser_signal_unit<'a>(
     if retained_unit.is_none() && starts_with_accessor(name, "phase(") {
         return "°";
     }
+    // A loop gain is a ratio, whatever the analysis' nominal quantity.
+    if retained_unit.is_none()
+        && [
+            rspice_results::nyquist::LOOP_GAIN_REAL_TRACE,
+            rspice_results::nyquist::LOOP_GAIN_IMAGINARY_TRACE,
+        ]
+        .contains(&name)
+    {
+        return "1";
+    }
     quantity_unit(name, retained_unit, analysis_unit)
 }
 
