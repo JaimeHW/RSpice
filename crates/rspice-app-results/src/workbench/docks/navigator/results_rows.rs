@@ -1380,6 +1380,18 @@ pub(super) fn show_virtualized_result_signals(
                             let selection_key =
                                 ResultBrowserSelectionKey::Artifact(artifact.identity.clone());
                             let selected = selected_artifact == Some(&artifact.identity);
+                            // A whole payload's summary is a detail that
+                            // yields to the row's name, not a reading.
+                            let (meta, value) = match artifact.value.as_deref() {
+                                Some(summary)
+                                    if sheet_drawn_payload(
+                                        artifact.identity.canonical_name(),
+                                    ) =>
+                                {
+                                    (summary, None)
+                                }
+                                value => (artifact.meta.as_str(), value),
+                            };
                             let responses = result_artifact_row(
                                 ui,
                                 result_signal_row_id(&selection_key),
@@ -1390,12 +1402,13 @@ pub(super) fn show_virtualized_result_signals(
                                         .unwrap_or(SignalKind::Other(artifact.kind.glyph())),
                                     indent: depth,
                                 },
-                                &artifact.meta,
-                                artifact.value.as_deref(),
+                                meta,
+                                value,
                                 selected,
                                 // The tick is the one the count above reads: an
                                 // event net's or a bus's row is ticked while its
-                                // lane is plotted, however it got there.
+                                // lane is plotted, however it got there, and a
+                                // payload's while its sheet draws it.
                                 ticked.contains(&selection_key),
                             );
                             if responses.selection.drag_started()
@@ -1477,6 +1490,16 @@ pub(super) fn show_virtualized_result_signals(
 
 /// The identity prefix of a measurement's row, its name after it.
 const MEASUREMENT_ROW_PREFIX: &str = "measurement/";
+
+/// Whether a row is a whole payload its own sheet draws: the pole-zero
+/// roots, a loop gain's margins, a transfer function. An event net or a bus
+/// is one lane among many the reader plots, and the events they come from
+/// are never drawn whole.
+pub(super) fn sheet_drawn_payload(canonical: &str) -> bool {
+    canonical
+        .strip_prefix("payload/")
+        .is_some_and(|rest| !rest.contains('/') && rest != "transient-events")
+}
 
 /// An event net's row name with its net spelled as the drawing spells it
 /// (`Digital net csn` for the engine's `CSN`), and a measurement's as its
@@ -2530,15 +2553,31 @@ fn paint_row_line(
     name_color: egui::Color32,
     right: Option<(&str, egui::Color32, bool)>,
 ) {
+    // The least room a row's detail is drawn in: a few characters and the
+    // ellipsis, under which it says nothing a reader could use.
+    const MIN_DETAIL_ROOM: f32 = 40.0;
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let mut name_right = rect.right() - 8.0;
-    if let Some((text, color, reading)) = right {
+    // A value yields to the name past half the row: a long bus member list
+    // must not push the identity out of its own row. A detail yields to the
+    // whole name and takes only the room it leaves, or none.
+    let right = right.and_then(|(text, color, reading)| {
+        let room = if reading {
+            (name_right - left) * 0.5
+        } else {
+            let name_width = ui
+                .painter()
+                .layout_no_wrap(name.to_owned(), font.clone(), name_color)
+                .size()
+                .x;
+            name_right - left - name_width - 8.0
+        };
+        (reading || room >= MIN_DETAIL_ROOM).then_some((text, color, reading, room.max(0.0)))
+    });
+    if let Some((text, color, reading, room)) = right {
         let galley = ui
             .painter()
             .layout_no_wrap(text.to_owned(), font.clone(), color);
-        // The value yields to the name past half the row: a long bus member
-        // list must not push the identity out of its own row.
-        let room = ((name_right - left) * 0.5).max(0.0);
         let shown = if galley.size().x <= room {
             text.to_owned()
         } else {

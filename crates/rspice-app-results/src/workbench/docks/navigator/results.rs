@@ -32,7 +32,8 @@ use super::results_rows::{
     ResultCompletenessClass, artifact_hierarchical_name, artifact_signal_kind, expression_header,
     is_plottable_artifact, result_analysis_browser_status, result_analysis_completeness,
     result_analysis_domain, result_run_completeness, result_run_operational_label,
-    retained_result_artifacts, show_virtualized_result_signals, signal_row, signal_rows,
+    retained_result_artifacts, sheet_drawn_payload, show_virtualized_result_signals, signal_row,
+    signal_rows,
 };
 use super::results_sets::{save_ticked_as_set, signal_sets_menu};
 use super::results_tree::{BrowserQuery, SignalKind};
@@ -842,8 +843,10 @@ pub(super) fn read_ticked(
 ) -> TickedQuantities {
     let mut ticked = ticked_result_quantities(state.model, state.results);
     // An event net's or a bus's row is ticked while its lane is on the plot,
-    // as a curve's row is while the curve is.
+    // as a curve's row is while the curve is, and a payload's while its
+    // sheet draws it.
     ticked.extend(plotted_event_rows(state));
+    ticked.extend(drawn_payload_rows(state));
     TickedQuantities {
         revision,
         visibility,
@@ -1058,6 +1061,8 @@ fn ticked_fingerprint(state: &ResultsParts<'_>) -> u64 {
     (view.data_version, view.active_run_idx).hash(&mut hasher);
     view.overlay_dataset_ids.hash(&mut hasher);
     let session = &state.results.session;
+    // The sheet on show and its analysis tick the payload it draws.
+    (view.active_analysis_idx, session.viewer).hash(&mut hasher);
     // A set's or a map's order is its hasher's: combine its members in any
     // order.
     session
@@ -1843,6 +1848,27 @@ pub(super) fn button_menu<R>(
 }
 
 /// The active run's event-net and bus rows whose lanes are on the plot.
+/// The payload the sheet on show draws whole: the active analysis' own, on
+/// the sheet that draws it, as the pole-zero plane draws its roots.
+pub(super) fn drawn_payload_rows(state: &ResultsParts<'_>) -> Vec<ResultBrowserSelectionKey> {
+    let simulation = &state.model.simulation;
+    let (Some(run), Some(analysis)) = (simulation.active_run(), simulation.active_analysis())
+    else {
+        return Vec::new();
+    };
+    retained_result_artifacts(
+        analysis,
+        AnalysisPresentationKey::new(run.dataset_id, analysis),
+    )
+    .into_iter()
+    .filter(|artifact| {
+        sheet_drawn_payload(artifact.identity.canonical_name())
+            && artifact.viewer == state.results.session.viewer
+    })
+    .map(|artifact| ResultBrowserSelectionKey::Artifact(artifact.identity))
+    .collect()
+}
+
 pub(super) fn plotted_event_rows(state: &ResultsParts<'_>) -> Vec<ResultBrowserSelectionKey> {
     let Some(run) = state.model.simulation.active_run() else {
         return Vec::new();

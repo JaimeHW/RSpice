@@ -249,6 +249,61 @@ fn a_net_on_the_lanes_is_a_ticked_row() {
     );
 }
 
+/// A payload its sheet draws whole is a ticked row: the pole-zero plane draws
+/// the active analysis' roots, and the row and the count both say so, while
+/// another sheet draws none of them.
+#[test]
+fn the_roots_the_pole_zero_plane_draws_are_a_ticked_row() {
+    use crate::state::{
+        AnalysisResultPayload, ComplexResultValue, PoleZeroRootSetEvidence,
+        PoleZeroSpectrumCertificate,
+    };
+    let evidence = |count: u64| PoleZeroRootSetEvidence::Qualified {
+        certificate: PoleZeroSpectrumCertificate {
+            asymptotically_stable: None,
+            problem_order: count,
+            infinite_count: 0,
+            max_backward_error: 1.0e-14,
+            qualification_tolerance:
+                PoleZeroSpectrumCertificate::canonical_qualification_tolerance(count).unwrap(),
+        },
+    };
+    let root = |real: f64| ComplexResultValue {
+        real,
+        imaginary: 0.0,
+    };
+    let mut host = ResultsTestHost::default();
+    host.model.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+            AnalysisResultPayload::PoleZero {
+                poles: vec![root(-1.0e3)],
+                zeros: vec![root(-4.0e3)],
+                pole_evidence: evidence(1),
+                zero_evidence: evidence(1),
+                gain: Some(2.0),
+            },
+        ),
+    );
+    host.model.simulation.view.active_analysis_idx = Some(0);
+    host.results.session.viewer = crate::workbench::ResultViewer::PoleZero;
+    let mut browser = Browser::new(host);
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    let row = |nodes: &[Node]| {
+        nodes
+            .iter()
+            .find(|node| node.label.starts_with("Select Poles, zeros"))
+            .cloned()
+            .unwrap_or_else(|| panic!("no tick box for the roots: {:?}", labels(nodes)))
+    };
+    assert!(row(&nodes).ticked, "the plane draws the roots");
+    assert!(find(&nodes, "1 ticked").is_some(), "{:?}", labels(&nodes));
+    browser.host.results.session.viewer = crate::workbench::ResultViewer::Table;
+    browser.frame(Vec::new());
+    let nodes = browser.frame(Vec::new());
+    assert!(!row(&nodes).ticked, "a table draws no roots");
+}
+
 /// The engine folds every node name to upper case; an event net's row reads
 /// as the drawing spells the net.
 #[test]
