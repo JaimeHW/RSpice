@@ -16,7 +16,7 @@ const NPY: usize = 6;
 #[test]
 fn the_picker_offers_every_format_the_export_writes_in_stored_order() {
     let mut state = ResultsTestHost::default();
-    for (index, (_, one_analysis)) in FORMATS.iter().enumerate() {
+    for (index, offered) in FORMATS.iter().enumerate() {
         state
             .model
             .preferences
@@ -34,7 +34,7 @@ fn the_picker_offers_every_format_the_export_writes_in_stored_order() {
                 | EngineeringExportFormat::NumpyArray
                 | EngineeringExportFormat::SpicePwl
         );
-        assert_eq!(*one_analysis, holds_one, "format {index} disagrees");
+        assert_eq!(offered.one_analysis, holds_one, "format {index} disagrees");
     }
     assert!(
         state
@@ -295,11 +295,24 @@ fn a_stepped_view_offers_all_members_and_a_one_member_format_says_so() {
 
     open_form(&mut state, 0);
     let nodes = form_nodes(&mut state);
-    assert_eq!(analysis_question(&nodes).as_deref(), Some(ALL_MEMBERS));
+    // The choice counts the members; the signals are counted once, as each member holds them.
+    assert_eq!(
+        analysis_question(&nodes).as_deref(),
+        Some("All members (2)")
+    );
+    let words = spoken(&nodes);
     assert!(
-        !painted(&mut state)
+        words.iter().any(|word| word == "Plotted (1)")
+            && words.iter().any(|word| word == "All (2)"),
+        "{words:?}"
+    );
+    let texts = painted(&mut state);
+    assert!(!texts.iter().any(|text| text == ONE_MEMBER_NOTE));
+    assert!(
+        !texts
             .iter()
-            .any(|text| text == ONE_MEMBER_NOTE)
+            .any(|text| FORMATS.iter().any(|format| format.hint == Some(text))),
+        "CSV needs no hint: {texts:?}"
     );
 
     open_form(&mut state, NPY);
@@ -313,6 +326,57 @@ fn a_stepped_view_offers_all_members_and_a_one_member_format_says_so() {
     assert!(
         texts.iter().any(|text| text == ONE_MEMBER_NOTE),
         "{texts:?}"
+    );
+    // One array has no names: the reader is told before choosing it.
+    let hint = FORMATS[NPY].hint.expect("NumPy array states its column order");
+    assert!(texts.iter().any(|text| text == hint), "{texts:?}");
+}
+
+/// The form opens with no field focused, so no choice wears the focus ring
+/// before the reader has touched the keyboard.
+#[test]
+fn the_form_opens_with_no_field_focused() {
+    let mut state = two_strip_state();
+    open_form(&mut state, NPY);
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = std::collections::HashMap::new();
+    let mut focus = None;
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                show_dataset_export_picker(
+                    ctx,
+                    &mut state.results.dataset_export,
+                    &mut state.results.dataset_export_form,
+                    &mut state.model.preferences,
+                );
+            },
+        );
+        let update = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update");
+        focus = Some(update.focus);
+        nodes.extend(update.nodes);
+    }
+    let fields = nodes
+        .iter()
+        .filter(|(_, node)| node.role() == egui::accesskit::Role::ComboBox)
+        .map(|(id, _)| *id)
+        .collect::<Vec<_>>();
+    assert!(fields.len() >= 2, "Format and Analysis");
+    assert!(
+        !fields.contains(&focus.expect("a frame ran")),
+        "a field took the focus at open"
     );
 }
 

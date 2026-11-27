@@ -17,7 +17,7 @@
 
 use egui::Context;
 
-use crate::ui::widgets::{CommandForm, DialogChoice};
+use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::ChoicePreference;
 use crate::workbench::documents::result_document::ResultsReads;
 use crate::workbench::preferences::UserPreferences;
@@ -92,22 +92,57 @@ pub struct DatasetExportForm {
     trace: Option<String>,
 }
 
+/// One format the export writes: its name and the extension it writes, as
+/// the list shows it.
+struct Format {
+    label: &'static str,
+    /// It can hold only one analysis.
+    one_analysis: bool,
+    /// What the reader needs to know before choosing it and its name does
+    /// not say, stated under the field while it is chosen.
+    hint: Option<&'static str>,
+}
+
+const fn format(label: &'static str, one_analysis: bool, hint: Option<&'static str>) -> Format {
+    Format {
+        label,
+        one_analysis,
+        hint,
+    }
+}
+
 /// Every format the export writes, in the order the stored choice numbers
-/// them, and whether it can hold only one analysis.
-const FORMATS: [(&str, bool); 13] = [
-    ("CSV", false),
-    ("Touchstone where compatible", true),
-    ("TSV", false),
-    ("RSpice result bundle", false),
-    ("RSpice dataset bundle", false),
-    ("VCD \u{00b7} event timelines", true),
-    ("NumPy .npy \u{00b7} one array, column order stated", true),
-    ("NumPy .npz \u{00b7} one named array per signal", false),
-    ("HDF5 \u{00b7} names and units carried", false),
-    ("MATLAB v5 \u{00b7} column vectors, complex for AC", false),
-    ("SPICE raw \u{00b7} binary, for ngspice and LTspice", false),
-    ("SPICE raw \u{00b7} ASCII values", false),
-    ("SPICE PWL \u{00b7} one trace as a source", true),
+/// them.
+const FORMATS: [Format; 13] = [
+    format("CSV (.csv)", false, None),
+    format(
+        "Touchstone (.sNp)",
+        true,
+        Some("An S-parameter network: signals named S11, S21 and so on."),
+    ),
+    format("TSV (.tsv)", false, None),
+    format("RSpice result bundle (.rspiceresult)", false, None),
+    format("RSpice dataset bundle (.rspicedata)", false, None),
+    format(
+        "VCD (.vcd)",
+        true,
+        Some("The transient's event timelines, not its analog traces."),
+    ),
+    format(
+        "NumPy array (.npy)",
+        true,
+        Some("One array without names: the axis, then each signal."),
+    ),
+    format("NumPy archive (.npz)", false, None),
+    format("HDF5 (.h5)", false, None),
+    format("MATLAB (.mat)", false, None),
+    format("SPICE raw, binary (.raw)", false, None),
+    format("SPICE raw, ASCII (.raw)", false, None),
+    format(
+        "PWL (.inc)",
+        true,
+        Some("One trace as a PWL source, for a deck to include."),
+    ),
 ];
 
 /// Stored indices of the formats that have something particular to ask.
@@ -120,9 +155,11 @@ const PWL: usize = 12;
 /// long-form file, every other format each analysis in a part of its own, and
 /// a one-analysis format cannot hold.
 const EVERY_ANALYSIS: &str = "Every displayed analysis";
-/// The same entry over the members of one `.step` sweep or Monte Carlo study.
+/// The same entry over the members of one `.step` sweep or Monte Carlo study,
+/// followed by how many there are.
 const ALL_MEMBERS: &str = "All members";
 const ONE_ANALYSIS_REASON: &str = "This format holds one analysis.";
+const ONE_MEMBER_REASON: &str = "This format holds one member.";
 const ONE_MEMBER_NOTE: &str = "This format holds one member: it writes the one chosen.";
 const ONE_ANALYSIS_NOTE: &str = "This format holds one analysis: it writes the one chosen.";
 
@@ -232,8 +269,11 @@ impl DatasetExportForm {
     /// The position of the analysis `format` writes: the one chosen, else
     /// the active strip's for a one-analysis format, else every one.
     fn written_position(&self, format: usize) -> Option<usize> {
-        self.analysis
-            .or(if FORMATS[format].1 { self.active } else { None })
+        self.analysis.or(if FORMATS[format].one_analysis {
+            self.active
+        } else {
+            None
+        })
     }
 
     /// The choice the export reads, for a form showing `format`.
@@ -265,20 +305,32 @@ impl DatasetExportForm {
     }
 
     /// How many signals each choice writes in `format`, plotted and all:
-    /// traces, and lanes where the format carries them.
+    /// traces, and lanes where the format carries them. Every member of a
+    /// family holds the same signals, so all of them count those once: the
+    /// number of members is the analysis choice's to state.
     fn signal_counts(&self, format: usize) -> (usize, usize) {
         let lanes = usize::from(matches!(format, RAW_BINARY | RAW_ASCII));
         let position = self.written_position(format);
-        self.analyses
+        let counted = self
+            .analyses
             .iter()
             .enumerate()
             .filter(|(at, _)| position.is_none_or(|chosen| chosen == *at))
-            .fold((0, 0), |(plotted, all), (_, offered)| {
+            .map(|(_, offered)| {
                 (
-                    plotted + offered.plotted_traces + lanes * offered.plotted_lanes,
-                    all + offered.traces + lanes * offered.lanes,
+                    offered.plotted_traces + lanes * offered.plotted_lanes,
+                    offered.traces + lanes * offered.lanes,
                 )
+            });
+        if self.family {
+            counted.fold((0, 0), |(plotted, all), (one_plotted, one_all)| {
+                (plotted.max(one_plotted), all.max(one_all))
             })
+        } else {
+            counted.fold((0, 0), |(plotted, all), (one_plotted, one_all)| {
+                (plotted + one_plotted, all + one_all)
+            })
+        }
     }
 }
 
@@ -295,7 +347,7 @@ pub fn show_dataset_export_picker(
     let draft = form.get_or_insert_with(Box::default);
     let labels = FORMATS
         .iter()
-        .map(|(label, _)| (*label).to_owned())
+        .map(|format| format.label.to_owned())
         .collect::<Vec<_>>();
     let several = picker.several_analyses && draft.analyses.len() > 1;
     let (owns_table, offers_analyses) = (draft.owns_table, !draft.analyses.is_empty());
@@ -327,15 +379,18 @@ pub fn show_dataset_export_picker(
             let format = rows.select_with_disabled(
                 "Format",
                 "results.export-dataset.format",
-                FORMATS[picker.format].0,
+                FORMATS[picker.format].label,
                 &labels,
                 &[],
             );
             if let Some(index) = format.picked {
                 picker.format = index;
             }
+            if let Some(hint) = FORMATS[picker.format].hint {
+                rows.field_line(Some(format.response.id), FieldLine::Derived(hint));
+            }
             if several {
-                show_analysis_row(rows, draft, FORMATS[picker.format].1);
+                show_analysis_row(rows, draft, FORMATS[picker.format].one_analysis);
             }
             if asks_signals(picker.format) {
                 let (plotted, all) = draft.signal_counts(picker.format);
@@ -358,9 +413,11 @@ pub fn show_dataset_export_picker(
             if picker.format == PWL {
                 show_trace_row(rows, draft);
             }
-            // The first field takes the focus, as Export generated netlist's
-            // does; the form opened with nothing focused.
-            Some(format.response.id)
+            // Nothing here is typed into, so no field takes the focus when
+            // the form opens: a choice focused at open wore the focus ring
+            // before the reader had touched the keyboard. Tab reaches the
+            // first field, ring and all.
+            None
         });
     match choice {
         DialogChoice::Primary => {
@@ -399,39 +456,35 @@ fn show_analysis_row(
         draft.analysis = draft.active;
     }
     let every = if draft.family {
-        ALL_MEMBERS
+        format!("{ALL_MEMBERS} ({})", draft.analyses.len())
     } else {
-        EVERY_ANALYSIS
+        EVERY_ANALYSIS.to_owned()
     };
-    let options = std::iter::once(every.to_owned())
-        .chain(draft.analyses.iter().map(|offered| offered.label.clone()))
-        .collect::<Vec<_>>();
     let selected = draft
         .analysis
-        .map_or(every, |position| &draft.analyses[position].label);
-    let disabled: &[(usize, &'static str)] = if one_analysis {
-        &[(0, ONE_ANALYSIS_REASON)]
+        .map_or(every.as_str(), |position| &draft.analyses[position].label)
+        .to_owned();
+    let options = std::iter::once(every)
+        .chain(draft.analyses.iter().map(|offered| offered.label.clone()))
+        .collect::<Vec<_>>();
+    let (reason, note) = if draft.family {
+        (ONE_MEMBER_REASON, ONE_MEMBER_NOTE)
     } else {
-        &[]
+        (ONE_ANALYSIS_REASON, ONE_ANALYSIS_NOTE)
     };
-    let picked = rows
-        .select_with_disabled(
-            "Analysis",
-            "results.export-dataset.analysis",
-            selected,
-            &options,
-            disabled,
-        )
-        .picked;
-    if let Some(index) = picked {
+    let disabled: &[(usize, &'static str)] = if one_analysis { &[(0, reason)] } else { &[] };
+    let analysis = rows.select_with_disabled(
+        "Analysis",
+        "results.export-dataset.analysis",
+        &selected,
+        &options,
+        disabled,
+    );
+    if let Some(index) = analysis.picked {
         draft.analysis = index.checked_sub(1);
     }
     if one_analysis {
-        rows.derived(if draft.family {
-            ONE_MEMBER_NOTE
-        } else {
-            ONE_ANALYSIS_NOTE
-        });
+        rows.field_line(Some(analysis.response.id), FieldLine::Derived(note));
     }
 }
 
