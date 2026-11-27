@@ -168,6 +168,10 @@ pub struct HistogramViewResponse {
 
 /// The share of the frame the single bar of a degenerate distribution covers.
 const DEGENERATE_BAR_FRACTION: f32 = 0.18;
+/// How opaque a bar's fill is over the well: enough that a bar reads as a
+/// filled bar in the trace hue, light enough that the fit and the ±1σ band
+/// read through it.
+const BAR_FILL: f32 = 0.38;
 /// Samples along the fitted normal curve.
 const FIT_SAMPLES: usize = 241;
 /// The bar's measurement select: the width of a long measurement name.
@@ -473,7 +477,7 @@ fn show_bars(
     let subtitle = format!("{} samples", histogram.total_count);
     let mut legend = vec![LegendChip {
         name: mode.label(),
-        color: c.accent,
+        color: c.traces[0],
         on: true,
         glyph: strip::LegendGlyph::Line,
     }];
@@ -594,8 +598,9 @@ fn show_bars(
     let bins = &histogram.bins;
     let degenerate_at = axis.degenerate_at;
     let ordinates = &display.ordinates;
-    let accent = c.accent;
-    let accent_dim = c.accent_dim;
+    // The bars in the first trace hue, filled so they read as bars, not outlines.
+    let accent = c.traces[0];
+    let accent_dim = accent.gamma_multiply(BAR_FILL);
     let err = c.err;
     let picked_fill = c.warn.gamma_multiply(0.55);
     let picked_edge = c.warn;
@@ -816,7 +821,7 @@ fn show_probability(
     };
     let mut legend = vec![LegendChip {
         name: "samples",
-        color: c.accent,
+        color: c.traces[0],
         on: true,
         glyph: strip::LegendGlyph::Line,
     }];
@@ -853,7 +858,7 @@ fn show_probability(
         spec.traces.push(plot::Trace::new(xs, ys, c.text).thin());
     }
     spec.traces.push(
-        plot::Trace::new(&quantiles, &samples, c.accent)
+        plot::Trace::new(&quantiles, &samples, c.traces[0])
             .draw(plot::DrawMode::Points)
             .cache_key(0x4849_5354_5150_5000),
     );
