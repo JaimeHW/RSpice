@@ -40,14 +40,16 @@ fn key(state: &ResultsTestHost) -> AnalysisPresentationKey {
     )
 }
 
-/// The X axis's log toggle as the drawn waves view publishes it: whether it
-/// is lit and whether it can be pressed. `None` when the view draws none.
+/// The X axis's log toggle as the sheet's bar publishes it, over the drawn
+/// waves view: whether it is lit and whether it can be pressed. `None` when
+/// the bar draws none.
 fn x_log_toggle(state: &mut ResultsTestHost) -> Option<(bool, bool)> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
+            super::super::super::show_sheet_bar(ui, &mut state.results_parts());
             show(ui, &mut state.results_parts());
         });
     });

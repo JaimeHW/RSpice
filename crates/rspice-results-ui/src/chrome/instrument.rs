@@ -55,6 +55,20 @@ pub struct InstrumentAvailability {
     pub marker_available: bool,
 }
 
+/// What the bar's strip tools read for the active strip: whether one is
+/// active for them to act on, its X scale, and whether a strip is maximized.
+#[derive(Debug, Clone, Default)]
+pub struct StripTools {
+    /// Whether a strip is active for the tools to act on.
+    pub active: bool,
+    /// Whether the active strip's X axis is logarithmic.
+    pub log_x: bool,
+    /// Why the active strip's X axis cannot be logarithmic, when it cannot.
+    pub log_x_refusal: Option<String>,
+    /// Whether a strip stands maximized.
+    pub maximized: bool,
+}
+
 /// A request applied by the host to its current active pane and local tools.
 pub enum InstrumentAction {
     Cursor,
@@ -66,6 +80,12 @@ pub enum InstrumentAction {
     ToggleGrid,
     DropMarker,
     RestoreStrips,
+    /// Open the expression editor on the active strip.
+    AddExpression,
+    /// Turn the active strip's X axis between linear and logarithmic.
+    ToggleLogX,
+    /// Maximize the active strip, or restore every strip.
+    ToggleMaximize,
 }
 
 /// Immediate host operations preserve control order within a frame.
@@ -83,6 +103,11 @@ pub trait WaveInstrumentHost {
     /// tooltips give: with several strips on the sheet, that is where the
     /// reader learns which one they will move.
     fn active_strip(&self) -> Option<String>;
+    /// What the bar's strip tools (+ Expression, log X and maximize) read,
+    /// on a sheet of strips; `None` where the sheet draws none.
+    fn strip_tools(&self) -> Option<StripTools> {
+        None
+    }
 }
 
 pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl WaveInstrumentHost) {
@@ -200,6 +225,13 @@ pub fn show_plot_tools(ui: &mut Ui, host: &mut impl WaveInstrumentHost) {
 /// cursor tools, and zoom and fit.
 const CURSOR_GROUP: u8 = 0;
 const ZOOM_GROUP: u8 = 2;
+/// The active strip's tools, + Expression and log X, after the display
+/// toggles; then maximize, with the restore of closed strips beside it.
+const STRIP_GROUP: u8 = 5;
+const WINDOW_GROUP: u8 = 6;
+/// What the bar's X scale toggle is called in its menu row and to
+/// assistive technology.
+const LOG_X_NAME: &str = "Logarithmic X axis";
 
 /// The gap between two controls of the bar.
 const CONTROL_GAP: f32 = 4.0;
@@ -220,6 +252,9 @@ enum ControlKind {
     Action(String),
     /// A glyph, drawn flat as a toolbar's tools are.
     Glyph(Icon),
+    /// A glyph that latches a state of the sheet's windows, maximize: lit by
+    /// the neutral fill and the full ink, as no accent is drawn for it.
+    Latch(Icon),
 }
 
 impl ControlKind {
@@ -227,7 +262,7 @@ impl ControlKind {
     fn label(&self) -> Option<&str> {
         match self {
             Self::Segment(label) | Self::Toggle(label) | Self::Action(label) => Some(label),
-            Self::Glyph(_) => None,
+            Self::Glyph(_) | Self::Latch(_) => None,
         }
     }
 }
@@ -241,6 +276,9 @@ struct BarControl {
     /// What the control's menu row reads, and its tooltip on the bar.
     name: String,
     tooltip: String,
+    /// What a lettered control is called to assistive technology, where its
+    /// letters alone ("log X") would not say it.
+    accessible: Option<&'static str>,
     on: bool,
     enabled: bool,
     action: fn() -> Option<InstrumentAction>,
@@ -255,7 +293,7 @@ impl BarControl {
     fn width(&self, ui: &Ui) -> f32 {
         let side = ResultBarMetrics::of(ui).instrument_control;
         let own = match &self.kind {
-            ControlKind::Glyph(_) => side,
+            ControlKind::Glyph(_) | ControlKind::Latch(_) => side,
             ControlKind::Toggle(label) | ControlKind::Action(label) => {
                 Button::new(label).measured_width(ui)
             }
@@ -273,15 +311,21 @@ impl BarControl {
 
     fn show_on_bar(&self, ui: &mut Ui) -> egui::Response {
         match &self.kind {
-            ControlKind::Toggle(label) => Button::new(label)
-                .selected(self.on)
-                .enabled(self.enabled)
+            ControlKind::Toggle(label) => {
+                let button = Button::new(label).selected(self.on).enabled(self.enabled);
+                match self.accessible {
+                    Some(name) => button.accessible_label(name),
+                    None => button,
+                }
                 .show(ui)
-                .on_hover_text(&self.tooltip),
+                .on_hover_text(&self.tooltip)
+                .on_disabled_hover_text(&self.tooltip)
+            }
             ControlKind::Action(label) => Button::new(label)
                 .enabled(self.enabled)
                 .show(ui)
-                .on_hover_text(&self.tooltip),
+                .on_hover_text(&self.tooltip)
+                .on_disabled_hover_text(&self.tooltip),
             ControlKind::Segment(label) => {
                 ui.add_enabled_ui(self.enabled, |ui| {
                     instrument_control(ui, label, self.on, &self.tooltip)
@@ -293,6 +337,17 @@ impl BarControl {
                     IconButton::new(*icon)
                         .side(ResultBarMetrics::of(ui).instrument_control)
                         .on(self.on)
+                        .tooltip(&self.tooltip)
+                        .show(ui)
+                })
+                .inner
+            }
+            ControlKind::Latch(icon) => {
+                ui.add_enabled_ui(self.enabled, |ui| {
+                    IconButton::new(*icon)
+                        .side(ResultBarMetrics::of(ui).instrument_control)
+                        .on(self.on)
+                        .plain()
                         .tooltip(&self.tooltip)
                         .show(ui)
                 })
@@ -325,6 +380,7 @@ fn bar_controls(
         kind,
         name: name.to_owned(),
         tooltip: tooltip.to_owned(),
+        accessible: None,
         on,
         enabled,
         action,
@@ -432,11 +488,54 @@ fn bar_controls(
             || Some(InstrumentAction::DropMarker),
         ),
     ];
+    // The active strip's own tools: what its row carried before the bar
+    // took them. They act on the active strip, as zoom and fit do.
+    if let Some(tools) = host.strip_tools() {
+        bar.push(control(
+            STRIP_GROUP,
+            ControlKind::Action(crate::strip::EXPRESSION_ACTION_LABEL.to_owned()),
+            crate::strip::EXPRESSION_ACTION_LABEL,
+            crate::strip::EXPRESSION_ACTION_TIP,
+            false,
+            tools.active,
+            || Some(InstrumentAction::AddExpression),
+        ));
+        let log_x_tip = match &tools.log_x_refusal {
+            Some(reason) => format!("Logarithmic X is unavailable: {reason}"),
+            None => format!("Draw {strip}'s X axis in decades"),
+        };
+        bar.push(BarControl {
+            accessible: Some(LOG_X_NAME),
+            ..control(
+                STRIP_GROUP,
+                ControlKind::Toggle(crate::strip::X_SCALE_LABEL.to_owned()),
+                LOG_X_NAME,
+                &log_x_tip,
+                tools.log_x,
+                tools.active && tools.log_x_refusal.is_none(),
+                || Some(InstrumentAction::ToggleLogX),
+            )
+        });
+        let (glyph, name) = if tools.maximized {
+            (Icon::Restore, "Restore strips")
+        } else {
+            (Icon::Maximize, "Maximize strip")
+        };
+        bar.push(control(
+            WINDOW_GROUP,
+            ControlKind::Latch(glyph),
+            name,
+            name,
+            tools.maximized,
+            tools.active || tools.maximized,
+            || Some(InstrumentAction::ToggleMaximize),
+        ));
+    }
     let hidden = host.hidden_strip_count();
     if hidden > 0 {
         let label = format!("{hidden} hidden");
         bar.push(control(
-            4,
+            WINDOW_GROUP,
             ControlKind::Action(label.clone()),
             &label,
             "Restore closed waveform strips",

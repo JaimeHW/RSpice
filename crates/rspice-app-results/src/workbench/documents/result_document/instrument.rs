@@ -4,7 +4,8 @@ use super::{ResultPlotTool, ResultsParts, Tokens, Ui, hidden_wave_strip_count, w
 use rspice_results_ui::chrome::{
     ExportRequests,
     instrument::{
-        self, InstrumentAction, InstrumentAvailability, InstrumentControls, WaveInstrumentHost,
+        self, InstrumentAction, InstrumentAvailability, InstrumentControls, StripTools,
+        WaveInstrumentHost,
     },
 };
 
@@ -21,6 +22,9 @@ pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         state.results.session.show_family_envelope = false;
     }
     let active_strip = waves::active_strip_name(state, &t);
+    // A sheet of strips carries the active strip's own tools on its bar.
+    let strip_tools = super::viewer_uses_wave_stack(state.results.session.viewer)
+        .then(|| waves::active_strip_tools(state, &t));
 
     instrument::show(
         ui,
@@ -34,6 +38,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             tokens: &t,
             ctx: ui.ctx().clone(),
             active_strip,
+            strip_tools,
         },
     );
 }
@@ -51,6 +56,7 @@ pub(super) fn show_plot_tools(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             tokens: &t,
             ctx: ui.ctx().clone(),
             active_strip,
+            strip_tools: None,
         },
     );
 }
@@ -65,6 +71,7 @@ struct Host<'a, 'p> {
     tokens: &'a Tokens,
     ctx: egui::Context,
     active_strip: Option<String>,
+    strip_tools: Option<StripTools>,
 }
 
 impl WaveInstrumentHost for Host<'_, '_> {
@@ -115,6 +122,15 @@ impl WaveInstrumentHost for Host<'_, '_> {
             }
             InstrumentAction::DropMarker => waves::drop_marker_at_cursor_a(self.state, self.tokens),
             InstrumentAction::RestoreStrips => self.state.results.session.hidden_strips.clear(),
+            InstrumentAction::AddExpression => {
+                waves::act_on_active_strip(self.state, self.tokens, waves::StripTool::AddExpression)
+            }
+            InstrumentAction::ToggleLogX => {
+                waves::act_on_active_strip(self.state, self.tokens, waves::StripTool::LogX)
+            }
+            InstrumentAction::ToggleMaximize => {
+                waves::act_on_active_strip(self.state, self.tokens, waves::StripTool::Maximize)
+            }
         }
     }
 
@@ -134,5 +150,8 @@ impl WaveInstrumentHost for Host<'_, '_> {
     }
     fn active_strip(&self) -> Option<String> {
         self.active_strip.clone()
+    }
+    fn strip_tools(&self) -> Option<StripTools> {
+        self.strip_tools.clone()
     }
 }

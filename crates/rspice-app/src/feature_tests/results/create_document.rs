@@ -985,28 +985,56 @@ fn a_created_document_is_drawn_under_a_tab_of_its_own() {
     );
 }
 
-/// The analysis rows of the strips the frame draws, top to bottom and left
-/// to right: one per pane of a waveform document.
+//// The legend rows the frame draws: each pane's band over its plot.
+#[cfg(not(target_arch = "wasm32"))]
+fn legend_rows(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<egui::Rect> {
+    nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.role() == egui::accesskit::Role::Button
+                && node.label().is_some_and(|label| label.ends_with(" pane"))
+        })
+        .filter_map(|(_, node)| node_rect(node))
+        .collect()
+}
+
+/// The analysis tags the frame writes on legend rows, top to bottom and
+/// left to right, each with whether it reports itself selected: one on the
+/// top legend row of each strip a waveform document's panes draw.
+#[cfg(not(target_arch = "wasm32"))]
+fn analysis_tags(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+) -> Vec<(egui::Rect, bool)> {
+    let rows = legend_rows(nodes);
+    let mut tags = nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.role() == egui::accesskit::Role::Label
+                && (node.value() == Some("TR") || node.label() == Some("TR"))
+        })
+        .filter_map(|(_, node)| Some((node_rect(node)?, node.is_selected() == Some(true))))
+        .filter(|(tag, _)| rows.iter().any(|row| row.contains_rect(*tag)))
+        .collect::<Vec<_>>();
+    tags.sort_by(|a, b| {
+        a.0.top()
+            .total_cmp(&b.0.top())
+            .then(a.0.left().total_cmp(&b.0.left()))
+    });
+    tags
+}
+
+/// Where each analysis tag of [`analysis_tags`] stands.
 #[cfg(not(target_arch = "wasm32"))]
 fn analysis_rows(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<egui::Pos2> {
-    let mut rows = nodes
-        .iter()
-        .filter(|(_, node)| node.label() == Some("TR"))
-        .filter_map(|(_, node)| node.bounds())
-        .collect::<Vec<_>>();
-    rows.sort_by(|a, b| a.y0.total_cmp(&b.y0).then(a.x0.total_cmp(&b.x0)));
-    rows.into_iter()
-        .map(|bounds| {
-            egui::pos2(
-                ((bounds.x0 + bounds.x1) * 0.5) as f32,
-                ((bounds.y0 + bounds.y1) * 0.5) as f32,
-            )
-        })
+    analysis_tags(nodes)
+        .into_iter()
+        .map(|(tag, _)| tag.center())
         .collect()
 }
 
 /// A press in a document's inactive pane makes it the active pane, and the
-/// menu on a pane's analysis row moves the pane and removes it.
+/// menu of a pane's legend row, opened on its analysis tag, moves the pane
+/// and removes it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_press_activates_a_pane_and_its_analysis_row_moves_and_removes_it() {
@@ -1035,7 +1063,7 @@ fn a_press_activates_a_pane_and_its_analysis_row_moves_and_removes_it() {
     assert_eq!(active(&window), Some(first));
 
     let rows = analysis_rows(&window.frames(Vec::new()));
-    assert_eq!(rows.len(), 2, "each pane draws its analysis row");
+    assert_eq!(rows.len(), 2, "each pane writes its analysis tag");
     window.press(rows[1], PointerButton::Primary);
     assert_eq!(
         active(&window),
@@ -1067,8 +1095,8 @@ struct AnalysisRowMark {
     full: bool,
 }
 
-/// The analysis rows the frame draws, top to bottom and left to right, with
-/// the texts the frame paints.
+/// The analysis tags the frame writes, top to bottom and left to right,
+/// with the texts the frame paints.
 #[cfg(not(target_arch = "wasm32"))]
 fn analysis_row_marks(window: &mut ResultsWindow) -> (Vec<AnalysisRowMark>, Vec<String>) {
     fn fills(shape: &egui::Shape, color: egui::Color32, rects: &mut Vec<egui::Rect>) {
@@ -1113,31 +1141,23 @@ fn analysis_row_marks(window: &mut ResultsWindow) -> (Vec<AnalysisRowMark>, Vec<
         painted_texts(&clipped.shape, &mut texts);
         tags(&clipped.shape, &mut inks);
     }
-    let mut rows = output
+    let nodes = output
         .platform_output
         .accesskit_update
         .map(|update| update.nodes)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let rows = analysis_tags(&nodes)
         .into_iter()
-        .filter(|(_, node)| node.label() == Some("TR"))
-        .filter_map(|(_, node)| {
-            let bounds = node.bounds()?;
-            let row = egui::Rect::from_min_max(
-                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-            );
-            Some(AnalysisRowMark {
-                at: row.center(),
-                selected: node.is_selected() == Some(true),
-                filled: filled.iter().any(|fill| fill.contains(row.center())),
-                full: inks
-                    .iter()
-                    .find(|(at, _)| row.expand(1.0).contains(at.center()))
-                    .is_some_and(|(_, ink)| *ink == tokens.color.text),
-            })
+        .map(|(tag, selected)| AnalysisRowMark {
+            at: tag.center(),
+            selected,
+            filled: filled.iter().any(|fill| fill.contains(tag.center())),
+            full: inks
+                .iter()
+                .find(|(at, _)| tag.expand(1.0).contains(at.center()))
+                .is_some_and(|(_, ink)| *ink == tokens.color.text),
         })
         .collect::<Vec<_>>();
-    rows.sort_by(|a, b| a.at.y.total_cmp(&b.at.y).then(a.at.x.total_cmp(&b.at.x)));
     (rows, texts)
 }
 
@@ -1181,68 +1201,137 @@ fn a_press_in_another_pane_moves_the_full_tag_and_the_inspectors_pane() {
     assert!(!texts.iter().any(|text| text == "Top \u{b7} analysis"));
 }
 
-/// Every control on a document pane's control row stands centred on the
-/// band above the row's 1 px rule: as far from the rule as from the row's
-/// top, to the half point. A control centred on the row with its rule in it
-/// stood half a point low and read as resting on the rule.
+/// The bar's control labelled `label`, other than a label's words: where it
+/// stands and whether it reads lit.
+#[cfg(not(target_arch = "wasm32"))]
+fn bar_tool(
+    nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
+    label: &str,
+) -> Option<(egui::accesskit::NodeId, egui::Rect, bool)> {
+    nodes
+        .iter()
+        .filter(|(_, node)| node.role() != egui::accesskit::Role::Label)
+        .filter(|(_, node)| node.label() == Some(label))
+        .find_map(|(id, node)| {
+            Some((
+                *id,
+                node_rect(node)?,
+                node.toggled() == Some(egui::accesskit::Toggled::True),
+            ))
+        })
+}
+
+/// The active strip's tools, + Expression, log X and maximize, stand on the
+/// document's bar, each once and centred on the band above the bar's rule.
+/// No row of the strip's own stands over its panes: nothing but the bar
+/// offers them, and no control row names the analysis.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn every_control_on_a_document_panes_control_row_stands_centred_above_its_rule() {
+fn the_strips_tools_stand_on_the_bar_and_no_control_row_is_drawn() {
     use egui::accesskit::Role;
-    let rect = |node: &egui::accesskit::Node| {
-        node.bounds().map(|bounds| {
-            egui::Rect::from_min_max(
-                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-            )
-        })
-    };
     let mut window = ResultsWindow::new();
     window.create("Transient review").expect("document commits");
     let nodes = window.settled_frames();
-    // Each control row: the row names its analysis, its rule included.
-    let rows: Vec<egui::Rect> = nodes
-        .iter()
-        .filter(|(_, node)| node.label() == Some("TR") && node.role() != Role::Label)
-        .filter_map(|(_, node)| rect(node))
-        .collect();
-    assert_eq!(
-        rows.len(),
-        2,
-        "each pane of the document has its control row"
-    );
-    let mut checked = Vec::new();
-    for (_, node) in &nodes {
-        if !matches!(
-            node.role(),
-            Role::Button | Role::CheckBox | Role::RadioButton
-        ) {
-            continue;
-        }
-        let Some(control) = rect(node) else {
-            continue;
-        };
-        let Some(row) = rows
+    let (_, bar) =
+        labelled(&nodes, Role::Toolbar, "Plot instrument controls").expect("the document's bar");
+    for tool in ["+ Expression", "Logarithmic X axis", "Maximize strip"] {
+        let offered: Vec<egui::Rect> = nodes
             .iter()
-            .find(|row| row.contains_rect(control) && control.height() < row.height() - 1.0)
-        else {
-            continue;
-        };
-        let above = control.top() - row.top();
-        let below = (row.bottom() - 1.0) - control.bottom();
+            .filter(|(_, node)| node.role() != Role::Label && node.label() == Some(tool))
+            .filter_map(|(_, node)| node_rect(node))
+            .collect();
+        assert_eq!(offered.len(), 1, "{tool} is offered once: {offered:?}");
+        let control = offered[0];
+        assert!(
+            bar.contains_rect(control),
+            "{tool} stands on the bar: {control:?} on {bar:?}"
+        );
+        let above = control.top() - bar.top();
+        let below = (bar.bottom() - 1.0) - control.bottom();
         assert!(
             (above - below).abs() <= 0.5,
-            "{:?} stands {above} below the row's top and {below} above its rule",
-            node.label()
-        );
-        checked.push(node.label().unwrap_or_default().to_owned());
-    }
-    for control in ["+ Expression", "Logarithmic X axis", "Maximize strip"] {
-        assert!(
-            checked.iter().any(|label| label == control),
-            "{control} is among the row's controls checked: {checked:?}"
+            "{tool} stands {above} below the bar's top and {below} above its rule"
         );
     }
+    assert!(
+        !nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("TR") && node.role() != Role::Label),
+        "no control row names the analysis"
+    );
+    assert_eq!(
+        analysis_tags(&nodes).len(),
+        2,
+        "each pane's legend row starts with its analysis tag"
+    );
+}
+
+/// The bar's strip tools act on the document's active pane: log X turns its
+/// X axis to decades, which the document keeps, and reads lit; maximize
+/// trades its glyph for restore and back; + Expression opens the expression
+/// editor on the strip.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_bars_strip_tools_act_on_the_documents_active_pane() {
+    use rspice_app_state::results::visualization_document::{AxisOrientation, AxisScale};
+    let logarithmic = |window: &ResultsWindow, document| {
+        window
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .visualization_document(document)
+            .expect("the project owns it")
+            .axes()
+            .iter()
+            .any(|axis| {
+                axis.orientation == AxisOrientation::Horizontal
+                    && axis.scale == AxisScale::Logarithmic
+            })
+    };
+    let mut window = ResultsWindow::new();
+    let document = window.create("Transient review").expect("document commits");
+    let nodes = window.settled_frames();
+    let (log_x, _, lit) = bar_tool(&nodes, "Logarithmic X axis").expect("the bar offers log X");
+    assert!(
+        !lit && !logarithmic(&window, document),
+        "a new document's time axis is linear"
+    );
+    window.click(log_x);
+    let nodes = window.settled_frames();
+    assert!(
+        logarithmic(&window, document),
+        "log X turns the active pane's time axis to decades, and the document keeps it"
+    );
+    assert!(
+        bar_tool(&nodes, "Logarithmic X axis").is_some_and(|(_, _, lit)| lit),
+        "log X reads lit"
+    );
+
+    let (maximize, _, _) = bar_tool(&nodes, "Maximize strip").expect("the bar offers maximize");
+    let nodes = window.click(maximize);
+    let (restore, _, _) =
+        bar_tool(&nodes, "Restore strips").expect("a maximized strip offers to restore");
+    let nodes = window.click(restore);
+    assert!(
+        bar_tool(&nodes, "Maximize strip").is_some(),
+        "restored, the strips offer maximize again"
+    );
+
+    let (expression, _, _) = bar_tool(&nodes, "+ Expression").expect("the bar offers + Expression");
+    window.click(expression);
+    assert!(
+        window
+            .app
+            .state
+            .results
+            .results
+            .session
+            .expr_editor
+            .is_some(),
+        "+ Expression opens the expression editor"
+    );
 }
 
 /// A run of one transient whose V(out) and I(R1) stand in panes of their
@@ -1285,14 +1374,14 @@ fn labelled(
         .find_map(|(id, node)| Some((*id, node_rect(node)?)))
 }
 
-/// Two panes on one time axis stand under one control row, which names the
-/// analysis and carries the strip's controls; each pane names its curves on
-/// a legend row of its own directly over its plot, the full width, its
-/// entries starting where the row's analysis tag does, and no row carries a
-/// Y scale button.
+/// Two panes on one time axis each name their curves on a legend row of
+/// their own over their plot, the full width. The top pane's row starts
+/// with the strip's analysis tag, its entries after it; the other's start
+/// where the tag does. No row carries a Y scale button: a pane's log Y is
+/// on its plot's menu.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn panes_on_one_time_axis_stand_under_one_control_row_each_with_its_legend_row() {
+fn panes_on_one_time_axis_each_have_a_legend_row_the_top_one_starting_with_the_tag() {
     use egui::accesskit::Role;
     let mut window = ResultsWindow::over(volts_and_amps_run());
     window
@@ -1303,51 +1392,41 @@ fn panes_on_one_time_axis_stand_under_one_control_row_each_with_its_legend_row()
         )
         .expect("document commits");
     let nodes = window.settled_frames();
-    let rows: Vec<egui::Rect> = nodes
-        .iter()
-        .filter(|(_, node)| node.label() == Some("TR") && node.role() != Role::Label)
-        .filter_map(|(_, node)| node_rect(node))
-        .collect();
-    assert_eq!(
-        rows.len(),
-        1,
-        "the strip's control row stands once: {rows:?}"
-    );
-    let row = rows[0];
-    let tag = nodes
-        .iter()
-        .filter(|(_, node)| {
-            node.role() == Role::Label && (node.value() == Some("TR") || node.label() == Some("TR"))
-        })
-        .find_map(|(_, node)| node_rect(node))
-        .expect("the control row writes its analysis tag");
     let (_, volts) = labelled(&nodes, Role::Button, "V pane").expect("the volts pane's row");
     let (_, amps) = labelled(&nodes, Role::Button, "A pane").expect("the amps pane's row");
+    let tags = analysis_tags(&nodes);
+    assert_eq!(tags.len(), 1, "the strip writes its tag once: {tags:?}");
+    let (tag, _) = tags[0];
     assert!(
-        (volts.top() - row.bottom()).abs() <= 0.5,
-        "the first pane's legend row stands right under the control row: {row:?} {volts:?}"
+        volts.contains_rect(tag),
+        "the tag starts the top pane's legend row: {tag:?} on {volts:?}"
     );
     assert!(
         amps.top() > volts.bottom(),
         "the amps pane stands under the volts pane"
     );
-    for (legend, curve) in [(volts, "V(out)"), (amps, "I(R1)")] {
-        assert!(
-            (legend.left() - row.left()).abs() <= 0.5
-                && (legend.right() - row.right()).abs() <= 0.5,
-            "{curve}'s legend row spans the pane: {legend:?} under {row:?}"
-        );
-        let (_, chip) = labelled(&nodes, Role::Button, &format!("Toggle {curve} visibility"))
-            .unwrap_or_else(|| panic!("{curve} is named on its legend row"));
-        assert!(
-            legend.contains_rect(chip),
-            "{curve} stands on its own pane's row"
-        );
-        assert!(
-            (chip.left() - tag.left()).abs() <= 0.5,
-            "{curve}'s entry starts where the analysis tag does: {chip:?} {tag:?}"
-        );
-    }
+    assert!(
+        (volts.left() - amps.left()).abs() <= 0.5 && (volts.right() - amps.right()).abs() <= 0.5,
+        "both legend rows span the pane: {volts:?} {amps:?}"
+    );
+    let chip = |curve: &str| {
+        labelled(&nodes, Role::Button, &format!("Toggle {curve} visibility"))
+            .map(|(_, chip)| chip)
+            .unwrap_or_else(|| panic!("{curve} is named on a legend row"))
+    };
+    let (volt_chip, amp_chip) = (chip("V(out)"), chip("I(R1)"));
+    assert!(
+        volts.contains_rect(volt_chip) && amps.contains_rect(amp_chip),
+        "each curve stands on its own pane's row"
+    );
+    assert!(
+        volt_chip.left() >= tag.right(),
+        "V(out)'s entry comes after the tag: {volt_chip:?} {tag:?}"
+    );
+    assert!(
+        (amp_chip.left() - tag.left()).abs() <= 0.5,
+        "I(R1)'s entry starts where the tag does: {amp_chip:?} {tag:?}"
+    );
     assert!(
         !nodes.iter().any(|(_, node)| node.label() == Some("log Y")),
         "no row carries a Y scale button"
@@ -1452,19 +1531,18 @@ fn a_panes_plot_menu_turns_its_own_y_axis_logarithmic_and_its_unit_says_so() {
 fn the_bars_zoom_in_magnifies_a_document_pane_and_its_fit_lets_go() {
     use egui::accesskit::Role;
     use rspice_app_state::results::visualization_document::AxisOrientation;
-    let bar_control = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
-                       starts: &str,
-                       ends: &str| {
-        nodes
-            .iter()
-            .find(|(_, node)| {
-                node.role() == Role::Button
-                    && node
-                        .label()
-                        .is_some_and(|label| label.starts_with(starts) && label.ends_with(ends))
-            })
-            .map(|(id, _)| *id)
-    };
+    let bar_control =
+        |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], starts: &str, ends: &str| {
+            nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == Role::Button
+                        && node
+                            .label()
+                            .is_some_and(|label| label.starts_with(starts) && label.ends_with(ends))
+                })
+                .map(|(id, _)| *id)
+        };
     // The X window the document keeps for its panes, when it keeps one.
     let window_kept = |window: &ResultsWindow, document| {
         window

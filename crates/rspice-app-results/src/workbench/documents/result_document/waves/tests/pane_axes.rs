@@ -148,34 +148,6 @@ fn pane_key(state: &mut ResultsTestHost, unit: &str) -> WavePanePresentationKey 
     }
 }
 
-/// Where the control named `name` is.
-fn control(output: &egui::FullOutput, name: &str) -> egui::Rect {
-    controls(output, name)
-        .first()
-        .copied()
-        .unwrap_or_else(|| panic!("the frame publishes {name:?}"))
-}
-
-/// Every control of the frame named `name`, top to bottom.
-fn controls(output: &egui::FullOutput, name: &str) -> Vec<egui::Rect> {
-    let mut found: Vec<egui::Rect> = output
-        .platform_output
-        .accesskit_update
-        .iter()
-        .flat_map(|update| &update.nodes)
-        .filter(|(_, node)| node.label() == Some(name))
-        .filter_map(|(_, node)| node.bounds())
-        .map(|bounds| {
-            egui::Rect::from_min_max(
-                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-            )
-        })
-        .collect();
-    found.sort_by(|a, b| a.top().total_cmp(&b.top()));
-    found
-}
-
 /// A click on a pane's plot, or on its header band where no control is,
 /// makes that pane the active one; pointing at a pane does not.
 #[test]
@@ -377,12 +349,17 @@ fn a_dimensionless_second_axis_names_no_unit() {
     );
 }
 
-/// A strip's header names its analysis once: a run's label that only names
-/// the kind again ("TRAN" beside TR, "SP" beside SP) is not repeated beside
-/// the kind tag, and a label of the run's own stays.
+/// A strip names its analysis once: its tag, which starts its top pane's
+/// legend row, and on the tag's hover a run's label of its own. A label that
+/// only names the kind again ("TRAN" beside TR, "SP" beside SP) is not
+/// repeated.
 #[test]
-fn a_strip_header_names_its_analysis_once() {
+fn a_strip_names_its_analysis_once() {
     let ctx = context(crate::ui::Theme::default());
+    ctx.all_styles_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
     let time: Vec<f64> = (0..=20).map(|index| f64::from(index) * 1.0e-6).collect();
     let mut state = transient(vec![RetainedTrace::new(
         "V(out)",
@@ -390,20 +367,38 @@ fn a_strip_header_names_its_analysis_once() {
         vec![1.0; 21],
         "#fff",
     )]);
+    // What the frame paints with the pointer resting on the strip's tag.
+    let hovered = |state: &mut ResultsTestHost| -> Vec<String> {
+        let tag = texts(&settled(&ctx, state, FRAME))
+            .into_iter()
+            .find(|(text, _)| text == "TR")
+            .map(|(_, rect)| rect)
+            .expect("the top pane's row starts with the strip's tag");
+        frame_of(
+            &ctx,
+            state,
+            FRAME,
+            vec![egui::Event::PointerMoved(tag.center())],
+        );
+        frame_of(&ctx, state, FRAME, Vec::new());
+        texts(&frame_of(&ctx, state, FRAME, Vec::new()))
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect()
+    };
     state.model.simulation.retained.runs[0].analyses[0].label = "TRAN".to_owned();
-    let words: Vec<String> = texts(&settled(&ctx, &mut state, FRAME))
-        .into_iter()
-        .map(|(text, _)| text)
-        .collect();
-    assert!(words.iter().any(|text| text == "TR"), "{words:?}");
-    assert!(!words.iter().any(|text| text == "TRAN"), "{words:?}");
+    let words = hovered(&mut state);
+    assert!(
+        !words.iter().any(|text| text.contains("TRAN")),
+        "a label that names the kind again is not repeated: {words:?}"
+    );
     state.model.simulation.retained.runs[0].analyses[0].label = "Startup".to_owned();
     state.model.simulation.view.data_version += 1;
-    let words: Vec<String> = texts(&settled(&ctx, &mut state, FRAME))
-        .into_iter()
-        .map(|(text, _)| text)
-        .collect();
-    assert!(words.iter().any(|text| text == "Startup"), "{words:?}");
+    let words = hovered(&mut state);
+    assert!(
+        words.iter().any(|text| text.contains("Startup")),
+        "the tag's hover gives the run's own label: {words:?}"
+    );
 }
 
 /// The values the H pane's Y axis is labelled with.
@@ -441,8 +436,8 @@ fn a_zoom_in_time_refits_y_to_the_window() {
     );
 }
 
-/// A Y range the reader pinned holds through a zoom in time, and the pane's
-/// fit control hands the axis back to the window's fit.
+/// A Y range the reader pinned holds through a zoom in time, and Fit Y to
+/// visible X hands the axis back to the window's fit.
 #[test]
 fn a_pinned_y_holds_through_a_zoom_in_time_until_fit() {
     let ctx = context(crate::ui::Theme::default());
@@ -460,9 +455,7 @@ fn a_pinned_y_holds_through_a_zoom_in_time_until_fit() {
         pinned.iter().any(|value| *value <= -500.0),
         "the pinned −1000 to 1000 did not hold: {pinned:?}"
     );
-    let output = settled(&ctx, &mut state, FRAME);
-    let fit = control(&output, "Fit Y to the traces in view");
-    click(&ctx, &mut state, fit.center());
+    fit_y_to_visible_x(&mut state.results_parts());
     let fitted = field_ticks(&ctx, &mut state);
     assert!(
         fitted.iter().all(|value| (-50.0..=450.0).contains(value)),

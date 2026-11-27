@@ -69,6 +69,76 @@ pub(crate) fn active_strip_name(state: &mut ResultsParts<'_>, t: &Tokens) -> Opt
     pane_name(model, &pane)
 }
 
+/// What the bar's strip tools read: whether a strip is active for them, its
+/// X scale and why it cannot be logarithmic, and whether a strip stands
+/// maximized.
+pub(crate) fn active_strip_tools(
+    state: &mut ResultsParts<'_>,
+    t: &Tokens,
+) -> rspice_results_ui::chrome::instrument::StripTools {
+    let maximized = state.results.session.maximized_strip.is_some();
+    let presentation = state.results_reads().presentation_policy();
+    let models = cached_models(
+        &state.model.simulation,
+        state.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    match active_pane(&models, &state.results.session) {
+        Some((model, _, _)) => rspice_results_ui::chrome::instrument::StripTools {
+            active: true,
+            log_x: model.x_scale == XScale::Log10,
+            log_x_refusal: rspice_results_ui::waves::stack::log_x_refusal(model),
+            maximized,
+        },
+        None => rspice_results_ui::chrome::instrument::StripTools {
+            maximized,
+            ..Default::default()
+        },
+    }
+}
+
+/// One of the bar's strip tools, which act on the active strip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StripTool {
+    /// Open the expression editor over it.
+    AddExpression,
+    /// Turn its X axis between linear and logarithmic.
+    LogX,
+    /// Maximize it, or restore every strip.
+    Maximize,
+}
+
+/// Carry out `tool` on the active strip. Restoring needs none: with a strip
+/// maximized, maximize restores every strip whichever is active.
+pub(crate) fn act_on_active_strip(state: &mut ResultsParts<'_>, t: &Tokens, tool: StripTool) {
+    use rspice_results_ui::waves::stack;
+    let presentation = state.results_reads().presentation_policy();
+    let models = cached_models(
+        &state.model.simulation,
+        state.results,
+        presentation.complex_number_display(),
+        t,
+    );
+    let session = &mut state.results.session;
+    let active = active_pane(&models, session).map(|(model, _, _)| model);
+    match (tool, active) {
+        (StripTool::Maximize, _) if session.maximized_strip.is_some() => {
+            session.maximized_strip = None;
+        }
+        (StripTool::Maximize, Some(model)) => {
+            stack::toggle_maximized_strip(session, model.analysis_key);
+        }
+        (StripTool::AddExpression, Some(model)) => {
+            stack::open_expression_editor(session, model.analysis_key);
+        }
+        (StripTool::LogX, Some(model)) if stack::log_x_refusal(model).is_none() => {
+            stack::toggle_x_scale(session, model);
+        }
+        _ => {}
+    }
+}
+
 pub(crate) fn zoom_active_pane(state: &mut ResultsParts<'_>, t: &Tokens, factor: f64) {
     let presentation = state.results_reads().presentation_policy();
     let models = cached_models(

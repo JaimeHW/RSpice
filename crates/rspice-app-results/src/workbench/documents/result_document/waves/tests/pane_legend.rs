@@ -243,8 +243,8 @@ fn an_expressions_entry_converts_and_removes_it() {
 }
 
 /// An expression is named once, as a signal is: in the legend of the pane
-/// that draws it. The strip header names the analysis and offers to add an
-/// expression, and names no curve.
+/// that draws it. The strip's analysis tag, which starts that row, names no
+/// curve.
 #[test]
 fn an_expression_is_named_once_in_its_panes_legend() {
     const DOUBLE: &str = "V(TOP)*2";
@@ -262,10 +262,6 @@ fn an_expression_is_named_once_in_its_panes_legend() {
     assert!(
         (named[0].center().y - row.center().y).abs() < 2.0,
         "it is named on the volts pane's row"
-    );
-    assert!(
-        text(&output, "+ Expression").is_some(),
-        "the strip header still offers to add one"
     );
 }
 

@@ -853,12 +853,8 @@ pub fn show(
     }
 
     // Deferred state mutations (collected while iterating immutably).
-    let mut toggle_maximize: Option<AnalysisPresentationKey> = None;
-    let mut close_strip: Option<AnalysisPresentationKey> = None;
-
     let mut toggle_expr: Option<(AnalysisPresentationKey, usize)> = None;
     let mut remove_expr: Option<(AnalysisPresentationKey, usize)> = None;
-    let mut open_editor: Option<AnalysisPresentationKey> = None;
     let avail = ui.available_rect_before_wrap();
     ui.ctx()
         .data_mut(|data| data.insert_temp(strip_area_id(), avail));
@@ -978,64 +974,15 @@ pub fn show(
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.set_min_height(strip_height);
-                    // The window controls the header keeps: maximize,
-                    // and close beside it when several strips are shown.
-                    // Each pane's row ends under them.
+                    // The strip may be closed, from its rows' menu, while
+                    // several strips are shown and none is maximized.
                     let closable = pane_chrome && !maximized && n > 1;
                     let window_slots = 1 + usize::from(closable);
-                    // In a document pane the strip's control row stands once
-                    // over its panes, and each pane names its curves on a
-                    // legend row of its own over its plot.
-                    let control_row = control_row(host.session(), options);
-                    // Beside a document the strip is its panes alone:
-                    // the pane's axis names the analysis, and the
-                    // Results sheet is where strips are told apart.
-                    if pane_chrome {
-                        // The strip header names the analysis and offers to
-                        // add an expression. Every curve, an expression's as
-                        // a signal's, is named once: in the legend of the
-                        // pane that draws it, or as the lane it draws.
-                        let header = StripHeader::new(&model.kind_tag, strip_subtitle(model), &[])
-                            .id_salt(model.analysis_key)
-                            .incomplete(model.incomplete)
-                            .maximized(maximized)
-                            .closable(closable)
-                            .expr_action(pane_chrome)
-                            .expr_trailing(control_row)
-                            .height(if control_row {
-                                WAVE_PANE_HEADER_HEIGHT
-                            } else {
-                                crate::strip::HEADER_HEIGHT
-                            })
-                            .pane_actions(pane_chrome)
-                            .x_scale(true)
-                            .show(ui);
-                        // The strip header owns the shared X axis, and with
-                        // it the axis' scale toggle.
-                        if let Some(rect) = header.scale_rect
-                            && crate::strip::x_scale_chip(
-                                ui,
-                                egui::Id::new(("rspice.results.x-scale", model.analysis_key)),
-                                rect,
-                                (
-                                    model.x_scale == XScale::Log10,
-                                    log_x_refusal(model).as_deref(),
-                                ),
-                            )
-                        {
-                            toggle_x_scale(host.session_mut(), model);
-                        }
-                        if header.maximize_clicked {
-                            toggle_maximize = Some(model.analysis_key);
-                        }
-                        if header.close_clicked {
-                            close_strip = Some(model.analysis_key);
-                        }
-                        if header.add_expr_clicked {
-                            open_editor = Some(model.analysis_key);
-                        }
-                    }
-
+                    // No row of its own stands over a strip: its analysis
+                    // tag starts its top pane's legend row, and its tools,
+                    // + Expression, log X and maximize, stand on the bar,
+                    // where they act on the active strip. The expression
+                    // editor opens over the strip it adds to.
                     host.edit_expression(ui, model);
 
                     // Strips scrolled out of view skip the plot body
@@ -1083,19 +1030,6 @@ pub fn show(
     {
         results.xy_strips.remove(index);
     }
-    if let Some(idx) = toggle_maximize {
-        results.maximized_strip = (results.maximized_strip != Some(idx)).then_some(idx);
-    }
-    if let Some(idx) = close_strip {
-        results.hidden_strips.insert(idx);
-        if models
-            .iter()
-            .find(|model| model.analysis_key == idx)
-            .is_some_and(|model| results.cursor_strip == Some(model.analysis_index))
-        {
-            results.clear_cursors();
-        }
-    }
     if let Some((analysis, index)) = toggle_expr
         && let Some(expr) = results
             .analysis_exprs
@@ -1129,14 +1063,32 @@ pub fn show(
             results.sync_expression_projection(analysis, model.analysis_index);
         }
     }
-    if let Some(analysis) = open_editor {
-        host.session_mut().expr_editor = Some(ExprEditor {
-            analysis,
-            text: String::new(),
-            error: None,
-            want_focus: true,
-        });
-        host.session_mut().expr_editor_unit.clear();
+}
+
+/// Open the expression editor on `analysis`' strip, empty and taking the
+/// keys: the bar's "+ Expression" does, for the active strip.
+pub fn open_expression_editor(session: &mut ResultViewerState, analysis: AnalysisPresentationKey) {
+    session.expr_editor = Some(ExprEditor {
+        analysis,
+        text: String::new(),
+        error: None,
+        want_focus: true,
+    });
+    session.expr_editor_unit.clear();
+}
+
+/// Maximize `analysis`' strip, or, when it stands maximized, restore every
+/// strip: the bar's maximize does, for the active strip.
+pub fn toggle_maximized_strip(session: &mut ResultViewerState, analysis: AnalysisPresentationKey) {
+    session.maximized_strip = (session.maximized_strip != Some(analysis)).then_some(analysis);
+}
+
+/// Close `model`'s strip, which the bar's "N hidden" restores; its cursors
+/// go with it.
+pub fn close_strip(session: &mut ResultViewerState, model: &StripModel) {
+    session.hidden_strips.insert(model.analysis_key);
+    if session.cursor_strip == Some(model.analysis_index) {
+        session.clear_cursors();
     }
 }
 
@@ -1159,6 +1111,9 @@ pub(crate) struct StripFrame<'a> {
     /// The strip's expressions no pane or lane of it names, which this
     /// pane's legend names: the top pane's, and no other's.
     pub(crate) unplaced: &'a [usize],
+    /// Whether this is the strip's top pane, whose legend row starts with
+    /// the strip's analysis tag.
+    pub(crate) top: bool,
 }
 
 /// The share of a strip its ruler takes, up to the ruler's own height.
@@ -1343,18 +1298,9 @@ struct ExpressionEdits {
     remove: Option<usize>,
 }
 
-/// Whether the strips stand in the one pane chrome: each strip's control row
-/// once over its panes (its analysis tag and name at the left, and Fit while
-/// zoomed, + Expression, log X and maximize at the right), and each pane's
-/// legend on a row of its own over its plot, the full width, with the pane's
-/// Y scale on its plot's menu. A document pane stands in it.
-fn control_row(session: &ResultViewerState, options: StackOptions) -> bool {
-    options.pane_chrome && session.persistent_pane_context.is_some()
-}
-
 /// Turn the strip's X axis between linear and logarithmic, forgetting the
 /// range read on the other scale.
-fn toggle_x_scale(session: &mut ResultViewerState, model: &StripModel) {
+pub fn toggle_x_scale(session: &mut ResultViewerState, model: &StripModel) {
     let scale = match model.x_scale {
         XScale::Log10 => XScale::Linear,
         XScale::Linear => XScale::Log10,
@@ -1504,6 +1450,7 @@ fn show_strip_plot(
         several,
         strips: Some(strips),
         unplaced: &unplaced,
+        top: false,
     };
     // The strips share what is left by their weights, as the reader sized
     // them; a divider being dragged moves the line between two of them
@@ -1591,6 +1538,7 @@ fn show_strip_plot(
                         } else {
                             &[]
                         },
+                        top: top_shown == Some(ordinal),
                         ..frame
                     },
                     edits,
@@ -2031,6 +1979,7 @@ fn show_xy_strip(
         several,
         strips: None,
         unplaced: &[],
+        top: false,
     };
 
     // The pane's header: its legend, its unit and its scale, which the strip
@@ -2064,6 +2013,8 @@ fn show_xy_strip(
         arrange: false,
         folded_axes: Vec::new(),
         legend_row: false,
+        tag: false,
+        closable: false,
     };
     let header = ui
         .push_id(("xy-strip-pane", identity), |ui| {
@@ -2296,6 +2247,7 @@ fn show_unit_pane(
         several,
         strips,
         unplaced,
+        top,
     } = frame;
     let t = Tokens::get(ui.ctx());
     let presentation = options.readout;
@@ -2378,11 +2330,16 @@ fn show_unit_pane(
         window_slots,
         arrange: options.pane_chrome,
         folded_axes: folded_axes(model, pane, gutter),
-        legend_row: control_row(host.session(), options),
+        legend_row: options.pane_chrome,
+        tag: options.pane_chrome && top,
+        closable: options.pane_chrome && window_slots > 1,
     };
     let header = host.pane_header(ui, model, pane, input);
     if let Some(strips) = header.arrange {
         super::strip_drag::arrange(host, model, Ok(strips));
+    }
+    if header.close_strip {
+        close_strip(host.session_mut(), model);
     }
     edits.toggle = edits.toggle.or(header.toggle_expression);
     edits.remove = edits.remove.or(header.remove_expression);

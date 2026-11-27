@@ -19,6 +19,9 @@ pub const WAVE_PANE_HEADER_HEIGHT: f32 = 26.0;
 /// How tall the pane's trace list grows before it scrolls.
 const TRACE_LIST_HEIGHT: f32 = 320.0;
 
+/// The air between the strip's analysis tag and the legend after it.
+const TAG_GAP: f32 = 8.0;
+
 /// Source-qualified actions applied immediately in legend order.
 ///
 /// Selection is queried for each chip, including after an earlier chip changes it.
@@ -128,10 +131,16 @@ pub struct PaneHeader {
     /// The strip's axes there is no room to draw beside its plot, each
     /// named by its unit and its curves: the trace list names them.
     pub folded_axes: Vec<String>,
-    /// Whether the row is the pane's legend alone, under the strip's control
-    /// row: the legend has the row's whole width, and the pane's Y scale is
-    /// on its plot's menu rather than on a button of the row.
+    /// Whether the row is the pane's legend alone: the legend has the row's
+    /// whole width, and the pane's Y scale is on its plot's menu rather than
+    /// on a button of the row. The strip's own tools stand on the bar.
     pub legend_row: bool,
+    /// Whether the row starts with the strip's analysis tag: the strip's top
+    /// pane's row, as no row of the strip's own stands over its panes.
+    pub tag: bool,
+    /// Whether the row's menu offers to close the strip: while several
+    /// strips are shown and none is maximized.
+    pub closable: bool,
 }
 
 /// What a unit pane's curves may be plotted against: one of the strip's
@@ -231,6 +240,8 @@ pub struct UnitPaneHeaderResponse {
     /// The strips a strip or curve menu entry the reader chose arranges the
     /// stack into.
     pub arrange: Option<Vec<Strip>>,
+    /// Whether the row's "Close strip" was chosen.
+    pub close_strip: bool,
 }
 
 /// Where the legend runs in a pane header spanning `rect` whose trailing
@@ -278,6 +289,8 @@ pub fn show_header(
         arrange,
         folded_axes,
         legend_row,
+        tag,
+        closable,
     } = input;
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -337,7 +350,7 @@ pub fn show_header(
     // need, so the legend is measured against what is left of the row and no
     // chip of it runs under them.
     let action_width = if legend_row {
-        // Under the strip's control row the row is the legend's alone.
+        // The strip's tools stand on the bar: the row is the legend's alone.
         0.0
     } else if plotted {
         // The row ends as the strip header above it does: the fit icon in
@@ -395,9 +408,27 @@ pub fn show_header(
         rect.bottom() - 0.5,
         egui::Stroke::new(1.0, c.border),
     );
-    // The legend starts at the row's inset, where the strip's control row
-    // starts its analysis tag, and runs to the row's controls or its end.
+    // The legend starts at the row's inset and runs to the row's controls or
+    // its end; on the strip's top pane, after the strip's analysis tag, which
+    // its hover follows with what the strip shows of the run.
     let legend_rect = legend_region(strip::header_band(rect), action_width);
+    let legend_rect = if tag {
+        // On a page of panes, the tag of the pane a reader works in reads
+        // in full ink, and reports itself selected.
+        let mark = strip::header_row_mark(ui.ctx(), rect);
+        let kind = strip::KindTag::new(ui, &model.kind_tag, model.incomplete, mark)
+            .described(super::stack::strip_subtitle(model));
+        let width = kind.width().min(legend_rect.width());
+        if let Some(written) = kind.show(ui, legend_rect.with_max_x(legend_rect.left() + width))
+            && mark == Some(true)
+        {
+            ui.ctx()
+                .accesskit_node_builder(written.id, |node| node.set_selected(true));
+        }
+        legend_rect.with_min_x((legend_rect.left() + width + TAG_GAP).min(legend_rect.right()))
+    } else {
+        legend_rect
+    };
 
     // The row names exactly what the pane draws, the same traces its fit
     // and its curves read, and offers the hidden signals of its unit. A
@@ -560,7 +591,7 @@ pub fn show_header(
         },
     );
     let pane_entries = host.offers_pane_menu();
-    if abscissa.is_some() || arrange || pane_entries {
+    if abscissa.is_some() || arrange || pane_entries || closable {
         let draft_id = ui
             .id()
             .with(("abscissa-menu-draft", model.analysis_key, pane.unit));
@@ -568,7 +599,7 @@ pub fn show_header(
             .unit_panes()
             .iter()
             .position(|held| held.unit == pane.unit);
-        if let Some((strips, chosen)) = crate::context_menu::context_menu(&band, |ui| {
+        if let Some((strips, chosen, close)) = crate::context_menu::context_menu(&band, |ui| {
             // A document pane's own entries lead: moving, linking and
             // removing the pane the strip stands in.
             if pane_entries {
@@ -586,12 +617,28 @@ pub fn show_header(
                 }
                 abscissa_choices(ui, pane.quantity_unit(), menu, &display, draft_id)
             });
-            (strips, chosen)
+            // The strip closes from its rows: the bar's "N hidden" brings
+            // it back.
+            let close = closable && {
+                if arrange || abscissa.is_some() || pane_entries {
+                    ui.separator();
+                }
+                let close = ui
+                    .button("Close strip")
+                    .on_hover_text("Close the strip; the bar's \"hidden\" brings it back")
+                    .clicked();
+                if close {
+                    ui.close();
+                }
+                close
+            };
+            (strips, chosen, close)
         })
         .map(|inner| inner.inner)
         {
             output.arrange = strips;
             output.abscissa = chosen;
+            output.close_strip = close;
         }
     }
     output

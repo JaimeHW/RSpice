@@ -416,6 +416,96 @@ fn tag_ink(tokens: &Tokens, mark: Option<bool>) -> egui::Color32 {
     }
 }
 
+/// The analysis tag a strip's first row starts with ("TR", "AC"): mono
+/// medium, painted as written, in the ink its row's `mark` gives it. An
+/// incomplete result keeps the tag in its ink and sets a warning mark after
+/// it, and the tag's hover, and the accessibility text behind it, says why.
+pub(crate) struct KindTag {
+    job: egui::text::LayoutJob,
+    text_width: f32,
+    mark_room: f32,
+    hover: String,
+}
+
+impl KindTag {
+    pub(crate) fn new(ui: &Ui, kind: &str, incomplete: Option<&str>, mark: Option<bool>) -> Self {
+        let t = Tokens::get(ui.ctx());
+        let mut job = egui::text::LayoutJob::default();
+        job.append(
+            kind,
+            0.0,
+            egui::TextFormat {
+                font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
+                color: tag_ink(&t, mark),
+                ..Default::default()
+            },
+        );
+        let text_width = ui.fonts_mut(|fonts| fonts.layout_job(job.clone()).size().x);
+        // The mark alone would not carry the reason, so the hover states it
+        // in words.
+        let hover = match incomplete {
+            Some(reason) => format!("{kind} · {reason}"),
+            None => kind.to_owned(),
+        };
+        Self {
+            job,
+            text_width,
+            mark_room: if incomplete.is_some() {
+                KIND_MARK_GAP + KIND_MARK_SIDE
+            } else {
+                0.0
+            },
+            hover,
+        }
+    }
+
+    /// Follow the tag's hover with `detail`: what the strip shows of the
+    /// run, where its row has no room to write it.
+    pub(crate) fn described(mut self, detail: &str) -> Self {
+        if !detail.is_empty() {
+            self.hover = format!("{} · {detail}", self.hover);
+        }
+        self
+    }
+
+    /// The width the tag takes with nothing cut: its words and its mark.
+    pub(crate) fn width(&self) -> f32 {
+        self.text_width + self.mark_room
+    }
+
+    /// Write the tag in `rect`, cut at its end where it is narrower; the
+    /// written tag's response, which takes no press: a press on the tag is
+    /// its row's.
+    pub(crate) fn show(self, ui: &mut Ui, rect: Rect) -> Option<egui::Response> {
+        let incomplete = self.mark_room > 0.0;
+        let written = truncated_label(
+            ui,
+            Rect::from_min_max(
+                rect.min,
+                egui::pos2(
+                    (rect.right() - self.mark_room).max(rect.left()),
+                    rect.bottom(),
+                ),
+            ),
+            Label::new(self.job).truncate().selectable(false),
+            &self.hover,
+        );
+        if incomplete && rect.width() >= KIND_MARK_SIDE {
+            let left =
+                (rect.left() + self.text_width + KIND_MARK_GAP).min(rect.right() - KIND_MARK_SIDE);
+            paint_problem_mark(
+                &ui.painter().with_clip_rect(rect),
+                Rect::from_center_size(
+                    egui::pos2(left + KIND_MARK_SIDE * 0.5, rect.center().y),
+                    egui::Vec2::splat(KIND_MARK_SIDE),
+                ),
+                Problem::Warning,
+            );
+        }
+        written
+    }
+}
+
 /// The rows of the strip headers drawn this pass within `within`, each with
 /// what the reader did to it: where whatever holds the strips gives their
 /// rows a menu of its own. A row answers behind its chips and actions, so a
@@ -476,8 +566,6 @@ pub struct StripHeader<'a> {
     field_width: f32,
     x_scale: bool,
     window_slots: usize,
-    expr_trailing: bool,
-    height: f32,
 }
 
 impl<'a> StripHeader<'a> {
@@ -499,23 +587,7 @@ impl<'a> StripHeader<'a> {
             field_width: 0.0,
             x_scale: false,
             window_slots: 0,
-            expr_trailing: false,
-            height: HEADER_HEIGHT,
         }
-    }
-
-    /// How tall the row stands: a strip's control row over its panes'
-    /// legend rows stands as tall as they do.
-    pub(crate) fn height(mut self, height: f32) -> Self {
-        self.height = height;
-        self
-    }
-
-    /// Stand "+ Expression" at the row's end, left of the scale chip, as a
-    /// strip's control row stands it, rather than after the legend.
-    pub(crate) fn expr_trailing(mut self, on: bool) -> Self {
-        self.expr_trailing = on;
-        self
     }
 
     /// Name this header among the others its parent draws: the analysis a
@@ -623,7 +695,7 @@ impl<'a> StripHeader<'a> {
         let mut out = StripHeaderResponse::default();
 
         let width = ui.available_width();
-        let (rect, _) = ui.allocate_exact_size(vec2(width, self.height), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(width, HEADER_HEIGHT), Sense::hover());
         if !ui.is_rect_visible(rect) {
             return out;
         }
@@ -667,21 +739,15 @@ impl<'a> StripHeader<'a> {
         } else {
             0.0
         };
-        let trailing_expr = self.pane_actions && self.expr_action && self.expr_trailing;
-        let expr_width = if trailing_expr {
-            header_button_width(ui, EXPRESSION_ACTION_LABEL) + WINDOW_CONTROL_GAP
-        } else {
-            0.0
-        };
         let actions_width = if self.pane_actions {
-            (trailing_actions_width(
+            trailing_actions_width(
                 HEADER_ICON_SIDE,
                 slots,
                 scale_width,
                 self.zoomed,
                 fit_chip_width,
-            ) + expr_width)
-                .min(inner.width())
+            )
+            .min(inner.width())
         } else {
             0.0
         };
@@ -713,23 +779,8 @@ impl<'a> StripHeader<'a> {
         // keeps the tag in primary text and sets a warning mark after it.
         // Metadata is measured before rendering so it receives a bounded
         // region instead of consuming the legend or action budget.
-        let mut job = egui::text::LayoutJob::default();
-        job.append(
-            self.kind,
-            0.0,
-            egui::TextFormat {
-                font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-                color: tag_ink(&t, mark),
-                ..Default::default()
-            },
-        );
-        let kind_text_width = ui.fonts_mut(|fonts| fonts.layout_job(job.clone()).size().x);
-        let mark_room = if self.incomplete.is_some() {
-            KIND_MARK_GAP + KIND_MARK_SIDE
-        } else {
-            0.0
-        };
-        let kind_natural_width = kind_text_width + mark_room;
+        let tag = KindTag::new(ui, self.kind, self.incomplete, mark);
+        let kind_natural_width = tag.width();
         let subtitle_font = header_font();
         let subtitle_natural_width = if self.subtitle.is_empty() {
             0.0
@@ -749,8 +800,8 @@ impl<'a> StripHeader<'a> {
             content_rect.width(),
             kind_natural_width,
             subtitle_natural_width,
-            !self.legend.is_empty() || (self.expr_action && !trailing_expr),
-            legend_natural_width(ui, self.legend, self.expr_action && !trailing_expr),
+            !self.legend.is_empty() || self.expr_action,
+            legend_natural_width(ui, self.legend, self.expr_action),
         );
         let span_rect = |span: HorizontalSpan| {
             Rect::from_min_max(
@@ -758,37 +809,7 @@ impl<'a> StripHeader<'a> {
                 egui::pos2(content_rect.left() + span.end(), content_rect.bottom()),
             )
         };
-        // The mark alone would not carry this, so the hover — and the
-        // accessibility text behind it — states the reason in words.
-        let kind_hover = match self.incomplete {
-            Some(reason) => format!("{} · {reason}", self.kind),
-            None => self.kind.to_owned(),
-        };
-        let kind_rect = span_rect(layout.kind);
-        truncated_label(
-            ui,
-            Rect::from_min_max(
-                kind_rect.min,
-                egui::pos2(
-                    (kind_rect.right() - mark_room).max(kind_rect.left()),
-                    kind_rect.bottom(),
-                ),
-            ),
-            Label::new(job).truncate(),
-            &kind_hover,
-        );
-        if self.incomplete.is_some() && kind_rect.width() >= KIND_MARK_SIDE {
-            let left = (kind_rect.left() + kind_text_width + KIND_MARK_GAP)
-                .min(kind_rect.right() - KIND_MARK_SIDE);
-            paint_problem_mark(
-                &ui.painter().with_clip_rect(kind_rect),
-                Rect::from_center_size(
-                    egui::pos2(left + KIND_MARK_SIDE * 0.5, kind_rect.center().y),
-                    egui::Vec2::splat(KIND_MARK_SIDE),
-                ),
-                Problem::Warning,
-            );
-        }
+        tag.show(ui, span_rect(layout.kind));
         if layout.subtitle.width > 0.0 {
             truncated_label(
                 ui,
@@ -802,7 +823,7 @@ impl<'a> StripHeader<'a> {
         // keeps every trace reachable without crossing into the action rect.
         let removable = self.removable;
         let legend = self.legend;
-        let expr_action = self.expr_action && !trailing_expr;
+        let expr_action = self.expr_action;
         let legend_rect = span_rect(layout.legend);
         let mut legend_ui = ui.new_child(
             egui::UiBuilder::new()
@@ -879,8 +900,14 @@ impl<'a> StripHeader<'a> {
             } else {
                 "Maximize strip"
             };
+            // Its own glyph, so it is never taken for the bar's Fit.
+            let glyph = if self.maximized {
+                Icon::Restore
+            } else {
+                Icon::Maximize
+            };
             if self.maximizable
-                && IconButton::new(Icon::ZoomFit)
+                && IconButton::new(glyph)
                     .side(icon_side)
                     .on(self.maximized)
                     .plain()
@@ -900,38 +927,11 @@ impl<'a> StripHeader<'a> {
                 out.scale_rect = Some(scale);
                 left = scale.left();
             }
-            if trailing_expr {
-                let width = header_button_width(ui, EXPRESSION_ACTION_LABEL);
-                let right = left - WINDOW_CONTROL_GAP;
-                let at = Rect::from_min_max(
-                    egui::pos2((right - width).max(actions_rect.left()), inner.top()),
-                    egui::pos2(right, inner.bottom()),
-                );
-                let mut slot = ui.new_child(
-                    egui::UiBuilder::new()
-                        .id_salt((self.id_salt, "expression"))
-                        .max_rect(at)
-                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
-                );
-                if header_button(EXPRESSION_ACTION_LABEL)
-                    .show(&mut slot)
-                    .on_hover_text(EXPRESSION_ACTION_TIP)
-                    .clicked()
-                {
-                    out.add_expr_clicked = true;
-                }
-                left = at.left();
-            }
+
             // FIT's place is made whether or not the view is zoomed: a child
             // made only now and then would renumber every widget after it,
             // and a drag on the ruler below would lose its widget midway.
-            // Beside the row's other buttons it keeps their gap; it stands
-            // at the group's left end, so nothing moves when it comes.
-            let fit_gap = if trailing_expr {
-                WINDOW_CONTROL_GAP
-            } else {
-                HEADER_ACTION_ITEM_GAP + 4.0
-            };
+            let fit_gap = HEADER_ACTION_ITEM_GAP + 4.0;
             let fit = Rect::from_min_max(
                 egui::pos2(actions_rect.left(), inner.top()),
                 egui::pos2((left - fit_gap).max(actions_rect.left()), inner.bottom()),
@@ -969,9 +969,14 @@ pub(crate) fn header_words(text: &str, tokens: &Tokens) -> egui::RichText {
         .color(tokens.color.text_faint)
 }
 
-fn truncated_label(ui: &mut Ui, rect: Rect, label: Label, full_text: &str) {
+fn truncated_label(
+    ui: &mut Ui,
+    rect: Rect,
+    label: Label,
+    full_text: &str,
+) -> Option<egui::Response> {
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
-        return;
+        return None;
     }
     // A child of its own, which leaves the row's cursor where the row put
     // it: a scope would move it to the label's bottom, which stands above
@@ -982,7 +987,7 @@ fn truncated_label(ui: &mut Ui, rect: Rect, label: Label, full_text: &str) {
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     slot.set_clip_rect(rect);
-    slot.add_sized(rect.size(), label).on_hover_text(full_text);
+    Some(slot.add_sized(rect.size(), label).on_hover_text(full_text))
 }
 
 /// The face a legend chip's name is set in.
