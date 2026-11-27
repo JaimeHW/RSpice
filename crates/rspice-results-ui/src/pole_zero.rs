@@ -345,13 +345,20 @@ pub fn show(
         },
     ];
     let drawing_view = *view;
-    let header = strip::StripHeader::new(
-        "PZ",
-        &format!("{} · {} roots", data.name, data.roots.len()),
-        &legend,
-    )
-    .zoomed(drawing_view.is_zoomed())
-    .show(ui);
+    // The run's label beside the PZ tag, less one that only names the kind
+    // again, as a waveform strip's header does.
+    let count = format!("{} roots", data.roots.len());
+    let subtitle = if crate::waves::stack::label_names_the_kind(
+        rspice_results::analysis_type::AnalysisType::PoleZero,
+        &data.name,
+    ) {
+        count
+    } else {
+        format!("{} · {count}", data.name)
+    };
+    let header = strip::StripHeader::new("PZ", &subtitle, &legend)
+        .zoomed(drawing_view.is_zoomed())
+        .show(ui);
     if header.fit_clicked {
         *view = PlotView::default();
     }

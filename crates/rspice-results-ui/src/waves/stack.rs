@@ -774,24 +774,31 @@ pub fn expr_palette_slot(model: &StripModel, slot: usize) -> usize {
 /// kind again ("SP" beside SP, "TRAN" or "Transient" beside TR), which
 /// would read twice.
 pub(crate) fn strip_subtitle(model: &StripModel) -> &str {
-    let kind = model.analysis_type;
     let (label, rest) = model
         .subtitle
         .split_once(" · ")
         .map_or((model.subtitle.as_str(), ""), |(label, rest)| (label, rest));
+    if label_names_the_kind(model.analysis_type, label) {
+        rest
+    } else {
+        &model.subtitle
+    }
+}
+
+/// Whether a run's label for an analysis only names its kind again: its
+/// tag, its command or its name, "PZ", "pz" or "Pole-Zero" beside PZ.
+pub(crate) fn label_names_the_kind(
+    kind: rspice_results::analysis_type::AnalysisType,
+    label: &str,
+) -> bool {
     let label = label.trim();
-    let names_the_kind = [
+    [
         kind.short_label(),
         kind.spice_command().trim_start_matches('.'),
         kind.display_name(),
     ]
     .iter()
-    .any(|name| label.eq_ignore_ascii_case(name));
-    if names_the_kind {
-        rest
-    } else {
-        &model.subtitle
-    }
+    .any(|name| label.eq_ignore_ascii_case(name))
 }
 
 /// What a strip says when every trace it holds is hidden.
