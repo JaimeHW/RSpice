@@ -355,19 +355,10 @@ impl RSpiceApp {
         cc.egui_ctx.set_zoom_factor(1.0);
 
         // Restore global user Verilog-A library (commercial-style user library).
-        let startup_faults = [
-            restore_global_veriloga_library(
-                &mut state.model.library_manager,
-                &mut state.model.workspace,
-            )
-            .err(),
-            state
-                .model
-                .model_library_manager
-                .spice_pack_error()
-                .map(str::to_owned),
-        ];
-        for fault in startup_faults.into_iter().flatten() {
+        if let Err(fault) = restore_global_veriloga_library(
+            &mut state.model.library_manager,
+            &mut state.model.workspace,
+        ) {
             state.record(
                 rspice_app_state::diagnostics::LogSeverity::Error,
                 rspice_app_state::diagnostics::LogSource::Studio,

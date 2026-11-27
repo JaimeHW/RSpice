@@ -1350,12 +1350,6 @@ fn poll_browser_model_imports(cx: &mut Cx<'_, ModelsFeature>) {
                     "Model library '{library_name}' was added while the worker was parsing; the candidate was discarded."
                 ));
             }
-            if parsed.library.pack_id.is_some() {
-                return Err(
-                    "Browser worker incorrectly assigned official pack authority to a user import."
-                        .to_owned(),
-                );
-            }
             let mut candidate = cx.model.model_library_manager.clone();
             candidate.add_library(parsed.library);
             if cx.platform.project_lifecycle.is_open() {

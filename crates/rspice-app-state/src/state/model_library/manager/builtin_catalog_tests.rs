@@ -18,7 +18,6 @@ fn builtin_catalog_is_one_complete_foundation_library() {
         .expect("foundation library");
     assert_eq!(foundation.models.len(), 21);
     assert_eq!(foundation.top_level_models.len(), 21);
-    assert_eq!(foundation.pack_id.as_deref(), Some("rspice-foundation"));
     let opamp = foundation
         .subcircuits
         .get("RSPICE_OPAMP")

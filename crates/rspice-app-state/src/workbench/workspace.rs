@@ -67,17 +67,15 @@ impl Workspace {
     }
 }
 
-/// The built-in models and the SPICE packs shipped beside the binary.
+/// The built-in models.
 pub fn default_model_library_manager() -> ModelLibraryManager {
     let mut manager = ModelLibraryManager::new();
     manager.load_builtin_models();
-    // The packs ship beside the binary; absence is normal (browser build).
-    manager.discover_spice_packs();
     manager
 }
 
-/// The model catalog a PDK configuration describes: the built-in models and
-/// shipped packs, then the configuration's model sources, with the count of
+/// The model catalog a PDK configuration describes: the built-in models,
+/// then the configuration's model sources, with the count of
 /// models those sources loaded. On success the configuration records the
 /// sources the catalog now manages; on failure it is unchanged. Nothing is
 /// persisted: keeping the recorded sources is the caller's decision.

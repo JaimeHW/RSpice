@@ -32,9 +32,7 @@ pub use rspice_model_library::{
 };
 // Metadata fixtures used by application integration tests.
 pub use manager::model_library_source_digest;
-pub use manager::{
-    ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
-};
+pub use manager::{ModelLibraryManager, ProjectModelCommit, SealedModelExecutionSources};
 pub use part_index::{LibraryPart, LibraryPartKind, library_part_index};
 pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::ProjectModelRevisionDefinition;
@@ -50,7 +48,7 @@ pub use rspice_model_library::{
     ModelValidationFindingSeverity, SimulationPlanModelBinding,
 };
 pub use rspice_model_library::{ModelLevel, ModelType};
-pub use rspice_model_library::{ModelLibrary, ModelSourceAuthority, PackPartPin};
+pub use rspice_model_library::{ModelLibrary, ModelSourceAuthority};
 #[cfg(any(test, feature = "test-support"))]
 pub use rspice_model_library::{
     ModelSourceContent, ModelSourceEdge, ModelSourcePin, ModelSubcircuitInterface,

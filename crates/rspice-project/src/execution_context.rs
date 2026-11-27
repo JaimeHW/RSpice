@@ -44,13 +44,6 @@ pub struct ProjectModelLibrary {
     pub name: String,
     pub pdk_name: String,
     pub technology_node: String,
-    #[serde(default)]
-    pub pack_id: Option<String>,
-    /// The signed Model Hub release this library's parts came from. Absent in
-    /// every project written before pack distribution, and in every project
-    /// whose libraries were imported from local files.
-    #[serde(default)]
-    pub pack_pin: Option<rspice_model_library::PackPartPin>,
     pub root_path: Option<PathBuf>,
     #[serde(default)]
     pub source_authority: ModelSourceAuthority,
@@ -212,8 +205,6 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
             name: library.name.clone(),
             pdk_name: library.pdk_name.clone(),
             technology_node: library.technology_node.clone(),
-            pack_id: library.pack_id.clone(),
-            pack_pin: library.pack_pin.clone(),
             root_path: library.root_path.clone(),
             source_authority: library.source_authority,
             source_closure: library.source_closure.clone(),
@@ -324,8 +315,6 @@ impl ProjectModelLibrary {
             name: self.name,
             pdk_name: self.pdk_name,
             technology_node: self.technology_node,
-            pack_id: self.pack_id,
-            pack_pin: self.pack_pin,
             root_path: self.root_path,
             source_authority: self.source_authority,
             source_closure: self.source_closure,

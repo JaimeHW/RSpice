@@ -175,7 +175,6 @@ impl ModelCatalog {
             .libraries
             .entry("RSpice Foundation".to_owned())
             .or_insert_with(|| ModelLibrary::new("RSpice Foundation"));
-        library.pack_id = Some("rspice-foundation".to_owned());
 
         for model in &parsed.top_level_models {
             let device_model = DeviceModel {

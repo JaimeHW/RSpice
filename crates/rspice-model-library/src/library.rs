@@ -118,32 +118,6 @@ pub struct ModelSourcePin {
     pub digest: rspice_vocabulary::product::ContentDigest,
 }
 
-/// The published release a project part was taken from.
-///
-/// The retained source closure beside this pin is what makes a project
-/// reproducible; the pin is what makes it attributable. It names the exact
-/// signed archive the bytes came from, so a saved design can still say which
-/// release supplied a model after that release has been uninstalled,
-/// superseded, or withdrawn from the catalog — and a later reader can prove
-/// the claim, because `archive_sha256` identifies exactly one published
-/// archive forever.
-///
-/// A project written before packs were distributed carries no pin. That is
-/// not a defect and is never repaired by guessing: the field is absent, the
-/// retained closure is unchanged, and the project loads and runs identically.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PackPartPin {
-    /// Canonical pack identity, `rspice-<family>`.
-    pub pack_id: String,
-    /// Semantic version of the release the part was added from.
-    pub pack_version: String,
-    /// Lowercase hexadecimal SHA-256 of that release's signed archive.
-    pub archive_sha256: String,
-    /// Part identifier as the signed manifest publishes it.
-    pub part_id: String,
-}
-
 /// Authenticated bytes retained for one pinned source. Native execution
 /// revalidates external libraries against the live filesystem, while
 /// project-owned execution and browser execution use these retained bytes.
@@ -285,16 +259,6 @@ pub struct ModelLibrary {
     pub pdk_name: String,
     /// Technology node (e.g., "180nm", "65nm")
     pub technology_node: String,
-    /// Stable shipped-corpus identity when this library was attached from a
-    /// redistributable model pack. Detection never depends on the original
-    /// installation path after the retained snapshot enters a project.
-    #[serde(default)]
-    pub pack_id: Option<String>,
-    /// The signed release this library's parts were taken from, when they came
-    /// from a Model Hub pack. Absent on every library that predates pack
-    /// distribution and on every library imported from a local file.
-    #[serde(default)]
-    pub pack_pin: Option<PackPartPin>,
     /// Root execution identity. This is a live filesystem path only for an
     /// external library; project-owned sources use a regenerated virtual path.
     pub root_path: Option<PathBuf>,
@@ -457,18 +421,12 @@ impl ModelLibrary {
     /// every run receipt attributes a result to, so it has to be the strongest
     /// true statement about where the bytes came from.
     ///
-    /// A pinned pack part names its pack and release, because that is the fact
-    /// a reader needs to attribute a result and the one a path cannot carry: a
-    /// retained bundle is addressed by the digest of its own contents, so its
-    /// path names bytes rather than an origin, and a deck sealed under
-    /// `/rspice-browser/model-sources/9f2c…` tells nobody which release they
-    /// simulated. Everything else says what it is — compiled into RSpice,
-    /// authored here, or retained — except a file on this machine, which is
-    /// named by its path because the path *is* its identity.
+    /// Each library says what it is — compiled into RSpice, authored here, or
+    /// retained — except a file on this machine, which is named by its path
+    /// because the path *is* its identity. A retained bundle is addressed by
+    /// the digest of its own contents, so its path names bytes rather than an
+    /// origin, and is never the label.
     pub fn provenance_label(&self) -> String {
-        if let Some(pin) = self.pack_pin.as_ref() {
-            return format!("pack {} {}", pin.pack_id, pin.pack_version);
-        }
         let origin = match self.source_authority {
             ModelSourceAuthority::BuiltIn => "built into RSpice",
             ModelSourceAuthority::ProjectOwned { .. } => "authored in this project",
@@ -480,10 +438,7 @@ impl ModelLibrary {
                     .map_or_else(|| self.name.clone(), |path| path.display().to_string());
             }
         };
-        match self.pack_id.as_deref() {
-            Some(pack) => format!("{origin} from pack {pack}"),
-            None => format!("{origin} · {}", self.name),
-        }
+        format!("{origin} · {}", self.name)
     }
 
     /// Create a new library.
@@ -749,11 +704,11 @@ mod tests {
         }
     }
 
-    /// Every origin says what it is, and a pinned pack part says which release.
+    /// Every origin says what it is.
     ///
     /// The retained case is the one that matters: its root path is the digest
     /// of the bundle's own contents, so sealing a deck under that path names
-    /// bytes and tells a reader nothing about which release they simulated.
+    /// bytes and tells a reader nothing about where they came from.
     #[test]
     fn a_library_is_labelled_as_what_its_provenance_says_it_is() {
         let mut library = ModelLibrary::new("proving");
@@ -781,18 +736,6 @@ mod tests {
         assert_eq!(
             library.provenance_label(),
             "retained into this project · proving"
-        );
-
-        library.pack_pin = Some(PackPartPin {
-            pack_id: "rspice-opamps".to_owned(),
-            pack_version: "2.1.0".to_owned(),
-            archive_sha256: "9f2c".repeat(16),
-            part_id: "OPA2340".to_owned(),
-        });
-        assert_eq!(
-            library.provenance_label(),
-            "pack rspice-opamps 2.1.0",
-            "and a pinned part names the release a result can be attributed to"
         );
     }
 }

@@ -921,11 +921,10 @@ fn change_refusal(cx: &Cx<'_, ProjectFeature>, row: &DependencyRow) -> Option<St
             if !found.source_authority.has_execution_source() {
                 return Some("It ships with RSpice.".to_owned());
             }
-            let relinkable = found.pack_id.is_none()
-                && matches!(
-                    found.source_authority,
-                    ModelSourceAuthority::External | ModelSourceAuthority::RetainedImport { .. }
-                );
+            let relinkable = matches!(
+                found.source_authority,
+                ModelSourceAuthority::External | ModelSourceAuthority::RetainedImport { .. }
+            );
             if relinkable {
                 reading_refusal(cx)
             } else {
@@ -1357,7 +1356,6 @@ fn start_model_library_read(
         return;
     }
     let section = library.selected_corner.clone();
-    let pack = library.pack_id.clone().filter(|_| relink.is_none());
     let mut candidate = cx.model.model_library_manager.clone();
     let expected = name.to_owned();
     let file = root.file_name().map_or_else(
@@ -1375,10 +1373,7 @@ fn start_model_library_read(
             if relinked {
                 candidate.remove_library(&expected);
             }
-            let loaded = match pack {
-                Some(pack) => candidate.refresh_spice_pack(&pack),
-                None => candidate.load_library_file(&root, section.as_deref()),
-            }?;
+            let loaded = candidate.load_library_file(&root, section.as_deref())?;
             if loaded != expected {
                 return Err(format!(
                     "The file read as model library '{loaded}', not '{expected}'."
