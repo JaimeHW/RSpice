@@ -38,6 +38,11 @@ pub(super) struct NetworkMatrixState {
 }
 
 impl NetworkMatrixState {
+    /// Whether the polar window over the selected coefficient is open.
+    pub(super) fn polar_open(&self) -> bool {
+        self.open_trace
+    }
+
     /// Release a discarded source even while its sheet is inactive.
     pub(super) fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
         if self

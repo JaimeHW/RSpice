@@ -383,15 +383,24 @@ fn active_result_pane(
     }
     property_row(ui, "Limit mask", facts.limit_mask);
     // A polar chart has no X or Y interval: its one ruled axis is the
-    // radius, which the sheet bar's radius mode sets.
-    if viewer == rspice_results::result_presentation::ResultViewer::Polar {
-        if let Some(radius) = state
-            .model
-            .simulation
-            .active_analysis()
-            .and_then(|analysis| {
-                rspice_results_ui::polar::radius_summary(analysis, &state.results.session.polar)
-            })
+    // radius, which the sheet bar's radius mode sets. The network matrix
+    // draws one in its polar window, and the matrix itself has no interval.
+    let polar = match viewer {
+        rspice_results::result_presentation::ResultViewer::Polar => Some(true),
+        rspice_results::result_presentation::ResultViewer::NetworkMatrix => {
+            Some(state.results.network_polar_open())
+        }
+        _ => None,
+    };
+    if let Some(drawn) = polar {
+        if drawn
+            && let Some(radius) = state
+                .model
+                .simulation
+                .active_analysis()
+                .and_then(|analysis| {
+                    rspice_results_ui::polar::radius_summary(analysis, &state.results.session.polar)
+                })
         {
             property_row(ui, "Radius", &radius);
         }

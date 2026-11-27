@@ -1878,6 +1878,12 @@ pub(crate) fn analysis_evidence_failure(
 }
 
 impl ResultsState {
+    /// Whether the network matrix's polar window is open, drawing a
+    /// coefficient on the polar sheet's radius ruling.
+    pub(crate) fn network_polar_open(&self) -> bool {
+        self.network_matrix.polar_open()
+    }
+
     /// The signals of the shown run the strips drew last, each with its
     /// curve's colour, the first strip's first and each signal once. The
     /// schematic inks a probed net in it, so the drawing and the plot share
