@@ -212,6 +212,7 @@ impl PreparedRunSnapshot {
                     .unwrap_or(NOMINAL_TEMPERATURE_C),
             );
             if let Some(point) = &task.pvt_point {
+                stated.add_corner(point.process(), point.supply_voltage());
                 for swept in point.swept_values() {
                     stated.add_swept(&swept.name, &swept.value);
                 }

@@ -611,6 +611,10 @@ impl SimulationController {
                 })
             })
             .flatten();
+        // The plan the run ran, by the name it has as the run starts.
+        let plan_name = dispatched_plan_id
+            .and_then(|id| state.model().sim_setup.plan_name(id))
+            .map(|name| name.as_str().to_owned());
         // A run outside every plan is kept under the project's own limit, or
         // under the one Preferences sets when the project names none.
         let model = state.model_mut();
@@ -632,9 +636,10 @@ impl SimulationController {
                 .expect("campaign membership was validated before run creation");
         }
         // What the run sets the engine to, read where it was prepared, and
-        // the simulator that runs it.
+        // the plan and the simulator that run it.
         run.facts = dispatch.facts().cloned().map(|mut facts| {
             facts.simulator = run_lines::product_version();
+            facts.plan = plan_name.unwrap_or_default();
             facts
         });
         let run_id = run.id;

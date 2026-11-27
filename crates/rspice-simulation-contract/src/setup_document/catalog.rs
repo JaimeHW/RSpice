@@ -29,6 +29,23 @@ impl SimulationSetupDocument {
         &self.inactive_plans
     }
 
+    /// The name of the plan `id`, the active one or one put away; `None`
+    /// when the catalog no longer holds it.
+    #[must_use]
+    pub fn plan_name(&self, id: SimulationPlanId) -> Option<&SimulationPlanName> {
+        if self
+            .analysis_plan
+            .as_ref()
+            .is_some_and(|plan| plan.id() == id)
+        {
+            return Some(&self.active_plan_name);
+        }
+        self.inactive_plans
+            .iter()
+            .find(|plan| plan.id() == id)
+            .map(StoredSimulationPlan::name)
+    }
+
     #[must_use]
     pub fn plan_count(&self) -> usize {
         usize::from(self.analysis_plan.is_some()) + self.inactive_plans.len()
