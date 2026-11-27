@@ -951,6 +951,24 @@ fn labels_under(values: &[f64], step: f64, index: i32) -> Vec<String> {
         .collect()
 }
 
+/// The labels of ticks in a unit that names its own decade
+/// ([`unit_carries_its_decade`]): each number as it stands, never on a
+/// prefix, so a noise density's top decade reads `1000 nV/√Hz`, never
+/// `1 knV/√Hz`. Ticks `step` apart keep the places the step calls for; a
+/// logarithmic ladder's, whose `step` is zero, the places each tick needs.
+pub fn unprefixed_tick_labels(values: &[f64], step: f64) -> Vec<String> {
+    if step.is_finite() && step > 0.0 {
+        return labels_under(values, step, 0);
+    }
+    values
+        .iter()
+        .map(|value| {
+            let own = 10f64.powf(value.abs().log10().floor());
+            labels_under(&[*value], own, 0).remove(0)
+        })
+        .collect()
+}
+
 /// `labels`, ticks `step` apart under the prefix `index`, with every tick
 /// that reads a thousand or more of that prefix restated in the next one
 /// up, where each such tick reads shorter so: the top of a current axis
@@ -1074,6 +1092,25 @@ mod tests {
         assert_eq!(reading_coordinate(1.8, "V"), "1.8 V");
         assert_eq!(reading_coordinate(0.9, "V"), "900 mV");
         assert_eq!(reading_coordinate(-40.0, "\u{b0}C"), "\u{2212}40 \u{b0}C");
+    }
+
+    /// A unit that names its own decade takes no prefix on a tick: a
+    /// density's decades read `10, 100, 1000`, and a linear ladder keeps
+    /// the places its step needs.
+    #[test]
+    fn a_unit_that_names_its_decade_ticks_without_a_prefix() {
+        assert_eq!(
+            unprefixed_tick_labels(&[0.1, 1.0, 10.0, 100.0, 1000.0, 1.0e4], 0.0),
+            ["0.1", "1", "10", "100", "1000", "10000"]
+        );
+        assert_eq!(
+            unprefixed_tick_labels(&[0.0, 500.0, 1000.0, 1500.0], 500.0),
+            ["0", "500", "1000", "1500"]
+        );
+        assert_eq!(
+            unprefixed_tick_labels(&[1.2, 1.4, 1.6], 0.2),
+            ["1.2", "1.4", "1.6"]
+        );
     }
 
     /// A `.step` point reads as the netlist wrote it: `.STEP PARAM r LIST

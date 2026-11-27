@@ -3,7 +3,10 @@
 
 use egui::Color32;
 
-use super::format::{axis_tick_labels, offset_anchor_label, offset_tick_labels, tick_label};
+use super::format::{
+    axis_tick_labels, offset_anchor_label, offset_tick_labels, tick_label, unit_carries_its_decade,
+    unprefixed_tick_labels,
+};
 use super::sample::SweepShape;
 use super::scale::{
     LabelColumn, TickSeries, XScale, anchor_label, decade_ticks, fitted_linear_ticks, linear_ticks,
@@ -43,8 +46,17 @@ pub struct Axis {
 }
 
 impl Axis {
-    fn from_series(min: f64, max: f64, unit: impl Into<String>, series: TickSeries) -> Self {
+    fn from_series(min: f64, max: f64, unit: impl Into<String>, mut series: TickSeries) -> Self {
         let unit = unit.into();
+        // A unit that names its own decade, `nV/√Hz`, takes no prefix on a
+        // tick, as it takes none in a reading: `1000 nV/√Hz`, not `1 knV/√Hz`.
+        if unit_carries_its_decade(&unit) && series.anchor.is_none() {
+            let values: Vec<f64> = series.ticks.iter().map(|(value, _)| *value).collect();
+            let labels = unprefixed_tick_labels(&values, series.step);
+            for ((_, label), text) in series.ticks.iter_mut().zip(labels) {
+                *label = text;
+            }
+        }
         let offset_anchor = anchor_label(&series, &unit);
         Self {
             min,
