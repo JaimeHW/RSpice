@@ -28,6 +28,7 @@ mod plot_page;
 mod result_import_adapters;
 mod result_import_workflow;
 mod retained_memo;
+mod run_facts;
 mod runs;
 mod saved_documents;
 mod sheet_print;
