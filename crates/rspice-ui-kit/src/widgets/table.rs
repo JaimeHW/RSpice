@@ -722,8 +722,9 @@ pub struct DataTable<'a> {
     /// take under a coarse pointer; none elsewhere.
     lead_gutter: f32,
     kind: Kind,
-    /// Drawn as a panel's rows of facts are: no rule between its columns,
-    /// its words at a fact row's size and its rows at their height.
+    /// Drawn as a panel's rows of facts are: no rule between its rows or
+    /// its columns, its words at a fact row's size and its rows at their
+    /// height.
     plain_rows: bool,
     /// The table takes the keyboard this frame.
     focus: bool,
@@ -1111,9 +1112,10 @@ impl<'a> DataTable<'a> {
     }
 
     /// Draw a list's or a tree's rows as a panel's fact rows read: no rule
-    /// between the columns, which no heads name, and the words at a fact
-    /// row's size and each row at its height, so the rows read on from the
-    /// facts around them. Size its columns with [`fitted_plain_width`].
+    /// under a row or between the columns, which no heads name, and the
+    /// words at a fact row's size and each row at its height, so the rows
+    /// read on from the facts around them. Size its columns with
+    /// [`fitted_plain_width`].
     pub fn plain_rows(mut self) -> Self {
         self.plain_rows = true;
         self
