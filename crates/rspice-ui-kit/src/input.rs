@@ -291,30 +291,49 @@ fn remove_events_at_indices(events: &mut Vec<Event>, indices: Vec<usize>) {
 /// as any other key does. A key held from the pass before was answered then.
 ///
 /// A control that opens its menu on Shift+F10 opens it on this as well.
-#[cfg(windows)]
 pub fn menu_key_pressed(ctx: &Context) -> bool {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_APPS};
-    let id = Id::new("rspice_ui_kit.menu-key");
     let pass = ctx.cumulative_pass_nr();
-    let last = ctx.data(|data| data.get_temp::<(u64, bool, bool)>(id));
+    let last = ctx.data(|data| data.get_temp::<(u64, bool, bool)>(menu_key_id()));
     if let Some((seen, _, pressed)) = last
         && seen == pass
     {
         return pressed;
     }
-    // SAFETY: takes a virtual-key code and returns a value; nothing is borrowed.
-    let down =
-        unsafe { GetAsyncKeyState(i32::from(VK_APPS)) } < 0 && ctx.input(|input| input.focused);
+    let down = menu_key_down(ctx);
     let held = last.is_some_and(|(seen, down, _)| down && seen + 1 == pass);
     let pressed = down && !held;
-    ctx.data_mut(|data| data.insert_temp(id, (pass, down, pressed)));
+    ctx.data_mut(|data| data.insert_temp(menu_key_id(), (pass, down, pressed)));
     pressed
 }
 
-/// Whether the Menu key went down this pass: never, where the keyboard's
-/// state is not read.
+/// Press the Menu key for the pass `ctx` runs next, as the reader would: the
+/// keyboard's own state is not something a test can set.
+#[cfg(any(test, feature = "test-support"))]
+pub fn press_menu_key(ctx: &Context) {
+    // The pass number counts the passes finished, so the next pass reads the
+    // number read now.
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(menu_key_id(), (pass, true, true)));
+}
+
+/// Where [`menu_key_pressed`] keeps what it read this pass.
+fn menu_key_id() -> Id {
+    Id::new("rspice_ui_kit.menu-key")
+}
+
+/// Whether the Menu key is down while the window has the keyboard.
+#[cfg(windows)]
+fn menu_key_down(ctx: &Context) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_APPS};
+    // SAFETY: takes a virtual-key code and returns a value; nothing is borrowed.
+    let state = unsafe { GetAsyncKeyState(i32::from(VK_APPS)) };
+    state < 0 && ctx.input(|input| input.focused)
+}
+
+/// Whether the Menu key is down: never, where the keyboard's state is not
+/// read.
 #[cfg(not(windows))]
-pub const fn menu_key_pressed(_ctx: &Context) -> bool {
+const fn menu_key_down(_ctx: &Context) -> bool {
     false
 }
 
