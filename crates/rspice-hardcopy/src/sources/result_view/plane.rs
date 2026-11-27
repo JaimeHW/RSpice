@@ -286,10 +286,28 @@ fn plane_axes(plane: &Plane) -> Result<PlaneAxes, HardcopySourceError> {
     })
 }
 
+/// The points of one complex series, each column asked of the reader
+/// service whole, as a Nyquist locus is: a stored sweep is read on the
+/// service's thread under its one budget, never a block at a time here.
+fn complex_points(
+    name: &str,
+    real: &WaveformValues,
+    imaginary: &WaveformValues,
+) -> Result<Vec<(f64, f64)>, HardcopySourceError> {
+    let (real, imaginary) = (whole(name, real)?, whole(name, imaginary)?);
+    Ok(real
+        .iter()
+        .copied()
+        .zip(imaginary.iter().copied())
+        .collect())
+}
+
 /// The complex loci a polar or Smith sheet draws from one analysis: each
 /// shown trace the `renderability` rule names a quantity of the polar
 /// sheet, a network term or a complex response.
-fn polar_loci<W: AsRef<RetainedWaveform>>(active: &RetainedQuickViewSource<'_, W>) -> Vec<Locus> {
+fn polar_loci<W: AsRef<RetainedWaveform>>(
+    active: &RetainedQuickViewSource<'_, W>,
+) -> Result<Vec<Locus>, HardcopySourceError> {
     let network = network_impedances(active.analysis);
     active
         .analysis
@@ -300,20 +318,17 @@ fn polar_loci<W: AsRef<RetainedWaveform>>(active: &RetainedQuickViewSource<'_, W
         .filter(|waveform| is_polar_quantity(active.analysis.analysis_type, network, waveform))
         .filter_map(|waveform| {
             let complex = waveform.complex.as_ref()?;
-            Some(Locus {
+            let points = complex_points(&waveform.name, &complex.real, &complex.imag);
+            Some(points.map(|points| Locus {
                 identity: format!(
                     "{}:{}:{}:{}:complex",
                     active.dataset_id, active.run_id, active.analysis.id, waveform.name
                 ),
                 label: waveform.name.clone(),
-                points: complex
-                    .real
-                    .samples(..)
-                    .zip(complex.imag.samples(..))
-                    .collect(),
+                points,
                 companion: false,
                 palette_slot: None,
-            })
+            }))
         })
         .collect()
 }
@@ -395,7 +410,7 @@ struct SmithLoci {
 fn smith_loci<W: AsRef<RetainedWaveform>>(
     active: &RetainedQuickViewSource<'_, W>,
     sheet: &QuickSmithSettings,
-) -> SmithLoci {
+) -> Result<SmithLoci, HardcopySourceError> {
     let analysis = active.analysis;
     let mut loci = Vec::new();
     let mut references = Vec::new();
@@ -456,20 +471,16 @@ fn smith_loci<W: AsRef<RetainedWaveform>>(
                     active.dataset_id, active.run_id, analysis.id, waveform.name
                 ),
                 label: name.clone(),
-                points: complex
-                    .real
-                    .samples(..)
-                    .zip(complex.imag.samples(..))
-                    .collect(),
+                points: complex_points(name, &complex.real, &complex.imag)?,
                 companion: false,
                 palette_slot: Some(slot),
             });
         }
-        return SmithLoci {
+        return Ok(SmithLoci {
             loci,
             references,
             responses: false,
-        };
+        });
     }
     for text in &sheet.responses {
         let retained = analysis
@@ -480,11 +491,7 @@ fn smith_loci<W: AsRef<RetainedWaveform>>(
                 waveform.name == *text && is_polar_quantity(analysis.analysis_type, None, waveform)
             });
         let parts = match retained.and_then(|waveform| waveform.complex.as_ref()) {
-            Some(complex) => complex
-                .real
-                .samples(..)
-                .zip(complex.imag.samples(..))
-                .collect::<Vec<_>>(),
+            Some(complex) => complex_points(text, &complex.real, &complex.imag)?,
             None => {
                 match rspice_results::calculator::retained::complex_locus(&analysis.waveforms, text)
                 {
@@ -518,11 +525,11 @@ fn smith_loci<W: AsRef<RetainedWaveform>>(
             palette_slot: None,
         });
     }
-    SmithLoci {
+    Ok(SmithLoci {
         loci,
         references,
         responses: true,
-    }
+    })
 }
 
 /// What the sheet's header says the chart is read against, and, for
@@ -615,7 +622,7 @@ pub(super) fn quick_smith_plot<W: AsRef<RetainedWaveform>>(
     active: &RetainedQuickViewSource<'_, W>,
     sheet: &QuickSmithSettings,
 ) -> Result<SemanticPlot, HardcopySourceError> {
-    let drawn = smith_loci(active, sheet);
+    let drawn = smith_loci(active, sheet)?;
     if drawn.loci.is_empty() {
         return Err(HardcopySourceError::InvalidVisualizationSource(
             "the Smith chart has no complex coefficient to draw".to_owned(),
@@ -655,7 +662,7 @@ const POLAR_RINGS: u32 = 5;
 pub(super) fn quick_polar_plot<W: AsRef<RetainedWaveform>>(
     active: &RetainedQuickViewSource<'_, W>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
-    let loci = polar_loci(active);
+    let loci = polar_loci(active)?;
     let reach = loci
         .iter()
         .flat_map(|locus| &locus.points)

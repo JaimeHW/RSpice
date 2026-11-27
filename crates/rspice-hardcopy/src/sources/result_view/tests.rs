@@ -487,6 +487,85 @@ fn a_stored_source_is_asked_of_the_reader_service() {
     assert_eq!(SERVICE.0.load(Ordering::SeqCst), 2);
 }
 
+/// A polar locus of a stored sweep is asked of the reader service a column
+/// at a time, and no stored column is read on the thread that prints it.
+#[test]
+fn a_printed_polar_asks_the_reader_service_for_a_stored_locus() {
+    use rspice_results::waveform::column_work::ColumnWork;
+    use rspice_results::waveform::{
+        ColumnSource, Read, ReadService, ReadValue, StoredWindow, WindowLead, perform, read_through,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Reads on a thread of its own, as the service does.
+    struct Asked(AtomicUsize);
+    impl ReadService for Asked {
+        fn request(
+            &self,
+            _run: u64,
+            values: &WaveformValues,
+            x: &WaveformValues,
+            read: Read,
+        ) -> Option<ReadValue> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::thread::scope(|scope| scope.spawn(|| perform(values, x, read)).join().ok())
+        }
+    }
+    struct Column(Vec<f64>);
+    impl ColumnSource for Column {
+        fn name(&self) -> &str {
+            "column"
+        }
+        fn store(&self) -> String {
+            "run.rsr".to_owned()
+        }
+        fn rows(&self) -> u64 {
+            self.0.len() as u64
+        }
+        fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+            let first = usize::try_from(first).map_err(|error| error.to_string())?;
+            out.copy_from_slice(&self.0[first..first + out.len()]);
+            Ok(())
+        }
+    }
+    let stored = |values: &[f64]| {
+        WaveformValues::stored(
+            std::sync::Arc::new(Column(values.to_vec())),
+            StoredWindow {
+                first: 0,
+                rows: values.len() as u64,
+                lead: WindowLead::None,
+            },
+        )
+        .unwrap()
+    };
+    static SERVICE: Asked = Asked(AtomicUsize::new(0));
+    let (real, imaginary) = ([7.3, 0.0, -1.0], [0.0, 5.0, 0.0]);
+    let mut waveform = RetainedWaveform::new("V(out)", vec![1.0, 10.0, 100.0], vec![7.3, 5.0, 1.0])
+        .with_complex_components("V(out)", real.to_vec(), imaginary.to_vec());
+    let complex = waveform.complex.as_mut().unwrap();
+    (complex.real, complex.imag) = (stored(&real), stored(&imaginary));
+    let run = completed(
+        AnalysisResult::new(2, AnalysisType::Ac, "AC", 0.0).with_waveforms(vec![waveform]),
+    );
+    let source = RetainedQuickViewSource::try_new(&run, 2, |_| true).unwrap();
+    let before = ColumnWork::read();
+    let plot = read_through(&SERVICE, || quick_polar_plot(&source)).unwrap();
+    let work = before.since();
+    assert_eq!(
+        (work.stored_views, work.stored_reads),
+        (0, 0),
+        "a stored column was read on the thread that prints"
+    );
+    assert_eq!(SERVICE.0.load(Ordering::SeqCst), 2);
+    let printed = real
+        .iter()
+        .zip(&imaginary)
+        .map(|(re, im)| (re.to_bits(), im.to_bits()))
+        .collect::<Vec<_>>();
+    assert_eq!(plot.traces[0].source_samples, printed);
+}
+
 /// A table sheet prints the tables it showed under the analysis's name,
 /// and never tables read off another analysis.
 #[test]
