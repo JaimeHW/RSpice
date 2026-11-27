@@ -28,12 +28,8 @@ use super::results_actions::{
     select_result_signal_by_key, set_result_quantities_ticked,
     update_result_browser_multi_selection,
 };
-use super::results_documents::{
-    document_row, document_row_actions, documents_head_actions, group_expanded,
-};
 use super::results_tree::{InstanceNode, SignalKind, TreeItem, split_hierarchy};
 use crate::product::ResultDocumentId;
-use crate::workbench::chrome::document_bar::results::ListedDocument;
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_app_workbench::workbench::docks::navigator::muted;
 
@@ -861,7 +857,6 @@ impl VisibleKeys<'_> {
 /// instance, since each branch the filter left holds a match.
 pub(super) fn signal_rows<'a>(
     ctx: &egui::Context,
-    documents: usize,
     runs: &'a [ResultRun],
     active_run: Option<usize>,
     active_analysis: Option<usize>,
@@ -874,16 +869,6 @@ pub(super) fn signal_rows<'a>(
         quantity_rows: 0,
         pending: false,
     };
-    // The saved documents head the tree, as their own group above the runs.
-    if documents > 0 {
-        let expanded = filtering || group_expanded(ctx);
-        list.push_row(ResultSignalVirtualRow::Documents { expanded });
-        if expanded {
-            for document in 0..documents {
-                list.push_row(ResultSignalVirtualRow::Document { document });
-            }
-        }
-    }
     for (run_position, run) in runs.iter().enumerate() {
         let run_expanded = filtering
             || result_browser_dataset_expanded(
@@ -1017,7 +1002,6 @@ fn retained_waveform<'a>(
 pub(super) fn show_virtualized_result_signals(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
-    documents: &[ListedDocument],
     shown_document: Option<ResultDocumentId>,
     runs: &[ResultRun],
     list: &SignalRows<'_>,
@@ -1035,8 +1019,9 @@ pub(super) fn show_virtualized_result_signals(
     // name the engine answered under.
     let notations = bus_notations(&state.model.workspace, &state.model.schematic);
     let marks = run_marks(state, runs);
-    // One row reads as what Results shows: a saved document's while one is
-    // shown, though its pane reads a run, and else the run's.
+    // The run's rows read as shown only while Results shows the run: a saved
+    // document's tab is in front, though its pane reads a run, until a row
+    // picks the run and brings its tab forward.
     let active_run = active_run.filter(|_| shown_document.is_none());
     let rows = list.len();
     let signal_rows = list.quantity_rows;
@@ -1085,16 +1070,6 @@ pub(super) fn show_virtualized_result_signals(
                         egui::vec2(ui.available_width(), row_height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| match row {
-                        ResultSignalVirtualRow::Documents { expanded } => {
-                            let head = documents_head(ui, documents.len(), expanded);
-                            documents_head_actions(&head, expanded, filtering);
-                        }
-                        ResultSignalVirtualRow::Document { document } => {
-                            let document = &documents[document];
-                            let shown = shown_document == Some(document.id);
-                            let response = document_row(ui, document, shown);
-                            document_row_actions(state, document, shown, &response);
-                        }
                         ResultSignalVirtualRow::Dataset { run, expanded } => {
                             let mark = marks[run].as_ref();
                             let run = &runs[run];
@@ -2022,28 +1997,10 @@ enum HeadLabel<'a> {
         mark: Option<f32>,
     },
     Analysis(&'a str),
-    /// The saved documents' group, which heads the tree as a run does.
-    Documents,
 }
 
 /// A group head's response, and where a run's mark stands after its name.
 type HeadResponse = (Response, Option<egui::Rect>);
-
-/// The saved documents' group head: their count, and its disclosure.
-pub(super) fn documents_head(ui: &mut Ui, count: usize, expanded: bool) -> Response {
-    result_browser_analysis_head(
-        ui,
-        None,
-        HeadLabel::Documents,
-        "",
-        count,
-        count,
-        false,
-        true,
-        expanded,
-    )
-    .0
-}
 
 fn result_browser_analysis_head(
     ui: &mut Ui,
@@ -2060,7 +2017,7 @@ fn result_browser_analysis_head(
     let c = t.color;
     let height = result_browser_row_height(&t);
     // A run heads the tree; its analyses sit one level in.
-    let level: usize = if matches!(head, HeadLabel::Run { .. } | HeadLabel::Documents) {
+    let level: usize = if matches!(head, HeadLabel::Run { .. }) {
         0
     } else {
         1
@@ -2078,12 +2035,6 @@ fn result_browser_analysis_head(
             theme::mono(tokens::FS_0, FontWeight::SemiBold),
             None,
         ),
-        HeadLabel::Documents => (
-            "Documents",
-            "Saved documents",
-            theme::sans(tokens::FS_0, FontWeight::Medium),
-            None,
-        ),
     };
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
@@ -2093,11 +2044,6 @@ fn result_browser_analysis_head(
         response
     } else {
         response.on_hover_text(spoken)
-    };
-    let counted = if matches!(head, HeadLabel::Documents) {
-        "documents"
-    } else {
-        "quantities"
     };
     response.widget_info(|| {
         // A head with nothing to say about its data states only its name.
@@ -2111,7 +2057,7 @@ fn result_browser_analysis_head(
             ui.is_enabled(),
             selected,
             format!(
-                "{spoken}, {domain}{count} {counted}, {}",
+                "{spoken}, {domain}{count} quantities, {}",
                 if expanded { "expanded" } else { "collapsed" }
             ),
         )

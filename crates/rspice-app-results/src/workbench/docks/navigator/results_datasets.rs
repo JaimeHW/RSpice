@@ -1,7 +1,6 @@
-//! The data browser's Datasets tab: the saved result documents, then every
-//! retained run, with the analyses of the one shown under it. Like the
-//! Signals tree, it draws only the rows in view, so a long run history
-//! costs a frame what one screen of it does.
+//! The data browser's Datasets tab: every retained run, with the analyses
+//! of the one shown under it. Like the Signals tree, it draws only the rows
+//! in view, so a long run history costs a frame what one screen of it does.
 
 use egui::{ScrollArea, Ui};
 
@@ -9,16 +8,12 @@ use super::super::super::commands::result_navigation::open_run_log;
 use super::super::super::design_system::WorkbenchIcon;
 use super::results::{ResultRun, locate_results, result_dataset_row, run_mark, run_row_id};
 use super::results_actions::select_result_analysis_by_key;
-use super::results_documents::{
-    document_row, document_row_actions, documents_head_actions, group_expanded,
-};
 use super::results_rows::{
-    RESULT_BROWSER_RENDER_WINDOW_ROWS, documents_head, result_browser_manifest_row,
-    result_browser_row_height,
+    RESULT_BROWSER_RENDER_WINDOW_ROWS, result_browser_manifest_row, result_browser_row_height,
 };
 use crate::product::ResultDocumentId;
 use crate::ui::tokens::Tokens;
-use crate::workbench::chrome::document_bar::results::{ListedDocument, show_run};
+use crate::workbench::chrome::document_bar::results::show_run;
 use crate::workbench::docks::RunDetailsDialogState;
 use crate::workbench::documents::result_document::ResultsParts;
 use rspice_app_workbench::workbench::docks::navigator::muted;
@@ -30,30 +25,14 @@ const OVERSCAN_ROWS: usize = 2;
 /// One row of the Datasets tab, by its place in the frame's lists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DatasetRow {
-    Documents { expanded: bool },
-    Document(usize),
     Run(usize),
     Analysis { run: usize, analysis: usize },
 }
 
-/// The tab's rows: the documents group while there are documents, then each
-/// run, with its analyses under it while it is the run shown, or under
-/// every run while a query filters them.
-fn dataset_rows(
-    ctx: &egui::Context,
-    documents: usize,
-    runs: &[ResultRun],
-    shown_run: Option<usize>,
-    filtering: bool,
-) -> Vec<DatasetRow> {
-    let mut rows = Vec::with_capacity(documents + runs.len() + 1);
-    if documents > 0 {
-        let expanded = filtering || group_expanded(ctx);
-        rows.push(DatasetRow::Documents { expanded });
-        if expanded {
-            rows.extend((0..documents).map(DatasetRow::Document));
-        }
-    }
+/// The tab's rows: each run, with its analyses under it while it is the run
+/// shown, or under every run while a query filters them.
+fn dataset_rows(runs: &[ResultRun], shown_run: Option<usize>, filtering: bool) -> Vec<DatasetRow> {
+    let mut rows = Vec::with_capacity(runs.len());
     for (at, run) in runs.iter().enumerate() {
         rows.push(DatasetRow::Run(at));
         if filtering || shown_run == Some(run.run_index) {
@@ -79,13 +58,12 @@ fn rows_in_view(tops: &[f32], top: f32, bottom: f32) -> (usize, usize) {
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "the tab reads the frame's documents, runs and the one shown"
+    reason = "the tab reads the frame's runs, the one shown and the document in front"
 )]
 pub(super) fn show_datasets(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_details: &mut Option<Box<RunDetailsDialogState>>,
-    documents: &[ListedDocument],
     shown_document: Option<ResultDocumentId>,
     runs: &[ResultRun],
     active_run: Option<usize>,
@@ -102,10 +80,11 @@ pub(super) fn show_datasets(
             },
         );
     }
-    // One row reads as what Results shows: a saved document's while one is
-    // shown, though its pane reads a run, and else the run's.
+    // The run's rows read as shown only while Results shows the run: a saved
+    // document's tab is in front, though its pane reads a run, until a row
+    // picks the run and brings its tab forward.
     let shown_run = active_run.filter(|_| shown_document.is_none());
-    let rows = dataset_rows(ui.ctx(), documents.len(), runs, shown_run, filtering);
+    let rows = dataset_rows(runs, shown_run, filtering);
     let t = Tokens::get(ui.ctx());
     let (row_height, run_height) = (result_browser_row_height(&t), t.metrics.row_h);
     let height = |row: &DatasetRow| match row {
@@ -142,16 +121,6 @@ pub(super) fn show_datasets(
                 ui.skip_ahead_auto_ids(start);
                 for row in &rows[start..end] {
                     match *row {
-                        DatasetRow::Documents { expanded } => {
-                            let head = documents_head(ui, documents.len(), expanded);
-                            documents_head_actions(&head, expanded, filtering);
-                        }
-                        DatasetRow::Document(document) => {
-                            let document = &documents[document];
-                            let shown = shown_document == Some(document.id);
-                            let response = document_row(ui, document, shown);
-                            document_row_actions(state, document, shown, &response);
-                        }
                         DatasetRow::Run(at) => {
                             run_row(ui, state, run_details, runs, at, shown_run);
                         }
