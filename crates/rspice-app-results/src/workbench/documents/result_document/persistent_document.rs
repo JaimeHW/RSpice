@@ -937,14 +937,18 @@ pub fn project_pane_presentation(
         .ok_or_else(|| "The pane's retained analysis is not active.".to_owned())?;
     let analysis_key = super::AnalysisPresentationKey::new(run.dataset_id, analysis);
     let lanes = lanes::EventNames::of(analysis, None);
+    // The pane draws the signals it lists, as it lists them, and no other:
+    // a signal the run shows by default but the pane does not list stays off.
     let mut visibility = analysis
         .waveforms
         .iter()
-        .filter_map(|waveform| {
-            pane.traces
+        .map(|waveform| {
+            let listed = pane
+                .traces
                 .iter()
                 .find(|trace| trace.label == waveform.name)
-                .map(|trace| (waveform.name.clone(), waveform.visible, trace.visible))
+                .is_some_and(|trace| trace.visible);
+            (waveform.name.clone(), waveform.visible, listed)
         })
         .collect::<Vec<_>>();
     // A net the run keeps only as history is plotted while the document
