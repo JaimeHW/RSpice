@@ -1518,6 +1518,52 @@ fn two_panes_drawing_one_analysis_in_two_strips_each_use_no_widget_id_twice() {
     assert!(clashes.is_empty(), "{clashes:?}");
 }
 
+/// A signal ticked in the data browser while a document is shown is plotted
+/// in the document's active pane, though the pane did not list it, and
+/// unticked comes off it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_signal_ticked_in_the_browser_is_plotted_in_the_documents_active_pane() {
+    use rspice_app_results::workbench::docks::navigator::results_actions::set_result_quantities_ticked;
+    use rspice_app_results::workbench::documents::result_document::AnalysisPresentationKey;
+    use rspice_results::result_presentation::SourceWaveformPresentationKey;
+    use rspice_results_ui::selection::ResultBrowserSelectionKey;
+    let mut window = ResultsWindow::new();
+    let run = window.app.state.model.simulation.retained.runs[0].clone();
+    window.app.state.results.create_result_document = draft(
+        "Inputs",
+        &run,
+        0,
+        "viewer-waveform",
+        ResultDocumentLayout::SinglePane,
+        &["V(in)"],
+    );
+    let document_id = commit(&mut window.app.state.results_parts()).expect("the document commits");
+    window.frames(Vec::new());
+    let output = ResultBrowserSelectionKey::Waveform(SourceWaveformPresentationKey::new(
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
+        "V(out)",
+    ));
+    let plotted = |window: &ResultsWindow| {
+        plotted_traces(&window.app.state, document_id)
+            .into_iter()
+            .filter(|(_, _, visible)| *visible)
+            .map(|(_, label, _)| label)
+            .collect::<Vec<_>>()
+    };
+
+    set_result_quantities_ticked(&mut window.app.state.results_parts(), [&output], true);
+    window.frames(Vec::new());
+    assert_eq!(
+        plotted(&window),
+        ["V(in)", "V(out)"],
+        "ticked, it is plotted"
+    );
+    set_result_quantities_ticked(&mut window.app.state.results_parts(), [&output], false);
+    window.frames(Vec::new());
+    assert_eq!(plotted(&window), ["V(in)"], "unticked, it comes off");
+}
+
 /// The traces each pane of `document_id` plots, by pane and label.
 #[cfg(not(target_arch = "wasm32"))]
 fn plotted_traces(

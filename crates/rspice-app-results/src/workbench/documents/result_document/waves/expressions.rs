@@ -720,6 +720,33 @@ pub(crate) fn toggle_source_visibility(
                     .collect::<Vec<_>>();
                 (document.revision(), traces)
             });
+        // A pane draws only the signals it lists, so a tick of a signal it
+        // does not list puts the signal on it. A net the run keeps only as
+        // history is no column to list, and is plotted as its lanes say.
+        let column = key.resolve(&state.model.simulation.retained.runs).is_some();
+        if let Some((revision, traces)) = &retained
+            && traces.is_empty()
+            && column
+        {
+            let edit = crate::results::visualization_document::DocumentEdit::SetSignalsPlotted {
+                pane_id: context.pane_id,
+                signals: vec![name.clone()],
+                plotted: true,
+            };
+            if let Err(error) = crate::workbench::documents::result_document::view_edits::apply(
+                state,
+                context.document_id,
+                *revision,
+                vec![edit],
+            ) {
+                state
+                    .workbench
+                    .prompt(format!("Could not plot {name} in the active pane: {error}"));
+                return;
+            }
+            state.results.session.note_recent_signal(key);
+            return;
+        }
         if let Some((revision, traces)) = retained
             && !traces.is_empty()
         {
