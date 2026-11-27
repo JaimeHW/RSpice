@@ -59,11 +59,10 @@ impl Feature for ModelsFeature {
 }
 
 /// The dialogs the feature draws, each under the key the shell lists it by.
-/// The dialog order draws the PDK settings and the model browser at their
-/// steps, the PDK settings step taking the model operations that finished
-/// since the last frame whether or not the dialog is open. The Models
-/// workspace's own dialogs hold a modal gate the shell asks of them, and
-/// that workspace draws them, since it carries out what they ask.
+/// The dialog order draws the PDK settings at its step, which takes the model
+/// operations that finished since the last frame whether or not the dialog is
+/// open. The Models workspace's own dialogs hold a modal gate the shell asks
+/// of them, and that workspace draws them, since it carries out what they ask.
 const DIALOGS: &[FeatureDialog<ModelsFeature>] = &[
     FeatureDialog {
         key: DialogKey("models.pdk_settings"),
@@ -236,10 +235,10 @@ impl CommandSet for ModelsCommand {
         self.declared_spec()
     }
 
-    /// The pages, the model browser, the PDK paths and the rescan run
-    /// whenever the shell lets them through. The editor and the project copy
-    /// need one coherent selected model, and the editor's
-    /// workflows need the candidate it has open in the state each one acts on.
+    /// The pages, the PDK paths and the rescan run whenever the shell lets
+    /// them through. The editor and the project copy need one coherent
+    /// selected model, and the editor's workflows need the candidate it has
+    /// open in the state each one acts on.
     fn availability(self, reads: &Reads<'_, ModelsFeature>) -> CommandAvailability {
         rule_availability(
             self,
