@@ -1489,11 +1489,7 @@ fn fitted_labels_id() -> egui::Id {
 /// labels leave. The width is the widest label the block drew the frame
 /// before, so a block's first frame takes the proportional column and the
 /// next settles; a row that states its own label width keeps it.
-pub fn fitted_label_column<R>(
-    ui: &mut Ui,
-    id: impl std::hash::Hash,
-    add: impl FnOnce(&mut Ui) -> R,
-) -> R {
+pub fn fitted_label_column<R>(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     let key = fitted_labels_id().with(id);
     let stated = ui.data(|data| data.get_temp::<f32>(key));
     let outer = ui.data(|data| data.get_temp::<FittedLabels>(fitted_labels_id()));
@@ -1510,7 +1506,9 @@ pub fn fitted_label_column<R>(
     let drawn = ui.data_mut(|data| {
         let drawn = data.get_temp::<FittedLabels>(fitted_labels_id());
         match outer {
-            Some(outer) => data.insert_temp(fitted_labels_id(), outer),
+            Some(outer) => {
+                data.insert_temp(fitted_labels_id(), outer);
+            }
             None => data.remove::<FittedLabels>(fitted_labels_id()),
         }
         drawn
