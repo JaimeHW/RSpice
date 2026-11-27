@@ -577,7 +577,6 @@ pub(super) fn drawing_sheet_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) 
 /// 04 — format, resolution and color.
 pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
     let mut action = BodyAction::None;
-    let old_format = draft.format;
     if draft.format.raster_dpi().is_some() {
         form_row(ui, |row| {
             row.wide(|ui| output_format_field(ui, draft));
@@ -586,15 +585,10 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
     } else {
         output_format_field(ui, draft);
     }
-    if old_format != draft.format && !draft.format.is_vector() {
-        draft.searchable_text = false;
-    }
-    // The archive format is the one case where the contract makes the font
-    // decision itself. It says nothing about outlining, so searchable text
-    // stays the operator's.
-    if draft.format == OutputFormat::PdfA {
-        draft.embed_fonts = true;
-    }
+    // A raster target keeps no fonts; the archive format is the one case
+    // where the contract makes the font decision itself. It says nothing
+    // about outlining, so searchable text stays the operator's.
+    draft.fit_fonts_to_format();
 
     let color_supported = draft.format != OutputFormat::NativePrinter
         || draft
@@ -839,34 +833,29 @@ pub(super) fn identity_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) {
             egui::Checkbox::new(&mut draft.searchable_text, "Searchable text"),
         );
         if !vector {
-            searchable.on_disabled_hover_text("A raster target has no text to keep live.");
+            searchable.on_disabled_hover_text("A printer page or an image has no text to select.");
         } else if !draft.embed_fonts {
             searchable.on_disabled_hover_text(
-                "Text a reader can select needs the typefaces that draw it inside the artifact.",
+                "Text a reader can select needs its fonts embedded.",
             );
         }
     });
-    if !vector {
-        draft.embed_fonts = false;
-        draft.searchable_text = false;
-    } else if !draft.embed_fonts {
-        draft.searchable_text = false;
-    }
+    draft.fit_fonts_to_format();
     ui.add_space(6.0);
     panel_note(
         ui,
         match draft.format {
             OutputFormat::PdfA => {
-                "PDF/A embeds its typefaces by contract. Searchable text is still a choice: without it the letters are published as outlines."
+                "A PDF/A file always carries its fonts. Without searchable text its letters are drawn as shapes."
             }
             OutputFormat::SvgVector => {
-                "SVG has no outlined-text form here, so a page carrying any text is refused unless it stays searchable."
+                "An SVG keeps its words as text, so searchable text stays on."
             }
             format if format.is_vector() => {
-                "Embedded fonts make the artifact self-contained; searchable text keeps its letters selectable rather than drawn as outlines."
+                "Embedded fonts make the file look the same on every computer; searchable text lets a reader select and find its words."
             }
             _ => {
-                "A raster target has no text to embed or search; both apply to vector formats only."
+                "A printer page or an image is pixels, with no fonts or text to keep. These apply to PDF and SVG files."
             }
         },
     );

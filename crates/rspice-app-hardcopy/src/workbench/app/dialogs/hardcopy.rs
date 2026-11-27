@@ -260,7 +260,7 @@ impl From<HardcopyRenderError> for BlockedSetup {
 pub enum HardcopyDialogError {
     #[error(transparent)]
     Contract(#[from] HardcopyError),
-    #[error("select a printer and resolve its current capabilities before printing")]
+    #[error("choose a printer to print to")]
     #[cfg(not(target_arch = "wasm32"))]
     #[cfg_attr(
         not(any(target_os = "windows", target_os = "macos", target_os = "linux")),
@@ -682,8 +682,27 @@ impl HardcopyDialogState {
         {
             draft.format = OutputFormat::PdfVector;
         }
+        // A setup saved for a file asks for text a reader can select; the
+        // system printer is sent the page as pixels and has none to keep.
+        draft.fit_fonts_to_format();
         draft.refresh_preview();
         *self = draft;
+    }
+
+    /// Keep the font choices to what the output carries. The system printer
+    /// is sent each page rendered to pixels, as a raster file is written, so
+    /// neither has a typeface to embed or text to keep live; a reader can
+    /// select only text whose typefaces travel with it; and PDF/A embeds its
+    /// typefaces by contract.
+    pub(crate) fn fit_fonts_to_format(&mut self) {
+        if !self.format.is_vector() {
+            self.embed_fonts = false;
+            self.searchable_text = false;
+        } else if self.format == OutputFormat::PdfA {
+            self.embed_fonts = true;
+        } else if !self.embed_fonts {
+            self.searchable_text = false;
+        }
     }
 
     pub fn open_resolved(
@@ -733,7 +752,7 @@ impl HardcopyDialogState {
     /// Atomically bind a driver capability snapshot to its printer identity.
     /// Callers must never update the visible printer name independently from
     /// the authenticated job settings.
-    pub(crate) fn set_printer(&mut self, printer_id: String, job: PrinterJobSettings) {
+    pub fn set_printer(&mut self, printer_id: String, job: PrinterJobSettings) {
         self.printer_id = printer_id;
         self.printer_job = Some(job);
         self.refresh_preview();

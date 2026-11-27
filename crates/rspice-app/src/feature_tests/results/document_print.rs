@@ -6,9 +6,10 @@ use super::availability::app_showing;
 use crate::feature_tests::hardcopy::{hardcopy_parts, resolve_retained_hardcopy_source};
 use crate::workbench::RSpiceApp;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::publish::active_retained_source_selection;
+use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::{HardcopySection, HardcopyWorkflow};
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::create_document::commit;
-use rspice_app_state::product::ResultDocumentId;
+use rspice_app_state::product::{ContentDigest, ResultDocumentId};
 use rspice_app_state::results::visualization_document::{
     AxisOrientation, AxisScale, DocumentEdit, EntityRef, NewAxis, NewTrace,
 };
@@ -24,10 +25,11 @@ use rspice_hardcopy::sources::{
     HardcopySemanticDocument, ResolvedHardcopyDocument, SemanticAxisKind, SemanticPlot,
 };
 use rspice_hardcopy_contract::{
-    BackgroundMode, Bleed, ColorMapping, DecorationSetup, FontPolicy, HardcopyPlan, HardcopyPlanId,
-    HardcopyScope, HardcopySetup, Length, Orientation, OutputFormat, PageMargins, PaperSize,
-    PhysicalPageSetup, RenderSetup, RenderTarget, ScaleMode, SchematicHardcopySetup, StandardPaper,
-    TilingMode, TilingSetup, Watermark,
+    BackgroundMode, Bleed, ColorMapping, DecorationSetup, DuplexMode, FontPolicy, HardcopyPlan,
+    HardcopyPlanId, HardcopyScope, HardcopySetup, Length, Orientation, OutputFormat, PageMargins,
+    PaperSize, PhysicalPageSetup, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry,
+    RenderSetup, RenderTarget, ScaleMode, SchematicHardcopySetup, StandardPaper, TilingMode,
+    TilingSetup, Watermark,
 };
 use rspice_results::document_creation::ResultDocumentLayout;
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
@@ -423,6 +425,74 @@ fn a_saved_document_exports_the_page_it_prints_as_pdf_and_svg() {
             assert!(svg.contains("TIME \u{b7} s"), "the SVG names its abscissa");
             assert!(svg.contains("mA"), "the SVG states the current's unit");
         }
+    }
+}
+
+/// File > Print opens ready to print, on a saved document and on the run's
+/// own sheet alike. The system printer is sent each page as pixels, so a
+/// fresh dialog asks for no selectable text the printer cannot keep: the
+/// only thing it waits on is a printer, and once one is chosen the page
+/// previews and Print is enabled.
+#[test]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+fn a_fresh_print_dialog_previews_the_page_and_enables_print() {
+    let mut app = app_holding(mixed_units_run(), ResultViewer::Waves);
+    let sheet = run_sheet_printed(&mut app);
+    new_document(
+        &mut app,
+        "Mixed units",
+        "viewer-waveform",
+        &["V(out)", "I(R1)"],
+    );
+    let document = printed(&mut app);
+    for page in [document, sheet] {
+        let name = page.authority().display_name().to_owned();
+        let dialog = &mut app.state.hardcopy.hardcopy;
+        dialog
+            .open_resolved(HardcopyWorkflow::Print, page.clone(), None)
+            .expect("Print opens");
+        assert_eq!(dialog.format, OutputFormat::NativePrinter, "{name}");
+        assert!(
+            !dialog.searchable_text && !dialog.embed_fonts,
+            "{name}: a printer page keeps no text"
+        );
+        assert_eq!(
+            dialog.error.as_deref(),
+            Some("choose a printer to print to"),
+            "{name}: a printer is all Print waits on"
+        );
+        assert_eq!(dialog.error_section, Some(HardcopySection::Output));
+
+        dialog.set_printer(
+            "Microsoft Print to PDF".to_owned(),
+            PrinterJobSettings::try_new(
+                ContentDigest::from_bytes([0x50; 32]),
+                "1",
+                PrinterRasterGeometry::try_new(1_000, 800, 0, 0, 1_000, 800).unwrap(),
+                PrinterMediaSource::AutomaticCompatibleTray,
+                600,
+                DuplexMode::Off,
+                1,
+                false,
+            )
+            .unwrap(),
+        );
+        assert_eq!(dialog.error, None, "{name}");
+        let plan = dialog
+            .preview_plan
+            .clone()
+            .unwrap_or_else(|| panic!("{name}: Print is enabled"));
+        let preview = HardcopyRenderer::render_preview_pages_resolved(
+            &plan,
+            &page,
+            HardcopySceneMetadata::try_new(&name, "RSpice").unwrap(),
+            &[0],
+            72,
+            || false,
+        )
+        .unwrap_or_else(|error| panic!("{name} previews: {error:?}"));
+        assert_eq!(preview.len(), 1, "{name}: the first page previews");
+        dialog.close();
     }
 }
 
