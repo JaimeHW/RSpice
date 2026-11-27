@@ -27,9 +27,34 @@ fn divider() -> rspice_app_runs::simulation::controller::test_host::RunTestHost 
     state
 }
 
-/// Every row Run details shows for `run`, label and value, once the reader
-/// has it open in an application that retains the run.
-fn run_details_rows(run: SimulationRun) -> Vec<(String, String)> {
+/// What Run details shows for `run` once the reader has it open in an
+/// application that retains the run: every fact row, label and value, and
+/// every line of words it paints.
+struct Shown {
+    rows: Vec<(String, String)>,
+    words: Vec<String>,
+}
+
+fn painted_words(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+    fn walk(shape: &egui::Shape, words: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => words.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, words);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut words = Vec::new();
+    for clipped in shapes {
+        walk(&clipped.shape, &mut words);
+    }
+    words
+}
+
+fn run_details_shown(run: SimulationRun) -> Shown {
     let mut app = RSpiceApp::test_instance();
     let run_id = run.id;
     app.state.model.simulation.retained.runs.push(run);
@@ -42,6 +67,7 @@ fn run_details_rows(run: SimulationRun) -> Vec<(String, String)> {
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut nodes = Vec::new();
+    let mut words = Vec::new();
     for _ in 0..2 {
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             run_details::show(
@@ -50,16 +76,32 @@ fn run_details_rows(run: SimulationRun) -> Vec<(String, String)> {
                 &app.state.model,
             );
         });
+        words = painted_words(&output.shapes);
         nodes = output
             .platform_output
             .accesskit_update
             .map(|update| update.nodes)
             .unwrap_or_default();
     }
-    nodes
-        .iter()
-        .filter_map(|(_, node)| Some((node.label()?.to_owned(), node.value()?.to_owned())))
-        .collect()
+    Shown {
+        rows: nodes
+            .iter()
+            .filter_map(|(_, node)| Some((node.label()?.to_owned(), node.value()?.to_owned())))
+            .collect(),
+        words,
+    }
+}
+
+fn run_details_rows(run: SimulationRun) -> Vec<(String, String)> {
+    run_details_shown(run).rows
+}
+
+fn names_a_row(shown: &Shown, name: &str) {
+    assert!(
+        shown.words.iter().any(|words| words == name),
+        "Run details names no analysis row {name}; it paints {:?}",
+        shown.words
+    );
 }
 
 fn shows(rows: &[(String, String)], label: &str, value: &str) {
@@ -76,22 +118,25 @@ fn version(rows: &[(String, String)]) -> &str {
         .map_or("", |(_, value)| value.as_str())
 }
 
-/// The divider's plan run at 85 °C, with two design variables and a
-/// relative tolerance tighter than the default.
-fn plan_run_at_85_c() -> SimulationRun {
-    let mut state = divider();
-    state
-        .model
-        .sim_setup
-        .set_reference_pvt(rspice_vocabulary::product::ProcessCorner::TT, 85.0)
-        .unwrap();
-    state.model.sim_setup.options.reltol = 1e-4;
+/// The name the divider's plan has.
+fn divider_plan_name() -> String {
+    divider().model.sim_setup.active_plan_name().to_string()
+}
+
+/// Add the design variable `name` at `value` to `state`'s plan.
+fn add_design_variable(
+    state: &mut rspice_app_runs::simulation::controller::test_host::RunTestHost,
+    name: &str,
+    value: &str,
+) {
     let plan = state.model.sim_setup.stable_analysis_plan().unwrap().id();
     let content = &mut state.model.workspace.content;
     content.migrate_active_plan_data(plan);
-    let payload = content.plan_data_mut(plan).unwrap();
-    for (name, value) in [("rload", "2k"), ("cl", "1p")] {
-        payload.design_variables.push(
+    content
+        .plan_data_mut(plan)
+        .unwrap()
+        .design_variables
+        .push(
             DesignVariable::new(
                 name.to_owned(),
                 value.to_owned(),
@@ -104,6 +149,20 @@ fn plan_run_at_85_c() -> SimulationRun {
             )
             .unwrap(),
         );
+}
+
+/// The divider's plan run at 85 °C, with two design variables and a
+/// relative tolerance tighter than the default.
+fn plan_run_at_85_c() -> SimulationRun {
+    let mut state = divider();
+    state
+        .model
+        .sim_setup
+        .set_reference_pvt(rspice_vocabulary::product::ProcessCorner::TT, 85.0)
+        .unwrap();
+    state.model.sim_setup.options.reltol = 1e-4;
+    for (name, value) in [("rload", "2k"), ("cl", "1p")] {
+        add_design_variable(&mut state, name, value);
     }
 
     run_generated_batch(state, SimulationRunLifecycle::Completed)
@@ -121,36 +180,74 @@ fn temperature_sweep_run() -> SimulationRun {
     run_generated_batch(state, SimulationRunLifecycle::Completed)
 }
 
+/// The divider's plan run with its design variable `rload` stepped across
+/// two values.
+fn design_variable_sweep_run() -> SimulationRun {
+    let mut state = divider();
+    add_design_variable(&mut state, "rload", "2k");
+    let mut axis = RunSetDimension::new(
+        "fixture-rload",
+        RunSetDimensionKind::Parameter,
+        &["1k", "2k"],
+        1,
+    );
+    "design-variable:rload".clone_into(&mut axis.source);
+    state.model.sim_setup.run_set.dimensions = vec![axis];
+    run_generated_batch(state, SimulationRunLifecycle::Completed)
+}
+
 #[test]
 fn a_plan_run_at_85_c_records_and_shows_its_variables_and_options() {
     let run = plan_run_at_85_c();
     let facts = run.facts.as_ref().expect("the run records what it set");
     assert_eq!(facts.temperatures, [85.0]);
+    assert_eq!(facts.plan, divider_plan_name());
 
-    let rows = run_details_rows(run);
-    shows(&rows, "Temperature", "85 \u{b0}C");
-    shows(&rows, "rload", "2k");
-    shows(&rows, "cl", "1p");
-    shows(&rows, "RELTOL", "1e-4");
+    let shown = run_details_shown(run);
+    let rows = &shown.rows;
+    shows(rows, "Temperature", "85 \u{b0}C");
+    shows(rows, "rload", "2k");
+    shows(rows, "cl", "1p");
+    shows(rows, "RELTOL", "1e-4");
     assert!(
         !rows.iter().any(|(label, _)| label == "PIVTOL"),
         "an option at the product's own default is shown: {rows:?}"
     );
-    assert!(version(&rows).starts_with("RSpice "), "{rows:?}");
+    assert!(version(rows).starts_with("RSpice "), "{rows:?}");
+    // Source says what kind of run it was, Plan which plan ran it.
+    shows(rows, "Source", "Simulation plan");
+    shows(rows, "Plan", &divider_plan_name());
+    // A run of one point names its analysis alone.
+    names_a_row(&shown, "DC Operating Point");
 }
 
 #[test]
-fn a_temperature_sweep_shows_its_range() {
+fn a_temperature_sweep_shows_its_range_and_names_each_row_by_its_temperature() {
     let run = temperature_sweep_run();
     let facts = run.facts.as_ref().expect("the run records what it set");
     assert_eq!(facts.temperatures, [-40.0, 27.0, 125.0]);
 
-    let rows = run_details_rows(run);
+    let shown = run_details_shown(run);
     shows(
-        &rows,
+        &shown.rows,
         "Temperature",
         "\u{2212}40 \u{b0}C to 125 \u{b0}C, 3 temperatures",
     );
+    for temperature in ["\u{2212}40", "27", "125"] {
+        names_a_row(
+            &shown,
+            &format!("DC Operating Point \u{b7} {temperature} \u{b0}C"),
+        );
+    }
+}
+
+#[test]
+fn a_design_variable_sweep_names_each_row_by_its_value() {
+    let shown = run_details_shown(design_variable_sweep_run());
+    shows(&shown.rows, "rload", "1k to 2k, 2 values");
+    for value in ["1k", "2k"] {
+        names_a_row(&shown, &format!("DC Operating Point \u{b7} rload={value}"));
+    }
 }
 
 #[test]
@@ -174,4 +271,10 @@ fn a_manual_deck_shows_what_its_deck_set() {
     shows(&rows, "RELTOL", "1e-4");
     shows(&rows, "ABSTOL", "1e-10");
     assert!(version(&rows).starts_with("RSpice "), "{rows:?}");
+    // A deck no plan produced has no Plan row.
+    shows(&rows, "Source", "Manual deck");
+    assert!(
+        !rows.iter().any(|(label, _)| label == "Plan"),
+        "a manual deck's run names a plan: {rows:?}"
+    );
 }
