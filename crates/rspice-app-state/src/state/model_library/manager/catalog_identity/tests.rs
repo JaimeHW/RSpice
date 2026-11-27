@@ -5,6 +5,8 @@
 //! one. A key that notices something no deck reads costs the page a full engine
 //! re-inspection for nothing. Both directions are asserted case by case.
 
+use std::path::PathBuf;
+
 use super::*;
 
 /// One named way to vary a catalogue, applied to a clone of the fixture.
