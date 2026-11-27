@@ -208,12 +208,22 @@ C1 out 0 33n
         second.save_project_to_path(&second_file),
         "the second project saves"
     );
+    let deleted = files_in(&segment_folder(&second_file));
     std::fs::remove_dir_all(segment_folder(&second_file)).unwrap();
     let mut reopened = AppState::default();
     assert!(reopened.load_project_from_path(&second_file));
     let reason = reopened.model.simulation.retained.runs[0]
         .unread_results()
-        .expect("the second project's results are missing, not read from the first's");
+        .unwrap_or_else(|| {
+            panic!(
+                "the second project's results are missing, not read from the first's: deleted \
+                 {deleted:?}; the folder holds {:?} after the reopen; the saved run held its \
+                 samples in memory: {}; the reopened run does: {}",
+                files_in(&segment_folder(&second_file)),
+                second.model.simulation.retained.runs[0].holds_samples_in_memory(),
+                reopened.model.simulation.retained.runs[0].holds_samples_in_memory(),
+            )
+        });
     assert!(reason.contains(" is missing"), "{reason}");
 
     drop((reopened, second, first));
