@@ -784,32 +784,37 @@ impl PaintedColumns {
         centre: f32,
         slot_width: f32,
     ) {
+        /// Half the width of the antialiased band along the outline.
+        const FEATHER: f32 = 0.5;
         let Some(profile) = violin_profile(column) else {
             return;
         };
         let half = slot_width * 0.42;
-        // One trapezoid per density step rather than one outline: a violin is
-        // not convex, and `convex_polygon` fans its vertices, which draws a
-        // chord straight across the waist.
-        for pair in profile.windows(2) {
-            let [(low_at, low_share), (high_at, high_share)] = [pair[0], pair[1]];
-            let (low_y, high_y) = (mapper.y(low_at), mapper.y(high_at));
-            let low_width = half * low_share as f32;
-            let high_width = half * high_share as f32;
-            if low_width <= 0.05 && high_width <= 0.05 {
-                continue;
-            }
-            painter.add(egui::Shape::convex_polygon(
-                vec![
-                    egui::pos2(centre - low_width, low_y),
-                    egui::pos2(centre + low_width, low_y),
-                    egui::pos2(centre + high_width, high_y),
-                    egui::pos2(centre - high_width, high_y),
-                ],
-                self.colors.body,
-                egui::Stroke::NONE,
-            ));
+        // One mesh down the whole profile: a violin is not convex, so it
+        // cannot be one `convex_polygon`, and abutting shapes each feather
+        // their own edges, which leaves a faint seam at every density step.
+        // Each step is four vertices across, a transparent one half a point
+        // outside the outline on either side, so only the outline is soft.
+        let (body, clear) = (self.colors.body, egui::Color32::TRANSPARENT);
+        let mut mesh = egui::Mesh::default();
+        for (at, share) in &profile {
+            let y = mapper.y(*at);
+            let width = half * *share as f32;
+            let inner = (width - FEATHER).max(0.0);
+            mesh.colored_vertex(egui::pos2(centre - width - FEATHER, y), clear);
+            mesh.colored_vertex(egui::pos2(centre - inner, y), body);
+            mesh.colored_vertex(egui::pos2(centre + inner, y), body);
+            mesh.colored_vertex(egui::pos2(centre + width + FEATHER, y), clear);
         }
+        for step in 0..profile.len().saturating_sub(1) {
+            let top = (step * 4) as u32;
+            let bottom = top + 4;
+            for across in 0..3 {
+                mesh.add_triangle(top + across, top + across + 1, bottom + across + 1);
+                mesh.add_triangle(top + across, bottom + across + 1, bottom + across);
+            }
+        }
+        painter.add(egui::Shape::mesh(mesh));
     }
 
     fn draw_box(
