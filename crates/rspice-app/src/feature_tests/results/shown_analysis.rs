@@ -334,8 +334,8 @@ fn run_details_lists_the_inventory_and_no_sheet_does() {
         Some("Completed"),
         "the summary says how the run ended: {rows:?}"
     );
-    // The inventory's table speaks each row as its cells under their heads:
-    // what each analysis kept, and how it ended.
+    // The inventory speaks each row as its cells, in words that need no
+    // heads: what each analysis kept, and how it ended.
     let spoken = nodes
         .iter()
         .filter_map(|(_, node)| node.label())
@@ -344,9 +344,9 @@ fn run_details_lists_the_inventory_and_no_sheet_does() {
         assert!(
             spoken
                 .iter()
-                .any(|row| row.contains(&format!("Analysis: {analysis}"))
+                .any(|row| row.starts_with(&format!("{analysis}, "))
                     && row.contains("signal")
-                    && row.contains("State: Complete")),
+                    && row.ends_with(", Complete")),
             "the inventory lists {analysis}: {spoken:?}"
         );
     }

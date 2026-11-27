@@ -5,7 +5,7 @@
 use crate::workbench::RSpiceApp;
 use rspice_app_results::workbench::docks::inspector::run_details;
 use rspice_app_runs::simulation::controller::test_execution::{
-    pvt, run_generated_batch, run_manual_batch,
+    pvt, run_generated_batch, run_manual_batch, run_manual_batch_at,
 };
 use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
 use rspice_app_state::state::SimulationRun;
@@ -55,14 +55,38 @@ fn painted_words(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
 }
 
 fn run_details_shown(run: SimulationRun) -> Shown {
+    run_details_shown_keeping(run, None)
+}
+
+/// [`run_details_shown`] with its Identifiers unfolded, in an application
+/// that keeps `deck` as the deck the run executed.
+fn run_details_shown_keeping(run: SimulationRun, deck: Option<&str>) -> Shown {
     let mut app = RSpiceApp::test_instance();
     let run_id = run.id;
     app.state.model.simulation.retained.runs.push(run);
+    if let Some(deck) = deck {
+        use rspice_results::executed_deck::{ExecutedDeck, ExecutedDeckPoint};
+        app.state
+            .model
+            .simulation
+            .retained
+            .executed_decks
+            .retain(ExecutedDeck {
+                run_id,
+                points: vec![ExecutedDeckPoint::new("op", deck.into(), Vec::new())],
+            });
+    }
     run_details::open(
         &mut app.state.results.run_details,
         &app.state.model.simulation,
         run_id,
     );
+    app.state
+        .results
+        .run_details
+        .as_mut()
+        .expect("Run details is open")
+        .show_identifiers();
     let ctx = egui::Context::default();
     rspice_app_workbench::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -112,10 +136,24 @@ fn shows(rows: &[(String, String)], label: &str, value: &str) {
     );
 }
 
-fn version(rows: &[(String, String)]) -> &str {
+fn value<'a>(rows: &'a [(String, String)], label: &str) -> &'a str {
     rows.iter()
-        .find(|(label, _)| label == "Version")
+        .find(|(shown, _)| shown == label)
         .map_or("", |(_, value)| value.as_str())
+}
+
+fn shows_no(rows: &[(String, String)], label: &str) {
+    assert!(
+        !rows.iter().any(|(shown, _)| shown == label),
+        "Run details shows {label}; it shows {rows:?}"
+    );
+}
+
+/// Where in the dialog `label`'s row stands, top to bottom.
+fn place(rows: &[(String, String)], label: &str) -> usize {
+    rows.iter()
+        .position(|(shown, _)| shown == label)
+        .unwrap_or_else(|| panic!("Run details shows no {label}; it shows {rows:?}"))
 }
 
 /// The name the divider's plan has.
@@ -209,11 +247,33 @@ fn a_plan_run_at_85_c_records_and_shows_its_variables_and_options() {
         !rows.iter().any(|(label, _)| label == "PIVTOL"),
         "an option at the product's own default is shown: {rows:?}"
     );
-    assert!(version(rows).starts_with("RSpice "), "{rows:?}");
-    // Source says what kind of run it was, Plan which plan ran it.
-    shows(rows, "Source", "Simulation plan");
+    assert!(value(rows, "Simulator").starts_with("RSpice "), "{rows:?}");
+    // A plan's run is named by its plan, which says what kind of run it was.
     shows(rows, "Plan", &divider_plan_name());
-    // A run of one point names its analysis alone.
+    // What goes without saying is not said: the kind of run beside its plan,
+    // the default configuration, the check its source passed, and the engine
+    // of the computer it ran on.
+    for label in ["Source", "Source check", "Configuration", "Engine"] {
+        shows_no(rows, label);
+    }
+    // The revision it ran is one of its identifiers, among them, which no
+    // longer name the job or the source check's digest.
+    assert!(place(rows, "Project revision") > place(rows, "Run ID"));
+    for label in ["Job ID", "Source-check digest"] {
+        shows_no(rows, label);
+    }
+    // Its duration reads in plain units, with nothing finer than a
+    // millisecond.
+    let duration = value(rows, "Duration");
+    assert!(
+        duration.ends_with(" ms") || duration.ends_with(" s") || duration == "Under 1 ms",
+        "{duration}"
+    );
+    assert!(!duration.starts_with("0."), "{duration}");
+    // A plan's run read no deck file; the dialog holds no deck for it.
+    names_a_row(&shown, "Not kept");
+    // A run of one point names its analysis alone, in a section of its own.
+    names_a_row(&shown, "Analyses");
     names_a_row(&shown, "DC Operating Point");
 }
 
@@ -266,11 +326,42 @@ fn a_manual_deck_shows_what_its_deck_set() {
     shows(&rows, "gain", "2");
     shows(&rows, "RELTOL", "1e-4");
     shows(&rows, "ABSTOL", "1e-10");
-    assert!(version(&rows).starts_with("RSpice "), "{rows:?}");
-    // A deck no plan produced has no Plan row.
+    assert!(value(&rows, "Simulator").starts_with("RSpice "), "{rows:?}");
+    // A deck no plan produced says what it was, and has no Plan row.
     shows(&rows, "Source", "Manual deck");
+    shows_no(&rows, "Plan");
+}
+
+#[test]
+fn a_deck_run_names_its_deck_by_its_file_and_its_whole_path_in_the_hover() {
+    let source = "* divider
+V1 in 0 1
+R1 in out 3k
+R2 out 0 1k
+.op
+.end
+";
+    let path = std::env::temp_dir()
+        .join("rspice-run-facts")
+        .join("divider.cir");
+    let run = run_manual_batch_at(source, &path, SimulationRunLifecycle::Completed);
+    let whole = path.display().to_string();
+    assert_eq!(
+        run.facts.as_ref().map(|facts| facts.deck.as_str()),
+        Some(whole.as_str())
+    );
+
+    // Kept, the deck is named by its file, and the hover says where it is.
+    let shown = run_details_shown_keeping(run.clone(), Some(source));
+    names_a_row(&shown, "divider.cir");
+    shows(&shown.rows, "Deck", &whole);
+
+    // Let go, it says so, and the hover says why.
+    let shown = run_details_shown(run);
+    names_a_row(&shown, "divider.cir, not kept");
     assert!(
-        !rows.iter().any(|(label, _)| label == "Plan"),
-        "a manual deck's run names a plan: {rows:?}"
+        value(&shown.rows, "Deck").starts_with(&format!("{whole}; not kept")),
+        "{:?}",
+        shown.rows
     );
 }

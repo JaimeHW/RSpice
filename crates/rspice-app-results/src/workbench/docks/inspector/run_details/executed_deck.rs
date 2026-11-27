@@ -24,28 +24,44 @@ use super::Line;
 /// lines of Run details…'s Inputs section; the place of the line that opens
 /// the deck.
 ///
+/// The deck is named by the file a deck run read, `file`, its whole path in
+/// the hover; a plan's run read no file, and its deck is the one it executed.
+///
 /// `executed` is `None` when the archive holds no deck for this run. That is
 /// stated rather than papered over: the working deck is a different document
 /// and showing it here would be a confident lie. Decks are written to the
 /// project file ([`crate::state::ExecutedDeckArchive`]), so a reopened project
 /// reopens the decks its retained runs executed, and a missing one was let go
-/// because only the newest runs' decks are kept.
-pub(super) fn lines(lines: &mut Vec<Line>, executed: Option<&[String]>) -> Option<usize> {
+/// because only the newest runs' decks are kept, which its hover says.
+pub(super) fn lines(
+    lines: &mut Vec<Line>,
+    executed: Option<&[String]>,
+    file: &str,
+) -> Option<usize> {
+    let name = (!file.is_empty()).then(|| {
+        std::path::Path::new(file)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(file)
+    });
     let Some(sources) = executed else {
-        lines.push(Line::new(
-            "Deck",
-            format!(
-                "Not kept; RSpice keeps the decks of the last {} runs",
-                rspice_results::executed_deck::MAX_RETAINED_RUNS
-            ),
-        ));
+        let why = format!(
+            "RSpice keeps the decks of the last {} runs",
+            rspice_results::executed_deck::MAX_RETAINED_RUNS
+        );
+        lines.push(match name {
+            Some(name) => Line::new("Deck", format!("{name}, not kept"))
+                .whole(format!("{file}; not kept, for {why}")),
+            None => Line::new("Deck", "Not kept").whole(format!("Not kept; {why}")),
+        });
         return None;
     };
     let deck = lines.len();
-    lines.push(
-        Line::new("Deck", "As executed, read-only")
-            .linked("Opens the netlist exactly as this run simulated it, read-only"),
-    );
+    let line = match name {
+        Some(name) => Line::new("Deck", name).whole(file),
+        None => Line::new("Deck", "As executed"),
+    };
+    lines.push(line.linked("Opens the netlist exactly as this run simulated it, read-only"));
     lines.extend(
         sources
             .iter()

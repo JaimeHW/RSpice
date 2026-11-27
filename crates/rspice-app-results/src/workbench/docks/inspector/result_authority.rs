@@ -50,9 +50,37 @@ fn duration_words(
         && let Ok(now) = rspice_app_state::time_compat::checked_unix_epoch()
     {
         let elapsed = (now.as_secs_f64() - run.timestamp).max(0.0);
-        return format!("{elapsed:.1} s so far");
+        return format!("{} so far", plain_duration(elapsed));
     }
-    manifest.elapsed_time.clone()
+    if !run.elapsed_time.is_finite() || run.elapsed_time < 0.0 {
+        return manifest.elapsed_time.clone();
+    }
+    plain_duration(run.elapsed_time)
+}
+
+/// A span of `seconds` in the units a reader says it in: `7 ms`, `1.4 s`,
+/// `12 s`, `2 min 5 s`, `1 h 2 min`. Nothing finer than a millisecond is
+/// stated, and nothing finer than a tenth of a second past one second: a
+/// run's own timing varies more than that from one run to the next.
+fn plain_duration(seconds: f64) -> String {
+    let milliseconds = (seconds * 1_000.0).round();
+    if milliseconds < 1.0 {
+        return "Under 1 ms".to_owned();
+    }
+    if milliseconds < 1_000.0 {
+        return format!("{milliseconds} ms");
+    }
+    let tenths = (seconds * 10.0).round();
+    if tenths < 100.0 {
+        return format!("{:.1} s", tenths / 10.0);
+    }
+    let whole = seconds.round() as u64;
+    let (hours, minutes, seconds) = (whole / 3_600, whole % 3_600 / 60, whole % 60);
+    match (hours, minutes) {
+        (0, 0) => format!("{seconds} s"),
+        (0, _) => format!("{minutes} min {seconds} s"),
+        _ => format!("{hours} h {minutes} min"),
+    }
 }
 
 /// The Run section: the run's name and duration, its state when it did not
@@ -98,9 +126,12 @@ pub(super) fn result_run(
     } else if let Some(problem) = problem {
         property_row_problem(ui, "State", &run_state_words(run), problem);
     }
+    // The configuration, when it was one of the project's own: the built-in
+    // default goes without saying.
     if let Some(recorded) = run
         .prepared_receipt()
         .and_then(|receipt| receipt.configuration())
+        .filter(|recorded| recorded.id.is_some())
     {
         // A result from a configuration that moved since is one to look at
         // before relying on: the mark says so, the words say how.
@@ -297,14 +328,30 @@ mod duration_tests {
         assert_eq!(at(1_007.0), "7.0 s so far");
 
         run.lifecycle = SimulationRunLifecycle::Completed;
-        run.elapsed_time = 7.25;
+        run.elapsed_time = 7.4;
         let manifest = ManifestViewModel::from_run(&run, |analysis| analysis.is_live_partial());
         assert_eq!(
             with_unix_epoch(Ok(Duration::from_secs(2_000)), || duration_words(
                 &run, &manifest
             )),
-            "7.25 s",
+            "7.4 s",
             "a finished run states the time it took"
         );
+    }
+
+    #[test]
+    fn a_duration_reads_in_plain_units_without_noise_below_them() {
+        for (seconds, words) in [
+            (0.000_4, "Under 1 ms"),
+            (0.007_3, "7 ms"),
+            (0.012_4, "12 ms"),
+            (0.999_6, "1.0 s"),
+            (1.43, "1.4 s"),
+            (12.4, "12 s"),
+            (125.0, "2 min 5 s"),
+            (3_725.0, "1 h 2 min"),
+        ] {
+            assert_eq!(plain_duration(seconds), words, "{seconds} s");
+        }
     }
 }

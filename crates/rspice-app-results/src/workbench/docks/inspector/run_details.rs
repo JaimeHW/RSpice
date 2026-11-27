@@ -1,16 +1,20 @@
 //! Run details…: one retained run, read the way a reader asks about a run.
 //!
 //! What the run was comes first, as one band of facts: its name, how it
-//! ended, when it started, how long it took, on which engine and simulator,
-//! and at what temperature. Under it the analyses it ran, one row each with
-//! what it kept and how it ended; an analysis opens on Results, and each of
-//! its signals on the schematic, in one action. Then what the run set the
-//! engine to, its design variables and its options, as Spectre's and ADS's
-//! run logs state them up front; a long list folds to its count. Then the
-//! inputs that produced it, in words, each one a link to what it names while
-//! that exists; then the solver's statistics. The identifiers and digests
-//! that prove where the run came from close the dialog, folded until the
-//! reader asks for them.
+//! ended, when it started, how long it took, the engine when it was not this
+//! computer's, the simulator, and at what temperature. Under it the analyses
+//! it ran, one row each with what it kept and how it ended; an analysis opens
+//! on Results, and each of its signals on the schematic, in one action. Then
+//! what the run set the engine to, its design variables and its options, as
+//! Spectre's and ADS's run logs state them up front; a long list folds to its
+//! count. Then the inputs that produced it, in words, each one a link to what
+//! it names while that exists; then the solver's statistics. The identifiers
+//! and digests that prove where the run came from close the dialog, folded
+//! until the reader asks for them.
+//!
+//! A row a stranger would not use to judge the run, or to run it again, is
+//! not shown: what goes without saying (the kind of run beside its plan, the
+//! default configuration, this computer's own engine) is left unsaid.
 //!
 //! Every fact in the dialog stands on one label column, so the sections
 //! read as one sheet; identifiers alone are set in mono.
@@ -31,6 +35,7 @@ use super::super::super::design_system::{
 };
 use super::result_authority::forced_lte_acceptances;
 use crate::state::{SimulationRunLifecycle, SimulationState};
+use crate::ui::accessibility::counted;
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
 use crate::workbench::app_state::Model;
 use crate::workbench::documents::result_document::ResultsParts;
@@ -344,11 +349,8 @@ pub fn show(
             }
             panel_body(ui, |ui| {
                 let _ = facts(ui, &summary, label_width);
-                // The table's heads title the analyses, on a hairline under
-                // the summary.
-                let top = ui.cursor().top();
+                section_header(ui, "Analyses", None);
                 inventory_route = inventory_table(ui, manifest, run, dialog.rows_are_analyses);
-                hairline(ui, top);
                 settings_section(
                     ui,
                     "Design variables",
@@ -432,8 +434,8 @@ pub fn show(
 }
 
 /// What the run was: its name, how it ended, when it started, how long it
-/// took, on which engine and simulator, at what temperature, and how its
-/// checks came out when it had any.
+/// took, the engine when it was not this computer's, the simulator, at what
+/// temperature, and how its checks came out when it had any.
 fn summary(
     ui: &Ui,
     run: &crate::state::SimulationRun,
@@ -474,23 +476,27 @@ fn summary(
             "Duration",
             super::result_authority::run_duration(ui, run, manifest),
         ),
-        Line::new(
-            "Engine",
-            run.execution_target.map_or_else(
-                || "Not recorded".to_owned(),
-                |target| target.label().to_owned(),
-            ),
-        ),
-        Line::new(
-            "Version",
-            run.facts
-                .as_ref()
-                .map(|facts| facts.simulator.as_str())
-                .filter(|simulator| !simulator.is_empty())
-                .unwrap_or("Not recorded"),
-        ),
-        Line::new("Temperature", temperature_words(run.facts.as_ref())),
     ];
+    // Where it ran, only when that was not this computer's own engine: the
+    // engine in front of the reader goes without saying.
+    if let Some(target) = run
+        .execution_target
+        .filter(|target| *target != rspice_results::run::ExecutionTarget::current())
+    {
+        lines.push(Line::new("Engine", target.label()));
+    }
+    lines.push(Line::new(
+        "Simulator",
+        run.facts
+            .as_ref()
+            .map(|facts| facts.simulator.as_str())
+            .filter(|simulator| !simulator.is_empty())
+            .unwrap_or("Not recorded"),
+    ));
+    lines.push(Line::new(
+        "Temperature",
+        temperature_words(run.facts.as_ref()),
+    ));
     // Stated only for a run whose checks reported something: a run that
     // checked nothing has not passed anything.
     if let Some(verdict) = run.check_verdict() {
@@ -634,9 +640,9 @@ struct Inputs {
     deck: Option<usize>,
 }
 
-/// Where the run came from, in words: what it was prepared from, its plan,
-/// configuration and revision, the check its source passed, and the deck it
-/// executed.
+/// Where the run came from, in words: its plan, or what it was prepared
+/// from when no plan produced it; its configuration when it was not the
+/// default; and the deck it executed.
 fn inputs(
     model: &Model,
     run: &crate::state::SimulationRun,
@@ -648,29 +654,36 @@ fn inputs(
     let mut plan = None;
     match &manifest.authority {
         Some(authority) => {
-            lines.push(Line::new("Source", sentence(&authority.source_domain)));
-            if let Some(id) = run
+            match run
                 .prepared_receipt()
                 .and_then(|receipt| receipt.simulation_plan_id())
             {
-                let name = plan_name(model, run, id);
-                lines.push(match plan_block {
-                    Some(None) => {
-                        plan = Some(lines.len());
-                        Line::new("Plan", name).linked(
-                            "Opens the Analyses page of the plan that produced this run, with \
-                             the producing analysis selected",
-                        )
-                    }
-                    Some(Some(reason)) => Line::new("Plan", name).whole(sentence(reason)),
-                    None => Line::new("Plan", name),
-                });
+                // A plan's run is named by its plan, which says what kind of
+                // run it was.
+                Some(id) => {
+                    let name = plan_name(model, run, id);
+                    lines.push(match plan_block {
+                        Some(None) => {
+                            plan = Some(lines.len());
+                            Line::new("Plan", name).linked(
+                                "Opens the Analyses page of the plan that produced this run, \
+                                 with the producing analysis selected",
+                            )
+                        }
+                        Some(Some(reason)) => Line::new("Plan", name).whole(sentence(reason)),
+                        None => Line::new("Plan", name),
+                    });
+                }
+                None => lines.push(Line::new("Source", sentence(&authority.source_domain))),
             }
-            // The design the run elaborated, by the name it ran under; its
-            // identity and revision are with the identifiers.
+            // The design the run elaborated, by the name it ran under, when
+            // it was one of the project's configurations: the built-in
+            // default goes without saying. Its identity and revision are with
+            // the identifiers.
             if let Some(recorded) = run
                 .prepared_receipt()
                 .and_then(|receipt| receipt.configuration())
+                .filter(|recorded| recorded.id.is_some())
             {
                 lines.push(Line::new(
                     "Configuration",
@@ -680,11 +693,6 @@ fn inputs(
                     ),
                 ));
             }
-            lines.push(Line::new(
-                "Project revision",
-                authority.project_revision.as_str(),
-            ));
-            lines.push(Line::new("Source check", sentence(&authority.source_check)));
         }
         None => {
             // An imported dataset carries no receipt; the files it was read
@@ -708,7 +716,8 @@ fn inputs(
             }
         }
     }
-    let deck = executed_deck::lines(&mut lines, executed);
+    let file = run.facts.as_ref().map_or("", |facts| facts.deck.as_str());
+    let deck = executed_deck::lines(&mut lines, executed, file);
     Inputs { lines, plan, deck }
 }
 
@@ -771,11 +780,8 @@ fn identifiers(
     let mut lines = vec![
         integrity(run),
         Line::code("Run ID", manifest.run_id.as_str()),
+        Line::code("Dataset ID", manifest.dataset_id.as_str()),
     ];
-    if let Some(job) = run.job_id {
-        lines.push(Line::code("Job ID", job.to_string()));
-    }
-    lines.push(Line::code("Dataset ID", manifest.dataset_id.as_str()));
     lines.push(match dataset_digest {
         Some(digest) => Line::code("Dataset digest", digest),
         None => Line::new("Dataset digest", "Computing\u{2026}"),
@@ -797,16 +803,16 @@ fn identifiers(
         ));
     }
     lines.push(Line::code(
+        "Project revision",
+        authority.project_revision.as_str(),
+    ));
+    lines.push(Line::code(
         "Prepared input digest",
         authority.prepared_snapshot_digest.as_str(),
     ));
     lines.push(Line::code(
         "Source content digest",
         authority.source_content_digest.as_str(),
-    ));
-    lines.push(Line::code(
-        "Source-check digest",
-        authority.source_check_digest.as_str(),
     ));
     for (identity, digest) in &authority.model_sources {
         // The model's name, then its digest: shortened from the middle, both
@@ -895,7 +901,10 @@ fn analysis_words(
             failed_points,
             ..
         }) => (
-            format!("{kind} \u{b7} {target}, {} points", sweep_values.len()),
+            format!(
+                "{kind} \u{b7} {target}, {}",
+                counted(sweep_values.len(), "point", "points")
+            ),
             Some((*failed_points, sweep_values.len(), "points")),
         ),
         Some(Family::Corner {
@@ -903,7 +912,10 @@ fn analysis_words(
             failed_corners,
             ..
         }) => (
-            format!("{kind} \u{b7} {} corners", corner_labels.len()),
+            format!(
+                "{kind} \u{b7} {}",
+                counted(corner_labels.len(), "corner", "corners")
+            ),
             Some((*failed_corners, corner_labels.len(), "corners")),
         ),
         Some(Family::MonteCarlo {
@@ -911,7 +923,10 @@ fn analysis_words(
             failures,
             ..
         }) => (
-            format!("{kind} \u{b7} {runs_requested} samples"),
+            format!(
+                "{kind} \u{b7} {}",
+                counted(*runs_requested, "sample", "samples")
+            ),
             Some((*failures, *runs_requested, "samples")),
         ),
         _ => (kind.to_owned(), None),
@@ -924,13 +939,12 @@ fn analysis_words(
     };
     let kept = match (analysis.waveforms.len(), &analysis.dc_op) {
         (0, Some(op)) => Some(format!(
-            "{} node voltages, {} currents",
-            op.node_voltages.len(),
-            op.branch_currents.len()
+            "{}, {}",
+            counted(op.node_voltages.len(), "node voltage", "node voltages"),
+            counted(op.branch_currents.len(), "current", "currents")
         )),
         (0, None) => None,
-        (1, _) => Some("1 signal".to_owned()),
-        (signals, _) => Some(format!("{signals} signals")),
+        (signals, _) => Some(counted(signals, "signal", "signals")),
     };
     let (state, problem, why) = if analysis.is_live_partial() {
         ("Running".to_owned(), None, None)
@@ -991,11 +1005,12 @@ fn point_words(
 /// analyses only while the run's receipt matches it; a mismatched run lists
 /// its tasks and leads nowhere.
 ///
-/// The table rules its own edges, from the dialog's one side to the other:
-/// its heads title it, on a hairline under the run's summary; the next head
-/// stands on its last rule; and it is as tall as its rows, for the dialog's
-/// body is what scrolls. Each column is as wide as its words, and the names
-/// take what is left.
+/// The table stands flush under its section's header, as every section's
+/// rows do, and needs no heads of its own: its rows say what each column
+/// holds. It rules its own edges, from the dialog's one side to the other;
+/// the next header stands on its last rule; and it is as tall as its rows,
+/// for the dialog's body is what scrolls. Each column is as wide as its
+/// words, and the names take what is left.
 fn inventory_table(
     ui: &mut Ui,
     manifest: &rspice_results::manifest::ManifestViewModel,
@@ -1088,12 +1103,9 @@ fn inventory_table(
         Some((measured, widths)) if measured == shape => widths,
         _ => {
             let rows: Vec<Vec<Cell>> = (0..lines.len()).map(cells).collect();
+            // A tree draws no heads, so only the rows' words size a column.
             let widths = std::array::from_fn(|column| {
-                fitted_width(
-                    ui,
-                    heads[column],
-                    rows.iter().filter_map(|row| row.get(column)),
-                )
+                fitted_width(ui, "", rows.iter().filter_map(|row| row.get(column)))
             });
             ui.data_mut(|data| data.insert_temp(widths_id, (shape, widths)));
             widths
@@ -1115,6 +1127,7 @@ fn inventory_table(
         &columns,
         lines.len(),
     )
+    .tree()
     .state(&mut state)
     .keys(&keys)
     .show(ui, cells);
@@ -1320,26 +1333,20 @@ fn convergence_lines(
     }
 }
 
+/// One phase's counters. The report's maximum residual and iterations per
+/// solve are not stated: the engine records neither, and a zero would read
+/// as a measurement.
 fn phase_lines(report: &crate::state::ConvergenceReport) -> PhaseLines<'_> {
-    let mut counters: Vec<Line> = [
+    let counters: Vec<Line> = [
         ("Newton iterations", report.total_iterations),
         ("Gmin stepping", report.gmin_stepping_count),
         ("Source stepping", report.source_stepping_count),
         ("Step reductions", report.timestep_reductions),
         ("LTE rejections", report.lte_rejections),
-        ("Device bypasses", report.bypassed_device_evaluations),
     ]
     .into_iter()
     .map(|(name, count)| Line::new(name, count.to_string()))
     .collect();
-    counters.push(Line::new(
-        "Maximum residual",
-        format!("{:.3e}", report.max_residual),
-    ));
-    counters.push(Line::new(
-        "Iterations per solve",
-        format!("{:.2}", report.avg_iterations_per_solve),
-    ));
     let forced = report
         .time_basis
         .as_ref()
