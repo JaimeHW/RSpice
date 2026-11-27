@@ -228,7 +228,6 @@ pub(crate) const RESULT_COORDINATE_NAMES: [&str; 5] = ["time", "frequency", "fre
 /// one themselves and decline to render rather than refusing the dataset.
 const MIN_RESULT_ROWS: usize = 1;
 const RESULT_IMPORT_WINDOW_MARGIN: f32 = 24.0;
-const RESULT_IMPORT_FOOTER_RESERVE: f32 = 82.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedResultDataset {
@@ -1130,79 +1129,95 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
     #[cfg(target_arch = "wasm32")]
     apply_browser_result_import_log(&mut draft);
     let tokens = Tokens::get(ctx);
-    let (max_window_size, body_height) = result_import_dialog_geometry(ctx.content_rect().size());
-    let max_window_width = max_window_size.x;
-    let max_window_height = max_window_size.y;
+    let window_size = result_import_window_size(ctx.content_rect().size());
 
+    // Every frame lays the review out at its final size and place, its first
+    // visible one included. Its height is the screen's, fixed; the footer is
+    // laid out first, from the bottom; the body fills what is left above it.
+    // The body was a scroll area of fixed height that filled the window as
+    // the last frame sized it, with the footer below it: the window grew by
+    // the footer's height every frame until the screen stopped it, and past
+    // the screen's edge once, so for its first several frames a click aimed
+    // at a footer button landed where the button had been a frame before.
     egui::Window::new("Import result dataset")
         .id(egui::Id::new("rspice.result-import"))
         .open(&mut window_open)
         .collapsible(false)
-        .resizable(true)
-        .default_width(860.0_f32.min(max_window_width))
-        .min_width(680.0_f32.min(max_window_width))
-        .max_width(max_window_width)
-        .min_height(520.0_f32.min(max_window_height))
-        .max_height(max_window_height)
+        .resizable([true, false])
+        .default_width(860.0_f32.min(window_size.x))
+        .min_width(680.0_f32.min(window_size.x))
+        .max_width(window_size.x)
+        .min_height(window_size.y)
+        .max_height(window_size.y)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("rspice.result-import.body")
-                .max_height(body_height)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new("RESULTS · EXTERNAL DATASET")
-                            .monospace()
-                            .color(tokens.color.text_dim),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(
-                        "Review the detected structure and mapping before RSpice adds these results to the project history.",
-                    );
-                    ui.add_space(10.0);
-                    result_import_stage_header(ui, draft.stage);
-                    ui.separator();
-
-                    match draft.stage {
-                        ResultImportStage::Detect => {
-                            choose_log = result_import_detect_page(ui, &draft);
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+                ui.allocate_ui_with_layout(
+                    row,
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        match draft.stage {
+                            ResultImportStage::Detect => {
+                                advance = ui.button("Map signals").clicked();
+                            }
+                            ResultImportStage::Map => {
+                                let valid = parsed_result_from_draft(&draft).is_ok();
+                                advance = ui
+                                    .add_enabled(valid, egui::Button::new("Validate import"))
+                                    .clicked();
+                                go_back = ui.button("Back").clicked();
+                            }
+                            ResultImportStage::Validate => {
+                                let valid = parsed_result_from_draft(&draft).is_ok()
+                                    && result_import_block_reason(state.model, state.platform)
+                                        .is_none();
+                                commit = ui
+                                    .add_enabled(valid, egui::Button::new("Import"))
+                                    .clicked();
+                                go_back = ui.button("Back").clicked();
+                            }
                         }
-                        ResultImportStage::Map => result_import_map_page(ui, &mut draft),
-                        ResultImportStage::Validate => {
-                            choose_log = result_import_validate_page(ui, &draft);
-                        }
-                    }
+                        cancel = ui.button("Cancel").clicked();
+                    },
+                );
+                ui.separator();
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("rspice.result-import.body")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("RESULTS · EXTERNAL DATASET")
+                                    .monospace()
+                                    .color(tokens.color.text_dim),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                "Review the detected structure and mapping before RSpice adds these results to the project history.",
+                            );
+                            ui.add_space(10.0);
+                            result_import_stage_header(ui, draft.stage);
+                            ui.separator();
 
-                    ui.add_space(8.0);
-                    if let Some(error) = draft.validation_error.as_deref() {
-                        ui.colored_label(tokens.color.err, error);
-                    }
+                            match draft.stage {
+                                ResultImportStage::Detect => {
+                                    choose_log = result_import_detect_page(ui, &draft);
+                                }
+                                ResultImportStage::Map => {
+                                    result_import_map_page(ui, &mut draft);
+                                }
+                                ResultImportStage::Validate => {
+                                    choose_log = result_import_validate_page(ui, &draft);
+                                }
+                            }
+
+                            ui.add_space(8.0);
+                            if let Some(error) = draft.validation_error.as_deref() {
+                                ui.colored_label(tokens.color.err, error);
+                            }
+                        });
                 });
-
-            ui.separator();
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                match draft.stage {
-                    ResultImportStage::Detect => {
-                        advance = ui.button("Map signals").clicked();
-                    }
-                    ResultImportStage::Map => {
-                        let valid = parsed_result_from_draft(&draft).is_ok();
-                        advance = ui
-                            .add_enabled(valid, egui::Button::new("Validate import"))
-                            .clicked();
-                        go_back = ui.button("Back").clicked();
-                    }
-                    ResultImportStage::Validate => {
-                        let valid = parsed_result_from_draft(&draft).is_ok()
-                            && result_import_block_reason(state.model, state.platform).is_none();
-                        commit = ui
-                            .add_enabled(valid, egui::Button::new("Import"))
-                            .clicked();
-                        go_back = ui.button("Back").clicked();
-                    }
-                }
-                cancel = ui.button("Cancel").clicked();
             });
         });
 
@@ -1250,8 +1265,10 @@ fn show_result_import_job(
     let progress = job.state();
     let tokens = Tokens::get(ctx);
     let mut cancel = false;
+    // A window of its own: the review that follows opens at its own size and
+    // place, not first at this one's.
     egui::Window::new("Import result dataset")
-        .id(egui::Id::new("rspice.result-import"))
+        .id(egui::Id::new("rspice.result-import.job"))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -1294,13 +1311,10 @@ fn show_result_import_job(
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
 }
 
-fn result_import_dialog_geometry(available: egui::Vec2) -> (egui::Vec2, f32) {
-    let maximum = egui::vec2(
-        (available.x - RESULT_IMPORT_WINDOW_MARGIN).max(1.0),
-        (available.y - RESULT_IMPORT_WINDOW_MARGIN).max(1.0),
-    );
-    let body_height = (maximum.y - RESULT_IMPORT_FOOTER_RESERVE).max(1.0);
-    (maximum, body_height)
+/// The review's widest width and its height: the screen's, less a margin on
+/// every side.
+fn result_import_window_size(available: egui::Vec2) -> egui::Vec2 {
+    (available - egui::Vec2::splat(RESULT_IMPORT_WINDOW_MARGIN)).max(egui::Vec2::splat(1.0))
 }
 
 /// Act on how the draft's job ended, once it has: review the staged source,
@@ -2040,18 +2054,6 @@ mod tests {
         assert_eq!(notices[0].title, "Result dataset import failed");
         assert_eq!(notices[0].detail, "the selected file is empty");
         assert!(state.model.simulation.retained.runs.is_empty());
-    }
-
-    #[test]
-    fn import_dialog_reserves_a_visible_footer_inside_desktop_viewports() {
-        for available in [egui::vec2(1_440.0, 900.0), egui::vec2(1_024.0, 768.0)] {
-            let (maximum, body) = result_import_dialog_geometry(available);
-            assert_eq!(maximum, available - egui::vec2(24.0, 24.0));
-            assert!(body > 0.0);
-            assert!(body + RESULT_IMPORT_FOOTER_RESERVE <= maximum.y);
-            assert!(maximum.x <= available.x);
-            assert!(maximum.y <= available.y);
-        }
     }
 
     /// The values of one signal of a parsed table, in row order.
