@@ -30,8 +30,71 @@ fn pane_slot_geometry_sanitizes_nonfinite_available_extents() {
     let size = finite_stage_size(vec2(f32::INFINITY, f32::NAN));
     assert_eq!(size, vec2(0.0, 0.0));
     let stage = Rect::from_min_size(pos2(0.0, 0.0), size);
-    let slots = bounded_pane_slots(stage, PageLayout::Grid { columns: 2 }, 4);
+    let slots = bounded_pane_slots(stage, PageLayout::Grid { columns: 2 }, 4, 1.0);
     assert_slots_are_finite_and_bounded(stage, &slots, 4);
+}
+
+/// Every pane of a page is the same size to the physical pixel, and the
+/// gutter runs along all four edges of the stage as well as between panes,
+/// whatever the stage's odd pixels.
+#[test]
+fn panes_are_equal_to_the_pixel_with_a_gutter_on_every_edge() {
+    for (ppp, width, height) in [
+        (1.0, 1203.0, 707.0),
+        (1.25, 1517.6, 811.2),
+        (2.0, 2049.5, 1201.0),
+    ] {
+        let stage = Rect::from_min_size(pos2(37.0, 61.0), vec2(width, height));
+        for (layout, count) in [
+            (PageLayout::SinglePane, 1),
+            (PageLayout::Columns, 3),
+            (PageLayout::Rows, 2),
+            (PageLayout::Grid { columns: 2 }, 4),
+            (PageLayout::Grid { columns: 3 }, 9),
+        ] {
+            let slots = bounded_pane_slots(stage, layout, count, ppp);
+            assert_slots_are_finite_and_bounded(stage, &slots, count);
+            let pixels = |value: f32| (value * ppp).round();
+            let first = slots[0];
+            for slot in &slots {
+                assert_eq!(
+                    pixels(slot.width()),
+                    pixels(first.width()),
+                    "{layout:?} {slot:?}"
+                );
+                assert_eq!(
+                    pixels(slot.height()),
+                    pixels(first.height()),
+                    "{layout:?} {slot:?}"
+                );
+            }
+            let gap = pixels(PANE_GAP);
+            let left = slots
+                .iter()
+                .map(|slot| slot.left())
+                .fold(f32::MAX, f32::min);
+            let top = slots.iter().map(|slot| slot.top()).fold(f32::MAX, f32::min);
+            let right = slots
+                .iter()
+                .map(|slot| slot.right())
+                .fold(f32::MIN, f32::max);
+            let bottom = slots
+                .iter()
+                .map(|slot| slot.bottom())
+                .fold(f32::MIN, f32::max);
+            for edge in [
+                pixels(left) - pixels(stage.left()),
+                pixels(top) - pixels(stage.top()),
+                pixels(stage.right()) - pixels(right),
+                pixels(stage.bottom()) - pixels(bottom),
+            ] {
+                assert!(
+                    edge >= gap,
+                    "{layout:?} at {ppp}: an edge gutter of {edge} px"
+                );
+            }
+        }
+    }
 }
 
 /// A pane is named by where it sits on its page, once the page has more

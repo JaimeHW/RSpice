@@ -27,7 +27,12 @@ pub fn page<R>(
     // pane's analysis row.
     ui.painter()
         .rect_filled(stage_rect, 0.0, Tokens::get(ui.ctx()).color.bg_app);
-    let slots = bounded_pane_slots(stage_rect, layout, pane_ids.len());
+    let slots = bounded_pane_slots(
+        stage_rect,
+        layout,
+        pane_ids.len(),
+        ui.ctx().pixels_per_point(),
+    );
     let mut activated_pane_id = None;
     for (index, (pane_id, rect)) in pane_ids.zip(slots).enumerate() {
         let mut pane_ui = ui.new_child(
@@ -43,7 +48,9 @@ pub fn page<R>(
     activated_pane_id
 }
 
-/// The gutter between two panes, across and down alike.
+/// The gutter around and between panes, across and down alike. It runs
+/// along the stage's edges too, so no pane's hairline lies against a dock
+/// separator and doubles it.
 const PANE_GAP: f32 = 4.0;
 
 fn finite_stage_size(size: egui::Vec2) -> egui::Vec2 {
@@ -58,19 +65,29 @@ fn finite_extent(value: f32) -> f32 {
     }
 }
 
-/// One pane's extent along an axis of `count` panes, in whole points so
-/// the panes are the same size to a point and every gutter the same width,
-/// and the gutter between two of them.
-fn bounded_axis_cells(extent: f32, count: usize) -> (f32, f32) {
+/// Where each of `count` panes starts along an axis that runs from `low` to
+/// `high`, and how long every one of them is, in points. The panes are equal
+/// to the physical pixel, with a gutter of the same width between them and
+/// along both ends; the pixels left over from rounding widen the two end
+/// gutters, never the last pane.
+fn bounded_axis_cells(low: f32, high: f32, count: usize, pixels_per_point: f32) -> (Vec<f32>, f32) {
     let count = count.max(1);
-    if count == 1 {
-        return (extent, 0.0);
-    }
-    let gap = PANE_GAP.min(extent / (count - 1) as f32);
-    let cell = ((extent - gap * (count - 1) as f32) / count as f32)
-        .floor()
-        .max(0.0);
-    (cell, gap)
+    let ppp = if pixels_per_point.is_finite() && pixels_per_point > 0.0 {
+        pixels_per_point
+    } else {
+        1.0
+    };
+    let first = (low * ppp).round();
+    let extent = ((high * ppp).round() - first).max(0.0);
+    let gutters = (count + 1) as f32;
+    let gap = (PANE_GAP * ppp).round().min((extent / gutters).floor());
+    let cell = ((extent - gap * gutters) / count as f32).floor().max(0.0);
+    let spare = (extent - gap * gutters - cell * count as f32).max(0.0);
+    let lead = first + gap + (spare / 2.0).floor();
+    let starts = (0..count)
+        .map(|index| (lead + index as f32 * (cell + gap)) / ppp)
+        .collect();
+    (starts, cell / ppp)
 }
 
 /// How many columns and rows `layout` sets `pane_count` panes in.
@@ -122,38 +139,26 @@ pub fn pane_place(layout: PageLayout, index: usize, pane_count: usize) -> Option
         .map(|first| first.to_uppercase().chain(letters).collect())
 }
 
-fn bounded_pane_slots(stage: Rect, layout: PageLayout, pane_count: usize) -> Vec<Rect> {
+fn bounded_pane_slots(
+    stage: Rect,
+    layout: PageLayout,
+    pane_count: usize,
+    pixels_per_point: f32,
+) -> Vec<Rect> {
     if pane_count == 0 {
         return Vec::new();
     }
     let stage = Rect::from_min_size(stage.min, finite_stage_size(stage.size()));
     let (columns, rows) = grid_of(layout, pane_count);
-    let (pane_width, horizontal_gap) = bounded_axis_cells(stage.width(), columns);
-    let (pane_height, vertical_gap) = bounded_axis_cells(stage.height(), rows);
+    let (lefts, pane_width) =
+        bounded_axis_cells(stage.left(), stage.right(), columns, pixels_per_point);
+    let (tops, pane_height) =
+        bounded_axis_cells(stage.top(), stage.bottom(), rows, pixels_per_point);
 
     (0..pane_count)
         .map(|index| {
-            let column = index % columns;
-            let row = index / columns;
-            let min = pos2(
-                stage.left() + column as f32 * (pane_width + horizontal_gap),
-                stage.top() + row as f32 * (pane_height + vertical_gap),
-            );
-            // The last column and row take the stage's odd points, so the
-            // panes meet its edges rather than leave a sliver of ground.
-            let max = pos2(
-                if column + 1 == columns {
-                    stage.right()
-                } else {
-                    min.x + pane_width
-                },
-                if row + 1 == rows {
-                    stage.bottom()
-                } else {
-                    min.y + pane_height
-                },
-            );
-            Rect::from_min_max(min, max).intersect(stage)
+            let min = pos2(lefts[index % columns], tops[index / columns]);
+            Rect::from_min_size(min, vec2(pane_width, pane_height)).intersect(stage)
         })
         .collect()
 }
