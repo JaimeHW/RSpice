@@ -1419,8 +1419,7 @@ fn whole_tab_offset(
     let previous = tabs
         .iter()
         .map(|(start, _)| *start)
-        .filter(|start| *start < target)
-        .last();
+        .rfind(|start| *start < target);
     match (next, previous) {
         (Some(next), _) if held.is_none_or(|(start, _)| start >= next - 0.5) => next,
         (_, Some(previous)) => previous,
