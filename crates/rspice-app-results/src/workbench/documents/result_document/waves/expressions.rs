@@ -1,10 +1,11 @@
 //! Per-strip expression traces: editing them and evaluating them.
 //!
 //! An expression is re-evaluated only when its text or the data behind it
-//! changes, so the cache key carries both — a stale result can never be shown
-//! against new data. An expression that fails to resolve is reported on its
-//! own row rather than being dropped, so the strip never silently loses a
-//! trace the engineer asked for.
+//! changes, so the cache key carries both. One evaluated off the frame keeps
+//! drawing the curve it last landed until the job for the new version lands,
+//! under the identity of the version it was evaluated at. An expression that
+//! fails to resolve is reported on its own row rather than being dropped, so
+//! the strip never silently loses a trace the engineer asked for.
 
 use super::*;
 use crate::state::ComplexExpressionPolicy;
@@ -234,68 +235,37 @@ pub(super) fn resolve_strip_exprs(
             ^ pin
             ^ places.version_for(&expr.text).rotate_left(7);
         let key = (model.analysis_key, expr.text.clone());
-        land_expression_job(state, &key);
-        let fresh = state
-            .results
-            .analysis_expr_cache
-            .get(&key)
-            .is_some_and(|s| s.version == version);
-        let evaluating = state
-            .results
-            .expression_jobs
-            .get(&key)
-            .is_some_and(|job| job.version == version);
-        if !fresh
-            && !evaluating
-            && expression_reads_store(&state.model.simulation, model.analysis_index, &expr.text)
-        {
-            let work = ExpressionWork::gather(
-                &state.model.simulation,
-                (model.analysis_index, baseline),
-                &expr.text,
-                (sample_selection.as_ref(), expr.complex_policy),
-                lanes.as_ref(),
-                &places,
-            );
-            start_expression_job(state, key.clone(), version, work);
-        } else if !fresh && !evaluating {
-            let series = evaluate_expression_reading(
-                &state.model.simulation,
-                (model.analysis_index, baseline),
-                &expr.text,
-                sample_selection.as_ref(),
-                expr.complex_policy,
-                lanes.as_ref(),
-                &places,
-            );
-            if let Err(error) = &series {
-                state.record(
-                    crate::diagnostics::LogSeverity::Warning,
-                    crate::diagnostics::LogSource::Studio,
-                    format!("Could not evaluate {}: {error}", expr.text),
-                );
-            }
-            state
-                .results
-                .analysis_expr_cache
-                .insert(key.clone(), ExprSeries { version, series });
-        }
+        refresh_expression(
+            state,
+            &key,
+            &ExpressionRead {
+                analysis_index: model.analysis_index,
+                baseline,
+                selection: sample_selection.as_ref(),
+                complex_policy: expr.complex_policy,
+                lanes: lanes.as_ref(),
+                places: &places,
+                version,
+                report: true,
+            },
+        );
         // A `digital()` conversion is a logic lane above the panes.
         if !expr.visible || draws_as_logic(&expr.text) {
             continue;
         }
+        // Until a job lands this version, the curve is the one it last
+        // landed, under that version's identity.
         let cached = state
             .results
             .analysis_expr_cache
             .get(&key)
-            .and_then(|cached| cached.series.as_ref().ok())
-            .cloned();
-        let Some(outputs) = cached else {
+            .and_then(|cached| Some((cached.version, cached.series.as_ref().ok()?.clone())));
+        let Some((evaluated, outputs)) = cached else {
             continue;
         };
         let base_color = expr_color(tokens, expr_palette_slot(model, slot));
         let base_cache_key =
-            (expr_cache_key(model.analysis_key, &expr.text) ^ version.rotate_left(7)) | (1 << 63);
+            (expr_cache_key(model.analysis_key, &expr.text) ^ evaluated.rotate_left(7)) | (1 << 63);
         for output in outputs {
             let group = match output.source {
                 ExpressionSource::Analysis | ExpressionSource::SelectedSamples => None,
@@ -392,40 +362,123 @@ pub(super) fn expression_reads_store(
             .any(|run| run.analyses.iter().any(stored))
 }
 
-/// Evaluate an expression on a Results job: the curve of an earlier version
-/// is not this one's, so it goes, and the pane shows the expression pending
-/// until the job lands it.
+/// What a strip, or a pane drawn against an expression, reads one at: the
+/// version it is read at and what it is evaluated with.
+struct ExpressionRead<'a> {
+    analysis_index: usize,
+    baseline: Option<crate::product::DatasetId>,
+    selection: Option<&'a SourceSampleSelection>,
+    complex_policy: ComplexExpressionPolicy,
+    lanes: Option<&'a EventLaneLayout>,
+    places: &'a Places,
+    version: u64,
+    /// Whether a failed evaluation goes to the log.
+    report: bool,
+}
+
+/// Bring the cached series of `key` to `read.version`.
+///
+/// One that reads only samples held in memory is evaluated here, on the
+/// frame. One that reads a store is evaluated on a Results job, one job at a
+/// time per expression: a job whose version is no longer read is cancelled,
+/// and once it ends it is dropped, never drawn; the next frame then starts a
+/// job for the version read then, so the latest request replaces any made
+/// while the job ran. The series last landed stays cached, and drawn, until
+/// a job lands the version read.
+fn refresh_expression(
+    state: &mut ResultsParts<'_>,
+    key: &(AnalysisPresentationKey, String),
+    read: &ExpressionRead<'_>,
+) {
+    land_expression_job(state, key, read);
+    let fresh = state
+        .results
+        .analysis_expr_cache
+        .get(key)
+        .is_some_and(|cached| cached.version == read.version);
+    let text = &key.1;
+    if !fresh && expression_reads_store(&state.model.simulation, read.analysis_index, text) {
+        if !state.results.expression_jobs.contains_key(key) {
+            let work = ExpressionWork::gather(
+                &state.model.simulation,
+                (read.analysis_index, read.baseline),
+                text,
+                (read.selection, read.complex_policy),
+                read.lanes,
+                read.places,
+            );
+            start_expression_job(state, key.clone(), read, work);
+        }
+    } else if !fresh {
+        let series = evaluate_expression_reading(
+            &state.model.simulation,
+            (read.analysis_index, read.baseline),
+            text,
+            read.selection,
+            read.complex_policy,
+            read.lanes,
+            read.places,
+        );
+        if let Err(error) = &series {
+            report_failure(state, read, text, error);
+        }
+        state.results.analysis_expr_cache.insert(
+            key.clone(),
+            ExprSeries {
+                version: read.version,
+                series,
+            },
+        );
+    }
+    // A job still out lands on a later frame, so one is due.
+    if state.results.expression_jobs.contains_key(key) {
+        state.results.expression_frame_due = true;
+    }
+}
+
+fn report_failure(
+    state: &mut ResultsParts<'_>,
+    read: &ExpressionRead<'_>,
+    text: &str,
+    error: &str,
+) {
+    if read.report {
+        state.record(
+            crate::diagnostics::LogSeverity::Warning,
+            crate::diagnostics::LogSource::Studio,
+            format!("Could not evaluate {text}: {error}"),
+        );
+    }
+}
+
+/// Start the job that evaluates `key` at `read.version`, or cache why it
+/// could not start.
 fn start_expression_job(
     state: &mut ResultsParts<'_>,
     key: (AnalysisPresentationKey, String),
-    version: u64,
+    read: &ExpressionRead<'_>,
     work: Result<super::expression_evaluation::ExpressionWork, String>,
 ) {
-    if let Some(earlier) = state.results.expression_jobs.remove(&key) {
-        earlier.job.cancel();
-    }
-    state.results.analysis_expr_cache.remove(&key);
     match work {
         Ok(work) => {
             let job = crate::workbench::results_job::ResultsJob::start(
                 "results-expression",
                 move |job| Ok(work.evaluate(job.cancel_flag())),
             );
-            state
-                .results
-                .expression_jobs
-                .insert(key, ExpressionJob { version, job });
+            state.results.expression_jobs.insert(
+                key,
+                ExpressionJob {
+                    version: read.version,
+                    job,
+                },
+            );
         }
         Err(error) => {
-            state.record(
-                crate::diagnostics::LogSeverity::Warning,
-                crate::diagnostics::LogSource::Studio,
-                format!("Could not evaluate {}: {error}", key.1),
-            );
+            report_failure(state, read, &key.1, &error);
             state.results.analysis_expr_cache.insert(
                 key,
                 ExprSeries {
-                    version,
+                    version: read.version,
                     series: Err(error),
                 },
             );
@@ -433,49 +486,45 @@ fn start_expression_job(
     }
 }
 
-/// Put what a finished job evaluated for `key` in the expression cache, as
-/// of the version it evaluated.
-fn land_expression_job(state: &mut ResultsParts<'_>, key: &(AnalysisPresentationKey, String)) {
+/// Settle the job evaluating `key`: one still running for a version no
+/// longer read is cancelled; one that has ended leaves, and lands in the
+/// expression cache only when it evaluated the version read.
+fn land_expression_job(
+    state: &mut ResultsParts<'_>,
+    key: &(AnalysisPresentationKey, String),
+    read: &ExpressionRead<'_>,
+) {
     use crate::workbench::results_job::JobOutcome;
-    if !state
-        .results
-        .expression_jobs
-        .get(key)
-        .is_some_and(|job| job.job.is_finished())
-    {
-        return;
-    }
-    let Some(job) = state.results.expression_jobs.remove(key) else {
+    let Some(running) = state.results.expression_jobs.get(key) else {
         return;
     };
-    let series = match job.job.take_outcome() {
+    if !running.job.is_finished() {
+        if running.version != read.version {
+            running.job.cancel();
+        }
+        return;
+    }
+    let Some(ended) = state.results.expression_jobs.remove(key) else {
+        return;
+    };
+    if ended.version != read.version {
+        return;
+    }
+    let series = match ended.job.take_outcome() {
         Some(JobOutcome::Done(series)) => series,
         Some(JobOutcome::Failed(reason)) => Err(reason),
         Some(JobOutcome::Cancelled) | None => return,
     };
     if let Err(error) = &series {
-        state.record(
-            crate::diagnostics::LogSeverity::Warning,
-            crate::diagnostics::LogSource::Studio,
-            format!("Could not evaluate {}: {error}", key.1),
-        );
+        report_failure(state, read, &key.1, error);
     }
     state.results.analysis_expr_cache.insert(
         key.clone(),
         ExprSeries {
-            version: job.version,
+            version: ended.version,
             series,
         },
     );
-}
-
-/// Whether an expression is being evaluated off the frame, for a frame to
-/// draw again until it lands.
-pub(crate) fn expressions_evaluating(results: &ResultsState) -> bool {
-    results
-        .expression_jobs
-        .values()
-        .any(|job| !job.job.is_finished())
 }
 
 /// Evaluate `text` as the abscissa a pane is drawn against: once per family

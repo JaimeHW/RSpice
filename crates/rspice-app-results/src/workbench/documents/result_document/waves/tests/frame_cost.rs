@@ -495,57 +495,86 @@ fn a_hundred_thousand_signals_ticked_at_once_follow_the_strips_built_before() {
     );
 }
 
-/// An expression over a stored run is evaluated on a Results job, a block at
-/// a time: the frame that asks for it reads none of its operands whole and
-/// names it pending on its pane, and the curve the job lands holds, sample
-/// for sample, what the same samples held in memory and read whole give.
+/// More rows than a block, so a read of a block is not a read of all: the
+/// time grid and `V(out)` on it.
 #[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn an_expression_over_a_stored_run_is_evaluated_off_the_frame_a_block_at_a_time() {
-    use crate::workbench::documents::result_document::test_fixtures::stored_transient;
-    use crate::workbench::results_job::hold_jobs_for_tests;
-    const TEXT: &str = "V(out) * 2 - avg(V(out))";
-    // More rows than a block, so a read of a block is not a read of all.
+fn stored_rows() -> (Vec<f64>, Vec<f64>) {
     let rows = 3 * rspice_results::waveform::BLOCK_SAMPLES + 7;
     let time: Vec<f64> = (0..rows).map(|row| row as f64 * 1.0e-9).collect();
-    let out: Vec<f64> = time.iter().map(|t| (t * 2.0e5).sin()).collect();
-    let host = |analysis: AnalysisResult| {
-        let mut state = ResultsTestHost::default();
-        state.model.simulation.start_run().add_analysis(analysis);
-        state.model.simulation.complete_run();
-        let run = state.model.simulation.active_run().expect("the run");
-        let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    let out = time.iter().map(|t| (t * 2.0e5).sin()).collect();
+    (time, out)
+}
+
+/// A host with `analysis` as its one run, in volts, with `expressions` on
+/// its strip; the analysis' key.
+#[cfg(not(target_arch = "wasm32"))]
+fn expression_host(
+    mut analysis: AnalysisResult,
+    expressions: &[&str],
+) -> (ResultsTestHost, AnalysisPresentationKey) {
+    analysis.waveforms = std::mem::take(&mut analysis.waveforms)
+        .into_iter()
+        .map(|trace| trace.with_unit("V"))
+        .collect();
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.start_run().add_analysis(analysis);
+    state.model.simulation.complete_run();
+    let run = state.model.simulation.active_run().expect("the run");
+    let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+    for text in expressions {
         state
             .results
             .results
-            .add_expression_trace(&state.model.simulation, key, TEXT.to_owned())
+            .add_expression_trace(&state.model.simulation, key, (*text).to_owned())
             .expect("the expression is added");
-        (state, key)
-    };
-    let curves = |state: &mut ResultsTestHost| {
-        let models = cached_models(
-            &state.model.simulation,
-            &mut state.results.results,
-            ComplexNumberDisplay::MagnitudePhaseDegrees,
-            &Tokens::default(),
-        );
-        resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default())
-    };
-    let (stored, columns) = stored_transient(
-        time.clone(),
-        vec![("V(out)".to_owned(), out.clone())],
-        Some([8; 32]),
-    );
-    let (mut state, key) = host(stored);
-    let whole_reads = || {
-        columns
-            .iter()
-            .map(|column| column.whole_reads())
-            .sum::<u64>()
-    };
+    }
+    (state, key)
+}
 
-    hold_jobs_for_tests(true);
-    let ctx = new_context();
+/// The stored run of [`stored_rows`] and the columns it reads, which count
+/// the reads that take a column whole.
+#[cfg(not(target_arch = "wasm32"))]
+fn stored_run(
+    time: &[f64],
+    out: &[f64],
+) -> (
+    AnalysisResult,
+    Vec<std::sync::Arc<crate::workbench::documents::result_document::test_fixtures::CountedColumn>>,
+) {
+    crate::workbench::documents::result_document::test_fixtures::stored_transient(
+        time.to_vec(),
+        vec![("V(out)".to_owned(), out.to_vec())],
+        Some([8; 32]),
+    )
+}
+
+/// The same samples held in memory.
+#[cfg(not(target_arch = "wasm32"))]
+fn held_run(time: &[f64], out: &[f64]) -> AnalysisResult {
+    AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        RetainedTrace::new("V(out)", time.to_vec(), out.to_vec(), "#55aaff"),
+    ])
+}
+
+/// The expression curves the first strip resolves.
+#[cfg(not(target_arch = "wasm32"))]
+fn expression_curves(
+    state: &mut ResultsTestHost,
+) -> Vec<rspice_results_ui::waves::pane::ResolvedExpr> {
+    let models = cached_models(
+        &state.model.simulation,
+        &mut state.results.results,
+        ComplexNumberDisplay::MagnitudePhaseDegrees,
+        &Tokens::default(),
+    );
+    resolve_strip_exprs(&mut state.results_parts(), &models[0], &Tokens::default())
+}
+
+/// One Waves frame, holding the jobs it starts while `hold`: the texts it
+/// painted.
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_frame(ctx: &egui::Context, state: &mut ResultsTestHost, hold: bool) -> Vec<String> {
+    crate::workbench::results_job::hold_jobs_for_tests(hold);
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
@@ -558,49 +587,162 @@ fn an_expression_over_a_stored_run_is_evaluated_off_the_frame_a_block_at_a_time(
             egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state.results_parts()));
         },
     );
-    hold_jobs_for_tests(false);
-    assert_eq!(whole_reads(), 0, "the frame read an operand whole");
-    let painted: Vec<String> = output
+    crate::workbench::results_job::hold_jobs_for_tests(false);
+    output
         .shapes
         .iter()
         .filter_map(|clipped| match &clipped.shape {
             egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
             _ => None,
         })
-        .collect();
-    assert!(
-        painted.iter().any(|text| text.contains("evaluating")),
-        "the pane names the expression pending: {painted:?}"
-    );
+        .collect()
+}
+
+/// The job out for `text` on `key`, released if it was held.
+#[cfg(not(target_arch = "wasm32"))]
+fn released_job(
+    state: &ResultsTestHost,
+    key: AnalysisPresentationKey,
+    text: &str,
+) -> Option<
+    crate::workbench::results_job::ResultsJob<
+        crate::workbench::documents::result_document::ExpressionSeriesResult,
+    >,
+> {
     let job = state
         .results
         .results
         .expression_jobs
-        .get(&(key, TEXT.to_owned()))
-        .expect("a job evaluates the expression")
+        .get(&(key, text.to_owned()))?
         .job
         .clone();
     job.release();
+    Some(job)
+}
+
+/// Whether two series hold the same samples, bit for bit.
+#[cfg(not(target_arch = "wasm32"))]
+fn same_samples(
+    left: &rspice_results::waveform::WaveformValues,
+    right: &rspice_results::waveform::WaveformValues,
+) -> bool {
+    left.len() == right.len()
+        && left
+            .samples(..)
+            .zip(right.samples(..))
+            .all(|(left, right)| left.to_bits() == right.to_bits())
+}
+
+/// An expression over a stored run is evaluated on a Results job, a block at
+/// a time: the frame that asks for it reads none of its operands whole and
+/// names it pending on its pane, and the curve the job lands holds, sample
+/// for sample, what the same samples held in memory and read whole give.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_expression_over_a_stored_run_is_evaluated_off_the_frame_a_block_at_a_time() {
+    const TEXT: &str = "V(out) * 2 - avg(V(out))";
+    let (time, out) = stored_rows();
+    let (stored, columns) = stored_run(&time, &out);
+    let (mut state, key) = expression_host(stored, &[TEXT]);
+    let whole_reads = || {
+        columns
+            .iter()
+            .map(|column| column.whole_reads())
+            .sum::<u64>()
+    };
+
+    let painted = painted_frame(&new_context(), &mut state, true);
+    assert_eq!(whole_reads(), 0, "the frame read an operand whole");
+    assert!(
+        painted.iter().any(|text| text.contains("evaluating")),
+        "the pane names the expression pending: {painted:?}"
+    );
+    let job = released_job(&state, key, TEXT).expect("a job evaluates the expression");
     assert!(
         job.wait(std::time::Duration::from_secs(120)),
         "the job ends"
     );
 
-    let landed = curves(&mut state);
+    let landed = expression_curves(&mut state);
     assert_eq!(whole_reads(), 0, "the job read an operand whole");
-    let (mut held, _) = host(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
-            .with_waveforms(vec![RetainedTrace::new("V(out)", time, out, "#55aaff")]),
-    );
-    let whole = curves(&mut held);
+    let (mut held, _) = expression_host(held_run(&time, &out), &[TEXT]);
+    let whole = expression_curves(&mut held);
     assert_eq!((landed.len(), whole.len()), (1, 1));
-    assert_eq!(landed[0].y.len(), rows);
+    assert_eq!(landed[0].y.len(), time.len());
     assert!(
-        landed[0]
-            .y
-            .samples(..)
-            .zip(whole[0].y.samples(..))
-            .all(|(block, whole)| block.to_bits() == whole.to_bits()),
+        same_samples(&landed[0].y, &whole[0].y),
         "the curve read in blocks is not the curve read whole"
+    );
+}
+
+/// Dragging a cursor an expression over a stored run reads never leaves its
+/// pane without the curve or marks it pending: each frame draws the curve
+/// last landed while a job evaluates the new position, a job for a position
+/// the cursor has left is dropped, never drawn, and the curve that lands
+/// last is the one at the cursor's final position.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn dragging_a_cursor_an_expression_reads_keeps_its_curve_until_the_last_position_lands() {
+    const TEXT: &str = "V(out) - xA";
+    let (time, out) = stored_rows();
+    let (stored, _) = stored_run(&time, &out);
+    let (mut state, key) = expression_host(stored, &[TEXT]);
+    let wait = |state: &ResultsTestHost| {
+        if let Some(job) = released_job(state, key, TEXT) {
+            assert!(
+                job.wait(std::time::Duration::from_secs(120)),
+                "the job ends"
+            );
+        }
+    };
+    state.results.results.session.cursors.a = Some(time[10]);
+    assert!(
+        expression_curves(&mut state).is_empty(),
+        "nothing has landed"
+    );
+    wait(&state);
+    assert_eq!(
+        expression_curves(&mut state).len(),
+        1,
+        "the first curve lands"
+    );
+
+    let ctx = new_context();
+    let steps = 40;
+    for step in 0..steps {
+        state.results.results.session.cursors.a = Some(time[100 + step * 997]);
+        let painted = painted_frame(&ctx, &mut state, false);
+        assert!(
+            !painted.iter().any(|text| text.contains("evaluating")),
+            "frame {step} marked the expression pending: {painted:?}"
+        );
+        assert_eq!(
+            expression_curves(&mut state).len(),
+            1,
+            "frame {step} left the pane without the curve"
+        );
+    }
+    // The job out when the drag stops may be for a position it left: that
+    // one is dropped and the final position's is started in its place.
+    for _ in 0..3 {
+        wait(&state);
+        assert_eq!(expression_curves(&mut state).len(), 1);
+    }
+    assert!(
+        !state
+            .results
+            .results
+            .expression_jobs
+            .contains_key(&(key, TEXT.to_owned())),
+        "the final position has landed"
+    );
+    let last = time[100 + (steps - 1) * 997];
+    let landed = expression_curves(&mut state);
+    let expected = rspice_results::waveform::WaveformValues::from(
+        out.iter().map(|out| out - last).collect::<Vec<_>>(),
+    );
+    assert!(
+        same_samples(&landed[0].y, &expected),
+        "the curve drawn is not the one at the cursor's final position"
     );
 }

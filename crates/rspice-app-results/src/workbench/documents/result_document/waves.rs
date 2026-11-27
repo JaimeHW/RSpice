@@ -572,7 +572,7 @@ fn show_strips(ui: &mut Ui, state: &mut ResultsParts<'_>, stack: Stack) {
         ui.ctx().request_repaint();
     }
     // An expression evaluated off the frame lands on a frame after it is in.
-    if expressions::expressions_evaluating(state.results) {
+    if std::mem::take(&mut state.results.expression_frame_due) {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(30));
     }

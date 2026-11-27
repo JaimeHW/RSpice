@@ -2000,10 +2000,13 @@ pub struct ResultsState {
     pub analysis_expr_cache:
         std::collections::HashMap<(AnalysisPresentationKey, String), ExprSeries>,
     /// Expressions over stored samples being evaluated off the frame, by the
-    /// same keys; each lands in `analysis_expr_cache` once it is in.
-    /// Transient.
+    /// same keys, one job each; each lands in `analysis_expr_cache` once it
+    /// is in. Transient.
     pub(crate) expression_jobs:
         std::collections::HashMap<(AnalysisPresentationKey, String), ExpressionJob>,
+    /// Whether an expression read since the last Waves frame has a job still
+    /// out, so another frame is due to land it. Transient.
+    pub(crate) expression_frame_due: bool,
     /// The run whose attributed failure sites are currently marked on the
     /// drawing, if any.
     ///
