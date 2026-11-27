@@ -502,8 +502,9 @@ pub(in crate::workbench) fn duplicate_shown_document(
 }
 
 /// Every saved result document as Open result document lists it, the most
-/// recently made first, each with the run and analysis its first pane
-/// reads, beside the document it is.
+/// recently changed first and, of those that carry no time, the most
+/// recently made, each with the run and analysis its first pane reads and
+/// when it changed, beside the document it is.
 pub(in crate::workbench) fn open_rows(
     state: ResultsReads<'_>,
 ) -> Vec<(
@@ -513,10 +514,20 @@ pub(in crate::workbench) fn open_rows(
     use crate::workbench::documents::result_document::persistent_document;
     let content = &state.model.workspace.content;
     let runs = &state.model.simulation.retained.runs;
-    saved_documents(state.model)
+    let mut documents = saved_documents(state.model)
         .into_iter()
         .rev()
         .map(|listed| {
+            let changed = content.visualization_document_changed_at(listed.id);
+            (listed, changed)
+        })
+        .collect::<Vec<_>>();
+    // A stable sort, so documents changed together, or carrying no time,
+    // keep the most recently made first.
+    documents.sort_by_key(|(_, changed)| std::cmp::Reverse(changed.unwrap_or(0)));
+    documents
+        .into_iter()
+        .map(|(listed, changed)| {
             let read = content
                 .visualization_document(listed.id)
                 .and_then(|document| {
@@ -539,6 +550,9 @@ pub(in crate::workbench) fn open_rows(
                     title: listed.title,
                     run,
                     analysis,
+                    modified_ms: changed.unwrap_or(0),
+                    modified: changed
+                        .map_or_else(String::new, rspice_app_state::time_compat::local_stamp),
                 },
             )
         })
@@ -560,7 +574,7 @@ pub(in crate::workbench) fn open_chosen(
     let rows = open_rows(state.results_reads());
     let (document, _) = draft
         .chosen()
-        .and_then(|row| rows.get(row))
+        .and_then(|key| rows.iter().find(|(_, row)| row.key == key))
         .ok_or("Choose a document to open.")?;
     if !show_visualization_document(state, document) {
         return Err("Results is not the workspace showing".to_owned());
