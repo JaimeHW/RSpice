@@ -464,9 +464,12 @@ impl KeptSegments {
             .iter()
             .filter_map(Weak::upgrade)
             .find(|segment| {
+                // Open is not enough: a segment whose file was deleted under its reader reads
+                // as missing to a file that keeps it in that folder.
                 scope
                     .iter()
                     .any(|folder| segment.path == folder.join(&name))
+                    && segment.path.is_file()
             })
     }
 
