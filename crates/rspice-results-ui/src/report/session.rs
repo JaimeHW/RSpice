@@ -166,14 +166,12 @@ pub fn report_template_index(template: ReportTemplate) -> usize {
     match template {
         ReportTemplate::ReleaseVerification42 => 0,
         ReportTemplate::DesignReview => 1,
-        ReportTemplate::ModelQualification => 2,
     }
 }
 
 pub fn report_template_from_index(index: usize) -> ReportTemplate {
     match index {
         1 => ReportTemplate::DesignReview,
-        2 => ReportTemplate::ModelQualification,
         _ => ReportTemplate::ReleaseVerification42,
     }
 }

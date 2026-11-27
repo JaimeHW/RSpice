@@ -107,7 +107,6 @@ pub fn report_template_label(template: ReportTemplate) -> &'static str {
     match template {
         ReportTemplate::ReleaseVerification42 => "Release verification",
         ReportTemplate::DesignReview => "Design review",
-        ReportTemplate::ModelQualification => "Model qualification",
     }
 }
 

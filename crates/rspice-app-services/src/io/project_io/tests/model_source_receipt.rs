@@ -1,12 +1,9 @@
-//! Which model definitions a run consumed, and under what qualification gate.
+//! Which model definitions a run consumed.
 //!
 //! A receipt names its models by exact revision and content digest rather than
 //! by name, so a library edited after the run cannot be mistaken for the one
-//! that produced these numbers. Alongside each is whether that exact revision
-//! had cleared its qualification gate when the run was sealed — a fact that has
-//! to survive the project file, because the gate is editable and the run is
-//! not. A restored project that forgot it would present an unqualified result
-//! as sign-off evidence, which is the one thing the stamp exists to prevent.
+//! that produced these numbers, and that record has to survive the project
+//! file.
 
 use super::*;
 use rspice_results::specification::{SpecificationSource, SpecificationWaiver};
@@ -20,7 +17,6 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
         "nch_receipt",
         ObjectRevision::INITIAL,
         ContentDigest::from_bytes([0x51; 32]),
-        rspice_results::run_receipt::PreparedModelQualification::Unqualified,
     )
     .unwrap();
     let analysis_id = AnalysisInstanceId::new();
@@ -92,18 +88,6 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
     let restored_source = &restored.project_model_sources()[0];
     assert_eq!(restored_source.source_id(), source_id);
     assert_eq!(restored_source.model_name(), "nch_receipt");
-    assert_eq!(
-        restored_source.qualification(),
-        rspice_results::run_receipt::PreparedModelQualification::Unqualified,
-        "the qualification gate a run was prepared under must survive the \
-         project file, or a reopened project presents an unqualified result as \
-         sign-off evidence"
-    );
-    assert!(
-        restored.sign_off_blocker().is_some(),
-        "a restored run with an unqualified model is still not sign-off"
-    );
-    assert_eq!(restored.unqualified_model_sources().len(), 1);
     assert_eq!(
         restored_source.content_digest(),
         ContentDigest::from_bytes([0x51; 32])

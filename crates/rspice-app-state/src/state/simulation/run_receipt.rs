@@ -51,7 +51,6 @@ mod tests {
             "precision_nmos",
             ObjectRevision::INITIAL,
             digest(0x44),
-            rspice_results::run_receipt::PreparedModelQualification::Released,
         )
         .expect("valid project model identity");
         let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {

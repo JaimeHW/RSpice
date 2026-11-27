@@ -1,7 +1,6 @@
 //! Exact retained-byte publication and tamper rejection across catalog and execution.
 
 use super::*;
-use rspice_model_library::qualification::ModelQualificationState;
 use rspice_model_library::{ProjectModelDefinition, ProjectModelRevisionDefinition};
 use rspice_vocabulary::product::ObjectRevision;
 
@@ -14,7 +13,6 @@ fn create_project_model(
     catalog.create_project_model_revision(
         name,
         &ProjectModelRevisionDefinition::new(definition.clone(), metadata),
-        &ModelQualificationState::default(),
     )
 }
 
@@ -91,7 +89,6 @@ fn project_model_create_and_replace_publish_exact_retained_execution_bytes() {
                     .reconcile_metadata(None)
                     .expect("candidate metadata"),
             ),
-            &ModelQualificationState::default(),
         )
         .expect("replace project model");
     let ModelSourceAuthority::ProjectOwned {

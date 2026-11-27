@@ -157,7 +157,7 @@ impl PreparedStudy {
             "source_digest": metadata.source_digest,
             "target": metadata.target,
             "advisories": metadata.advisories,
-            "qualification_blocker": receipt.sign_off_blocker(),
+            "sign_off_blocker": receipt.sign_off_blocker(),
             "validation_scope": "Source and task preparation; no numerical analysis has been executed.",
         }))
     }

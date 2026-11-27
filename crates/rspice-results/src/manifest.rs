@@ -745,14 +745,7 @@ const fn missing_result_status(lifecycle: SimulationRunLifecycle) -> &'static st
 /// does is name the blocker the receipt carries, read from the one owner
 /// [`crate::run_receipt::PreparedRunReceipt::sign_off_blocker`].
 ///
-/// Its doc said that before this. What the code did was rebuild the verdict out
-/// of `unqualified_model_sources()` and `preview_engine_kinds()` — the two
-/// halves that owner is a fold of — and restate them in a vocabulary of its
-/// own, so a third disqualifying condition added to the receipt would leave
-/// this line calling the run merely unqualified while Verify's tile refused it,
-/// and the blocker named the objects while this named only their category.
-///
-/// The eligible case then stayed behind: it read "unavailable · no retained
+/// The eligible case once read "unavailable · no retained
 /// sign-off qualification" for a receipt nothing disqualifies. Both cases come
 /// from [`crate::run_receipt::SignOffStanding`] now, which is where Verify's tile
 /// reads them too.
@@ -1022,7 +1015,7 @@ mod tests {
         assert_eq!(standing.verdict(), "Eligible");
         assert_eq!(
             manifest.qualification,
-            "eligible · every model released · every analysis production"
+            "eligible · every analysis production"
         );
         assert_eq!(manifest.qualification, standing.qualification());
         assert!(

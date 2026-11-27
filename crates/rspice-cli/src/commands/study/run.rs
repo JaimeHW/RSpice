@@ -292,7 +292,7 @@ fn execute_inner(args: &StudyRunArgs, config: &Config, quiet: bool) -> Result<Va
         "task_count": receipt.tasks().len(), "snapshot_digest": metadata.snapshot_digest,
         "dataset_digest": run.dataset_content_digest_with_encoding(rspice_results::result_digest::ResultDigestEncoding::CURRENT),
         "elapsed_seconds": started.elapsed().as_secs_f64(),
-        "qualification_blocker": receipt.sign_off_blocker(),
+        "sign_off_blocker": receipt.sign_off_blocker(),
     }))
 }
 

@@ -54,8 +54,8 @@ fn project_model_sources_in(
         .into_iter()
         // A repeated semantic name cannot be traced back to one exact project
         // source from the executable SPICE instance. Omit every ambiguous
-        // candidate so simulation remains available while correlation
-        // evidence fails closed.
+        // candidate so simulation remains available while the receipt's
+        // provenance fails closed.
         .filter(|(_, model_name, _, _)| {
             name_counts.get(&model_name.to_ascii_lowercase()).copied() == Some(1)
         })
@@ -85,68 +85,15 @@ fn project_model_sources_in(
                 && model_definitions_match(canonical_model, executable_model)
         })
         .map(|(source_id, model_name, revision, content_digest)| {
-            let qualification = model_qualification_at_preparation(
-                catalog,
-                source_id,
-                &model_name,
-                revision,
-                content_digest,
-            );
             rspice_results::run_receipt::PreparedModelSourceIdentity::new(
                 source_id,
                 model_name,
                 revision,
                 content_digest,
-                qualification,
             )
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
         })
         .collect()
-}
-
-/// Whether an immutable release covers this exact model revision right now.
-///
-/// Matched on the exact source digest and revision, not on the model name: a
-/// release authorizes the bytes it was measured against, so a model edited
-/// after it was released is a different model and is not covered by it. That is
-/// the whole value of recording the answer per run — the qualification state is
-/// editable and the run is not.
-fn model_qualification_at_preparation(
-    catalog: &rspice_model_library::ModelCatalog,
-    source_id: rspice_vocabulary::product::ModelSourceId,
-    model_name: &str,
-    revision: rspice_vocabulary::product::ObjectRevision,
-    content_digest: rspice_vocabulary::product::ContentDigest,
-) -> rspice_results::run_receipt::PreparedModelQualification {
-    use rspice_model_library::ModelSourceAuthority;
-    use rspice_results::run_receipt::PreparedModelQualification;
-
-    let Some(library) = catalog.libraries_sorted().into_iter().find(|library| {
-        matches!(
-            library.source_authority,
-            ModelSourceAuthority::ProjectOwned { source_id: owner, .. } if owner == source_id
-        )
-    }) else {
-        return PreparedModelQualification::Unqualified;
-    };
-
-    let released = library
-        .model_qualification
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case(model_name))
-        .any(|(_, qualification)| {
-            qualification.releases.iter().any(|release| {
-                release.source.source_id == Some(source_id)
-                    && release.source.source_digest == content_digest
-                    && release.source.source_revision == revision
-            })
-        });
-
-    if released {
-        PreparedModelQualification::Released
-    } else {
-        PreparedModelQualification::Unqualified
-    }
 }
 
 fn canonical_project_model_definitions(
@@ -175,7 +122,7 @@ fn canonical_project_model_definitions(
                 rspice_model_library::ProjectModelDefinition::from_device_model(model),
                 metadata.clone(),
             );
-            let Ok(source) = definition.qualification_model_source(None) else {
+            let Ok(source) = definition.standalone_model_source(None) else {
                 continue;
             };
             let deck = format!("Authenticated project model\n{source}.end\n");

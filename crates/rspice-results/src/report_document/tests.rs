@@ -861,7 +861,7 @@ fn document_template_and_page_update_policy_are_transactional() {
             document.revision(),
             vec![
                 ReportEdit::SetTemplate {
-                    template: ReportTemplate::ModelQualification,
+                    template: ReportTemplate::DesignReview,
                 },
                 ReportEdit::SetPageUpdatePolicy {
                     page_id,
@@ -872,7 +872,7 @@ fn document_template_and_page_update_policy_are_transactional() {
             72,
         )
         .unwrap();
-    assert_eq!(document.template(), ReportTemplate::ModelQualification);
+    assert_eq!(document.template(), ReportTemplate::DesignReview);
     assert_eq!(
         document.page(page_id).unwrap().update_policy(),
         ReportPageUpdatePolicy::FreezeSelectedRevision

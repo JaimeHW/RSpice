@@ -21,51 +21,15 @@ use crate::analysis_type::AnalysisType;
 use crate::provenance::AnalysisResultSourceDomain;
 use crate::waveform::RetainedWaveform;
 
-/// Whether the exact model revision a run consumed had cleared its
-/// qualification gate at the moment the run was prepared.
-///
-/// Recorded per model rather than derived later, because the qualification
-/// state is editable and the run is not: a model released after a run finished
-/// does not retroactively qualify that run's results, and a release withdrawn
-/// afterwards does not retroactively disqualify them. What the receipt says is
-/// what was true when the deck was sealed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PreparedModelQualification {
-    /// An immutable release covers this exact source revision and digest.
-    Released,
-    /// No release covers this exact revision. It may never have been
-    /// qualified, or it may have been edited since the release that covered it
-    /// — the receipt does not distinguish them, because neither is sign-off.
-    Unqualified,
-    /// The run predates recorded qualification state. Legacy history is not
-    /// evidence of qualification and is not evidence against it.
-    #[default]
-    Unrecorded,
-}
-
-impl PreparedModelQualification {
-    /// Whether this model bars the run from carrying a sign-off.
-    ///
-    /// Only an outright `Unqualified` model does. An unrecorded state is a gap
-    /// in the record, not a finding, and stamping historical results as
-    /// unqualified would put a claim on them that was never assessed.
-    #[must_use]
-    pub const fn blocks_sign_off(self) -> bool {
-        matches!(self, Self::Unqualified)
-    }
-}
-
 /// Exact project-owned model definition admitted to one prepared run.
 ///
-/// Historical receipts legitimately carry no identities and therefore cannot
-/// authorize model-correlation evidence for an exact model revision.
+/// Historical receipts legitimately carry no identities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedModelSourceIdentity {
     source_id: ModelSourceId,
     model_name: String,
     revision: ObjectRevision,
     content_digest: ContentDigest,
-    qualification: PreparedModelQualification,
 }
 
 impl PreparedModelSourceIdentity {
@@ -74,7 +38,6 @@ impl PreparedModelSourceIdentity {
         model_name: impl Into<String>,
         revision: ObjectRevision,
         content_digest: ContentDigest,
-        qualification: PreparedModelQualification,
     ) -> Result<Self, String> {
         let model_name = model_name.into();
         if model_name.trim().is_empty() {
@@ -85,7 +48,6 @@ impl PreparedModelSourceIdentity {
             model_name,
             revision,
             content_digest,
-            qualification,
         })
     }
 
@@ -107,11 +69,6 @@ impl PreparedModelSourceIdentity {
     #[must_use]
     pub const fn content_digest(&self) -> ContentDigest {
         self.content_digest
-    }
-
-    #[must_use]
-    pub const fn qualification(&self) -> PreparedModelQualification {
-        self.qualification
     }
 }
 
@@ -685,26 +642,10 @@ impl PreparedRunReceipt {
         &self.project_model_sources
     }
 
-    /// The project-owned models this run consumed that had not cleared their
-    /// qualification gate when it was prepared.
-    ///
-    /// A non-empty answer does not make the results wrong and must never stop
-    /// anyone reading them — an unqualified model is exactly what an engineer
-    /// characterizing a new device is supposed to be simulating with. It makes
-    /// them unfit to be *cited* as sign-off, so every surface that presents
-    /// them as evidence says so, and says which model.
-    #[must_use]
-    pub fn unqualified_model_sources(&self) -> Vec<&PreparedModelSourceIdentity> {
-        self.project_model_sources
-            .iter()
-            .filter(|identity| identity.qualification().blocks_sign_off())
-            .collect()
-    }
-
     /// The preview-engine analyses this run executed.
     ///
-    /// The second thing that disqualifies a run from sign-off, and it is a
-    /// property of the *engine* rather than of the design: a preview solver
+    /// What disqualifies a run from sign-off, and it is a property of the
+    /// *engine* rather than of the design: a preview solver
     /// ships connected and produces real numbers, but has not cleared the
     /// evidence bar a production kind has. The tag on each authenticated task
     /// is what survives into a sealed receipt, so it is what this reads.
@@ -723,16 +664,10 @@ impl PreparedRunReceipt {
     /// Why this run may not be cited as sign-off evidence, naming the objects.
     ///
     /// The one predicate, and it answers with its reason rather than with a
-    /// bare verdict. Two things disqualify a run and both are stamped on the
-    /// receipt: a project model that had not cleared its qualification gate
-    /// when the run was prepared, and an analysis whose engine is still
-    /// preview. Verify's sign-off tile, the Results manifest, the Results specs
-    /// table and the requirements page all read this rather than re-deriving
-    /// half of it, because a surface that checks only the models calls a
-    /// preview run eligible while one that checks only the kind calls a
-    /// qualified one ineligible — and a stamp reading "NOT SIGN-OFF" with
-    /// nothing after it is what a surface says when it knows the answer and not
-    /// the cause.
+    /// bare verdict: an analysis whose engine is still preview, stamped on the
+    /// receipt. Every surface reads this rather than re-deriving it, because a
+    /// stamp reading "NOT SIGN-OFF" with nothing after it is what a surface
+    /// says when it knows the answer and not the cause.
     ///
     /// There was an `is_sign_off_eligible` beside this returning
     /// `self.sign_off_blocker().is_none()`. Every surface that reached for it
@@ -740,31 +675,15 @@ impl PreparedRunReceipt {
     /// discarded half the answer.
     #[must_use]
     pub fn sign_off_blocker(&self) -> Option<String> {
-        let mut reasons = Vec::new();
-        let unqualified = self.unqualified_model_sources();
-        if !unqualified.is_empty() {
-            let named = unqualified
-                .iter()
-                .take(3)
-                .map(|identity| identity.model_name())
-                .collect::<Vec<_>>()
-                .join(", ");
-            reasons.push(if unqualified.len() > 3 {
-                format!("{named} and {} more unqualified", unqualified.len() - 3)
-            } else {
-                format!("{named} unqualified at run time")
-            });
-        }
         let preview = self.preview_engine_kinds();
-        if !preview.is_empty() {
+        (!preview.is_empty()).then(|| {
             let named = preview
                 .iter()
                 .map(|kind| kind.result_analysis_type().display_name())
                 .collect::<Vec<_>>()
                 .join(", ");
-            reasons.push(format!("{named} on a preview engine"));
-        }
-        (!reasons.is_empty()).then(|| reasons.join(" \u{00b7} "))
+            format!("{named} on a preview engine")
+        })
     }
 
     /// This run's sign-off standing, in the words every surface states it in.
@@ -873,9 +792,7 @@ impl SignOffStanding {
     #[must_use]
     pub fn cause(&self) -> String {
         match self {
-            Self::Eligible => "Every project model this run consumed was released, and every \
-                               analysis it ran is production"
-                .to_owned(),
+            Self::Eligible => "Every analysis this run ran is production".to_owned(),
             Self::Blocked(blocker) => blocker.clone(),
         }
     }
@@ -884,10 +801,7 @@ impl SignOffStanding {
     #[must_use]
     pub fn qualification(&self) -> String {
         match self {
-            Self::Eligible => {
-                "eligible \u{00b7} every model released \u{00b7} every analysis production"
-                    .to_owned()
-            }
+            Self::Eligible => "eligible \u{00b7} every analysis production".to_owned(),
             Self::Blocked(blocker) => format!("blocked \u{00b7} {blocker} \u{00b7} non-sign-off"),
         }
     }

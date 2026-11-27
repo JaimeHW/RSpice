@@ -89,6 +89,5 @@ fn create_project_model(
     catalog.create_project_model_revision(
         library_name,
         &rspice_model_library::ProjectModelRevisionDefinition::new(definition.clone(), metadata),
-        &rspice_model_library::qualification::ModelQualificationState::default(),
     )
 }

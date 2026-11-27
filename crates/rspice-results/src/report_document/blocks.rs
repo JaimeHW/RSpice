@@ -22,7 +22,6 @@ pub enum ReportTemplate {
     #[default]
     ReleaseVerification42,
     DesignReview,
-    ModelQualification,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -43,11 +43,7 @@ fn create_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
     if !host.editor().create_document_open {
         return;
     }
-    const TEMPLATE_LABELS: [&str; 3] = [
-        "Release verification",
-        "Design review",
-        "Model qualification",
-    ];
+    const TEMPLATE_LABELS: [&str; 2] = ["Release verification", "Design review"];
     let valid = valid_title(&host.editor().create_document_title);
     let writable = host.writable();
     let error = host.editor().transaction_error.clone();
@@ -169,11 +165,7 @@ fn page_properties_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
                 .position(|page| page.id() == page_id)
         })
         .unwrap_or_default();
-    const TEMPLATE_LABELS: [&str; 3] = [
-        "Release verification",
-        "Design review",
-        "Model qualification",
-    ];
+    const TEMPLATE_LABELS: [&str; 2] = ["Release verification", "Design review"];
     const UPDATE_POLICY_LABELS: [&str; 2] = [
         "Refresh linked figures automatically",
         "Freeze selected figure revision",

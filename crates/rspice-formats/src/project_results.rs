@@ -1498,7 +1498,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for PersistedField<T> {
 }
 
 /// The result-history schema this build writes, and the only one it reads.
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 48;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 49;
 
 fn analysis_type_key(analysis_type: AnalysisType) -> &'static str {
     match analysis_type {
