@@ -77,18 +77,6 @@ pub(crate) enum HardcopyDialogPage {
     PrintMapping,
 }
 
-/// Which region a surface too narrow to hold both is showing.
-///
-/// View state: it is a property of how this hardcopy is being looked at, never
-/// of the hardcopy itself, so it stays out of the setup the workflow commits
-/// and out of the comparisons that invalidate the preview.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum HardcopyRegion {
-    #[default]
-    Setup,
-    Preview,
-}
-
 /// The one concern the main page is editing right now.
 ///
 /// The surface shows exactly one of these at a time, which is what keeps it
@@ -298,15 +286,15 @@ pub enum HardcopyWorkflow {
 impl HardcopyWorkflow {
     pub(crate) const fn title(self) -> &'static str {
         match self {
-            Self::Print => "Print and hardcopy",
-            Self::Export => "Export active view",
+            Self::Print => "Print",
+            Self::Export => "Export",
         }
     }
 
     pub(crate) const fn primary_label(self) -> &'static str {
         match self {
             Self::Print => "Print",
-            Self::Export => "Export hardcopy",
+            Self::Export => "Save…",
         }
     }
 }
@@ -402,11 +390,6 @@ pub(crate) enum HardcopySubflowSnapshot {
 pub struct HardcopyDialogState {
     pub open: bool,
     pub(crate) page: HardcopyDialogPage,
-    pub section: HardcopySection,
-    /// Which region the one-at-a-time surface is showing. Meaningless where
-    /// the setup and the page are both on screen, which is why nothing else
-    /// reads it.
-    pub region: HardcopyRegion,
     pub(crate) subflow_snapshot: Option<HardcopySubflowSnapshot>,
     pub workflow: HardcopyWorkflow,
     pub source: Option<ActiveHardcopySource>,
@@ -425,6 +408,9 @@ pub struct HardcopyDialogState {
     pub(crate) margin_right: String,
     pub(crate) margin_bottom: String,
     pub margin_left: String,
+    /// Whether the margins are the operator's own, even where they happen to
+    /// match a preset's.
+    pub margins_custom: bool,
     pub(crate) bleed: String,
     pub(crate) scale: ScaleMode,
     pub(crate) custom_scale_percent: String,
@@ -462,6 +448,10 @@ pub struct HardcopyDialogState {
     pub(crate) include_header: bool,
     pub(crate) include_provenance: bool,
     pub(crate) watermark: Watermark,
+    pub(crate) include_cursors_markers: bool,
+    pub(crate) include_notes: bool,
+    /// The first and last page published, where not every page is.
+    pub page_range: Option<(u32, u32)>,
     pub(crate) print_mapping: PrintMappingTable,
     pub(crate) mapping_scope_draft: PrintMappingSaveScope,
     pub(crate) mapping_name_draft: String,
@@ -554,8 +544,6 @@ impl HardcopyDialogState {
         Self {
             open: false,
             page: HardcopyDialogPage::Main,
-            section: HardcopySection::default(),
-            region: HardcopyRegion::default(),
             subflow_snapshot: None,
             workflow: HardcopyWorkflow::Print,
             source: None,
@@ -570,6 +558,7 @@ impl HardcopyDialogState {
             margin_right: format_length(margins.right, display_unit),
             margin_bottom: format_length(margins.bottom, display_unit),
             margin_left: format_length(margins.left, display_unit),
+            margins_custom: false,
             bleed: match physical.bleed() {
                 Bleed::None => "0".to_owned(),
                 Bleed::Uniform(value) => format_length(value, display_unit),
@@ -614,6 +603,11 @@ impl HardcopyDialogState {
             include_header: decorations.includes_header(),
             include_provenance: decorations.includes_provenance(),
             watermark: decorations.watermark().clone(),
+            include_cursors_markers: decorations.includes_cursors_and_markers(),
+            include_notes: decorations.includes_notes(),
+            page_range: setup
+                .page_range()
+                .map(|range| (range.first(), range.last())),
             print_mapping: setup.print_mapping().clone(),
             mapping_scope_draft: setup.print_mapping().save_scope().clone(),
             mapping_name_draft: match setup.print_mapping().save_scope() {
@@ -651,8 +645,6 @@ impl HardcopyDialogState {
         let mut draft = saved.cloned().map_or_else(Self::default, Self::from_setup);
         draft.open = true;
         draft.page = HardcopyDialogPage::Main;
-        draft.section = HardcopySection::default();
-        draft.region = HardcopyRegion::default();
         draft.subflow_snapshot = None;
         draft.workflow = workflow;
         draft.source = Some(source);
@@ -1068,7 +1060,8 @@ impl HardcopyDialogState {
                 self.include_header,
                 self.include_provenance,
                 self.watermark.clone(),
-            )?,
+            )?
+            .with_plot_overlays(self.include_cursors_markers, self.include_notes),
             SchematicHardcopySetup::new(
                 self.schematic_extent,
                 self.outside_sheet_content,
@@ -1080,6 +1073,11 @@ impl HardcopyDialogState {
                 self.include_schematic_grid,
             ),
             print_mapping.clone(),
+        )?
+        .with_page_range(
+            self.page_range
+                .map(|(first, last)| rspice_hardcopy_contract::PageRange::try_new(first, last))
+                .transpose()?,
         )?)
     }
 
@@ -1776,49 +1774,6 @@ mod tests {
             .section(),
             Some(HardcopySection::Page)
         );
-    }
-
-    /// Which section is open and which region a narrow surface is showing are
-    /// properties of the looking, not of the hardcopy. If either reached the
-    /// setup, reading a different section would rewrite the document.
-    #[test]
-    fn looking_at_a_different_section_or_region_changes_no_setup() {
-        let mut draft = HardcopyDialogState::default();
-        draft.open(
-            HardcopyWorkflow::Export,
-            source(),
-            ContentExtent::try_new(
-                Length::from_micrometres(250_000),
-                Length::from_micrometres(160_000),
-            )
-            .unwrap(),
-            None,
-        );
-        let baseline = draft.build_setup().unwrap();
-        let mut store = HardcopySetupStore::default();
-        let first = store
-            .save(draft.source.as_ref().unwrap(), baseline.clone())
-            .unwrap();
-        assert_eq!(first.disposition(), SetupSaveDisposition::Inserted);
-        let digest = first.saved().content_digest();
-
-        for section in HardcopySection::ALL {
-            for region in [HardcopyRegion::Setup, HardcopyRegion::Preview] {
-                draft.section = section;
-                draft.region = region;
-                draft.refresh_preview();
-                let setup = draft.build_setup().unwrap();
-                assert_eq!(setup, baseline, "{section:?} / {region:?}");
-                let outcome = store.save(draft.source.as_ref().unwrap(), setup).unwrap();
-                assert_eq!(
-                    outcome.disposition(),
-                    SetupSaveDisposition::Unchanged,
-                    "{section:?} / {region:?}"
-                );
-                assert_eq!(outcome.saved().content_digest(), digest);
-                assert_eq!(outcome.saved().revision(), ObjectRevision::INITIAL);
-            }
-        }
     }
 
     /// Reopening a saved setup has to give back the setup that was saved. A

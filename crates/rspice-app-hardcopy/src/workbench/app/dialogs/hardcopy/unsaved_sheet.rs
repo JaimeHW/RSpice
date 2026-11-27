@@ -160,24 +160,6 @@ impl HardcopyDialogState {
             })
     }
 
-    /// Fit the page to what the selected printer can print: the widest strip
-    /// it cannot print becomes the margin on every side, so the sheet stays
-    /// centred on its paper, and the content is scaled to fit inside it.
-    pub(crate) fn fit_to_printer_printable_area(&mut self) {
-        let Some(job) = self.printer_job.as_ref() else {
-            return;
-        };
-        let margin = format_length(
-            widest_unprintable_margin(job.raster_geometry(), job.resolution_dpi()),
-            self.display_unit,
-        );
-        self.margin_top.clone_from(&margin);
-        self.margin_right.clone_from(&margin);
-        self.margin_bottom.clone_from(&margin);
-        self.margin_left = margin;
-        self.scale = ScaleMode::FitPrintableArea;
-    }
-
     /// The unsaved sheet, while the page is still as the dialog last laid it.
     fn followed_unsaved_sheet(&self) -> Option<UnsavedSheetLayout> {
         let sheet = self.unsaved_sheet.as_ref()?;
@@ -208,6 +190,8 @@ impl HardcopyDialogState {
         self.include_header = decorations.includes_header();
         self.include_provenance = decorations.includes_provenance();
         self.watermark = decorations.watermark().clone();
+        self.include_cursors_markers = decorations.includes_cursors_and_markers();
+        self.include_notes = decorations.includes_notes();
         let laid_out = self.page_layout().ok();
         match (self.unsaved_sheet.as_mut(), laid_out) {
             (Some(sheet), Some(laid_out)) => {
@@ -330,7 +314,7 @@ fn fitted_to(
 
 /// The widest strip on any side of the page the driver cannot print,
 /// rounded up to a tenth of a millimetre.
-fn widest_unprintable_margin(geometry: PrinterRasterGeometry, dpi: u16) -> Length {
+pub(super) fn widest_unprintable_margin(geometry: PrinterRasterGeometry, dpi: u16) -> Length {
     let (width, height) = geometry.physical_size_px();
     let (x, y, printable_width, printable_height) = geometry.printable_rect_px();
     let widest = [

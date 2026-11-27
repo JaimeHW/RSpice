@@ -1,48 +1,12 @@
-//! The hardcopy studio decides once, then renders what it decided.
+//! The Print and Export dialog decides once, then renders what it decided.
 //!
-//! Two rules carry most of these: a summary reports a decision only where
-//! there is one to make, and the preview worker is bounded — two rotating
-//! texture slots, no launch over an active worker, and a cancel that
-//! completes before the dialog can reopen. The fit cases hold the studio to
-//! every viewport without scrolling, which is the constraint the section
-//! layout exists to satisfy.
+//! The preview worker is bounded: two rotating texture slots, no launch over
+//! an active worker, and a cancel that completes before the dialog can
+//! reopen.
 
 use super::*;
 
-/// A source with no governed drawing sheet has no sheet furniture to
-/// configure, so the rail must not offer the section — and a selection
-/// left pointing at it must land somewhere real rather than on a blank
-/// editor.
-#[test]
-fn a_source_without_an_authored_sheet_offers_no_sheet_section() {
-    let draft = HardcopyDialogState::default();
-    let sections = available_sections(&draft);
-
-    assert!(!sections.contains(&HardcopySection::DrawingSheet));
-    assert_eq!(sections.first(), Some(&HardcopySection::Source));
-    assert!(sections.contains(&HardcopySection::Output));
-}
-
-/// The rail summarises the sections nobody is looking at, so a summary that
-/// names a decision the document does not pose is worse than none.
-#[test]
-fn the_sheet_summary_only_reports_a_decision_there_is_one_to_make() {
-    let mut draft = HardcopyDialogState::default();
-    draft.outside_sheet_content = OutsideSheetContentPolicy::Ask;
-    // No resolved document: nothing crosses a sheet that does not exist.
-    assert_eq!(
-        section_detail(&draft, HardcopySection::DrawingSheet),
-        "sheet · undecided"
-    );
-    draft.schematic_extent = SchematicHardcopyExtent::CompleteSchematicContent;
-    assert_eq!(
-        section_detail(&draft, HardcopySection::DrawingSheet),
-        "complete content"
-    );
-}
-
-/// A raster target is meaningless without its resolution, and the rail is
-/// where it is read while another section is open.
+/// A raster target is meaningless without its resolution.
 #[test]
 fn the_output_summary_carries_the_resolution_of_a_raster_target() {
     assert_eq!(
@@ -119,40 +83,6 @@ fn closing_preview_cancels_and_clears_worker_before_reopen() {
         preview_schedule_decision(None, 42),
         PreviewScheduleDecision::Launch
     );
-}
-
-/// A preview with no page reserves exactly the band its toolbar draws, at
-/// the touch control height too. The no-page band was measured in a pass where
-/// its justified row did not stretch, so it reserved the text's height while
-/// it drew a touch control's: the preview column ran 29 points past the body
-/// and pushed the dialog's footer off a 768-point touch screen.
-#[test]
-fn a_preview_with_no_page_reserves_the_band_it_draws() {
-    for target in [None, Some(44.0)] {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, target);
-        let mut band = (0.0, 0.0);
-        let _ = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                let view = PreviewView { page: 0, zoom: 100 };
-                let reserved = preview_toolbar_height(ui, &view, 0, 340.0);
-                let drawn = ui
-                    .allocate_ui_with_layout(
-                        vec2(340.0, 400.0),
-                        Layout::top_down(Align::Min),
-                        |ui| preview_toolbar(ui, &mut { view }, 0, 340.0),
-                    )
-                    .inner;
-                band = (reserved, drawn);
-            });
-        });
-        assert!(
-            (band.0 - band.1).abs() < 0.5,
-            "target {target:?}: the desk gave up {:.0} pt for a band that drew {:.0}",
-            band.0,
-            band.1
-        );
-    }
 }
 
 #[test]

@@ -8,8 +8,7 @@ use egui::{Context, Rect, Vec2, vec2};
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::content_options::*;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::output_summary;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::{
-    DEFAULT_RASTER_DPI, HardcopyRegion, HardcopySection, HardcopyWorkflow, PaperDraft, publish,
-    render_hardcopy_dialog,
+    DEFAULT_RASTER_DPI, HardcopyWorkflow, PaperDraft, publish, render_hardcopy_dialog,
 };
 use rspice_hardcopy::render::max_raster_dpi;
 use rspice_hardcopy_contract::{OutputFormat, StandardPaper};
@@ -77,8 +76,6 @@ impl Studio {
             viewport,
         };
         studio.settle();
-        studio.app.state.hardcopy.hardcopy.section = HardcopySection::Output;
-        studio.app.state.hardcopy.hardcopy.region = HardcopyRegion::Setup;
         studio.app.state.hardcopy.hardcopy.format = OutputFormat::Png { dpi: 150 };
         studio.app.state.hardcopy.hardcopy.raster_dpi_draft = "150".to_owned();
         studio.app.state.hardcopy.hardcopy.embed_fonts = false;
@@ -91,12 +88,6 @@ impl Studio {
     /// The desktop composition: rail, editor and preview all on screen.
     fn wide() -> Self {
         Self::raster(vec2(1_440.0, 900.0))
-    }
-
-    /// A phone-width surface, which is below `STUDIO_SPLIT_WIDTH` and so
-    /// shows the setup or the page but never both.
-    fn narrow() -> Self {
-        Self::raster(vec2(390.0, 844.0))
     }
 
     fn pass(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
@@ -151,8 +142,8 @@ impl Studio {
         let output = self.pass(Vec::new());
         controls(&output)
             .into_iter()
-            .find(|(role, _, _)| *role == Role::TextInput)
-            .expect("the output section draws the resolution field")
+            .find(|(role, name, _)| *role == Role::TextInput && name == "Resolution")
+            .expect("the dialog draws the resolution field")
             .2
     }
 
@@ -262,7 +253,7 @@ fn click(pos: egui::Pos2) -> Vec<egui::Event> {
 fn a_resolution_typed_and_published_in_one_gesture_publishes_what_it_shows() {
     let mut studio = Studio::wide();
     studio.type_resolution("300");
-    let button = studio.control(Role::Button, "Export hardcopy");
+    let button = studio.control(Role::Button, "Save\u{2026}");
     let _ = studio.pass(click(button.center()));
 
     assert_eq!(studio.published_resolution(), Some(300));
@@ -275,92 +266,12 @@ fn a_resolution_typed_and_published_in_one_gesture_publishes_what_it_shows() {
 fn a_resolution_published_by_a_click_spanning_two_passes_publishes_what_it_shows() {
     let mut studio = Studio::wide();
     studio.type_resolution("300");
-    let button = studio.control(Role::Button, "Export hardcopy");
+    let button = studio.control(Role::Button, "Save\u{2026}");
     let _ = studio.pass(press(button.center()));
     let _ = studio.pass(release(button.center()));
 
     assert_eq!(studio.published_resolution(), Some(300));
     assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "300");
-}
-
-/// The rail replaces the section in the pass it is clicked, so the field is
-/// never drawn again to see that its editing session ended. Publishing from
-/// the section the operator landed on used to seal the previous resolution
-/// while the field still held the typed one.
-#[test]
-fn a_resolution_left_behind_by_the_rail_is_still_the_one_published() {
-    let mut studio = Studio::wide();
-    studio.type_resolution("300");
-    let rail = studio.control(Role::Button, "Page marks");
-    let _ = studio.pass(click(rail.center()));
-    assert_eq!(
-        studio.app.state.hardcopy.hardcopy.section,
-        HardcopySection::Identity,
-        "the rail did not leave the output section"
-    );
-
-    let button = studio.control(Role::Button, "Export hardcopy");
-    let _ = studio.pass(click(button.center()));
-
-    assert_eq!(studio.published_resolution(), Some(300));
-    assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "300");
-}
-
-/// Below `STUDIO_SPLIT_WIDTH` the surface shows the setup or the page and
-/// never both, so choosing the page replaces the whole editor — the section
-/// panels included — in the pass the switch is clicked. Publishing from
-/// there used to seal the previous resolution while the field held the
-/// typed one, and no section panel was left running to notice.
-#[test]
-fn a_resolution_left_behind_by_the_region_switch_is_still_the_one_published() {
-    let mut studio = Studio::narrow();
-    studio.type_resolution("300");
-    let preview = studio.control(Role::Button, "Preview");
-    let _ = studio.pass(click(preview.center()));
-    assert_eq!(
-        studio.app.state.hardcopy.hardcopy.region,
-        HardcopyRegion::Preview,
-        "the switch did not leave the setup region"
-    );
-
-    let button = studio.control(Role::Button, "Export hardcopy");
-    let _ = studio.pass(click(button.center()));
-
-    assert_eq!(studio.published_resolution(), Some(300));
-    assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "300");
-}
-
-/// Settling belongs on the path every pass takes, not on the surfaces a
-/// composition may choose not to draw. Whatever the rail, the tab strip and
-/// the region switch select — in either composition — a pass has to leave
-/// the draft holding the resolution the field is showing.
-#[test]
-fn no_section_or_region_can_strand_a_typed_resolution() {
-    // `Studio` owns a complete `AppState`; keep only one fixture on the
-    // Windows test-thread stack at a time. Building both values in an
-    // array can overflow the default stack as production state grows.
-    for narrow in [false, true] {
-        let mut studio = if narrow {
-            Studio::narrow()
-        } else {
-            Studio::wide()
-        };
-        let composition = studio.viewport;
-        for section in HardcopySection::ALL {
-            for region in [HardcopyRegion::Setup, HardcopyRegion::Preview] {
-                studio.app.state.hardcopy.hardcopy.format = OutputFormat::Png { dpi: 150 };
-                studio.app.state.hardcopy.hardcopy.raster_dpi_draft = "300".to_owned();
-                studio.app.state.hardcopy.hardcopy.section = section;
-                studio.app.state.hardcopy.hardcopy.region = region;
-                let _ = studio.pass(Vec::new());
-                assert_eq!(
-                    studio.app.state.hardcopy.hardcopy.format.raster_dpi(),
-                    Some(300),
-                    "{composition:?} {section:?} {region:?} left a typed resolution uncommitted"
-                );
-            }
-        }
-    }
 }
 
 /// The largest page a standard media offers, which is what pulls the
@@ -460,7 +371,7 @@ fn a_page_that_lowers_the_ceiling_lowers_the_resolution_committed_with_it() {
         format!("PNG · {ceiling} dpi")
     );
 
-    let button = studio.control(Role::Button, "Export hardcopy");
+    let button = studio.control(Role::Button, "Save\u{2026}");
     let _ = studio.pass(click(button.center()));
     assert_eq!(studio.published_resolution(), Some(ceiling));
 }
@@ -471,7 +382,6 @@ fn a_page_that_lowers_the_ceiling_lowers_the_resolution_committed_with_it() {
 fn a_field_nobody_is_editing_states_the_resolution_in_force() {
     let mut studio = Studio::wide();
     studio.app.state.hardcopy.hardcopy.raster_dpi_draft = "3oo".to_owned();
-    studio.app.state.hardcopy.hardcopy.section = HardcopySection::Page;
     let _ = studio.pass(Vec::new());
 
     assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "150");

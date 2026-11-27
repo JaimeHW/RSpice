@@ -8,11 +8,13 @@ mod bodies;
 pub mod content_options;
 mod labels;
 mod preview;
+mod settings;
 
 use bodies::*;
 use content_options::*;
 use labels::*;
 use preview::*;
+use settings::*;
 
 use egui::{
     Align, ColorImage, Context, Frame, Layout, Margin, Rect, Sense, Stroke, TextureHandle,
@@ -23,7 +25,8 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, IconButton,
+    Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, IconButton, SegmentedWidth,
+    segmented,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_hardcopy::render::HardcopyRenderer;
@@ -40,7 +43,7 @@ use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource};
 
 use super::{
     BlockedSetup, DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopyParts,
-    HardcopyRegion, HardcopySection, HardcopyWorkflow, PaperDraft, publish,
+    HardcopyWorkflow, PaperDraft, publish,
 };
 
 #[derive(Clone)]
@@ -143,6 +146,7 @@ struct ContentInputs {
     schematic: SchematicHardcopySetup,
     printer_id: String,
     printer_job: Option<PrinterJobSettings>,
+    page_range: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +158,7 @@ struct RenderingInputs {
     searchable_text: bool,
     soft_proof: bool,
     decorations: (bool, bool, bool, Watermark),
+    plot_overlays: (bool, bool),
 }
 
 /// Draw the hardcopy dialog for this frame over its `parts`. It runs every
@@ -207,35 +212,38 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
     let busy = parts.dialog.busy;
     let plan_valid = parts.dialog.preview_plan.is_some();
     let description = match page {
-        HardcopyDialogPage::Main => "Choose what to print, its page, and where it goes.",
+        HardcopyDialogPage::Main => None,
         HardcopyDialogPage::PrinterProperties => {
-            "Check the paper, resolution and options the selected printer offers."
+            Some("Check the paper, resolution and options the selected printer offers.")
         }
-        HardcopyDialogPage::CustomPaperMargins => "Set a paper size and margins of your own.",
-        HardcopyDialogPage::PrintMapping => "Choose how layers, traces and markers look on paper.",
+        HardcopyDialogPage::CustomPaperMargins => Some("Set a paper size and margins of your own."),
+        HardcopyDialogPage::PrintMapping => {
+            Some("Choose how layers, traces and markers look on paper.")
+        }
     };
     let mut body_scroll_offset = parts.dialog.body_scroll_offset;
     let mut body_action = BodyAction::None;
-    // The main page is a studio, not a form: a fixed section rail, one
-    // section's fields, and a full-height preview beside them. Showing
-    // every control at once could only ever fit the surface by accident,
-    // and did not — the settings ran off the bottom and took the preview
-    // and the command row with them. Showing one section at a time fits by
-    // construction, so the dialog never scrolls no matter how many
-    // controls a hardcopy grows.
+    // One page: the settings in groups beside the page they lay out. The
+    // surface holds one size whatever is chosen, so nothing moves as an
+    // option shows or hides, and it never grows to the window.
     let mut dialog = Dialog::new(title, primary)
-        .description(description)
-        .size(match page {
-            HardcopyDialogPage::Main => DialogSize::SchematicPageSetup,
-            _ => DialogSize::SimulationWorkflow,
-        })
+        .size(DialogSize::DrawingSheetWorkflow)
+        .fixed_height(DIALOG_HEIGHT)
         .flush_body()
         .primary_on_enter(false)
         .primary_enabled(!busy && (plan_valid || page != HardcopyDialogPage::Main))
-        .ghost("Cancel");
-    // `SchematicPageSetup` already fills its surface at the authored height
-    // clamped to the viewport, so the studio only has to claim the body
-    // track: it divides that track itself and owns whatever scrolling any
+        .secondary("Cancel");
+    if let Some(description) = description {
+        dialog = dialog.description(description);
+    }
+    if page == HardcopyDialogPage::Main
+        && let Some(warning) = parts.dialog.printer_margin_warning()
+    {
+        dialog = dialog
+            .hint(warning)
+            .hint_tone(crate::ui::widgets::DialogHintTone::Warn);
+    }
+    // The body divides its track itself and owns whatever scrolling any
     // region of it ever needs.
     dialog = if page == HardcopyDialogPage::Main {
         dialog.manual_body_scroll()
@@ -247,19 +255,14 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
     }
     if let Some(error) = error.as_deref() {
         // The strip is the only thing on screen that explains a disabled
-        // primary, so where the refusal has an owner it names it. It names
-        // one only on the page that has a rail to send the operator to; a
-        // subflow keeps the dialog-level wording.
+        // primary.
+        let title = match parts.dialog.workflow {
+            HardcopyWorkflow::Print => "Cannot print with these settings",
+            HardcopyWorkflow::Export => "Cannot export with these settings",
+        };
         dialog = dialog.transaction_state(
             DialogTransactionTone::Error,
-            parts
-                .dialog
-                .error_section
-                .filter(|_| page == HardcopyDialogPage::Main)
-                .map_or_else(
-                    || "Cannot print with these settings".to_owned(),
-                    |section| format!("Blocked in {}", section.label()),
-                ),
+            title.to_owned(),
             sentence_case(error),
         );
     }
@@ -362,17 +365,17 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
                 parts.dialog.error = Some(error.to_string());
             }
         }
-        DialogChoice::Ghost | DialogChoice::Cancelled if page != HardcopyDialogPage::Main => {
+        DialogChoice::Secondary | DialogChoice::Cancelled if page != HardcopyDialogPage::Main => {
             parts.dialog.cancel_subflow();
         }
-        DialogChoice::Ghost | DialogChoice::Cancelled => {
+        DialogChoice::Secondary | DialogChoice::Cancelled => {
             publish::cancel_source_resolution();
             publish::cancel_publication();
             cancel_preview_worker();
             clear_preview_textures(ctx);
             parts.dialog.close();
         }
-        DialogChoice::Secondary | DialogChoice::None => {}
+        DialogChoice::Ghost | DialogChoice::None => {}
     }
 }
 
@@ -715,72 +718,57 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
     }
 }
 
-/// The section rail's fixed track, matched to the drawing-sheet studio so the
-/// two surfaces a hardcopy passes through do not shift under the pointer.
-const NAV_WIDTH: f32 = 230.0;
-/// Below this the rail, the editor and the preview cannot all hold the width
-/// their contents need, so the rail gives way to a tab strip across the top.
-const STUDIO_STACK_WIDTH: f32 = 980.0;
-/// Below this the editor and the preview cannot hold their widths side by side
-/// either, so the surface shows one of them at a time. Nothing below this width
-/// can carry a form and a page desk at once, and a surface that answers that by
-/// scrolling is the failure this studio exists to remove.
-pub const STUDIO_SPLIT_WIDTH: f32 = 730.0;
-const PANEL_INSET_X: i8 = 18;
-const PANEL_INSET_Y: i8 = 16;
-/// Height of one row of the preview's estimate strip. The strip's total height
-/// is reserved before it is drawn, so this is the contract the rows keep: a row
-/// that laid itself out freely made the column taller than the height it was
-/// assigned, and the whole studio then hung 40 pt below the rail beside it.
-const FACT_ROW_HEIGHT: f32 = 20.0;
-const FACT_STRIP_INSET: f32 = 20.0;
+/// The dialog's height on every page: the settings column's groups, held
+/// whole, over the footer.
+const DIALOG_HEIGHT: f32 = 760.0;
 
 fn main_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
-    // One before/after comparison for the whole surface. Each form used to run
-    // its own, so a control could only invalidate the preview if it happened to
-    // be declared in the same block as the fields it changed — and with the
-    // controls now spread across five sections, that is no longer true of any
-    // of them.
+    // One before/after comparison for the whole surface, so a control
+    // invalidates the preview wherever it is drawn.
     let before_content = content_inputs(draft);
     let before_render = rendering_inputs(draft);
-    // A field the operator typed into and then navigated away from is settled
-    // here, on the one path every pass takes, because the surfaces that draw it
-    // are exactly the ones a layout can decide not to draw. It has to come
-    // after the snapshot above: a resolution settled outside that comparison
-    // would never invalidate the plan it is meant to publish.
+    // A field the operator typed into and then left is settled here, on the
+    // one path every pass takes. It has to come after the snapshot above: a
+    // resolution settled outside that comparison would never invalidate the
+    // plan it is meant to publish.
     settle_raster_resolution(ui, draft);
+    // What a file keeps of its words follows from what the file is: a PDF or
+    // an SVG carries its typefaces and its text, pixels carry neither.
+    draft.embed_fonts = draft.format.is_vector();
+    draft.searchable_text = draft.format.is_vector();
+    draft.fit_fonts_to_format();
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
 
-    let sections = available_sections(draft);
-    if !sections.contains(&draft.section) {
-        draft.section = sections[0];
-    }
     let available = ui.available_size();
-    let body_height = available.y.max(1.0);
+    let height = available.y.max(1.0);
+    let t = Tokens::get(ui.ctx());
     let mut action = BodyAction::None;
-    if available.x < STUDIO_STACK_WIDTH {
-        action = tabbed_body(ui, draft, &sections, available.x, body_height);
-    } else {
-        let t = Tokens::get(ui.ctx());
-        ui.allocate_ui_with_layout(
-            vec2(available.x, body_height),
-            Layout::left_to_right(Align::Min),
-            |ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                let nav = ui.allocate_ui_with_layout(
-                    vec2(NAV_WIDTH, body_height),
-                    Layout::top_down(Align::Min),
-                    |ui| section_navigation(ui, draft, &sections, body_height),
-                );
-                ui.painter().vline(
-                    nav.response.rect.right(),
-                    nav.response.rect.y_range(),
-                    Stroke::new(1.0, t.color.border),
-                );
-                action = editor_and_preview(ui, draft, available.x - NAV_WIDTH, body_height);
-            },
-        );
-    }
+    ui.allocate_ui_with_layout(
+        vec2(available.x, height),
+        Layout::left_to_right(Align::Min),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let (settings, settings_action) = settings_column(ui, draft, height);
+            action = settings_action;
+            // The page takes exactly what the settings leave, clipped, so a
+            // long name in either can never widen the dialog.
+            let width = ui.available_width().max(1.0);
+            let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+            let mut page = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt("hardcopy-preview-column")
+                    .max_rect(rect)
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            page.set_clip_rect(rect.intersect(ui.clip_rect()));
+            preview_column(&mut page, draft, height);
+            ui.painter().vline(
+                settings.right(),
+                settings.y_range(),
+                Stroke::new(1.0, t.color.border),
+            );
+        },
+    );
 
     if draft.format == OutputFormat::NativePrinter
         && (before_content.paper != draft.paper || before_content.orientation != draft.orientation)
@@ -793,18 +781,6 @@ fn main_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
     action
 }
 
-/// The sections this source actually has. A document with no governed drawing
-/// sheet has no sheet furniture to configure, so the section is absent rather
-/// than present and inert — a rail entry that can never do anything is worse
-/// than one that is not there.
-fn available_sections(draft: &HardcopyDialogState) -> Vec<HardcopySection> {
-    let sheet = schematic_sheet_relationship(draft).is_some();
-    HardcopySection::ALL
-        .into_iter()
-        .filter(|section| sheet || *section != HardcopySection::DrawingSheet)
-        .collect()
-}
-
 /// `Some(true)` when resolved schematic content crosses the authored sheet,
 /// `Some(false)` when it does not, `None` when this source has no authored
 /// sheet at all.
@@ -815,397 +791,6 @@ pub(super) fn schematic_sheet_relationship(draft: &HardcopyDialogState) -> Optio
             .ok()
             .flatten()
     })
-}
-
-/// A step's number among the steps shown: a step a document has no use
-/// for is left out of the count, not left as a gap in it.
-fn step_number(index: usize) -> String {
-    format!("{:02}", index + 1)
-}
-
-fn section_navigation(
-    ui: &mut Ui,
-    draft: &mut HardcopyDialogState,
-    sections: &[HardcopySection],
-    height: f32,
-) {
-    let t = Tokens::get(ui.ctx());
-    // Paint the rail over the column it was assigned rather than over the
-    // entries it happens to contain. A Frame would only cover its content, and
-    // a rail that stops short of the editor beside it reads as a broken panel.
-    ui.painter()
-        .rect_filled(ui.max_rect(), 0.0, t.color.bg_panel);
-    {
-        ui.set_width(NAV_WIDTH);
-        ui.spacing_mut().item_spacing.y = 0.0;
-        let blocked_by = draft.error_section;
-        let blocking_message = draft.error.clone();
-        for (index, section) in sections.iter().copied().enumerate() {
-            let selected = draft.section == section;
-            let blocked = blocked_by == Some(section);
-            let detail = section_detail(draft, section);
-            let entry = Frame::NONE
-                .fill(if selected {
-                    t.color.bg_active
-                } else {
-                    t.color.bg_panel
-                })
-                .inner_margin(Margin::symmetric(12, 10))
-                .show(ui, |ui| {
-                    let width = ui.available_width();
-                    // The entry's own height, floored at the design system's
-                    // row metric so a coarse pointer is given the target the
-                    // rest of the shell gives it.
-                    ui.allocate_ui_with_layout(
-                        vec2(width, 34.0_f32.max(t.metrics.row_h)),
-                        Layout::left_to_right(Align::Min),
-                        |ui| {
-                            ui.set_min_width(width);
-                            ui.label(
-                                egui::RichText::new(step_number(index))
-                                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                                    .color(if selected {
-                                        t.color.accent
-                                    } else {
-                                        t.color.text_faint
-                                    }),
-                            );
-                            paint_section_icon(ui, section, selected);
-                            // The marker's track comes off the text before the
-                            // text is laid out. Taken afterwards, a summary
-                            // long enough to truncate would have claimed the
-                            // whole row and pushed the marker off the rail.
-                            let text_width = (ui.available_width()
-                                - if blocked { PROBLEM_MARKER_TRACK } else { 0.0 })
-                            .max(1.0);
-                            ui.allocate_ui_with_layout(
-                                vec2(text_width, ui.available_height()),
-                                Layout::top_down(Align::Min),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(section.label())
-                                            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                                            .color(t.color.text),
-                                    );
-                                    // Truncated, never wrapped: a two-line
-                                    // summary would push the entry past the
-                                    // height it was allocated and ripple down
-                                    // the whole rail.
-                                    ui.add(
-                                        egui::Label::new(
-                                            egui::RichText::new(detail)
-                                                .font(theme::sans(
-                                                    tokens::FS_0,
-                                                    FontWeight::Regular,
-                                                ))
-                                                .color(t.color.text_dim),
-                                        )
-                                        .truncate(),
-                                    );
-                                },
-                            );
-                        },
-                    );
-                });
-            let rect = entry.response.rect;
-            if blocked {
-                paint_problem_marker(ui, rect);
-            }
-            if selected {
-                ui.painter().rect_filled(
-                    Rect::from_min_max(rect.min, egui::pos2(rect.left() + 3.0, rect.bottom())),
-                    0.0,
-                    t.color.accent,
-                );
-            }
-            let response = entry.response.interact(Sense::click());
-            let name = section_entry_name(section, blocked);
-            response.widget_info(|| {
-                egui::WidgetInfo::selected(
-                    egui::WidgetType::SelectableLabel,
-                    ui.is_enabled(),
-                    selected,
-                    name.as_str(),
-                )
-            });
-            theme::paint_focus_ring(ui, &response, rect);
-            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-            let response = match blocking_message.as_deref() {
-                Some(message) if blocked => response.on_hover_text(message),
-                _ => response,
-            };
-            if response.clicked() {
-                draft.section = section;
-            }
-            ui.painter().hline(
-                rect.x_range(),
-                rect.bottom(),
-                Stroke::new(1.0, t.color.border),
-            );
-        }
-        // Dock the sealed source identity on the rail's bottom edge with
-        // whatever the entries left over. It belongs here rather than in a
-        // strip across the top: it is the one fact every section is about, and
-        // the rail is the only region that is never replaced.
-        let remaining = (height - ui.min_rect().height()).max(12.0);
-        ui.allocate_ui_with_layout(
-            vec2(ui.available_width(), remaining),
-            Layout::bottom_up(Align::Min),
-            |ui| {
-                // Claim the whole leftover, or the bottom-up region collapses
-                // to the note's own height and the rail ends above the columns.
-                ui.set_min_height(remaining);
-                // The seal answers to an id of its own rather than to however
-                // many entries were laid out before it. Taken from that count,
-                // its id changes the moment a section appears or leaves — while
-                // the block itself, docked to the rail's bottom edge, has not
-                // moved a point — and the widgets inside it lose the continuity
-                // focus, hovering and tooltips are keyed by.
-                ui.scope_builder(
-                    egui::UiBuilder::new().id(egui::Id::new("hardcopy-sealed-source")),
-                    |ui| {
-                        Frame::NONE
-                            .fill(t.color.bg_inset)
-                            .inner_margin(Margin::same(12))
-                            .show(ui, |ui| {
-                                ui.set_min_width(ui.available_width());
-                                // The frame inherits the bottom-up layout, so
-                                // the note is added in reverse reading order.
-                                let kind = draft.source.as_ref().map_or("unresolved", |source| {
-                                    document_kind_label(source.document_kind())
-                                });
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(kind)
-                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                            .color(t.color.text_dim),
-                                    )
-                                    .truncate(),
-                                );
-                                ui.add(
-                                    egui::Label::new(two_lines(
-                                        draft
-                                            .source
-                                            .as_ref()
-                                            .map_or("Nothing to print", |source| {
-                                                source.display_name()
-                                            }),
-                                        theme::sans(tokens::FS_1, FontWeight::SemiBold),
-                                        t.color.text,
-                                    ))
-                                    .wrap(),
-                                );
-                            });
-                    },
-                );
-            },
-        );
-    }
-}
-
-/// What a rail entry or a section chip is called once its section holds a field
-/// the publisher refuses.
-///
-/// The suffix is the marker assistive technology reads: a painted glyph and a
-/// colour are nothing to a screen reader, and a rail that only says which
-/// section is wrong in red says it to some of the people using it.
-fn section_entry_name(section: HardcopySection, blocked: bool) -> String {
-    if blocked {
-        format!("{} · blocked", section.label())
-    } else {
-        section.label().to_owned()
-    }
-}
-
-/// The width a marked entry gives up from its summary: the glyph, and the
-/// gutter that keeps it off the text.
-pub const PROBLEM_MARKER_TRACK: f32 = 22.0;
-/// The rail entry's own horizontal inset, which the mark shares so it lines up
-/// with the column of text above and below it.
-const PROBLEM_MARKER_INSET: f32 = 12.0;
-
-/// A blocked section's mark: a filled warning triangle at the trailing edge of
-/// `entry`. It is painted rather than set in text because the icon vocabulary
-/// has no warning glyph and the shipped faces have no dependable one either,
-/// and painted into the entry's own rectangle rather than allocated inside it
-/// because a row that grows by a marker's height stops fitting its column.
-fn paint_problem_marker(ui: &Ui, entry: Rect) {
-    let t = Tokens::get(ui.ctx());
-    let rect = Rect::from_center_size(
-        egui::pos2(entry.right() - PROBLEM_MARKER_INSET - 7.0, entry.center().y),
-        vec2(14.0, 14.0),
-    );
-    let triangle = Rect::from_center_size(rect.center(), vec2(13.0, 11.5));
-    let painter = ui.painter();
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            egui::pos2(triangle.center().x, triangle.top()),
-            triangle.right_bottom(),
-            triangle.left_bottom(),
-        ],
-        t.color.err,
-        Stroke::NONE,
-    ));
-    // The exclamation is cut out of the fill in the panel's own colour, so the
-    // mark reads at rail density instead of turning into a solid lozenge.
-    painter.vline(
-        triangle.center().x,
-        egui::Rangef::new(triangle.top() + 4.0, triangle.bottom() - 4.0),
-        Stroke::new(1.5, t.color.bg_panel),
-    );
-    painter.rect_filled(
-        Rect::from_center_size(
-            egui::pos2(triangle.center().x, triangle.bottom() - 2.5),
-            vec2(1.5, 1.5),
-        ),
-        0.0,
-        t.color.bg_panel,
-    );
-}
-
-fn paint_section_icon(ui: &mut Ui, section: HardcopySection, selected: bool) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-    let color = if selected {
-        t.color.accent
-    } else {
-        t.color.text_dim
-    };
-    let stroke = Stroke::new(1.0, color);
-    let page = Rect::from_center_size(rect.center(), vec2(13.0, 15.0));
-    let painter = ui.painter();
-    painter.rect_stroke(page, 0.5, stroke, egui::StrokeKind::Inside);
-    match section {
-        // A turned corner: the retained document, sealed as it was read.
-        HardcopySection::Source => {
-            painter.line_segment(
-                [
-                    egui::pos2(page.right() - 4.5, page.top()),
-                    egui::pos2(page.right(), page.top() + 4.5),
-                ],
-                Stroke::new(0.8, color),
-            );
-        }
-        // Tile seams across the sheet: pagination.
-        HardcopySection::Page => {
-            painter.vline(page.center().x, page.y_range(), Stroke::new(0.6, color));
-            painter.hline(page.x_range(), page.center().y, Stroke::new(0.6, color));
-        }
-        // Border and title block: the authored drawing sheet's furniture.
-        HardcopySection::DrawingSheet => {
-            painter.rect_stroke(
-                page.shrink(2.5),
-                0.0,
-                Stroke::new(0.6, color),
-                egui::StrokeKind::Inside,
-            );
-            painter.rect_stroke(
-                Rect::from_min_max(
-                    egui::pos2(page.center().x, page.bottom() - 4.5),
-                    page.right_bottom(),
-                ),
-                0.0,
-                Stroke::new(0.8, color),
-                egui::StrokeKind::Inside,
-            );
-        }
-        // A page leaving the surface: the artifact or the spool.
-        HardcopySection::Output => {
-            let tip = egui::pos2(page.center().x, page.top() + 3.0);
-            painter.line_segment(
-                [egui::pos2(page.center().x, page.bottom() - 3.0), tip],
-                Stroke::new(0.9, color),
-            );
-            painter.line_segment(
-                [tip, egui::pos2(tip.x - 3.0, tip.y + 3.5)],
-                Stroke::new(0.9, color),
-            );
-            painter.line_segment(
-                [tip, egui::pos2(tip.x + 3.0, tip.y + 3.5)],
-                Stroke::new(0.9, color),
-            );
-        }
-        // Ruled lines: the legends, header and provenance a page carries.
-        HardcopySection::Identity => {
-            for offset in [4.5, 8.0, 11.5] {
-                painter.hline(
-                    egui::Rangef::new(page.left() + 3.0, page.right() - 3.0),
-                    page.top() + offset,
-                    Stroke::new(0.7, color),
-                );
-            }
-        }
-    }
-}
-
-/// The one-line summary a section shows while another is open. Without these
-/// the rail would be a filing cabinet; with them nothing is hidden, only
-/// deferred.
-fn section_detail(draft: &HardcopyDialogState, section: HardcopySection) -> String {
-    match section {
-        HardcopySection::Source => draft.source.as_ref().map_or_else(
-            || "unresolved".to_owned(),
-            |source| detailed_scope_label(source.scope()).to_lowercase(),
-        ),
-        HardcopySection::Page => format!(
-            "{} · {}",
-            short_paper_label(&draft.paper),
-            orientation_word(draft.orientation)
-        ),
-        HardcopySection::DrawingSheet => match draft.schematic_extent {
-            SchematicHardcopyExtent::CompleteSchematicContent => "complete content".to_owned(),
-            // The outside-content policy only decides anything when there is
-            // outside content. Reporting "undecided" for a drawing that fits
-            // its sheet would name a decision nobody has to make.
-            SchematicHardcopyExtent::AuthoredDrawingSheet
-                if schematic_sheet_relationship(draft) == Some(false) =>
-            {
-                "drawing sheet".to_owned()
-            }
-            SchematicHardcopyExtent::AuthoredDrawingSheet => format!(
-                "sheet · {}",
-                match draft.outside_sheet_content {
-                    OutsideSheetContentPolicy::Ask => "undecided",
-                    OutsideSheetContentPolicy::ClipToAuthoredSheet => "clipped",
-                    OutsideSheetContentPolicy::ExtendOutput => "extended",
-                }
-            ),
-        },
-        HardcopySection::Output => output_summary(draft.format),
-        HardcopySection::Identity => {
-            let included = usize::from(draft.include_legends)
-                + usize::from(draft.include_header)
-                + usize::from(draft.include_provenance)
-                + usize::from(!matches!(draft.watermark, Watermark::None));
-            format!("{included} of 4 marks")
-        }
-    }
-}
-
-fn short_paper_label(paper: &PaperDraft) -> String {
-    match paper {
-        PaperDraft::Standard(paper) => match paper {
-            StandardPaper::Letter => "US Letter",
-            StandardPaper::Legal => "Legal",
-            StandardPaper::Tabloid => "Tabloid",
-            StandardPaper::A4 => "A4",
-            StandardPaper::A3 => "A3",
-            StandardPaper::A2 => "A2",
-            StandardPaper::A1 => "A1",
-            StandardPaper::A0 => "A0",
-        }
-        .to_owned(),
-        PaperDraft::MatchAuthoredSheets => "per drawing sheet".to_owned(),
-        PaperDraft::Custom { name, .. } => name.clone(),
-    }
-}
-
-const fn orientation_word(orientation: Orientation) -> &'static str {
-    match orientation {
-        Orientation::Landscape => "landscape",
-        Orientation::Portrait => "portrait",
-        Orientation::AutomaticPerPage => "auto per page",
-    }
 }
 
 /// The target in one phrase. A raster format is nothing without its
@@ -1226,9 +811,6 @@ pub fn output_summary(format: OutputFormat) -> String {
     )
 }
 
-/// The editor column. `height` fills the studio's assigned track; `None` sizes
-/// to the section's own content, which is what the stacked layout needs — a
-/// fixed track there would strand the preview a screen below the form.
 /// A refusal as the strip states it, in sentence case. The errors behind it
 /// are written as Rust errors are, in lower case, and the strip read
 /// "choose a printer to print to".
@@ -1239,418 +821,8 @@ fn sentence_case(text: &str) -> String {
     })
 }
 
-pub fn editor_column(
-    ui: &mut Ui,
-    draft: &mut HardcopyDialogState,
-    height: Option<f32>,
-) -> BodyAction {
-    let t = Tokens::get(ui.ctx());
-    let mut action = BodyAction::None;
-    Frame::NONE.fill(t.color.bg_app).show(ui, |ui| {
-        let Some(height) = height else {
-            action = editor_panel(ui, draft);
-            return;
-        };
-        ui.set_min_height(height);
-        ui.allocate_ui(vec2(ui.available_width(), height.max(120.0)), |ui| {
-            // Every section is authored to fit this column outright. The scroll
-            // area is the fallback for a hostile font scale, not the layout.
-            egui::ScrollArea::vertical()
-                .id_salt(("hardcopy-editor", draft.section))
-                .auto_shrink([false, false])
-                .show(ui, |ui| action = editor_panel(ui, draft));
-        });
-    });
-    action
-}
-
-fn editor_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
-    section_panel_header(ui, draft.section, draft.workflow);
-    Frame::NONE
-        .inner_margin(Margin::symmetric(PANEL_INSET_X, PANEL_INSET_Y))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
-            match draft.section {
-                HardcopySection::Source => source_panel(ui, draft),
-                HardcopySection::Page => page_panel(ui, draft),
-                HardcopySection::DrawingSheet => {
-                    drawing_sheet_panel(ui, draft);
-                    BodyAction::None
-                }
-                HardcopySection::Output => output_panel(ui, draft),
-                HardcopySection::Identity => {
-                    identity_panel(ui, draft);
-                    BodyAction::None
-                }
-            }
-        })
-        .inner
-}
-
-fn section_panel_header(ui: &mut Ui, section: HardcopySection, workflow: HardcopyWorkflow) {
-    let exporting = workflow == HardcopyWorkflow::Export;
-    let description = match section {
-        HardcopySection::Source if exporting => "Choose what to export and how much of it.",
-        HardcopySection::Source => "Choose what to print and how much of it.",
-        HardcopySection::Page => {
-            "Paper, scale, and how a drawing too large for one page is split. None of this changes the drawing sheet itself."
-        }
-        HardcopySection::DrawingSheet if exporting => {
-            "How much of the drawing sheet to export, and what to do with anything drawn past its edge."
-        }
-        HardcopySection::DrawingSheet => {
-            "How much of the drawing sheet to print, and what to do with anything drawn past its edge."
-        }
-        HardcopySection::Output => {
-            "Where the pages go, in what format and color. What this computer or printer cannot produce is turned off."
-        }
-        HardcopySection::Identity => {
-            "The legend, header, footer and watermark on every page, and whether its words stay text."
-        }
-    };
-    panel_header(ui, section.label(), description);
-}
-
-fn panel_header(ui: &mut Ui, title: &str, description: &str) {
-    let t = Tokens::get(ui.ctx());
-    let header = Frame::NONE
-        .fill(t.color.bg_elevated)
-        .inner_margin(Margin::symmetric(18, 14))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.label(
-                egui::RichText::new(title)
-                    .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
-                    .color(t.color.text),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(description)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
-        });
-    ui.painter().hline(
-        header.response.rect.x_range(),
-        header.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-}
-
-/// A supporting flow, offered where the settings it owns are edited rather
-/// than from a command strip that belonged to no section in particular. A flow
-/// this host cannot reach is not drawn at all, so the row is never inert.
-pub(super) fn action_row(ui: &mut Ui, label: &str, detail: &str) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let mut clicked = false;
-    Frame::NONE
-        .fill(t.color.bg_inset)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(Margin::symmetric(10, 9))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                clicked = Button::new(label).show(ui).clicked();
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(detail)
-                            .size(tokens::FS_0)
-                            .color(t.color.text_dim),
-                    )
-                    .truncate(),
-                );
-            });
-        });
-    clicked
-}
-
-/// A bordered label/value readout for facts a section is about but does not
-/// edit. Values are monospaced and truncated, never wrapped, so the block's
-/// height is a function of how many facts there are and nothing else.
-/// `text` laid out to wrap onto a second line where it is too long for one,
-/// and to end in an ellipsis only past that: a document's name is read in
-/// full far more often than it runs past two lines.
-fn two_lines(text: &str, font: egui::FontId, color: egui::Color32) -> egui::text::LayoutJob {
-    let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, color, f32::INFINITY);
-    job.wrap.max_rows = 2;
-    job.wrap.overflow_character = Some('…');
-    job
-}
-
-pub(super) fn fact_list(ui: &mut Ui, facts: &[(&'static str, String)]) {
-    let t = Tokens::get(ui.ctx());
-    let caption_font = theme::sans(tokens::FS_MICRO, FontWeight::Regular);
-    let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    Frame::NONE
-        .fill(t.color.bg_inset)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(Margin::symmetric(12, 10))
-        .show(ui, |ui| {
-            let content_width = ui.available_width();
-            ui.set_min_width(content_width);
-            ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
-            // Every value starts on one line, past the widest caption.
-            let captions = facts
-                .iter()
-                .map(|(label, _)| {
-                    ui.painter().layout_no_wrap(
-                        label.to_uppercase(),
-                        caption_font.clone(),
-                        t.color.text_faint,
-                    )
-                })
-                .collect::<Vec<_>>();
-            let column = captions
-                .iter()
-                .map(|caption| caption.size().x)
-                .fold(0.0, f32::max);
-            let value_width = (content_width - column - 10.0).max(40.0);
-            for (caption, (_, value)) in captions.into_iter().zip(facts) {
-                let mut job = two_lines(value, value_font.clone(), t.color.text);
-                job.wrap.max_width = value_width;
-                let value = ui.painter().layout_job(job);
-                // A value too long for one line takes a second, and its row
-                // grows by that line; the caption stays level with the first.
-                let line = value
-                    .rows
-                    .first()
-                    .map_or(value.size().y, |row| row.height());
-                let height = FACT_ROW_HEIGHT + value.size().y - line;
-                ui.allocate_ui_with_layout(
-                    vec2(content_width, height),
-                    Layout::left_to_right(Align::Min),
-                    |ui| {
-                        ui.set_min_height(height);
-                        ui.allocate_ui_with_layout(
-                            vec2(column, height),
-                            Layout::top_down(Align::Min),
-                            |ui| {
-                                ui.set_min_width(column);
-                                ui.add_space((FACT_ROW_HEIGHT - caption.size().y) * 0.5);
-                                ui.add(egui::Label::new(caption));
-                            },
-                        );
-                        ui.allocate_ui_with_layout(
-                            vec2(value_width, height),
-                            Layout::top_down(Align::Min),
-                            |ui| {
-                                ui.add_space((FACT_ROW_HEIGHT - line) * 0.5);
-                                ui.add(egui::Label::new(value));
-                            },
-                        );
-                    },
-                );
-            }
-        });
-}
-
-/// The composition below the rail's width: the sections become a tab strip
-/// across the top, and the regions under it divide exactly what the strip left.
-/// Both arrangements are given fixed tracks rather than a scroll area, because
-/// a surface that can only be read by scrolling is the failure this studio
-/// exists to remove.
-fn tabbed_body(
-    ui: &mut Ui,
-    draft: &mut HardcopyDialogState,
-    sections: &[HardcopySection],
-    width: f32,
-    height: f32,
-) -> BodyAction {
-    let split = width >= STUDIO_SPLIT_WIDTH;
-    let strip_height = section_tab_strip(ui, draft, sections, split);
-    let remaining = (height - strip_height).max(1.0);
-    if split {
-        return editor_and_preview(ui, draft, width, remaining);
-    }
-    let mut action = BodyAction::None;
-    ui.allocate_ui_with_layout(vec2(width, remaining), Layout::top_down(Align::Min), |ui| {
-        match draft.region {
-            HardcopyRegion::Preview => preview_column(ui, draft, remaining),
-            HardcopyRegion::Setup => action = editor_column(ui, draft, Some(remaining)),
-        }
-    });
-    action
-}
-
-/// The rail's stand-in below its width.
-///
-/// Two questions live on this strip and each gets a control of its own: a
-/// segmented switch decides whether the surface is showing the setup or the
-/// page, and the chips under it decide which section the setup is editing.
-/// Both as chips in one row asks them as though they were the same question,
-/// and a row of identical chips gives no clue that one of them replaces the
-/// whole surface. Each control is drawn only where it decides something: there
-/// is nothing to switch while both regions are on screen, and no section to
-/// choose while the page is. Returns the height the strip took.
-fn section_tab_strip(
-    ui: &mut Ui,
-    draft: &mut HardcopyDialogState,
-    sections: &[HardcopySection],
-    split: bool,
-) -> f32 {
-    let t = Tokens::get(ui.ctx());
-    let strip = Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::same(10))
-        .show(ui, |ui| {
-            // Claim the track the strip was assigned rather than the width the
-            // chips happen to need. A fill that stops at the last chip reads as
-            // a second, lighter panel butted against the first.
-            ui.set_min_width(ui.available_width());
-            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-            if !split {
-                region_switch(ui, draft);
-            }
-            if split || draft.region == HardcopyRegion::Setup {
-                let blocked_by = draft.error_section;
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                    for (index, section) in sections.iter().copied().enumerate() {
-                        // A chip carries its mark in its own text: it has no
-                        // room beside it for a glyph, and the text is what a
-                        // screen reader is given either way.
-                        let label = format!(
-                            "{}  {}",
-                            step_number(index),
-                            section_entry_name(section, blocked_by == Some(section))
-                        );
-                        if ui
-                            .selectable_label(draft.section == section, label)
-                            .clicked()
-                        {
-                            draft.section = section;
-                        }
-                    }
-                });
-            }
-        });
-    ui.painter().hline(
-        strip.response.rect.x_range(),
-        strip.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    strip.response.rect.height()
-}
-
-/// The region switch of a surface that can only show one region at a time.
-///
-/// One control with two halves, not two more chips: this decides what the
-/// whole surface is, so it reads as a switch and spans the strip. Its halves
-/// take the design system's control height, which is the touch target wherever
-/// the shell is in touch mode.
-fn region_switch(ui: &mut Ui, draft: &mut HardcopyDialogState) {
-    let t = Tokens::get(ui.ctx());
-    let height = t.metrics.ctl_h;
-    let segment = (ui.available_width() * 0.5).floor();
-    let row = ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        for (region, label) in [
-            (HardcopyRegion::Setup, "Setup"),
-            (HardcopyRegion::Preview, "Preview"),
-        ] {
-            let selected = draft.region == region;
-            if ui
-                .add_sized(
-                    vec2(segment, height),
-                    egui::Button::selectable(selected, label),
-                )
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
-                draft.region = region;
-            }
-        }
-    });
-    let rect = row.response.rect;
-    ui.painter().rect_stroke(
-        rect,
-        0.0,
-        Stroke::new(1.0, t.color.border_strong),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter().vline(
-        rect.center().x,
-        rect.y_range(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-}
-
-/// The editor and the preview side by side across `track`, each given the whole
-/// of `height`.
-fn editor_and_preview(
-    ui: &mut Ui,
-    draft: &mut HardcopyDialogState,
-    track: f32,
-    height: f32,
-) -> BodyAction {
-    let t = Tokens::get(ui.ctx());
-    let (editor_width, preview_width) = column_widths(track, height);
-    let mut action = BodyAction::None;
-    ui.allocate_ui_with_layout(
-        vec2(track, height),
-        Layout::left_to_right(Align::Min),
-        |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            let editor = ui.allocate_ui_with_layout(
-                vec2(editor_width, height),
-                Layout::top_down(Align::Min),
-                |ui| editor_column(ui, draft, Some(height)),
-            );
-            action = editor.inner;
-            ui.painter().vline(
-                editor.response.rect.right(),
-                editor.response.rect.y_range(),
-                Stroke::new(1.0, t.color.border),
-            );
-            ui.allocate_ui_with_layout(
-                vec2(preview_width, height),
-                Layout::top_down(Align::Min),
-                |ui| preview_column(ui, draft, height),
-            );
-        },
-    );
-    action
-}
-
-/// The narrowest column a form field and its unit suffix stay legible in, and
-/// the narrowest page desk worth rendering an exact page onto. Neither column
-/// is ever given less; where the track cannot pay for both, the studio is
-/// already below `STUDIO_SPLIT_WIDTH` and shows one of them at a time.
-const EDITOR_MIN: f32 = 390.0;
-const PREVIEW_MIN: f32 = 330.0;
 /// The track a two-up form row needs before it stops stacking.
 const PAIRED_TRACK_MINIMUM: f32 = 430.0;
-/// The measure a stacked form is authored to: one full-width field per row,
-/// wide enough that nothing in a section wraps of its own accord.
-pub const EDITOR_STACKED_MEASURE: f32 = 430.0;
-/// The measure a paired form needs: the two-up track plus the panel's insets.
-const EDITOR_PAIRED_MEASURE: f32 = 2.0 * PANEL_INSET_X as f32 + PAIRED_TRACK_MINIMUM;
-/// The column height a stacked form needs before it is worth trading width for
-/// it. Below this the tallest section does not fit stacked, and a form that
-/// does not fit is worse than a page desk one field narrower.
-const STACKED_FORM_HEIGHT: f32 = 560.0;
-
-/// How a track that carries both columns is divided.
-///
-/// The editor takes the measure its forms are authored for and the page desk
-/// takes the whole remainder. A form gains nothing from a wider column — past
-/// the width its fields need it only pushes a label and its value to opposite
-/// edges of the surface — while every point the desk is given comes back as a
-/// larger page. Height is the other half of the trade: a stacked form spends
-/// height to save width, so it only stacks where the column has the height to
-/// spend, and pairs its rows where it does not.
-fn column_widths(track: f32, height: f32) -> (f32, f32) {
-    let track = track.max(EDITOR_MIN + PREVIEW_MIN);
-    let measure = if height >= STACKED_FORM_HEIGHT {
-        EDITOR_STACKED_MEASURE
-    } else {
-        EDITOR_PAIRED_MEASURE
-    };
-    let editor = measure.min(track - PREVIEW_MIN).max(EDITOR_MIN);
-    (editor, track - editor)
-}
-
 fn dialog_split(ui: &mut Ui, mut render_column: impl FnMut(&mut Ui, usize)) {
     let t = Tokens::get(ui.ctx());
     let stacked = ui.ctx().content_rect().width() <= 760.0;
@@ -1765,6 +937,7 @@ fn content_inputs(draft: &HardcopyDialogState) -> ContentInputs {
         ),
         printer_id: draft.printer_id.clone(),
         printer_job: draft.printer_job.clone(),
+        page_range: draft.page_range,
     }
 }
 
@@ -1782,6 +955,7 @@ fn rendering_inputs(draft: &HardcopyDialogState) -> RenderingInputs {
             draft.include_provenance,
             draft.watermark.clone(),
         ),
+        plot_overlays: (draft.include_cursors_markers, draft.include_notes),
     }
 }
 

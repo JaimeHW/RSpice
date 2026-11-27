@@ -1,26 +1,7 @@
-//! How the hardcopy studio names its settings: the label each value is shown
+//! How the Print and Export dialog names its settings: the label each value is shown
 //! by, the key a choice list stores it under, and the options a list offers.
 
 use super::*;
-
-/// How many pages a plan prints, said the same way by the Pages field and
-/// the preview: "1 page", "2 × 1 tiles, 2 pages" for a drawing split over a
-/// grid of pages, or "3 pages, split between sections".
-pub(super) fn pages_phrase(plan: &rspice_hardcopy_contract::HardcopyPlan) -> String {
-    let pagination = plan.pagination();
-    let count = pagination.pages().len();
-    if count == 1 {
-        "1 page".to_owned()
-    } else if pagination.sections().is_empty() {
-        format!(
-            "{} × {} tiles, {count} pages",
-            pagination.columns(),
-            pagination.rows()
-        )
-    } else {
-        format!("{count} pages, split between sections")
-    }
-}
 
 pub(super) fn document_kind_label(kind: HardcopyDocumentKind) -> &'static str {
     match kind {
@@ -45,19 +26,6 @@ pub(super) fn scope_label(scope: &HardcopyScope) -> &'static str {
     }
 }
 
-pub(super) fn detailed_scope_label(scope: &HardcopyScope) -> &str {
-    match scope {
-        HardcopyScope::Selection => "Selection",
-        HardcopyScope::CurrentSheet => "This sheet",
-        HardcopyScope::VisibleHierarchy => "Visible hierarchy",
-        HardcopyScope::ActivePlotDocument => "This plot",
-        HardcopyScope::CompleteReport => "Whole report",
-        HardcopyScope::ActiveDocument => "This document",
-        HardcopyScope::AllSheetsOrPanes => "Every sheet or pane",
-        HardcopyScope::NamedPrintSet(name) => name,
-    }
-}
-
 pub(super) fn paper_label(paper: &PaperDraft) -> String {
     match paper {
         PaperDraft::Standard(paper) => standard_paper_label(*paper).to_owned(),
@@ -72,15 +40,6 @@ pub(super) fn scale_key(value: ScaleMode) -> u8 {
         ScaleMode::EngineeringOneToOne => 1,
         ScaleMode::CustomPercent { .. } => 2,
         ScaleMode::FitWidth => 3,
-    }
-}
-
-pub(super) fn scale_label(value: u8) -> &'static str {
-    match value {
-        0 => "Fit to printable area",
-        1 => "1:1 engineering scale",
-        2 => "Custom",
-        _ => "Fit width",
     }
 }
 
@@ -118,17 +77,6 @@ pub(super) fn background_label(background: BackgroundMode) -> &'static str {
         BackgroundMode::White => "White",
         BackgroundMode::Transparent => "Transparent · PDF or SVG",
         BackgroundMode::WorkspaceBackground => "Workspace background",
-    }
-}
-
-pub(super) fn color_mapping_label(mapping: ColorMapping) -> &'static str {
-    match mapping {
-        ColorMapping::PrintSafeEngineeringPalette => "Print-safe engineering palette",
-        ColorMapping::ScreenColors => "Screen colors",
-        ColorMapping::GrayscaleWithDashMarkerRedundancy => {
-            "Grayscale, told apart by dashes and markers"
-        }
-        ColorMapping::Monochrome => "Monochrome",
     }
 }
 

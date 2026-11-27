@@ -1,5 +1,5 @@
-//! The hardcopy studio's preview column: the page desk, its toolbar, and the
-//! facts strip under it.
+//! The Print and Export dialogs' preview: the page on its desk, and one line
+//! under it saying which page it is.
 //!
 //! Every page shown is the renderer's own raster of the planned page, cached
 //! in one of two rotating texture slots by its digest, so the desk shows
@@ -9,359 +9,169 @@
 use super::*;
 use rspice_hardcopy::render::PREVIEW_DPI;
 
+/// The line under the page: its number and the zoom.
+const PAGE_BAR_INSET_Y: i8 = 6;
+
 pub(super) fn preview_column(ui: &mut Ui, draft: &mut HardcopyDialogState, height: f32) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
-    Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
-        ui.set_min_size(vec2(width, height));
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        // The three bands divide the column's exact assigned height between
-        // them. The page desk takes what the toolbar and the estimate do not,
-        // so the preview grows with the surface instead of staying a thumbnail.
-        let pages = draft
-            .preview_plan
-            .as_ref()
-            .map_or(0, |plan| plan.pagination().pages().len() as u32);
-        let mut view = PreviewView {
-            page: draft.preview_page,
-            zoom: draft.preview_zoom_percent,
-        };
-        let toolbar_height = preview_toolbar_height(ui, &view, pages, width);
-        let facts = preview_facts(draft);
-        let facts_height = facts.len() as f32 * FACT_ROW_HEIGHT + FACT_STRIP_INSET;
-        let desk_height = (height - facts_height - toolbar_height).max(160.0);
-        preview_desk(ui, draft, width, desk_height);
-        preview_toolbar(ui, &mut view, pages, width);
-        if view.page != draft.preview_page {
-            draft.preview_page = view.page;
-            draft.invalidate_preview_raster();
-        }
-        draft.preview_zoom_percent = view.zoom;
-        preview_facts_strip(ui, &facts, width, facts_height);
-    });
-}
-
-/// The band the toolbar needs, measured rather than assumed.
-///
-/// Its controls are the design system's and its row wraps when they cannot
-/// share the column, so the number of rows is a fact about this width and this
-/// control set — not about whether the shell is in touch mode. A sizing pass
-/// lays the same row out invisibly and reports what it took, which is exact at
-/// every width; reserving a second row for every touch surface cost the page
-/// desk a whole row of page wherever one row was enough.
-pub(super) fn preview_toolbar_height(
-    ui: &mut Ui,
-    view: &PreviewView,
-    pages: u32,
-    width: f32,
-) -> f32 {
-    let mut probe = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(Rect::from_min_size(
-                ui.max_rect().min,
-                vec2(width, ui.max_rect().height().max(width)),
-            ))
-            .layout(Layout::top_down(Align::Min))
-            .sizing_pass()
-            .invisible(),
-    );
-    preview_toolbar(&mut probe, &mut { *view }, pages, width)
-}
-
-/// What the preview toolbar edits. The toolbar is laid out twice — once
-/// invisibly to measure its band — so it edits a copy the measuring pass can
-/// throw away rather than the draft itself.
-#[derive(Clone, Copy)]
-pub(super) struct PreviewView {
-    pub(super) page: u32,
-    pub(super) zoom: u16,
-}
-
-fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height: f32) {
-    let t = Tokens::get(ui.ctx());
     Frame::NONE.fill(t.color.bg_inset).show(ui, |ui| {
         ui.set_min_size(vec2(width, height));
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        let Some((pages, paper)) = draft.preview_plan.as_ref().map(|plan| {
-            let pages = plan.pagination().pages();
-            let paper = pages
-                .get(draft.preview_page as usize)
-                .or_else(|| pages.first())
-                .map(|page| {
-                    let (width, height) = page.geometry().physical_size();
-                    (width.micrometres(), height.micrometres())
-                });
-            (pages.len(), paper)
-        }) else {
-            ui.allocate_ui_with_layout(
-                vec2(width, height),
-                Layout::centered_and_justified(egui::Direction::LeftToRight),
-                |ui| {
-                    ui.add(egui::Label::new("Finish the setup to see the page.").wrap());
-                },
-            );
-            return;
-        };
-        let (count, tiled) = (pages.clamp(1, 2), pages > 1);
-        // The card is sized from the page, not the other way round: the white
-        // area is the sheet plus its margin, so the desk never shows a
-        // letterboxed page inside a card of some other proportion. The
-        // planned paper gives the proportion before any raster arrives, so
-        // the card does not change shape when one does.
-        let aspect = paper.map_or_else(
-            || match draft.orientation {
-                Orientation::Portrait => 1.0 / std::f32::consts::SQRT_2,
-                _ => std::f32::consts::SQRT_2,
-            },
-            |(width, height)| width as f32 / height.max(1) as f32,
-        );
-        let columns = count as f32;
-        let max_card = vec2(
-            ((width - 40.0) - 16.0 * (columns - 1.0)) / columns,
-            height - 40.0,
-        );
-        let image = fit_aspect(
-            vec2((max_card.x - 20.0).max(40.0), (max_card.y - 38.0).max(40.0)),
-            aspect,
-        );
-        let card = vec2(image.x + 20.0, image.y + 38.0);
-        // The page is rendered at the resolution it is shown at, and again
-        // when the zoom changes: a raster drawn smaller than it was rendered
-        // drops the thin lines that fall between the pixels it samples, and
-        // a trace then reads as dashes.
-        if let Some((width, _)) = paper {
-            let shown = image.x * f32::from(draft.preview_zoom_percent) / 85.0
-                * ui.ctx().pixels_per_point();
-            draft.preview_dpi = Some(shown_dpi(shown, width));
-        }
-        let shown = draft.preview_dpi;
-        let group_width = card.x * columns + 16.0 * (columns - 1.0);
-        let mut selected_adjacent = None;
-        ui.allocate_ui_with_layout(vec2(width, height), Layout::top_down(Align::Min), |ui| {
-            ui.set_width(width);
-            ui.add_space(((height - card.y) * 0.5).max(0.0));
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 16.0;
-                ui.add_space(((width - group_width) * 0.5).max(0.0));
-                let pages = [draft.preview.as_ref(), draft.preview_adjacent.as_ref()]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>();
-                for slot in 0..count {
-                    let preview = pages.get(slot).map(|page| &***page);
-                    let selected = preview.map_or(slot == 0, |preview| {
-                        preview.page_number() == draft.preview_page.saturating_add(1)
-                    });
-                    let clicked = preview_card(
-                        ui,
-                        (preview, tiled),
-                        selected,
-                        (draft.preview_zoom_percent, shown),
-                        slot,
-                        card,
-                    );
-                    if clicked
-                        && !selected
-                        && let Some(preview) = preview
-                    {
-                        selected_adjacent = Some(preview.page_number().saturating_sub(1));
-                    }
-                }
-            });
-        });
-        if let Some(page) = selected_adjacent {
-            draft.preview_page = page;
-            draft.invalidate_preview_raster();
-        }
+        let bar_height = t.metrics.ctl_h + 2.0 * f32::from(PAGE_BAR_INSET_Y);
+        let desk_height = (height - bar_height).max(160.0);
+        preview_desk(ui, draft, width, desk_height);
+        page_bar(ui, draft, width, bar_height);
     });
 }
 
-/// The preview toolbar's side inset.
-const TOOLBAR_INSET_X: i8 = 8;
-
-pub(super) fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, width: f32) -> f32 {
-    // With no page there is nothing to page through or zoom, and the desk
-    // above already says why there is no page. The band this drew instead
-    // restated it, and its measuring pass, where a justified row does not
-    // stretch, reserved the text's height rather than the control height the
-    // drawing pass took: the column ran past the body by the difference and
-    // pushed the dialog's footer off a touch screen.
-    if count == 0 {
-        return 0.0;
+fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height: f32) {
+    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+    let Some(paper) = draft.preview_plan.as_ref().map(|plan| {
+        let pages = plan.pagination().pages();
+        pages
+            .get(draft.preview_page as usize)
+            .or_else(|| pages.first())
+            .map(|page| {
+                let (width, height) = page.geometry().physical_size();
+                (width.micrometres(), height.micrometres())
+            })
+    }) else {
+        ui.allocate_ui_with_layout(
+            vec2(width, height),
+            Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                ui.add(egui::Label::new("Finish the setup to see the page.").wrap());
+            },
+        );
+        return;
+    };
+    // The page is sized from the planned paper, so it does not change shape
+    // when its raster arrives.
+    let aspect = paper.map_or_else(
+        || match draft.orientation {
+            Orientation::Portrait => 1.0 / std::f32::consts::SQRT_2,
+            _ => std::f32::consts::SQRT_2,
+        },
+        |(width, height)| width as f32 / height.max(1) as f32,
+    );
+    let image = fit_aspect(
+        vec2((width - 48.0).max(40.0), (height - 48.0).max(40.0)),
+        aspect,
+    );
+    // The page is rendered at the resolution it is shown at, and again when
+    // the zoom changes: a raster drawn smaller than it was rendered drops
+    // the thin lines that fall between the pixels it samples, and a trace
+    // then reads as dashes.
+    if let Some((paper_width, _)) = paper {
+        let shown =
+            image.x * f32::from(draft.preview_zoom_percent) / 85.0 * ui.ctx().pixels_per_point();
+        draft.preview_dpi = Some(shown_dpi(shown, paper_width));
     }
+    let (desk, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let page = draft.preview.as_deref();
+    preview_page(
+        ui,
+        desk,
+        page,
+        (draft.preview_zoom_percent, draft.preview_dpi),
+        image,
+    );
+}
+
+/// The line under the page: which page of how many, the arrows that turn
+/// them where there are several, and the zoom.
+fn page_bar(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height: f32) {
     let t = Tokens::get(ui.ctx());
-    let toolbar = Frame::NONE
+    let Some(plan) = draft.preview_plan.clone() else {
+        ui.add_space(height);
+        return;
+    };
+    let pages = plan.pagination().pages();
+    let count = u32::try_from(pages.len()).unwrap_or(u32::MAX);
+    let total = plan.pagination().total_page_count();
+    let current = pages
+        .get(draft.preview_page as usize)
+        .map_or(1, |page| page.number());
+    let mut page = draft.preview_page;
+    let mut zoom = draft.preview_zoom_percent;
+    let bar = Frame::NONE
         .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(TOOLBAR_INSET_X, 6))
+        .inner_margin(Margin::symmetric(10, PAGE_BAR_INSET_Y))
         .show(ui, |ui| {
-            ui.set_width((width - 2.0 * f32::from(TOOLBAR_INSET_X)).max(0.0));
-            // Wrapped, not fixed to one row: a column narrow enough to need a
-            // second row would otherwise run its last control off the right
-            // edge, and the band above reserves whichever count this produces.
-            // The row is sized to hold one row in the touch studio's 349 pt
-            // preview column: page controls only where there is a page to turn
-            // to, the page as "2 / 4", and a 4 pt gap. At "Page 1 / 1" beside
-            // two chevrons that could not move and 6 pt gaps, it took 386 pt
-            // there and set the fit control alone on a second row.
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                if count > 1 {
-                    if IconButton::new(Icon::ChevronLeft)
+            ui.set_width((width - 20.0).max(0.0));
+            ui.set_height(t.metrics.ctl_h);
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if count > 1
+                    && IconButton::new(Icon::ChevronLeft)
                         .tooltip("Previous page")
-                        .enabled(view.page > 0)
+                        .enabled(page > 0)
                         .show(ui)
                         .clicked()
-                    {
-                        view.page -= 1;
-                    }
-                    ui.monospace(format!("{} / {}", view.page.saturating_add(1), count));
-                    if IconButton::new(Icon::ChevronRight)
+                {
+                    page -= 1;
+                }
+                let words = if total == 1 {
+                    "1 page".to_owned()
+                } else {
+                    format!("Page {current} of {total}")
+                };
+                ui.label(
+                    egui::RichText::new(words)
+                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                        .color(t.color.text),
+                );
+                if count > 1
+                    && IconButton::new(Icon::ChevronRight)
                         .tooltip("Next page")
-                        .enabled(view.page + 1 < count)
+                        .enabled(page + 1 < count)
+                        .show(ui)
+                        .clicked()
+                {
+                    page += 1;
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if IconButton::new(Icon::ZoomFit)
+                        .tooltip("Fit page")
                         .show(ui)
                         .clicked()
                     {
-                        view.page += 1;
+                        zoom = 85;
                     }
-                    // Painted rather than `ui.separator()`, which takes the
-                    // band's whole height and would set the wrapped row's height
-                    // from a rule instead of from the controls beside it.
-                    let (rule, _) = ui.allocate_exact_size(
-                        vec2(1.0, Tokens::get(ui.ctx()).metrics.ctl_h),
-                        Sense::hover(),
+                    if IconButton::new(Icon::ZoomIn)
+                        .tooltip("Zoom in")
+                        .show(ui)
+                        .clicked()
+                    {
+                        zoom = zoom.saturating_add(10).min(200);
+                    }
+                    ui.label(
+                        egui::RichText::new(format!("{zoom}%"))
+                            .font(theme::field_mono())
+                            .color(t.color.text_dim),
                     );
-                    ui.painter().vline(
-                        rule.center().x,
-                        rule.y_range().shrink(5.0),
-                        Stroke::new(1.0, t.color.border),
-                    );
-                }
-                if IconButton::new(Icon::ZoomOut)
-                    .tooltip("Zoom out")
-                    .show(ui)
-                    .clicked()
-                {
-                    view.zoom = view.zoom.saturating_sub(10).max(25);
-                }
-                ui.monospace(format!("{}%", view.zoom));
-                if IconButton::new(Icon::ZoomIn)
-                    .tooltip("Zoom in")
-                    .show(ui)
-                    .clicked()
-                {
-                    view.zoom = view.zoom.saturating_add(10).min(200);
-                }
-                // The fit control is set as a glyph, not a word. It is the
-                // fifth member of a row of icon buttons and the same action the
-                // rest of the shell spells with this icon; as a labelled button
-                // it was also the one control the column could not pay for at
-                // the tablet width, and the row wrapped to strand it alone on a
-                // second row beneath the other six.
-                if IconButton::new(Icon::ZoomFit)
-                    .tooltip("Fit page")
-                    .show(ui)
-                    .clicked()
-                {
-                    view.zoom = 85;
-                }
+                    if IconButton::new(Icon::ZoomOut)
+                        .tooltip("Zoom out")
+                        .show(ui)
+                        .clicked()
+                    {
+                        zoom = zoom.saturating_sub(10).max(25);
+                    }
+                });
             });
         });
     ui.painter().hline(
-        toolbar.response.rect.x_range(),
-        toolbar.response.rect.top(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    toolbar.response.rect.height()
-}
-
-/// What this configuration will actually produce, as facts rather than as the
-/// settings that produced them.
-/// What this configuration produces. With no valid page there is no page
-/// count to state: the desk above says why there is no page, once.
-fn preview_facts(draft: &HardcopyDialogState) -> Vec<(&'static str, String)> {
-    let pages = draft.preview_plan.as_deref().map(pages_phrase);
-    let mut facts = Vec::with_capacity(5);
-    if let Some(pages) = pages {
-        facts.push(("Pages", pages));
-    }
-    facts.extend([
-        (
-            "Media",
-            format!(
-                "{} · {}",
-                short_paper_label(&draft.paper),
-                orientation_word(draft.orientation)
-            ),
-        ),
-        ("Target", output_summary(draft.format)),
-        ("Scale", scale_label(scale_key(draft.scale)).to_owned()),
-        ("Color", color_mapping_label(draft.color_mapping).to_owned()),
-    ]);
-    facts
-}
-
-fn preview_facts_strip(ui: &mut Ui, facts: &[(&'static str, String)], width: f32, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    let strip = Frame::NONE
-        .fill(t.color.bg_inset)
-        .inner_margin(Margin::symmetric(12, 10))
-        .show(ui, |ui| {
-            let content_width = (width - 24.0).max(0.0);
-            ui.set_width(content_width);
-            ui.set_min_height((height - FACT_STRIP_INSET).max(0.0));
-            ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
-            let label_width = 74.0_f32.min(content_width * 0.4);
-            for (label, value) in facts {
-                // Each row takes exactly the height the strip reserved for it.
-                ui.allocate_ui_with_layout(
-                    vec2(content_width, FACT_ROW_HEIGHT),
-                    Layout::left_to_right(Align::Center),
-                    |ui| {
-                        ui.allocate_ui_with_layout(
-                            vec2(label_width, FACT_ROW_HEIGHT),
-                            Layout::left_to_right(Align::Center),
-                            |ui| {
-                                // The column holds its width, so every value
-                                // starts on one line down the strip.
-                                ui.set_min_width(label_width);
-                                // Sentence case, as every label is.
-                                ui.label(
-                                    egui::RichText::new(*label)
-                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                        .color(t.color.text_faint),
-                                );
-                            },
-                        );
-                        // The facts are prose, so the body face: the strip set
-                        // "Print-safe engineering palette" in mono.
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(value)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.text),
-                            )
-                            .truncate(),
-                        );
-                    },
-                );
-            }
-        });
-    ui.painter().hline(
-        strip.response.rect.x_range(),
-        strip.response.rect.top(),
+        bar.response.rect.x_range(),
+        bar.response.rect.top(),
         Stroke::new(1.0, t.color.border),
     );
-}
-
-/// A preview page's caption: its number, and where it falls in the grid of
-/// pages a drawing is split over. A page holding the whole drawing is in no
-/// grid, and its grid name ("A1") would read as a paper size.
-fn page_caption(preview: &HardcopyPreviewPage, tiled: bool) -> String {
-    if tiled {
-        format!("Page {} · {}", preview.page_number(), preview.coordinate())
-    } else {
-        format!("Page {}", preview.page_number())
+    if page != draft.preview_page {
+        draft.preview_page = page;
+        draft.invalidate_preview_raster();
     }
+    draft.preview_zoom_percent = zoom;
 }
 
 /// The whole pixels per inch at which paper `paper_um` wide fills `pixels`
@@ -372,104 +182,64 @@ fn shown_dpi(pixels: f32, paper_um: u64) -> u16 {
     dpi.clamp(f64::from(least), f64::from(most)) as u16
 }
 
-/// A preview page on its card, or the card standing in for it while it
-/// renders. Both are one widget laid out alike, so a page arriving changes
-/// what the card shows, not which widget it is. `zoom` is the zoom percent
-/// and the resolution the desk shows the page at at that zoom.
-fn preview_card(
+/// The page, white on the desk under a thin neutral edge and a soft shadow,
+/// or a blank sheet of its size while it renders. `fitted` is the size the
+/// page takes at the fitting zoom; `zoom` is the zoom percent and the
+/// resolution the desk shows the page at at that zoom.
+fn preview_page(
     ui: &mut Ui,
-    (preview, tiled): (Option<&HardcopyPreviewPage>, bool),
-    selected: bool,
+    desk: Rect,
+    preview: Option<&HardcopyPreviewPage>,
     (zoom_percent, shown_dpi): (u16, Option<u16>),
-    texture_slot: usize,
-    size: Vec2,
-) -> bool {
-    let texture = preview.map(|preview| preview_texture(ui.ctx(), preview, texture_slot));
-    let caption = preview.map_or_else(
-        || "Rendering\u{2026}".to_owned(),
-        |preview| page_caption(preview, tiled),
-    );
-    let t = Tokens::get(ui.ctx());
-    let inner_width = (size.x - 20.0).max(20.0);
-    let image_box = vec2(inner_width, (size.y - 38.0).max(20.0));
-    let card = Frame::NONE
-        .fill(egui::Color32::from_rgb(245, 244, 239))
-        .stroke(Stroke::new(1.0, egui::Color32::from_rgb(155, 155, 150)))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 4],
-            blur: 12,
+    fitted: Vec2,
+) {
+    let pixels_per_point = ui.ctx().pixels_per_point();
+    // A page rendered for this view is drawn pixel for pixel, on whole
+    // pixels; one rendered for another zoom is stretched to its place until
+    // its own arrives.
+    let drawn = match preview {
+        Some(preview) if shown_dpi == Some(preview.dpi()) => {
+            vec2(preview.width() as f32, preview.height() as f32) / pixels_per_point
+        }
+        _ => fitted * (f32::from(zoom_percent) / 85.0),
+    };
+    let corner = desk.center() - drawn * 0.5;
+    let whole = |points: f32| (points * pixels_per_point).round() / pixels_per_point;
+    let sheet = Rect::from_min_size(egui::pos2(whole(corner.x), whole(corner.y)), drawn);
+    let painter = ui.painter().with_clip_rect(desk);
+    painter.add(
+        egui::epaint::Shadow {
+            offset: [0, 3],
+            blur: 14,
             spread: 0,
-            color: egui::Color32::from_black_alpha(71),
-        })
-        .inner_margin(Margin::same(10))
-        .show(ui, |ui| {
-            ui.set_width(inner_width);
-            ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                let (rect, _) = ui.allocate_exact_size(image_box, Sense::hover());
-                if let (Some(preview), Some(texture)) = (preview, texture.as_ref()) {
-                    let aspect = preview.width() as f32 / preview.height() as f32;
-                    let fitted = fit_aspect(rect.size(), aspect);
-                    // A page rendered for this view is drawn pixel for pixel,
-                    // on whole pixels; one rendered for another zoom is
-                    // stretched to its place until its own arrives.
-                    let pixels_per_point = ui.ctx().pixels_per_point();
-                    let drawn = if shown_dpi == Some(preview.dpi()) {
-                        vec2(preview.width() as f32, preview.height() as f32) / pixels_per_point
-                    } else {
-                        fitted * (zoom_percent as f32 / 85.0)
-                    };
-                    let corner = rect.center() - drawn * 0.5;
-                    let whole =
-                        |points: f32| (points * pixels_per_point).round() / pixels_per_point;
-                    let image_rect = egui::Rect::from_min_size(
-                        egui::pos2(whole(corner.x), whole(corner.y)),
-                        drawn,
-                    );
-                    ui.painter().with_clip_rect(rect).image(
-                        texture.id(),
-                        image_rect,
-                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                } else {
-                    let side = ui.spacing().interact_size.y;
-                    egui::Spinner::new().paint_at(
-                        ui,
-                        egui::Rect::from_center_size(rect.center(), Vec2::splat(side)),
-                    );
-                }
-                ui.add_sized(
-                    vec2(inner_width, 18.0),
-                    egui::Label::new(
-                        egui::RichText::new(caption.as_str())
-                            .monospace()
-                            .size(tokens::FS_0)
-                            .color(egui::Color32::from_rgb(44, 44, 42)),
-                    )
-                    .truncate(),
-                );
-            });
-        });
-    if selected {
-        ui.painter().rect_stroke(
-            card.response.rect,
-            0.0,
-            Stroke::new(2.0, t.color.accent),
-            egui::StrokeKind::Outside,
+            color: egui::Color32::from_black_alpha(90),
+        }
+        .as_shape(sheet, 0),
+    );
+    painter.rect_filled(sheet, 0.0, egui::Color32::WHITE);
+    if let Some(preview) = preview {
+        let texture = preview_texture(ui.ctx(), preview, 0);
+        painter.image(
+            texture.id(),
+            sheet,
+            Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
         );
+    } else {
+        let side = ui.spacing().interact_size.y;
+        egui::Spinner::new()
+            .color(egui::Color32::from_gray(150))
+            .paint_at(
+                ui,
+                Rect::from_center_size(sheet.center(), Vec2::splat(side)),
+            );
     }
-    let response = card.response.interact(Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            selected,
-            caption.clone(),
-        )
-    });
-    theme::paint_focus_ring(ui, &response, response.rect);
-    preview.is_some() && response.clicked()
+    painter.rect_stroke(
+        sheet,
+        0.0,
+        Stroke::new(1.0, egui::Color32::from_gray(120)),
+        egui::StrokeKind::Outside,
+    );
 }
 
 fn preview_texture(ctx: &Context, preview: &HardcopyPreviewPage, slot: usize) -> TextureHandle {
