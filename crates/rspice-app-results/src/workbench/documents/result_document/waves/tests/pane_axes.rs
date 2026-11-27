@@ -463,6 +463,54 @@ fn a_pinned_y_holds_through_a_zoom_in_time_until_fit() {
     );
 }
 
+/// A noise spectrum spans decades: its pane opens logarithmic, and once
+/// the reader turns it linear it stays linear.
+#[test]
+fn a_noise_spectrum_opens_on_decades_and_keeps_the_readers_scale() {
+    let ctx = context(crate::ui::Theme::default());
+    let frequency: Vec<f64> = (0..=40).map(|i| 10f64.powf(f64::from(i) / 10.0)).collect();
+    let psd: Vec<f64> = frequency
+        .iter()
+        .map(|f| 4.0e-16 * (1.0 + 1.0e3 / f))
+        .collect();
+    let mut run = crate::state::SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
+            RetainedTrace::new("onoise", frequency, psd, "#fff").with_unit("V^2/Hz"),
+        ]),
+    );
+    let mut state = ResultsTestHost::default();
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.results.results.session.viewer = crate::workbench::ResultViewer::NoiseContrib;
+    settled(&ctx, &mut state, FRAME);
+    let models = {
+        let presentation = state.model.preferences.result_presentation_policy();
+        cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        )
+    };
+    let panes = models[0].unit_panes();
+    assert!(
+        pane_log_y(&state.results.results.session, &models[0], &panes[0]),
+        "the density opens on decades"
+    );
+    set_pane_log_y(
+        &mut state.results.results.session,
+        &models[0],
+        &panes[0],
+        false,
+    );
+    settled(&ctx, &mut state, FRAME);
+    assert!(
+        !pane_log_y(&state.results.results.session, &models[0], &panes[0]),
+        "the reader's linear scale stands"
+    );
+}
+
 /// A logarithmic pane fits the positive values the window shows: a current
 /// that starts from exactly zero is still offered the axis, and the zero
 /// leaves the fit alone.

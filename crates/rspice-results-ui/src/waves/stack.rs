@@ -611,6 +611,31 @@ pub fn pane_log_y(results: &ResultViewerState, model: &StripModel, pane: &UnitPa
     results.log_y_panes.contains(&pane_log_y_key(model, pane))
 }
 
+/// Whether a pane in `unit` opens on decades: a noise spectrum, a power or
+/// an amplitude density, spans more decades than a linear axis can show.
+/// A decibel unit is logarithmic already.
+pub fn log_y_by_default(unit: &str) -> bool {
+    !unit.starts_with("dB") && (unit.ends_with("/Hz") || unit.ends_with("/\u{221a}Hz"))
+}
+
+/// Open `pane` on its default scale the first time it draws something a
+/// logarithmic axis can show: decades for a noise spectrum. A pane the
+/// reader set, or the view restored, is settled and keeps its scale.
+pub fn settle_pane_log_y(
+    results: &mut ResultViewerState,
+    model: &StripModel,
+    pane: &UnitPane,
+    available: bool,
+) {
+    let key = pane_log_y_key(model, pane);
+    if available && !results.log_y_settled.contains(&key) {
+        if log_y_by_default(&key.unit) {
+            results.log_y_panes.insert(key.clone());
+        }
+        results.log_y_settled.insert(key);
+    }
+}
+
 pub fn set_pane_log_y(
     results: &mut ResultViewerState,
     model: &StripModel,
@@ -618,6 +643,7 @@ pub fn set_pane_log_y(
     enabled: bool,
 ) {
     let key = pane_log_y_key(model, pane);
+    results.log_y_settled.insert(key.clone());
     if enabled {
         results.log_y_panes.insert(key);
     } else {
@@ -2307,6 +2333,7 @@ fn show_unit_pane(
     // A logarithmic axis draws a pane's positive values; one with none has
     // nothing to draw on it.
     let log_y_available = whole.positive_range().is_some();
+    settle_pane_log_y(host.session_mut(), model, pane, log_y_available);
     let mut log_y = pane_log_y(host.session(), model, pane) && log_y_available;
     if !log_y_available && log_y {
         set_pane_log_y(host.session_mut(), model, pane, false);

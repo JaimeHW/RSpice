@@ -1888,6 +1888,17 @@ fn project(state: &mut ResultsParts<'_>, view: ResultDocumentId, dataset: Datase
                 .collect(),
         );
         let session = &mut state.results.session;
+        // A unit axis the view records has the scale the reader left it on.
+        session.log_y_settled.extend(
+            axes.iter()
+                .filter(|axis| axis.orientation == AxisOrientation::VerticalLeft)
+                .filter_map(|axis| {
+                    Some(WavePanePresentationKey {
+                        analysis: key,
+                        unit: pane_unit(axis.unit.as_deref()?).to_owned(),
+                    })
+                }),
+        );
         session.log_y_panes.retain(|pane| pane.analysis != key);
         session.log_y_panes.extend(
             axes.iter()

@@ -1104,6 +1104,10 @@ pub struct ResultViewerState {
     /// dataset the user ever opened. It is the same class of fact as a marker
     /// and it is kept the same way.
     pub log_y_panes: HashSet<WavePanePresentationKey>,
+    /// The panes whose Y scale is settled: the reader set it, the view
+    /// keeps it, or the pane opened on its default. A noise spectrum's pane
+    /// opens logarithmic once, and is never turned back after that.
+    pub log_y_settled: HashSet<WavePanePresentationKey>,
     /// What the strips of a running transient keep in view as they grow.
     pub live_extent: crate::waves::extent::LiveExtent,
     /// Draw exact project specification bounds compatible with visible axes.
@@ -2044,6 +2048,7 @@ impl ResultViewerState {
     pub fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
         let live = |analysis: AnalysisPresentationKey| retained.contains(&analysis.dataset_id());
         self.log_y_panes.retain(|pane| live(pane.analysis));
+        self.log_y_settled.retain(|pane| live(pane.analysis));
         self.analysis_exprs.retain(|analysis, _| live(*analysis));
         self.expression_units
             .retain(|(analysis, _), _| live(*analysis));
