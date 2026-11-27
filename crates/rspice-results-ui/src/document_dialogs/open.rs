@@ -7,7 +7,8 @@ use rspice_ui_kit::panels::{WorkbenchIcon, empty_state};
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::table::{
-    Cell, Column, DataTable, LineHeights, RowKey, SortKey, TableState, fitted_width,
+    CELL_PAD, Cell, Column, DataTable, LineHeights, RowKey, SortKey, TABLE_EDGE_INSET, TableState,
+    fitted_width,
 };
 use rspice_ui_kit::widgets::{
     DIALOG_BODY_INSET, Dialog, DialogChoice, DialogInitialFocus, DialogSize, FILTER_CLEAR_INSET,
@@ -65,8 +66,8 @@ const LIST_ID: &str = "rspice.open-result-document.rows";
 const FILTER_HINT: &str = "Filter documents\u{2026}";
 /// The most rows the list shows before it scrolls inside the form.
 const ROWS_IN_VIEW: usize = 12;
-/// The room each fixed column keeps after its widest entry, so no column's
-/// words run into the next one's.
+/// The room each column but the last keeps after its widest entry, so no
+/// column's words run into the next one's.
 const COLUMN_GAP: f32 = 16.0;
 /// The least height the list keeps when it shows that nothing matches: the
 /// kit's empty state, whole.
@@ -101,6 +102,7 @@ pub fn show(ctx: &Context, draft: &mut OpenDraft, rows: &[OpenRow]) -> DialogCho
         )
         .size(DialogSize::Transaction)
         .width_from_content(width)
+        .overlay_scrollbar()
         .initial_focus(DialogInitialFocus::Control(filter))
         .primary_enabled(draft.chosen().is_some())
         .show_with_initial_body_focus(ctx, |ui| {
@@ -183,9 +185,9 @@ fn modified_cell(row: &OpenRow) -> Cell {
     }
 }
 
-/// The run, analysis and time as wide as the widest of each with a gap
-/// after it, the name taking the rest and never less than its own widest;
-/// and the width of them all.
+/// Every column as wide as its widest entry, with a gap after it but for
+/// the time at the table's edge, the name taking any width the form has to
+/// spare; and the width of them all.
 fn columns(ctx: &Context, rows: &[OpenRow]) -> ([Column; 4], f32) {
     // A `Ui` of its own, for the font cache alone: nothing is allocated in it
     // and nothing is painted from it.
@@ -200,10 +202,13 @@ fn columns(ctx: &Context, rows: &[OpenRow]) -> ([Column; 4], f32) {
         let cells = rows.iter().map(cell).collect::<Vec<_>>();
         fitted_width(&probe, head, &cells)
     };
-    let name = fitted("Name", |row| Cell::text(row.title.as_str()));
+    // The table holds its outer columns' words off its edges by more than a
+    // cell's padding.
+    let edge = TABLE_EDGE_INSET - CELL_PAD;
+    let name = fitted("Name", |row| Cell::text(row.title.as_str())) + edge + COLUMN_GAP;
     let run = fitted("Run", |row| Cell::text(row.run.as_str())) + COLUMN_GAP;
     let analysis = fitted("Analysis", |row| Cell::text(row.analysis.as_str())) + COLUMN_GAP;
-    let modified = fitted("Modified", modified_cell) + COLUMN_GAP;
+    let modified = fitted("Modified", modified_cell) + edge;
     (
         [
             Column::name("Name", name),
