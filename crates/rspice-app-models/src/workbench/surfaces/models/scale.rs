@@ -37,7 +37,7 @@ pub(super) const MODELS_PER_LIBRARY: usize = 125;
 pub(super) const PROJECT_LIBRARIES: usize = 4;
 /// Instances on the active schematic, which every "used by" column consults.
 pub(super) const COMPONENTS: usize = 400;
-/// Symbol cellviews in the design library, which the Symbols page registers.
+/// Symbol cellviews in the design library: a technology library ships one per device.
 pub(super) const SYMBOLS: usize = 600;
 
 /// Total models the fixture holds.
@@ -60,8 +60,8 @@ pub(super) fn large_corpus_app() -> FeatureHarness<ModelsFeature> {
             .add_library(bound_pdk_library(index));
     }
 
-    // The Symbols page registers one row per symbol cellview, which is its own
-    // corpus: a technology library ships a symbol for every device it offers.
+    // Symbol cellviews are their own corpus: a technology library ships a
+    // symbol for every device it offers.
     app.model
         .library_manager
         .add_library(crate::state::Library::new("tech_symbols"));
@@ -428,9 +428,8 @@ fn a_frame_authenticates_each_retained_closure_at_most_once() {
 
 #[test]
 fn a_repainted_page_deserializes_no_symbol_it_already_read() {
-    // Deriving a symbol registry row deserializes the cellview's typed contract
-    // and its artwork, and the Symbols page derives every row in the corpus
-    // before the table narrows to the rows on screen. Nothing on screen changes
+    // Reading a symbol cellview deserializes its typed contract and its
+    // artwork. Nothing on screen changes
     // between two frames over an untouched corpus, so the second frame must not
     // repeat the work — and the fixture ships a symbol per device the way a
     // technology library does, which is where the cost is.

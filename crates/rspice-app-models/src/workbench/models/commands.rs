@@ -28,9 +28,8 @@ pub enum ModelsCommand {
 
 impl ModelsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 12] = [
         Self::Page(ModelsPage::Models),
-        Self::Page(ModelsPage::Symbols),
         Self::Page(ModelsPage::Corners),
         Self::Page(ModelsPage::Bins),
         Self::Page(ModelsPage::Include),
@@ -48,7 +47,6 @@ impl ModelsCommand {
     pub const fn key(self) -> CommandKey {
         match self {
             Self::Page(ModelsPage::Models) => ids::MODELS_CATALOG,
-            Self::Page(ModelsPage::Symbols) => CommandKey::new("symbols-cdf"),
             Self::Page(ModelsPage::Corners) => CommandKey::new("corner-sections"),
             Self::Page(ModelsPage::Bins) => CommandKey::new("model-bins"),
             Self::Page(ModelsPage::Include) => CommandKey::new("include-graph"),
@@ -84,7 +82,6 @@ impl ModelsCommand {
             // A page goes by the name its tab shows. "Library Manager" is the
             // Project workspace's Library page, as Virtuoso names it.
             Self::Page(ModelsPage::Models) => ("Models", page),
-            Self::Page(ModelsPage::Symbols) => ("Symbols & CDF", page),
             Self::Page(ModelsPage::Corners) => ("Corners & sections", page),
             Self::Page(ModelsPage::Bins) => ("Bins & geometry", page),
             Self::Page(ModelsPage::Include) => ("Include graph", page),

@@ -1,8 +1,8 @@
 //! Import and typed parameter-form workflows for project-owned symbol
 //! definitions.
 //!
-//! The mockup owns two entry transactions on Models > Symbols & CDF. This
-//! module keeps their retained drafts, file-picker authority, validation and
+//! Two entry transactions open here: importing a symbol and editing its typed
+//! parameter form. This module keeps their retained drafts, file-picker authority, validation and
 //! atomic project-library publication together so neither native nor browser
 //! builds can bypass the same contract.
 

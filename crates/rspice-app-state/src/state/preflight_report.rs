@@ -10,25 +10,17 @@ use serde::{Deserialize, Serialize};
 pub enum ModelsPage {
     #[default]
     Models,
-    Symbols,
     Corners,
     Bins,
     Include,
 }
 
 impl ModelsPage {
-    pub const ALL: [Self; 5] = [
-        Self::Models,
-        Self::Symbols,
-        Self::Corners,
-        Self::Bins,
-        Self::Include,
-    ];
+    pub const ALL: [Self; 4] = [Self::Models, Self::Corners, Self::Bins, Self::Include];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Models => "Models",
-            Self::Symbols => "Symbols & CDF",
             Self::Corners => "Corners & sections",
             Self::Bins => "Bins & geometry",
             Self::Include => "Include graph",

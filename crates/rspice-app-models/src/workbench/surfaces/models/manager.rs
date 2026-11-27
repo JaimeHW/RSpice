@@ -17,8 +17,6 @@ mod page_chrome;
 mod paint;
 mod place;
 mod shelf;
-mod symbol_contracts;
-mod symbols;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,20 +25,18 @@ use std::path::{Path, PathBuf};
 use egui::{Align, Color32, Layout, RichText, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::explicit_component_model;
 use crate::state::model_library::{
     BinFamily, BindableModel, ClosureFacts, CornerSectionBinding, CornerSectionDomain, DeviceModel,
     ModelConsumerScope, ModelLibrary, ModelLibraryManager, ModelSourceAuthority, ProcessCorner,
     closure_facts, envelope_is_invalid, model_bin_family, model_library_source_digest,
     short_digest,
 };
-use crate::state::{
-    CellViewRef, ModelBoundSymbolDefinition, SymbolDocument, ViewType, explicit_component_model,
-};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 // The design system's widget vocabulary. Every page under this module reaches
 // it through `use super::*`, which is what keeps one spelling of a button, a
-// chip, a select and a modal across all six of them.
+// chip, a select and a modal across all of them.
 use crate::state::ModelsPage;
 use crate::state::command_catalog::CommandKey;
 use crate::ui::widgets::{
@@ -50,7 +46,6 @@ use crate::ui::widgets::{
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_resolution_candidate,
-    publish_symbol_definition_candidate,
 };
 use crate::workbench::framework::feature::Cx;
 #[cfg(test)]
@@ -262,7 +257,6 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     };
     match page {
         ModelsPage::Models => catalog_page(ui, &mut render),
-        ModelsPage::Symbols => symbols::symbols_page(ui, &mut render),
         ModelsPage::Corners => corners::corners_page(ui, &mut render),
         ModelsPage::Bins => bins::bins_page(ui, &mut render),
         ModelsPage::Include => include::include_page(
@@ -345,9 +339,9 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
 ///
 /// This workspace is one continuous document: the mockup's `.models-view` sits
 /// on the panel colour from the tab strip to the bottom edge and separates its
-/// regions with one-pixel dividers. Six pages compose six different bodies over
-/// it, and any of them can be shorter than the panel — a project with three
-/// symbols, an include graph with one file. Painting the surface once, first,
+/// regions with one-pixel dividers. Each page composes its own body over it,
+/// and any of them can be shorter than the panel — a project with three
+/// models, an include graph with one file. Painting the surface once, first,
 /// is what makes "shorter than the panel" read as room rather than as the
 /// shell's own canvas showing through a page that failed to render.
 fn paint_document_surface(ui: &Ui) {
@@ -489,7 +483,7 @@ fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
 /// Painted rather than built from the design system's `Button`: the mockup's
 /// `.model-tabs button` is frameless with an accent underline on the active
 /// one, which is a tab and not an action — a bordered control here would read
-/// as six buttons in a row. It still publishes a selected button role and
+/// as a row of buttons. It still publishes a selected button role and
 /// takes focus, which is what a tab owes a reader who cannot see it.
 fn page_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
     let t = Tokens::get(ui.ctx());
@@ -1439,115 +1433,6 @@ fn refresh_library(app: &mut ManagerRenderContext<'_>, library_name: &str) {
         return;
     }
     app.queue_library_refresh(library_name);
-}
-
-fn author_technology_symbol_variant(
-    app: &mut ManagerRenderContext<'_>,
-    package_id: &str,
-    source_cell: &str,
-    target_library: &str,
-    target_cell: &str,
-) -> Result<String, String> {
-    let target_cell = target_cell.trim();
-    let mut characters = target_cell.chars();
-    if target_cell.is_empty()
-        || target_cell.len() > 128
-        || !characters
-            .next()
-            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
-        || characters.any(|character| character != '_' && !character.is_ascii_alphanumeric())
-    {
-        return Err(
-            "Target cell must start with a letter or underscore and contain only ASCII letters, digits, and underscores."
-                .to_owned(),
-        );
-    }
-    let package = app
-        .model
-        .project_pdk_package()?
-        .ok_or_else(|| "This project has no PDK technology package.".to_owned())?;
-    if !package
-        .manifest()
-        .package_id
-        .eq_ignore_ascii_case(package_id)
-    {
-        return Err(format!(
-            "The selected technology symbol belongs to '{package_id}', but the project now pins '{}'.",
-            package.manifest().package_id
-        ));
-    }
-    let source = package
-        .symbol_definitions()
-        .iter()
-        .find(|definition| definition.identity.cell.eq_ignore_ascii_case(source_cell))
-        .cloned()
-        .ok_or_else(|| {
-            format!("PDK technology symbol '{package_id}/{source_cell}' no longer resolves.")
-        })?;
-    let target = app
-        .model
-        .library_manager
-        .get_library(target_library)
-        .ok_or_else(|| format!("Target library '{target_library}' no longer exists."))?;
-    if target.read_only {
-        return Err(format!("Target library '{target_library}' is read-only."));
-    }
-    if target.get_cell(target_cell).is_some() {
-        return Err(format!(
-            "Target cell '{target_library}/{target_cell}' already exists. Choose a new project cell so the PDK source is never overwritten implicitly."
-        ));
-    }
-
-    let mut variant = source;
-    variant.identity = crate::state::SymbolIdentity::new(
-        target_library,
-        target_cell,
-        1,
-        uuid::Uuid::new_v5(
-            &uuid::Uuid::NAMESPACE_OID,
-            format!(
-                "rspice:pdk-symbol-variant:{}:{}:{target_library}/{target_cell}",
-                package.archive_digest(),
-                variant.identity.binding_id
-            )
-            .as_bytes(),
-        )
-        .to_string(),
-    );
-    variant.parameter_form.revision = 1;
-    variant.generated_views.symbol = true;
-    variant.generated_views.parameter_form = true;
-    variant.generated_views.simulation_test_fixture = false;
-    variant
-        .validate()
-        .map_err(|error| format!("PDK technology symbol cannot seed a project variant: {error}"))?;
-
-    let mut candidate = app.model.library_manager.clone();
-    let plan = crate::state::prepare_symbol_construction(
-        &variant,
-        candidate
-            .get_library(target_library)
-            .expect("target library was resolved above"),
-    )
-    .map_err(|error| error.to_string())?;
-    candidate
-        .edit_library(target_library)
-        .expect("target library remains present in candidate")
-        .commit_symbol_construction(plan)
-        .map_err(|error| error.to_string())?;
-    let revision = publish_symbol_definition_candidate(
-        app.model,
-        candidate,
-        target_library,
-        target_cell,
-        format!("author project variant of PDK symbol {package_id}/{source_cell}"),
-    )?;
-    app.state.models_view.selected_symbol =
-        Some(format!("{target_library}\u{1f}{target_cell}\u{1f}symbol"));
-    Ok(format!(
-        "Authored '{target_library}/{target_cell}' from PDK technology symbol '{package_id}/{source_cell}' at project revision {}.",
-        revision.get()
-    ))
 }
 
 fn publish_definition_provider(

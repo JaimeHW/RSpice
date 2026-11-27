@@ -222,7 +222,6 @@ fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
     for (page, scope) in [
         (ModelsPage::Models, ModelsCatalogScope::Project),
         (ModelsPage::Models, ModelsCatalogScope::RSpiceLibrary),
-        (ModelsPage::Symbols, ModelsCatalogScope::Project),
         (ModelsPage::Corners, ModelsCatalogScope::Project),
         (ModelsPage::Bins, ModelsCatalogScope::Project),
         (ModelsPage::Include, ModelsCatalogScope::Project),

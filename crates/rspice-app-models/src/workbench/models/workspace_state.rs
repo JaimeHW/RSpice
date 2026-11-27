@@ -193,8 +193,6 @@ pub struct ModelsWorkbenchViewState {
     #[serde(default)]
     pub part_catalog_offset: usize,
     #[serde(default)]
-    pub selected_symbol: Option<String>,
-    #[serde(default)]
     pub selected_corner: Option<String>,
     #[serde(default)]
     pub selected_bin_family: Option<String>,
@@ -229,7 +227,6 @@ impl Default for ModelsWorkbenchViewState {
             catalog_sort: ModelsTableSort::default(),
             selected_part: None,
             part_catalog_offset: 0,
-            selected_symbol: None,
             selected_corner: None,
             selected_bin_family: None,
             include_selected_source: None,
@@ -301,12 +298,6 @@ pub enum ModelsWorkbenchDialog {
         /// definition is not a comparison, so there is no default beyond the
         /// same card in another library.
         right: Option<(String, String)>,
-    },
-    AuthorTechnologySymbolVariant {
-        package_id: String,
-        source_cell: String,
-        target_library: String,
-        target_cell: String,
     },
     DefinitionConflict {
         definition: String,

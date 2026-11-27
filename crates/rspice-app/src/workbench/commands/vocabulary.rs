@@ -778,7 +778,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SimulateCommand::Verify(VerificationPage::MonteCarlo).key(),
     SimulateCommand::Verify(VerificationPage::Checks).key(),
     SimulateCommand::Verify(VerificationPage::Reference).key(),
-    ModelsCommand::Page(ModelsPage::Symbols).key(),
     ModelsCommand::Page(ModelsPage::Corners).key(),
     ModelsCommand::Page(ModelsPage::Bins).key(),
     ModelsCommand::Page(ModelsPage::Include).key(),

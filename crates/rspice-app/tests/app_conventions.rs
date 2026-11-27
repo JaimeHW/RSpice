@@ -2600,7 +2600,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app-models/src/workbench/surfaces/models/manager/bins.rs::map_legend",
     "rspice-app-models/src/workbench/surfaces/models/manager/detail.rs::origin_property",
     "rspice-app-models/src/workbench/surfaces/models/manager/include.rs::include_closure_graph",
-    "rspice-app-models/src/workbench/surfaces/models/manager/symbols.rs::detail_table_header",
     "rspice-app-results/src/workbench/docks/inspector/results.rs::trace_colour_row",
     "rspice-app-simulate/src/workbench/surfaces/simulate.rs::analysis_group_header",
     "rspice-app-simulate/src/workbench/surfaces/simulate.rs::paint_control_row_label",
