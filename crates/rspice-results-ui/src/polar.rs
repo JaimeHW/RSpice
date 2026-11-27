@@ -497,7 +497,7 @@ pub fn domain_bar(
     }
 
     let decade_marks = sheet.decade_marks;
-    let response = chip(ui, "DEC", decade_marks).on_hover_text(if decade_marks {
+    let response = chip(ui, "Decades", decade_marks).on_hover_text(if decade_marks {
         "Decade frequency marks on the locus"
     } else {
         "Decade frequency marks off"
@@ -507,7 +507,7 @@ pub fn domain_bar(
     }
 
     let normalize = sheet.normalize;
-    let response = chip(ui, "NORM", normalize).on_hover_text(if normalize {
+    let response = chip(ui, "Normalize", normalize).on_hover_text(if normalize {
         "Radius normalized to this locus' own maximum"
     } else {
         "Radius ruled in retained units"

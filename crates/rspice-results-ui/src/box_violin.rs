@@ -337,7 +337,7 @@ pub fn domain_bar(
     display_menu(ui, state);
 
     let limits = *show_limits;
-    let response = chip(ui, "LIM", limits).on_hover_text(if limits {
+    let response = chip(ui, "Limits", limits).on_hover_text(if limits {
         "Requirement line drawn with the violating side shaded"
     } else {
         "Requirement line hidden"

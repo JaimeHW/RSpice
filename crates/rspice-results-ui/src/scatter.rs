@@ -212,7 +212,7 @@ pub fn domain_bar(
     }
 
     let limits = *show_limits;
-    let response = chip(ui, "LIM", limits).on_hover_text(if limits {
+    let response = chip(ui, "Limits", limits).on_hover_text(if limits {
         "Requirement windows shaded on the violating side"
     } else {
         "Requirement windows hidden"
