@@ -133,7 +133,7 @@ macro_rules! define_surface_catalog {
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
             #[cfg(any(test, feature = "test-support"))]
-            pub const ALL: [Self; 27] = [$(Self::$variant),+];
+            pub const ALL: [Self; 26] = [$(Self::$variant),+];
 
             #[must_use]
             pub const fn metadata(self) -> SurfaceMetadata {
@@ -214,9 +214,7 @@ macro_rules! define_surface_catalog {
             pub const fn owner_workspace(self) -> Option<Workspace> {
                 match self {
                     Self::DesignManagement => Some(Workspace::Design),
-                    Self::ModelEditor
-                    | Self::ModelCorrelation
-                    | Self::LibraryCellviewManager => Some(Workspace::Models),
+                    Self::ModelEditor | Self::LibraryCellviewManager => Some(Workspace::Models),
                     _ => self.workspace(),
                 }
             }
@@ -261,7 +259,6 @@ define_surface_catalog! {
     ReleaseCockpit => { id: "release-cockpit", label: "Release closure", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=release-cockpit" },
     ReportAuthoring => { id: "report-authoring", label: "Verification report", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=report-authoring" },
     ModelEditor => { id: "model-editor", label: "Device model editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
-    ModelCorrelation => { id: "model-correlation", label: "Measurement correlation", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=model-correlation" },
     LibraryCellviewManager => { id: "library-cellview-manager", label: "Symbol and form manager", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=library-cellview-manager" },
     ProjectLauncher => { id: "project-launcher", label: "Project launcher", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=project-launcher" },
     Preferences => { id: "preferences", label: "Preferences", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=preferences" },
@@ -385,7 +382,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_count_and_unique_contract_values() {
-        assert_eq!(SurfaceId::ALL.len(), 27);
+        assert_eq!(SurfaceId::ALL.len(), 26);
 
         let ids = SurfaceId::ALL
             .iter()
@@ -400,9 +397,9 @@ mod tests {
             .map(|surface| surface.deep_link())
             .collect::<HashSet<_>>();
 
-        assert_eq!(ids.len(), 27);
-        assert_eq!(labels.len(), 27);
-        assert_eq!(deep_links.len(), 27);
+        assert_eq!(ids.len(), 26);
+        assert_eq!(labels.len(), 26);
+        assert_eq!(deep_links.len(), 26);
     }
 
     #[test]

@@ -725,11 +725,6 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
         },
     },
     ModalSpec {
-        key: DialogKey("models.model_correlation"),
-        modality: Modality::Application,
-        is_open: |state| features::dialog_open(state, DialogKey("models.model_correlation")),
-    },
-    ModalSpec {
         key: DialogKey("models.models_view"),
         modality: Modality::Application,
         is_open: |state| features::dialog_open(state, DialogKey("models.models_view")),

@@ -35,13 +35,6 @@ const APPLICATION_GATE: &[GateRow] = &[
     ("workbench.notification_center_open", |state| {
         state.workbench.notification_center_open = true;
     }),
-    ("workbench.model_correlation.dialog", |state| {
-        state.models.model_correlation.dialog = Some(
-            rspice_app_models::workbench::documents::model_correlation::ModelCorrelationDialog::AddMetric(
-                rspice_app_models::workbench::documents::model_correlation::CorrelationMetricDraft::default(),
-            ),
-        );
-    }),
     ("workbench.create_result_document", |state| {
         state.results.create_result_document.open = true;
     }),

@@ -107,12 +107,6 @@ impl Host for RSpiceApp {
                     return;
                 }
                 if app.state.workbench.current_route().surface_id()
-                    == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::ModelCorrelation
-                {
-                    ModelsFeature::show_model_correlation(&mut features::cx(app), ui);
-                    return;
-                }
-                if app.state.workbench.current_route().surface_id()
                     == rspice_app_workbench::workbench::routing::surface_catalog::SurfaceId::LibraryCellviewManager
                 {
                     // The manager draws in the project feature's context.
