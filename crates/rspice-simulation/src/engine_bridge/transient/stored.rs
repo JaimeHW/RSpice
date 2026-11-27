@@ -20,7 +20,7 @@ use rspice_core::engine::{SinkTransient, TransientResult, TransientState};
 use rspice_core::result_sink::SinkStop;
 use rspice_results::store_reader::{SegmentBytes, StoreReader};
 use rspice_results::stored_transient::{
-    InstanceParameterAdoption, SlotTarget, clear_rows, fill_event_traces, fill_impulses, fill_rows,
+    InstanceParameterAdoption, SlotTarget, clear_rows, fill_event_traces, fill_impulses,
     fill_span_unless_stopped, instance_parameters, slot_targets,
 };
 use rspice_results::waveform::{StoredWindow, WaveformValues, WindowLead};
@@ -319,7 +319,7 @@ impl EngineBridge {
         }
         // The deck's `.FFT` spectra and lead powers read the whole waveforms once the run ends.
         ensure_not_aborted(abort)?;
-        stored.read_rows()?;
+        stored.read_rows(abort)?;
         engine
             .finish_transient_from_rows(netlist, &mut stored.shell, span.tstop, abort)
             .map_err(|error| self.translate_error(error))?;
@@ -330,7 +330,10 @@ impl EngineBridge {
 impl StoredTransient {
     /// Read every row and event into the shell, with each instance parameter as the constant
     /// trace the run kept, so it is the result the run returned in memory.
-    pub(super) fn read_rows(&mut self) -> Result<(), SimulationError> {
+    ///
+    /// The rows are read a chunk of the store at a time into columns sized for the whole run
+    /// once, asking `abort` before each chunk: Stop ends a read-back of a long run where it is.
+    pub(super) fn read_rows(&mut self, abort: &dyn AbortSignal) -> Result<(), SimulationError> {
         #[cfg(test)]
         tests::READ_BACKS.with(|count| count.set(count.get() + 1));
         let rows = self.rows()?;
@@ -341,8 +344,10 @@ impl StoredTransient {
             parameters,
             receipt,
         } = self;
-        run.with_reader(|reader| {
-            fill_rows(reader, targets, shell, 0, rows)?;
+        let read = run.with_reader(|reader| {
+            if !fill_rows_by_chunk(reader, targets, shell, rows, abort)? {
+                return Ok(false);
+            }
             fill_event_traces(reader, shell)?;
             let mut adoption = InstanceParameterAdoption::of(shell);
             for (slot, &target) in targets.iter().enumerate() {
@@ -353,9 +358,13 @@ impl StoredTransient {
                 let (device, parameter) = &parameters[index];
                 adoption.adopt(shell, device, parameter, values);
             }
-            Ok(())
-        })
-        .map_err(|error| store_failure(&receipt.path, error))
+            Ok(true)
+        });
+        match read {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(SimulationError::Aborted),
+            Err(error) => Err(store_failure(&receipt.path, error)),
+        }
     }
 
     /// The store's event signal of each digital and of each real node the run traced, by name.
@@ -683,6 +692,43 @@ pub(super) struct OutputWindow {
 }
 
 /// The time of a stored run's last row.
+/// Every row of the store into `shell`'s time and saved columns, a chunk at a time, each column
+/// sized for the `rows` once: false, with the rows read so far, once `abort` says to stop.
+fn fill_rows_by_chunk<I: rspice_results_store::SegmentIo>(
+    reader: &rspice_results_store::SegmentReader<I>,
+    targets: &[SlotTarget],
+    shell: &mut TransientResult,
+    rows: usize,
+    abort: &dyn AbortSignal,
+) -> Result<bool, StoreError> {
+    shell.time = Vec::with_capacity(rows);
+    for &target in targets {
+        if let Some(column) = target.column(shell) {
+            *column = Vec::with_capacity(rows);
+        }
+    }
+    let mut block = Vec::new();
+    for (chunk, _) in reader.chunk_spans().enumerate() {
+        if abort.is_aborted() {
+            return Ok(false);
+        }
+        #[cfg(test)]
+        tests::CHUNKS_READ_BACK.with(|count| count.set(count.get() + 1));
+        reader.read_chunk_x(chunk, &mut block)?;
+        shell.time.extend_from_slice(&block);
+        for (slot, &target) in targets.iter().enumerate() {
+            if target.column(shell).is_none() {
+                continue;
+            }
+            reader.read_chunk_slot(chunk, slot, &mut block)?;
+            if let Some(column) = target.column(shell) {
+                column.extend_from_slice(&block);
+            }
+        }
+    }
+    Ok(true)
+}
+
 fn last_time(run: &StoredRun) -> Option<f64> {
     let last = run.rows().checked_sub(1)?;
     let mut time = [0.0];

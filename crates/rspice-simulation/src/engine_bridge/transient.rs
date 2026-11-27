@@ -638,12 +638,13 @@ fn convert_stored_transient(
     } else {
         Some(Vec::new())
     };
-    // A card that does not stream reads the whole run: it is read back for it, then dropped.
+    // A card that does not stream reads the whole run: it is read back for it, a chunk of the
+    // store at a time, then dropped.
     let (measurements, assertions) = match (streamed_measurements, streamed_assertions) {
         (Some(measurements), Some(assertions)) => (measurements, assertions),
         (streamed_measurements, streamed_assertions) => {
             stored.drop_rows(device_traces);
-            stored.read_rows()?;
+            stored.read_rows(abort)?;
             let assertions = match streamed_assertions {
                 Some(assertions) => assertions,
                 None => {

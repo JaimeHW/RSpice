@@ -82,6 +82,9 @@ type AfterSolve = Option<Box<dyn Fn(&std::path::Path)>>;
 thread_local! {
     /// How many times a stored run on this thread was read back whole.
     pub(super) static READ_BACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many chunks of the store a read-back on this thread has read.
+    pub(super) static CHUNKS_READ_BACK: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
     /// What runs as a stored run's solve returns, before anything reads the run back.
     pub(super) static AFTER_SOLVE: std::cell::RefCell<AfterSolve> =
         const { std::cell::RefCell::new(None) };
@@ -186,6 +189,79 @@ fn a_stored_transient_is_checked_and_measured_from_its_store_as_the_in_memory_ro
         format!("{:?}", checks.assertions),
         format!("{expected_assertions:?}")
     );
+}
+
+/// Stop pressed once this thread's read-back has read `chunks` chunks of the store.
+struct StopAfterChunks(usize);
+
+impl rspice_core::abort_signal::AbortSignal for StopAfterChunks {
+    fn is_aborted(&self) -> bool {
+        CHUNKS_READ_BACK.with(std::cell::Cell::get) >= self.0
+    }
+}
+
+/// A measurement that does not stream (a continuous equation) reads the run back a chunk of the
+/// store at a time, and measures every statement as the in-memory route does; Stop pressed while
+/// it reads ends the read where it is.
+#[test]
+fn a_measurement_that_does_not_stream_reads_the_run_back_a_chunk_at_a_time() {
+    let bridge = EngineBridge::new();
+    // A step small enough for a run of several chunks of rows.
+    let config = config(300e-6, 33.3e-6, Some(0.02e-6));
+    let deck = DECK.replace(".end\n", ".meas tran doubled EQN {2*v(out)}\n.end\n");
+    let (expected, _, full_time) = in_memory(&bridge, &deck, &config);
+    READ_BACKS.with(|count| count.set(0));
+    CHUNKS_READ_BACK.with(|count| count.set(0));
+    let actual = bridge
+        .run(&AnalysisConfig::Transient(config.clone()), &deck)
+        .unwrap();
+    assert_eq!(READ_BACKS.with(std::cell::Cell::get), 1);
+    let chunks = CHUNKS_READ_BACK.with(std::cell::Cell::get);
+    assert_eq!(
+        chunks,
+        full_time.len().div_ceil(4096),
+        "{} rows read a chunk at a time",
+        full_time.len()
+    );
+    assert!(chunks > 2, "{chunks} chunks");
+    let (
+        SimulationResult::Transient {
+            measurements,
+            store,
+            ..
+        },
+        SimulationResult::Transient {
+            measurements: expected_measurements,
+            ..
+        },
+    ) = (actual, expected)
+    else {
+        panic!("both routes return a transient");
+    };
+    assert!(store.is_some());
+    assert!(
+        measurements
+            .iter()
+            .any(|measurement| measurement.name.eq_ignore_ascii_case("doubled")),
+        "{measurements:?}"
+    );
+    assert_eq!(
+        format!("{measurements:?}"),
+        format!("{expected_measurements:?}")
+    );
+
+    CHUNKS_READ_BACK.with(|count| count.set(0));
+    let stopped = bridge.run_with_abort(
+        &AnalysisConfig::Transient(config.clone()),
+        &deck,
+        &StopAfterChunks(2),
+    );
+    assert!(
+        matches!(stopped, Err(SimulationError::Aborted)),
+        "{:?}",
+        stopped.map(|_| "a result")
+    );
+    assert_eq!(CHUNKS_READ_BACK.with(std::cell::Cell::get), 2);
 }
 
 #[test]
