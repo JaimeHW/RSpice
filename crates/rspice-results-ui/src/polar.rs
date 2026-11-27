@@ -1556,7 +1556,14 @@ fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
         *right = edge;
     }
 
-    let (header_rect, _) = ui.allocate_exact_size(egui::vec2(width, 20.0), Sense::hover());
+    // The heads reach assistive technology as the table's header row.
+    let (header_rect, header_row) = ui.allocate_exact_size(egui::vec2(width, 20.0), Sense::hover());
+    header_row.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), "Columns: A, B, delta")
+    });
+    ui.ctx().accesskit_node_builder(header_row.id, |node| {
+        node.set_role(egui::accesskit::Role::Row);
+    });
     if ui.is_rect_visible(header_rect) {
         let painter = ui.painter();
         for (right, label) in rights.iter().zip(header) {
