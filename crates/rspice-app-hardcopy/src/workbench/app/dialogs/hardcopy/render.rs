@@ -793,24 +793,6 @@ pub(super) fn schematic_sheet_relationship(draft: &HardcopyDialogState) -> Optio
     })
 }
 
-/// The target in one phrase. A raster format is nothing without its
-/// resolution, so it never appears without one.
-pub fn output_summary(format: OutputFormat) -> String {
-    format.raster_dpi().map_or_else(
-        || format_label(format).to_owned(),
-        |dpi| {
-            format!(
-                "{} · {dpi} dpi",
-                if matches!(format, OutputFormat::Png { .. }) {
-                    "PNG"
-                } else {
-                    "TIFF"
-                }
-            )
-        },
-    )
-}
-
 /// A refusal as the strip states it, in sentence case. The errors behind it
 /// are written as Rust errors are, in lower case, and the strip read
 /// "choose a printer to print to".

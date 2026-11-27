@@ -6,7 +6,6 @@ use crate::workbench::app::RSpiceApp;
 use egui::accesskit::Role;
 use egui::{Context, Rect, Vec2, vec2};
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::content_options::*;
-use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::render::output_summary;
 use rspice_app_hardcopy::workbench::app::dialogs::hardcopy::{
     DEFAULT_RASTER_DPI, HardcopyWorkflow, PaperDraft, publish, render_hardcopy_dialog,
 };
@@ -365,10 +364,6 @@ fn a_page_that_lowers_the_ceiling_lowers_the_resolution_committed_with_it() {
         studio.app.state.hardcopy.hardcopy.format,
         OutputFormat::Png { dpi: ceiling },
         "the wider media left a resolution behind that this host cannot raster"
-    );
-    assert_eq!(
-        output_summary(studio.app.state.hardcopy.hardcopy.format),
-        format!("PNG · {ceiling} dpi")
     );
 
     let button = studio.control(Role::Button, "Save\u{2026}");

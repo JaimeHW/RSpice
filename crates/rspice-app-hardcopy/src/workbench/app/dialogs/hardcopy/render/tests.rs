@@ -6,20 +6,6 @@
 
 use super::*;
 
-/// A raster target is meaningless without its resolution.
-#[test]
-fn the_output_summary_carries_the_resolution_of_a_raster_target() {
-    assert_eq!(
-        output_summary(OutputFormat::Png { dpi: 300 }),
-        "PNG · 300 dpi"
-    );
-    assert_eq!(
-        output_summary(OutputFormat::Tiff { dpi: 1_200 }),
-        "TIFF · 1200 dpi"
-    );
-    assert_eq!(output_summary(OutputFormat::PdfA), "PDF/A · vector");
-}
-
 /// The field must refuse what the publisher would refuse, and for the
 /// same reason. A ceiling of `None` means the plan has not compiled yet,
 /// so only the contract's own range is known.
