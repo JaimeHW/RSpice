@@ -242,73 +242,96 @@ fn an_expressions_entry_converts_and_removes_it() {
     );
 }
 
-/// Where the first run of text that reads `wanted` exactly was painted: on
-/// the strip, the strip header's.
-fn first(output: &FullOutput, wanted: &str) -> Option<egui::Rect> {
-    texts(&output.shapes)
-        .into_iter()
-        .find(|(text, _)| text == wanted)
-        .map(|(_, rect)| rect)
-}
-
-/// An expression's chip in the strip header offers the conversion a trace's
-/// menu offers, ahead of Remove: Digital, which reads the expression as
-/// typed.
+/// An expression is named once, as a signal is: in the legend of the pane
+/// that draws it. The strip header names the analysis and offers to add an
+/// expression, and names no curve.
 #[test]
-fn an_expression_chip_offers_digital() {
+fn an_expression_is_named_once_in_its_panes_legend() {
     const DOUBLE: &str = "V(TOP)*2";
     let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
     add_expression(&mut state, key, DOUBLE);
     let ctx = theme_context();
     let output = settled(&ctx, &mut state);
-    let chip = first(&output, DOUBLE).expect("the strip header names the expression");
-    click(
-        &ctx,
-        &mut state,
-        chip.center(),
-        egui::PointerButton::Secondary,
-    );
-    let menu = run(&ctx, &mut state, Vec::new());
+    let named: Vec<egui::Rect> = texts(&output.shapes)
+        .into_iter()
+        .filter(|(text, _)| text == DOUBLE)
+        .map(|(_, rect)| rect)
+        .collect();
+    let row = volts_row(&output).expect("the volts pane's header row");
+    assert_eq!(named.len(), 1, "the expression is named once: {named:?}");
     assert!(
-        text(&menu, "Remove expression").is_some(),
-        "the chip still offers Remove"
+        (named[0].center().y - row.center().y).abs() < 2.0,
+        "it is named on the volts pane's row"
     );
-    let digital = text(&menu, "Digital").expect("the chip's menu offers Digital");
-    run(
-        &ctx,
-        &mut state,
-        vec![egui::Event::PointerMoved(digital.center())],
-    );
-    click(
-        &ctx,
-        &mut state,
-        digital.center(),
-        egui::PointerButton::Primary,
-    );
-    let form = run(&ctx, &mut state, Vec::new());
-    let add = text(&form, "Add digital lane").expect("Digital opens its threshold form");
-    click(&ctx, &mut state, add.center(), egui::PointerButton::Primary);
-    let added = expressions(&state, key);
     assert!(
-        added.len() == 2 && added[1].starts_with(&format!("digital({DOUBLE}, ")),
-        "Digital reads the expression as typed: {added:?}"
+        text(&output, "+ Expression").is_some(),
+        "the strip header still offers to add one"
     );
 }
 
-/// A `digital()` expression's chip offers what a logic lane's menu offers:
-/// Analog, which draws it as a staircase on a plain number's pane.
+/// An expression that fails to evaluate draws nothing and opens no pane, so
+/// the top pane's legend names it, says it failed and gives the evaluator's
+/// reason on hover; its menu removes it.
 #[test]
-fn a_logic_expression_chip_offers_analog() {
+fn an_expression_that_fails_is_named_and_removable() {
+    const BROKEN: &str = "V(NOWHERE)*2";
+    let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
+    add_expression(&mut state, key, BROKEN);
+    let ctx = theme_context();
+    let output = settled(&ctx, &mut state);
+    let failed = format!("{BROKEN} \u{b7} failed");
+    let entry = exact(&output, &failed).expect("the top pane names the failed expression");
+    let row = volts_row(&output).expect("the volts pane's header row");
+    assert!(
+        (entry.center().y - row.center().y).abs() < 2.0,
+        "the top pane's row names it"
+    );
+    click(
+        &ctx,
+        &mut state,
+        entry.center(),
+        egui::PointerButton::Secondary,
+    );
+    let menu = run(&ctx, &mut state, Vec::new());
+    let remove = text(&menu, "Remove expression").expect("its menu offers Remove");
+    click(
+        &ctx,
+        &mut state,
+        remove.center(),
+        egui::PointerButton::Primary,
+    );
+    assert!(
+        expressions(&state, key).is_empty(),
+        "Remove takes it off the strip"
+    );
+    let output = settled(&ctx, &mut state);
+    assert!(
+        exact(&output, &failed).is_none(),
+        "and its entry goes with it"
+    );
+}
+
+/// A `digital()` expression is named once, as the lane it draws, and the
+/// lane's menu offers what the expression's entry would: Analog, which draws
+/// it as a staircase on a plain number's pane, and Remove. It is no net, so
+/// the menu offers no probe of one.
+#[test]
+fn a_logic_expressions_lane_converts_and_removes_it() {
     const CLOCK: &str = "digital(V(CLK), 0.9)";
+    const LANE: &str = "V(CLK) \u{2265} 0.9";
     let (mut state, key) = sar_strip(BusRadix::Unsigned, false);
     add_expression(&mut state, key, CLOCK);
     let ctx = theme_context();
     let output = settled(&ctx, &mut state);
-    let chip = first(&output, CLOCK).expect("the strip header names the expression");
+    assert!(
+        exact(&output, CLOCK).is_none(),
+        "no legend names the lane's expression again"
+    );
+    let lane = exact(&output, LANE).expect("the lane is named in the gutter");
     click(
         &ctx,
         &mut state,
-        chip.center(),
+        lane.center(),
         egui::PointerButton::Secondary,
     );
     let menu = run(&ctx, &mut state, Vec::new());
@@ -316,7 +339,15 @@ fn a_logic_expression_chip_offers_analog() {
         text(&menu, "Digital").is_none(),
         "a logic expression is not read as logic again"
     );
-    let analog = text(&menu, "Analog").expect("the chip's menu offers Analog");
+    assert!(
+        text(&menu, "Select net").is_none(),
+        "an expression's lane is no net to probe"
+    );
+    assert!(
+        text(&menu, "Remove expression").is_some(),
+        "the lane's menu removes its expression"
+    );
+    let analog = text(&menu, "Analog").expect("the lane's menu offers Analog");
     click(
         &ctx,
         &mut state,
@@ -328,16 +359,34 @@ fn a_logic_expression_chip_offers_analog() {
         expressions(&state, key),
         [CLOCK.to_owned(), staircase.clone()]
     );
-    // Both names are cut to the strip header's 24 characters.
-    let name = rspice_results_ui::waves::header::elide(&staircase, 24);
     let output = settled(&ctx, &mut state);
     assert_eq!(
         texts(&output.shapes)
             .iter()
-            .filter(|(text, _)| text == &name)
+            .filter(|(text, _)| text.starts_with("analog("))
             .count(),
-        2,
-        "the staircase is drawn and named in its pane as in the strip header"
+        1,
+        "the staircase is drawn and named once, in its pane"
+    );
+    let lane = exact(&output, LANE).expect("the lane is still named");
+    click(
+        &ctx,
+        &mut state,
+        lane.center(),
+        egui::PointerButton::Secondary,
+    );
+    let menu = run(&ctx, &mut state, Vec::new());
+    let remove = text(&menu, "Remove expression").expect("the lane's menu offers Remove");
+    click(
+        &ctx,
+        &mut state,
+        remove.center(),
+        egui::PointerButton::Primary,
+    );
+    assert_eq!(
+        expressions(&state, key),
+        [staircase],
+        "Remove takes the lane's expression off the strip and leaves its staircase"
     );
 }
 

@@ -102,9 +102,7 @@ fn a_digital_expression_is_a_logic_lane_with_its_edges_on_the_threshold() {
         shapes
     };
     assert!(
-        texts(&shapes)
-            .iter()
-            .any(|(text, _)| text.starts_with("digital(")),
+        texts(&shapes).iter().any(|(text, _)| text == CLOCK_LANE),
         "the gutter names the lane"
     );
 }

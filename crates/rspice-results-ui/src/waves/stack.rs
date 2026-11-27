@@ -14,7 +14,7 @@ use crate::{
     derived::{DerivedSeries, Extremes, FRAME_EXTENTS, StoredExtent},
     presentation::well_hint,
     session::{ExprEditor, ResultViewerState, XyStrip},
-    strip::{LegendChip, StripHeader},
+    strip::StripHeader,
 };
 use egui::Ui;
 use rspice_results::result_presentation::{
@@ -59,6 +59,15 @@ pub trait StackHost {
     /// leaving it out or showing a swatch for a curve that is not there.
     fn expression_pending(&self, _analysis: AnalysisPresentationKey, _text: &str) -> bool {
         false
+    }
+    /// Why the expression draws nothing, when its last evaluation failed:
+    /// the evaluator's own message, which its legend entry gives on hover.
+    fn expression_failure(
+        &self,
+        _analysis: AnalysisPresentationKey,
+        _text: &str,
+    ) -> Option<String> {
+        None
     }
     fn edit_expression(&mut self, ui: &mut Ui, model: &StripModel);
     fn resolve_expressions(&mut self, model: &StripModel, tokens: &Tokens) -> Vec<ResolvedExpr>;
@@ -976,81 +985,35 @@ pub fn show(
                     let window_slots = 1 + usize::from(closable);
                     // In a document pane the strip's control row stands once
                     // over its panes, and each pane names its curves on a
-                    // legend row of its own over its plot; a strip with no
-                    // pane to name them on keeps them on its control row.
+                    // legend row of its own over its plot.
                     let control_row = control_row(host.session(), options);
-                    let on_its_panes =
-                        control_row && model.x_range.is_some() && !model.unit_panes().is_empty();
                     // Beside a document the strip is its panes alone:
                     // the pane's axis names the analysis, and the
                     // Results sheet is where strips are told apart.
                     if pane_chrome {
-                        // Analysis identity remains in the strip header.
-                        // Unit-owned signal legends live in the pane headers;
-                        // only unitless expressions remain alongside the
-                        // analysis identity here.
-                        let strip_exprs: Vec<ExprTrace> = if on_its_panes {
-                            Vec::new()
-                        } else {
-                            host.session()
-                                .analysis_exprs
-                                .get(&model.analysis_key)
-                                .cloned()
-                                .unwrap_or_default()
-                        };
-                        let expr_labels: Vec<String> = strip_exprs
-                            .iter()
-                            .map(|expr| {
-                                let complex =
-                                    host.expression_is_complex(model.analysis_key, &expr.text);
-                                expression_label(expr, complex)
-                            })
-                            .collect();
-                        // One still being evaluated draws a hollow swatch,
-                        // as its pane legend entry does; the entry is what
-                        // says "evaluating".
-                        let legend: Vec<LegendChip<'_>> = strip_exprs
-                            .iter()
-                            .enumerate()
-                            .map(|(i, expr)| LegendChip {
-                                name: &expr_labels[i],
-                                color: expr_color(&t, expr_palette_slot(model, i)),
-                                on: expr.visible,
-                                glyph: if host.expression_pending(model.analysis_key, &expr.text) {
-                                    crate::strip::LegendGlyph::Pending
-                                } else {
-                                    crate::strip::LegendGlyph::Line
-                                },
-                            })
-                            .collect();
-
+                        // The strip header names the analysis and offers to
+                        // add an expression. Every curve, an expression's as
+                        // a signal's, is named once: in the legend of the
+                        // pane that draws it, or as the lane it draws.
                         let zoomed = host
                             .session()
                             .analysis_strip_is_zoomed(ResultViewer::Waves, model.analysis_key);
-                        let mut conversions = |ui: &mut Ui, index: usize| {
-                            if let Some(expr) = strip_exprs.get(index) {
-                                expression_conversions(ui, host, model, index, expr, &t);
-                            }
-                        };
-                        let header =
-                            StripHeader::new(&model.kind_tag, strip_subtitle(model), &legend)
-                                .id_salt(model.analysis_key)
-                                .incomplete(model.incomplete)
-                                .maximized(maximized)
-                                .closable(closable)
-                                .zoomed(zoomed)
-                                .expr_action(pane_chrome)
-                                .expr_trailing(control_row)
-                                .height(if control_row {
-                                    WAVE_PANE_HEADER_HEIGHT
-                                } else {
-                                    crate::strip::HEADER_HEIGHT
-                                })
-                                .removable_from(0)
-                                .chip_menu(&mut conversions)
-                                .pane_actions(pane_chrome)
-                                .x_scale(true)
-                                .show(ui);
+                        let header = StripHeader::new(&model.kind_tag, strip_subtitle(model), &[])
+                            .id_salt(model.analysis_key)
+                            .incomplete(model.incomplete)
+                            .maximized(maximized)
+                            .closable(closable)
+                            .zoomed(zoomed)
+                            .expr_action(pane_chrome)
+                            .expr_trailing(control_row)
+                            .height(if control_row {
+                                WAVE_PANE_HEADER_HEIGHT
+                            } else {
+                                crate::strip::HEADER_HEIGHT
+                            })
+                            .pane_actions(pane_chrome)
+                            .x_scale(true)
+                            .show(ui);
                         // The strip header owns the shared X axis, and with
                         // it the axis' scale toggle.
                         if let Some(rect) = header.scale_rect
@@ -1065,15 +1028,6 @@ pub fn show(
                             )
                         {
                             toggle_x_scale(host.session_mut(), model);
-                        }
-                        if let Some(chip_index) = header.legend_clicked {
-                            toggle_expr = Some((model.analysis_key, chip_index));
-                        }
-                        if let Some(chip_index) = header.legend_visibility_clicked {
-                            toggle_expr = Some((model.analysis_key, chip_index));
-                        }
-                        if let Some(chip_index) = header.legend_removed {
-                            remove_expr = Some((model.analysis_key, chip_index));
                         }
                         if header.maximize_clicked {
                             toggle_maximize = Some(model.analysis_key);
@@ -1196,47 +1150,6 @@ pub fn show(
     }
 }
 
-/// The conversions an expression's chip offers, as a trace's or a lane's
-/// menu offers them: a value read as logic with `digital()`, a logic lane
-/// drawn as a staircase with `analog()`.
-fn expression_conversions(
-    ui: &mut Ui,
-    host: &mut impl StackHost,
-    model: &StripModel,
-    slot: usize,
-    expr: &ExprTrace,
-    t: &Tokens,
-) {
-    if super::logic::convert::draws_as_logic(&expr.text) {
-        if ui
-            .button("Analog")
-            .on_hover_text("Draw the lane's value as a staircase trace, analog()")
-            .clicked()
-        {
-            host.add_expression(model, format!("analog({})", expr.text));
-            ui.close();
-        }
-        return;
-    }
-    rspice_ui_kit::widgets::menu_button(ui, "Digital", |ui| {
-        // The threshold starts at the middle of what the expression draws.
-        let values = host
-            .resolve_expressions(model, t)
-            .into_iter()
-            .find(|resolved| resolved.slot == slot)
-            .map(|resolved| resolved.y)
-            .unwrap_or_default();
-        if let Some(text) = super::logic::convert::digital_form_of(ui, &expr.text, || {
-            values
-                .fetch_whole()
-                .ready()
-                .and_then(|values| super::logic::convert::mid_range(&values))
-        }) {
-            host.add_expression(model, text);
-        }
-    });
-}
-
 #[derive(Clone, Copy)]
 pub(crate) struct StripFrame<'a> {
     pub(crate) model: &'a StripModel,
@@ -1253,6 +1166,9 @@ pub(crate) struct StripFrame<'a> {
     /// The strips the sheet shows, this one among them, when it is one of
     /// them.
     pub(crate) strips: Option<&'a Arc<Vec<StripModel>>>,
+    /// The strip's expressions no pane or lane of it names, which this
+    /// pane's legend names: the top pane's, and no other's.
+    pub(crate) unplaced: &'a [usize],
 }
 
 /// The share of a strip its ruler takes, up to the ruler's own height.
@@ -1497,6 +1413,7 @@ fn show_strip_plot(
     for (pane, exprs) in panes.iter().zip(&mut pane_exprs) {
         exprs.extend(host.real_step_traces(model, pane, &t, view));
     }
+    let unplaced = unplaced_expressions(host.session(), model, &panes, &pane_exprs);
     // A pane with nothing to show keeps its header row, where its hidden
     // traces wait to be shown again and its plotted ones are named, and gives
     // its height to the others: nothing is plotted on it, or nothing plotted
@@ -1596,6 +1513,7 @@ fn show_strip_plot(
         window_slots,
         several,
         strips: Some(strips),
+        unplaced: &unplaced,
     };
     // The strips share what is left by their weights, as the reader sized
     // them; a divider being dragged moves the line between two of them
@@ -1633,6 +1551,7 @@ fn show_strip_plot(
     let top_open = (0..count)
         .find(|ordinal| shown[*ordinal] && !collapsed[*ordinal])
         .unwrap_or(0);
+    let top_shown = (0..count).find(|ordinal| shown[*ordinal]);
     let mut above: Option<usize> = None;
     for (ordinal, pane) in panes.iter().enumerate() {
         if !shown[ordinal] {
@@ -1676,7 +1595,14 @@ fn show_strip_plot(
                     host,
                     pane,
                     &pane_exprs,
-                    frame,
+                    StripFrame {
+                        unplaced: if top_shown == Some(ordinal) {
+                            frame.unplaced
+                        } else {
+                            &[]
+                        },
+                        ..frame
+                    },
                     edits,
                     if ordinal == top_open {
                         plot::CursorTabs::OutOfView
@@ -1792,13 +1718,48 @@ fn fitted_overflow(
     }
 }
 
+/// The strip's expressions that no pane or lane of it names: one that
+/// failed to evaluate, which opens no pane, a hidden one whose unit no pane
+/// shows, and a `digital()` conversion that draws no lane. With the strip
+/// header naming none, the top pane's legend names these, so none drops out
+/// of sight where it can be neither shown nor removed.
+fn unplaced_expressions(
+    session: &ResultViewerState,
+    model: &StripModel,
+    panes: &[UnitPane],
+    pane_exprs: &[Vec<ResolvedExpr>],
+) -> Vec<usize> {
+    let Some(list) = session.analysis_exprs.get(&model.analysis_key) else {
+        return Vec::new();
+    };
+    list.iter()
+        .enumerate()
+        .filter(|(slot, expr)| {
+            let listed = panes.iter().any(|pane| {
+                pane.all_expressions().any(|listed| listed == *slot)
+                    || pane.hidden_expressions.contains(slot)
+            });
+            let lane = expr.visible
+                && model.lane_traces.iter().any(|lane| {
+                    lane.kind == super::LaneTraceKind::Logic
+                        && lane.source_waveform_name == expr.text
+                });
+            // The curves are looked at last, for one listed nowhere: a
+            // family draws one for each member.
+            !listed && !lane && !pane_exprs.iter().flatten().any(|drawn| drawn.slot == *slot)
+        })
+        .map(|(slot, _)| slot)
+        .collect()
+}
+
 /// The legend entries of the strip's expressions on `pane`: one for each
-/// expression it draws, standing for all the curves of a family, then one
-/// for each hidden expression it would draw.
+/// expression it draws, standing for all the curves of a family, one for
+/// each still being evaluated, one for each of the strip's `unplaced`
+/// expressions, then one for each hidden expression it would draw.
 fn pane_expressions(
     host: &impl StackHost,
     model: &StripModel,
-    pane: &UnitPane,
+    (pane, unplaced): (&UnitPane, &[usize]),
     exprs: &[ResolvedExpr],
     cursor_a: Option<(f64, ReadoutPolicy, QuantityPresentationPolicy)>,
     t: &Tokens,
@@ -1860,6 +1821,7 @@ fn pane_expressions(
             at_cursor,
             curves: members.len(),
             values: first.y.clone(),
+            note: None,
         })
     });
     // One still being evaluated off the frame draws nothing yet; its entry
@@ -1886,9 +1848,38 @@ fn pane_expressions(
                     at_cursor: None,
                     curves: 0,
                     values: Default::default(),
+                    note: None,
                 })
         })
         .collect::<Vec<_>>();
+    // One no pane or lane names: still being evaluated, or failed, which
+    // its entry says, with the evaluator's reason on hover; a hidden one
+    // waits in the trace list.
+    let unplaced = unplaced.iter().filter_map(|&slot| {
+        let expr = list.get(slot)?;
+        let (label, note) = if !expr.visible {
+            (label(expr), None)
+        } else if host.expression_pending(model.analysis_key, &expr.text) {
+            (format!("{} \u{b7} evaluating\u{2026}", label(expr)), None)
+        } else {
+            (
+                format!("{} \u{b7} failed", label(expr)),
+                host.expression_failure(model.analysis_key, &expr.text),
+            )
+        };
+        Some(pane_header::PaneExpression {
+            slot,
+            text: expr.text.clone(),
+            label,
+            color: expr_color(t, expr_palette_slot(model, slot)),
+            swatch: swatch(slot, None),
+            visible: expr.visible,
+            at_cursor: None,
+            curves: 0,
+            values: Default::default(),
+            note,
+        })
+    });
     let hidden = pane.hidden_expressions.iter().filter_map(|&slot| {
         let expr = list.get(slot)?;
         Some(pane_header::PaneExpression {
@@ -1901,9 +1892,10 @@ fn pane_expressions(
             at_cursor: None,
             curves: 0,
             values: Default::default(),
+            note: None,
         })
     });
-    drawn.chain(pending).chain(hidden).collect()
+    drawn.chain(pending).chain(unplaced).chain(hidden).collect()
 }
 
 /// The hue an expression's curve takes among the palette's, which also
@@ -2048,6 +2040,7 @@ fn show_xy_strip(
         window_slots: slots,
         several,
         strips: None,
+        unplaced: &[],
     };
 
     // The pane's header: its legend, its unit and its scale, which the strip
@@ -2072,7 +2065,7 @@ fn show_xy_strip(
         log_y,
         log_y_available,
         cursor_a,
-        expressions: pane_expressions(host, model, pane, &exprs, cursor_a, &t),
+        expressions: pane_expressions(host, model, (pane, &[]), &exprs, cursor_a, &t),
         plotted: auto_y.is_some(),
         abscissa: options
             .pane_chrome
@@ -2312,6 +2305,7 @@ fn show_unit_pane(
         window_slots,
         several,
         strips,
+        unplaced,
     } = frame;
     let t = Tokens::get(ui.ctx());
     let presentation = options.readout;
@@ -2386,7 +2380,7 @@ fn show_unit_pane(
         log_y,
         log_y_available,
         cursor_a,
-        expressions: pane_expressions(host, model, pane, all_exprs, cursor_a, &t),
+        expressions: pane_expressions(host, model, (pane, unplaced), all_exprs, cursor_a, &t),
         plotted,
         abscissa: options
             .pane_chrome

@@ -85,10 +85,14 @@ pub struct PaneExpression {
     pub curves: usize,
     /// Its values, where Digital's threshold starts.
     pub values: rspice_results::waveform::SharedWaveformValues,
+    /// Why it draws nothing, given on hover after the expression: the
+    /// evaluator's message for one that failed.
+    pub note: Option<String>,
 }
 
 impl PaneExpression {
-    /// Whether it is shown but draws no curve yet: still being evaluated.
+    /// Whether it is shown but draws no curve: still being evaluated, or
+    /// failed.
     pub fn is_pending(&self) -> bool {
         self.visible && self.curves == 0
     }
@@ -861,7 +865,8 @@ fn expression_chip(
 ) {
     let t = Tokens::get(ui.ctx());
     let (swatch, swatch_response) = ui.allocate_exact_size(LEGEND_SWATCH, egui::Sense::click());
-    // One still being evaluated draws no curve yet, so its swatch is hollow.
+    // One still being evaluated, or failed, draws no curve, so its swatch is
+    // hollow.
     if expression.is_pending() {
         crate::strip::paint_pending_swatch(ui.painter(), swatch.center(), expression.color);
     } else {
@@ -890,7 +895,10 @@ fn expression_chip(
     }
     let label = ui
         .selectable_label(false, legend_text(ui, &entry.label, dimmed))
-        .on_hover_text(&expression.text);
+        .on_hover_text(match &expression.note {
+            Some(note) => format!("{}\n{note}", expression.text),
+            None => expression.text.clone(),
+        });
     let label = drag_curve(label, curve);
     if label.clicked() {
         host.activate_pane();

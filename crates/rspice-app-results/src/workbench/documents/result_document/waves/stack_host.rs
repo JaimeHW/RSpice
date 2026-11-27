@@ -53,6 +53,13 @@ impl StackHost for WaveStackHost<'_, '_> {
                 .get(&key)
                 .is_none_or(|cached| cached.series.is_err())
     }
+    fn expression_failure(&self, analysis: AnalysisPresentationKey, text: &str) -> Option<String> {
+        self.0
+            .results
+            .analysis_expr_cache
+            .get(&(analysis, text.to_owned()))
+            .and_then(|cached| cached.series.as_ref().err().cloned())
+    }
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String) {
         let key = (analysis, text);
         if let Some(evaluating) = self.0.results.expression_jobs.remove(&key) {
