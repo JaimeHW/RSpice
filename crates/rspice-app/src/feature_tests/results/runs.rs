@@ -299,6 +299,32 @@ impl Desk {
         self.settle();
     }
 
+    /// Give `node` the keyboard, as AccessKit's focus action does, and draw
+    /// the frames it takes.
+    fn focus(&mut self, node: NodeId) {
+        self.frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Focus,
+            target_tree: TreeId::ROOT,
+            target_node: node,
+            data: None,
+        })]);
+        self.settle();
+    }
+
+    /// Where the open menu's item labelled `label` stands.
+    fn menu_item(&mut self, label: &str) -> egui::Rect {
+        let nodes = self.nodes();
+        let bounds = nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::MenuItem && node.label() == Some(label))
+            .find_map(|(_, node)| node.bounds())
+            .unwrap_or_else(|| panic!("the menu offers {label}"));
+        egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+        )
+    }
+
     /// Choose the strip's tab labelled `label`, as a click on it does.
     fn click_tab(&mut self, label: &str) {
         let tab = strip_tabs::tab(&self.nodes(), label);
@@ -830,8 +856,10 @@ fn open_result_document_adds_a_tab_or_brings_its_tab_forward() {
 }
 
 /// A document's tab menu renames the document, closes its tab and deletes
+/// it. It hangs below the tab, whether a right-click or the keyboard opens
 /// it. Closing keeps the document; deleting asks nothing, since Undo puts
-/// the document back, and the run's tab comes forward.
+/// the document back as it was, changed when it was, and the run's tab
+/// comes forward.
 #[test]
 fn a_document_tabs_menu_renames_closes_and_deletes_it() {
     let Bench {
@@ -843,6 +871,17 @@ fn a_document_tabs_menu_renames_closes_and_deletes_it() {
     let run = desk.name_of(first[1]);
     let bias = strip_tabs::tab(&desk.nodes(), "Bias");
     desk.right_click(bias.centre);
+    // From the tab's bottom-left corner, as a menu of the menu bar hangs
+    // from its name, never over the tab's name.
+    let hangs_below = |item: egui::Rect, tab: egui::Rect| {
+        item.top() >= tab.bottom() && (0.0..=12.0).contains(&(item.left() - tab.left()))
+    };
+    let item = desk.menu_item("Rename\u{2026}");
+    assert!(
+        hangs_below(item, bias.rect),
+        "{item:?} under {:?}",
+        bias.rect
+    );
     desk.choose_below("Rename\u{2026}", bias.centre.y);
     let Some(ResultDocumentDialog::Rename(mut draft)) =
         desk.app.state.results.result_document_dialog.clone()
@@ -857,6 +896,13 @@ fn a_document_tabs_menu_renames_closes_and_deletes_it() {
     assert_eq!(strip_tabs::labels(&nodes), [run.as_str(), "Bias sweep"]);
     let tab = strip_tabs::tab(&nodes, "Bias sweep");
     assert!(tab.selected, "the renamed document is not in front");
+
+    // Shift+F10 on the tab with the keyboard hangs the same menu there.
+    desk.focus(tab.id);
+    desk.chord(egui::Key::F10, egui::Modifiers::SHIFT);
+    let item = desk.menu_item("Rename\u{2026}");
+    assert!(hangs_below(item, tab.rect), "{item:?} under {:?}", tab.rect);
+    desk.press(egui::Key::Escape);
 
     desk.right_click(tab.centre);
     desk.choose_below("Close", tab.centre.y);

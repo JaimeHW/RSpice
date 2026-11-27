@@ -135,11 +135,47 @@ pub fn context_menu_over(
     label: &str,
     rows: impl FnOnce(&Context) -> Vec<MenuRow>,
 ) -> Option<MenuChoice> {
+    let popup = crate::ui::widgets::context_menu_popup(response);
+    show_context_menu(response, popup, label, rows)
+}
+
+/// [`context_menu_over`] for a control whose menu hangs from it as a menu
+/// of the menu bar hangs from its name: below its bottom-left corner,
+/// whether a right-click, Shift+F10 or the Menu key opened it, so it never
+/// covers what the control reads.
+pub fn context_menu_below(
+    response: &Response,
+    label: &str,
+    rows: impl FnOnce(&Context) -> Vec<MenuRow>,
+) -> Option<MenuChoice> {
+    let from_keys = response.has_focus()
+        && (response
+            .ctx
+            .input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10))
+            || rspice_ui_kit::input::menu_key_pressed(&response.ctx));
+    let mut popup = Popup::context_menu(response)
+        .anchor(response.rect)
+        .align(egui::RectAlign::BOTTOM_START)
+        .gap(super::MENU_POPUP_GAP);
+    if from_keys {
+        popup = popup.open_memory(Some(egui::SetOpenCommand::Bool(true)));
+    }
+    show_context_menu(response, popup, label, rows)
+}
+
+/// Show `popup`, the menu over `response` named `label`, of the rows `rows`
+/// builds, and the row the reader chose from it.
+fn show_context_menu(
+    response: &Response,
+    popup: Popup<'_>,
+    label: &str,
+    rows: impl FnOnce(&Context) -> Vec<MenuRow>,
+) -> Option<MenuChoice> {
     let ctx = response.ctx.clone();
     let large_targets = ctx.content_rect().width() <= 820.0
         || Tokens::get(&ctx).metrics.ctl_h >= MENU_TOUCH_ROW_HEIGHT;
     let popup_id = Popup::default_response_id(response);
-    let shown = crate::ui::widgets::context_menu_popup(response).show(|ui| {
+    let shown = popup.show(|ui| {
         let rows = rows(ui.ctx());
         configure_menu_popup(ui, large_targets, &rows);
         ui.ctx().accesskit_node_builder(popup_id, |node| {

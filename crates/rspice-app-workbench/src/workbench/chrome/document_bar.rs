@@ -1268,12 +1268,13 @@ fn result_document_tab_menu_rows(
 }
 
 /// A saved result document's tab menu of `rows`, drawn as the menu bar
-/// draws its menus, and what the reader chose from it.
+/// draws its menus and hung below the tab as they hang below their names,
+/// and what the reader chose from it.
 fn result_document_tab_menu(
     tab: &egui::Response,
     rows: &[super::title_bar::menu_entries::MenuRow],
 ) -> Option<TabMenuChoice> {
-    let choice = super::title_bar::context_menu_over(tab, "Document tab menu", |_| rows.to_vec())?;
+    let choice = super::title_bar::context_menu_below(tab, "Document tab menu", |_| rows.to_vec())?;
     match choice.command().as_str() {
         RENAME_RESULT_DOCUMENT => Some(TabMenuChoice::Rename),
         CLOSE_DOCUMENT => Some(TabMenuChoice::Close),

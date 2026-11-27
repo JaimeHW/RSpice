@@ -127,6 +127,7 @@ mod strip_tabs {
         pub(super) unsaved: bool,
         pub(super) closable: bool,
         pub(super) centre: egui::Pos2,
+        pub(super) rect: egui::Rect,
     }
 
     /// The strip's tabs, left to right. They are the tabs that say how they
@@ -153,6 +154,10 @@ mod strip_tabs {
                     centre: egui::pos2(
                         ((bounds.x0 + bounds.x1) * 0.5) as f32,
                         ((bounds.y0 + bounds.y1) * 0.5) as f32,
+                    ),
+                    rect: egui::Rect::from_min_max(
+                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
                     ),
                 })
             })
