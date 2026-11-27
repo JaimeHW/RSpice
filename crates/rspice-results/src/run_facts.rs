@@ -109,7 +109,7 @@ impl RunFacts {
     /// `FF, r=2k`. `None` where the run solved at one point.
     #[must_use]
     pub fn point_words(&self, point: &crate::provenance::AnalysisResultPvtPoint) -> Option<String> {
-        use crate::number_format::spice_coordinate;
+        use crate::number_format::reading_coordinate;
         let mut words = Vec::new();
         if self.processes.len() > 1 {
             words.push(point.process().to_owned());
@@ -117,10 +117,10 @@ impl RunFacts {
         if self.supplies.len() > 1
             && let Some(volts) = point.supply_voltage()
         {
-            words.push(spice_coordinate(volts, "V"));
+            words.push(reading_coordinate(volts, "V"));
         }
         if self.temperatures.len() > 1 {
-            words.push(spice_coordinate(point.temperature_celsius(), "°C"));
+            words.push(reading_coordinate(point.temperature_celsius(), "°C"));
         }
         for swept in point.swept_values() {
             if self

@@ -599,6 +599,23 @@ pub fn spice_coordinate(value: f64, unit: &str) -> String {
     format!("{number}{prefix}{space}{unit}")
 }
 
+/// A point's coordinate read the way a reading of it is: the number, then
+/// its scaled unit after a space, `1.62 V`, `900 mV`, `−40 °C`.
+/// A run's supply and temperature name its points this way, where a swept
+/// parameter keeps the netlist's spelling, [`spice_coordinate`].
+pub fn reading_coordinate(value: f64, unit: &str) -> String {
+    let (number, prefix) = significant_number(
+        value,
+        COORDINATE_DIGITS,
+        unit_takes_prefix(unit),
+        Zeros::Trim,
+    );
+    if unit.is_empty() {
+        return format!("{number}{prefix}");
+    }
+    format!("{number} {prefix}{unit}")
+}
+
 /// The unit a `.STEP` of a device's own value sweeps, read from the
 /// device's letter as SPICE reads it: a resistor in ohms, a capacitor in
 /// farads, an inductor in henries, a voltage source in volts and a current
@@ -1017,6 +1034,16 @@ fn tick_label_with_decimals(value: f64, decimals: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A run's supply and temperature name its points as readings do, the
+    /// unit after a space.
+    #[test]
+    fn a_points_supply_reads_as_a_reading_does() {
+        assert_eq!(reading_coordinate(1.62, "V"), "1.62 V");
+        assert_eq!(reading_coordinate(1.8, "V"), "1.8 V");
+        assert_eq!(reading_coordinate(0.9, "V"), "900 mV");
+        assert_eq!(reading_coordinate(-40.0, "\u{b0}C"), "\u{2212}40 \u{b0}C");
+    }
 
     /// A `.step` point reads as the netlist wrote it: `.STEP PARAM r LIST
     /// 1k 2k 1Meg` names its points `1k`, `2k` and `1Meg`, never `2000`, and
