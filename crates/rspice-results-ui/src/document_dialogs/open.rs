@@ -59,6 +59,10 @@ pub fn show(ctx: &Context, draft: &mut OpenDraft, rows: &[OpenRow]) -> DialogCho
         .collect::<Vec<_>>();
     let mut activated = false;
     let choice = Dialog::new(TITLE, "Open")
+        .description(
+            "Every saved result document of the project, the most recent first; the one \
+             opened becomes a tab of Results.",
+        )
         .size(DialogSize::Transaction)
         .width_from_content(width)
         .initial_focus(DialogInitialFocus::Control(filter))

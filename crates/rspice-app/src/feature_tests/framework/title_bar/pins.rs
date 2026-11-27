@@ -552,6 +552,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  Sample table | result-table |  | hidden",
             "---",
             "New result document… | create-result-document |  | off: no retained result dataset is available",
+            "Open result document… | open-result-document |  | off: open a result in Results",
             "Save view as document | save-view-as-document | Shift+N | off: open a result in Results",
             "Document >",
             "  Rename document… | rename-result-document |  | off: open a result in Results",

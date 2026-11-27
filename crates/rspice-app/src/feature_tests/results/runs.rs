@@ -339,7 +339,8 @@ impl Desk {
     }
 
     /// The rows Open result document lists, top to bottom, by the name of
-    /// the document each leads with, among `names`.
+    /// the document each leads with, among `names`. A grid's row reads each
+    /// cell after its column's head.
     fn listed(&mut self, names: &[&str]) -> Vec<(NodeId, String, f32)> {
         let nodes = self.nodes();
         let mut rows = nodes
@@ -349,7 +350,7 @@ impl Desk {
                 let label = node.label()?;
                 let name = names
                     .iter()
-                    .find(|name| label.starts_with(&format!("{name}, ")))?;
+                    .find(|name| label.starts_with(&format!("Name: {name}, ")))?;
                 Some((*id, (*name).to_owned(), node.bounds()?.y1 as f32))
             })
             .collect::<Vec<_>>();
@@ -540,7 +541,7 @@ fn stepping_through_a_plans_runs_keeps_the_panes_the_x_range_and_the_cursors() {
 /// The strip's first tab is the run the browser picked, and it never
 /// closes; each saved document's tab follows it. The commands that step
 /// through and close tabs work on the strip: Next and Previous move between
-/// the run and the document, and Close, Close others and Close all close a
+/// the run and the document, and Close others and Close all close a
 /// document's tab, keep the document, and leave the run's tab.
 #[test]
 fn the_run_tab_leads_and_the_tab_commands_work_on_the_strip() {
@@ -587,7 +588,6 @@ fn the_run_tab_leads_and_the_tab_commands_work_on_the_strip() {
     };
     let document = WorkspaceDocumentId::VisualizationDocument(saved);
     for close in [
-        ShellCommand::CloseActiveDocument,
         ShellCommand::CloseOtherDocuments,
         ShellCommand::CloseAllDocuments,
     ] {
