@@ -261,7 +261,8 @@ fn a_volume_that_fills_during_a_run_stops_it_in_words_and_leaves_the_project_who
 
 /// A volume with not even room to close the segment, filled by another writer past the reserve
 /// the store keeps for `END`: the run still stops in words with the rows it wrote, kept again in a
-/// segment of their own, and the earlier run and the saved project are as they were.
+/// segment of their own whose `END` says the volume filled, and the earlier run and the saved
+/// project are as they were.
 #[test]
 fn a_volume_with_no_room_to_close_the_segment_still_stops_the_run_in_words() {
     let scratch = Scratch::new("full-disk-closing");
@@ -298,11 +299,15 @@ fn a_volume_with_no_room_to_close_the_segment_still_stops_the_run_in_words() {
     );
 
     // Its own segment could not be closed, so its rows are kept again in a segment of their own,
-    // which ends with END on every row the run wrote.
+    // which ends with END on every row the run wrote, saying the volume filled.
     let path = segment_of(&filled);
     let segment = StoreReader::open_file(&path).expect("the segment opens");
     assert!(segment.digest().is_some(), "{}", path.display());
     assert_eq!(segment.rows(), kept as u64);
+    let status = segment
+        .with_reader(|reader| Ok(format!("{:?}", reader.state())))
+        .unwrap();
+    assert!(status.contains("DiskFull"), "{status}");
     assert!(
         sample_bits(&filled)
             .iter()

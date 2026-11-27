@@ -115,6 +115,18 @@ impl SimulationRun {
         self.data.results_storage_stop = Some(stop);
     }
 
+    /// How the segment the analysis `label` is kept in ends: stopped as the run's results
+    /// storage stopped it, for the analysis it stopped, else completed.
+    #[must_use]
+    pub fn segment_end_of(&self, label: &str) -> rspice_results_store::RunStatus {
+        self.results_storage_stop()
+            .filter(|stop| stop.analysis == label)
+            .map_or(
+                rspice_results_store::RunStatus::Completed,
+                ResultsStorageStop::segment_end,
+            )
+    }
+
     #[must_use]
     pub fn prepared_receipt(&self) -> Option<&PreparedRunReceipt> {
         self.data.prepared_receipt()
@@ -201,7 +213,10 @@ impl SimulationRun {
         &mut self,
         mut analysis: AnalysisResult,
     ) -> Option<AnalysisResult> {
-        if let Err(error) = super::run_store::store_analysis(&mut analysis.data) {
+        // The analysis its results storage stopped, its own segment left unclosed, ends stopped
+        // in the segment it is kept in again, as it would have in its own.
+        let ended = self.segment_end_of(&analysis.label);
+        if let Err(error) = super::run_store::store_analysis_ending(&mut analysis.data, ended) {
             log::warn!("{}: {error}", analysis.label);
         }
         self.replace_live_or_add_stored_analysis(analysis)

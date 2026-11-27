@@ -24,7 +24,7 @@ use rspice_results::waveform::RetainedWaveform;
 /// The store's words for a segment's shape, so a caller of [`keep_segment`] names its schema
 /// without reaching the store itself.
 pub use rspice_results_store::{Axis, RunMeta, Schema, Signal, SignalKind, StoreError};
-use rspice_results_store::{MemoryIo, SegmentReader, SegmentWriter};
+use rspice_results_store::{MemoryIo, RunStatus, SegmentReader, SegmentWriter};
 
 /// Makes a finished segment of a schema from the rows its filler pushes.
 type MakeSegment = fn(&Schema, &RunMeta, &mut FillSegment<'_>) -> Result<Arc<Segment>, String>;
@@ -134,7 +134,22 @@ pub fn store_analysis<W>(analysis: &mut RetainedAnalysisResult<W>) -> Result<(),
 where
     W: AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
 {
-    store_analysis_with(analysis, process_segment)
+    store_analysis_ending(analysis, RunStatus::Completed)
+}
+
+/// [`store_analysis`] for an analysis whose run ended as `ended` says, which each segment's `END`
+/// keeps: the transient its results storage stopped reads as stopped from the segment it is kept
+/// in again, as from its own.
+pub fn store_analysis_ending<W>(
+    analysis: &mut RetainedAnalysisResult<W>,
+    ended: RunStatus,
+) -> Result<(), String>
+where
+    W: AsRef<RetainedWaveform> + AsMut<RetainedWaveform>,
+{
+    rspice_results::stored_analysis::store_analysis(analysis, &mut |schema, meta, fill| {
+        process_segment(schema, meta, &ended, fill)
+    })
 }
 
 /// A finished segment kept as [`store_analysis`] keeps one, its rows pushed by `fill` as they
@@ -145,7 +160,7 @@ pub fn keep_segment(
     meta: &RunMeta,
     fill: &mut FillSegment<'_>,
 ) -> Result<Arc<Segment>, String> {
-    process_segment(schema, meta, fill)
+    process_segment(schema, meta, &RunStatus::Completed, fill)
 }
 
 /// `analysis` as a results store keeps it: each series it holds in memory written into a segment
@@ -261,16 +276,20 @@ fn kept_failure(error: impl std::fmt::Display) -> String {
     format!("the results store could not keep the samples: {error}")
 }
 
-/// A finished segment of this process's store folder.
+/// A finished segment of this process's store folder, ending as `ended` says.
 #[cfg(not(target_arch = "wasm32"))]
 fn process_segment(
     schema: &Schema,
     meta: &RunMeta,
+    ended: &RunStatus,
     fill: &mut FillSegment<'_>,
 ) -> Result<Arc<Segment>, String> {
-    rspice_simulation::results_store::write_finished_segment(schema, meta, |writer| {
-        fill(&mut |x, values| writer.push_rows(x, values))
-    })
+    rspice_simulation::results_store::write_finished_segment(
+        schema,
+        meta,
+        ended.clone(),
+        |writer| fill(&mut |x, values| writer.push_rows(x, values)),
+    )
     .map_err(kept_failure)
 }
 
@@ -280,9 +299,10 @@ fn process_segment(
 fn process_segment(
     schema: &Schema,
     meta: &RunMeta,
+    ended: &RunStatus,
     fill: &mut FillSegment<'_>,
 ) -> Result<Arc<Segment>, String> {
-    let (segment, bytes) = memory_segment_sized(schema, meta, fill)?;
+    let (segment, bytes) = memory_segment_sized(schema, meta, ended, fill)?;
     browser::keep(&segment, bytes);
     Ok(segment)
 }
@@ -293,21 +313,20 @@ fn memory_segment(
     meta: &RunMeta,
     fill: &mut FillSegment<'_>,
 ) -> Result<Arc<Segment>, String> {
-    memory_segment_sized(schema, meta, fill).map(|(segment, _)| segment)
+    memory_segment_sized(schema, meta, &RunStatus::Completed, fill).map(|(segment, _)| segment)
 }
 
-/// A finished segment held in memory, with its bytes.
+/// A finished segment held in memory, ending as `ended` says, with its bytes.
 fn memory_segment_sized(
     schema: &Schema,
     meta: &RunMeta,
+    ended: &RunStatus,
     fill: &mut FillSegment<'_>,
 ) -> Result<(Arc<Segment>, u64), String> {
     use rspice_results_store::SegmentIo;
     let mut writer = SegmentWriter::create(MemoryIo::new(), schema, meta).map_err(kept_failure)?;
     fill(&mut |x, values| writer.push_rows(x, values)).map_err(kept_failure)?;
-    let (_, io) = writer
-        .finish(rspice_results_store::RunStatus::Completed)
-        .map_err(kept_failure)?;
+    let (_, io) = writer.finish(ended.clone()).map_err(kept_failure)?;
     let bytes = io.size().map_err(kept_failure)?;
     let reader = SegmentReader::open(Box::new(io) as SegmentBytes).map_err(kept_failure)?;
     Ok((

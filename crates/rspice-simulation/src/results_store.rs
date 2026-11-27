@@ -285,13 +285,14 @@ pub(crate) fn create_segment() -> Result<(PathBuf, TemporaryIo), String> {
         .map_err(|error| format!("{}: {error}", path.display()))
 }
 
-/// A new segment of this process's store folder holding the rows `write` pushes, finished and
-/// open for reading: where a finished analysis's samples go so that nothing holds them in memory
-/// and a saved project names the segment instead of the samples. Deleted with the last column
-/// that reads it, as a transient's own segment is.
+/// A new segment of this process's store folder holding the rows `write` pushes, finished with
+/// `ended` as its `END` and open for reading: where a finished analysis's samples go so that
+/// nothing holds them in memory and a saved project names the segment instead of the samples.
+/// Deleted with the last column that reads it, as a transient's own segment is.
 pub fn write_finished_segment(
     schema: &rspice_results_store::Schema,
     meta: &rspice_results_store::RunMeta,
+    ended: rspice_results_store::RunStatus,
     write: impl FnOnce(
         &mut rspice_results_store::SegmentWriter<TemporaryIo>,
     ) -> Result<(), rspice_results_store::StoreError>,
@@ -304,9 +305,7 @@ pub fn write_finished_segment(
     let mut writer =
         rspice_results_store::SegmentWriter::create(io, schema, meta).map_err(&failed)?;
     write(&mut writer).map_err(&failed)?;
-    let (_, io) = writer
-        .finish(rspice_results_store::RunStatus::Completed)
-        .map_err(&failed)?;
+    let (_, io) = writer.finish(ended).map_err(&failed)?;
     let reader = rspice_results_store::SegmentReader::open(
         Box::new(io.into_file()) as rspice_results::store_reader::SegmentBytes
     )

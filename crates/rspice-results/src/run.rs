@@ -308,6 +308,16 @@ impl ResultsStorageStop {
     pub fn kept_nothing(&self) -> bool {
         self.rows == 0 && self.budget.is_none()
     }
+
+    /// How the stopped analysis's segment ends, as its `END` says it.
+    #[must_use]
+    pub fn segment_end(&self) -> rspice_results_store::RunStatus {
+        rspice_results_store::RunStatus::Stopped(if self.budget.is_some() {
+            rspice_results_store::StopReason::StorageBudget
+        } else {
+            rspice_results_store::StopReason::DiskFull
+        })
+    }
 }
 
 /// The storage budget a run's plan set, which its results reached.

@@ -82,7 +82,12 @@ pub fn capture_run(run: &SimulationRun) -> ProjectSimulationRun {
     for analysis in &mut kept.data.analyses {
         if analysis.is_live_partial() {
             analysis.waveforms.clear();
-        } else if let Err(error) = crate::state::run_store::store_analysis(&mut analysis.data) {
+            continue;
+        }
+        let ended = run.segment_end_of(&analysis.label);
+        if let Err(error) =
+            crate::state::run_store::store_analysis_ending(&mut analysis.data, ended)
+        {
             log::warn!("{}: {error}", analysis.label);
         }
     }
