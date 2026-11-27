@@ -384,8 +384,9 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
         );
         // A value keeps one line: when it is wider than its column, the
         // name's column gives way to it rather than the value wrapping, down
-        // to the name's own width. Only a value wider still wraps; a name
-        // squeezed to nothing would stand one letter to a line.
+        // to the name's own width. A value wider still stands on a line of
+        // its own under its name, the row's full width, rather than wrapping
+        // ragged under the name's column.
         // A reading printed without a prefix keeps its prefix's slot blank
         // before its unit, so the values' digits end at one x down the list:
         // `1.144  V` under `604.8 mV`.
@@ -403,8 +404,13 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
             .size()
             .x;
         let content = name_width + value_width;
-        let value_width = natural.clamp(value_width, (content - name_natural).max(value_width));
-        let name_width = content - value_width;
+        let stacked = natural > content - name_natural;
+        let (name_width, value_width) = if stacked {
+            (content + STAT_GAP, content + STAT_GAP)
+        } else {
+            let value_width = natural.clamp(value_width, (content - name_natural).max(value_width));
+            (content - value_width, value_width)
+        };
         let name_galley = ui.painter().layout(
             (*name).to_owned(),
             name_font,
@@ -420,7 +426,12 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
                 slot,
                 value_width,
             ));
-        let row_height = PANEL_ROW_H.max(name_galley.size().y.max(value_galley.size().y) + 8.0);
+        let (name_height, value_height) = (name_galley.size().y, value_galley.size().y);
+        let row_height = if stacked {
+            name_height + STACKED_LINE_GAP + value_height + 8.0
+        } else {
+            PANEL_ROW_H.max(name_height.max(value_height) + 8.0)
+        };
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
         responses.push(response);
@@ -428,14 +439,27 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
             continue;
         }
         let painter = ui.painter().clone();
-        let name_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + inset, rect.top() + 4.0),
-            egui::vec2(name_width, row_height - 8.0),
-        );
-        let value_rect = egui::Rect::from_min_size(
-            egui::pos2(name_rect.right() + 8.0, rect.top() + 4.0),
-            egui::vec2(value_width, row_height - 8.0),
-        );
+        let (name_rect, value_rect) = if stacked {
+            let name_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + inset, rect.top() + 4.0),
+                egui::vec2(name_width, name_height),
+            );
+            let value_rect = egui::Rect::from_min_size(
+                egui::pos2(name_rect.left(), name_rect.bottom() + STACKED_LINE_GAP),
+                egui::vec2(value_width, value_height),
+            );
+            (name_rect, value_rect)
+        } else {
+            let name_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + inset, rect.top() + 4.0),
+                egui::vec2(name_width, row_height - 8.0),
+            );
+            let value_rect = egui::Rect::from_min_size(
+                egui::pos2(name_rect.right() + STAT_GAP, rect.top() + 4.0),
+                egui::vec2(value_width, row_height - 8.0),
+            );
+            (name_rect, value_rect)
+        };
         painter
             .with_clip_rect(name_rect)
             .galley(name_rect.min, name_galley, c.text_dim);
@@ -456,10 +480,14 @@ pub fn stat_table_responses(ui: &mut Ui, rows: &[(&str, String, bool)]) -> Vec<e
     responses
 }
 
+/// The air between a stat table's name and its value.
+const STAT_GAP: f32 = 8.0;
+/// The air between a name and the value standing on its own line under it.
+const STACKED_LINE_GAP: f32 = 2.0;
+
 /// The table's two columns inside the panel inset on both sides.
 fn stat_column_widths(width: f32, inset: f32) -> (f32, f32) {
-    const GAP: f32 = 8.0;
-    let content = (width - 2.0 * inset - GAP).max(0.0);
+    let content = (width - 2.0 * inset - STAT_GAP).max(0.0);
     let name = content * 0.42;
     (name, content - name)
 }
