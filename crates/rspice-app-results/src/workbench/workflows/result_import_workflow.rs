@@ -1519,7 +1519,6 @@ fn result_import_detect_page(
         result_import_line(ui, "Nothing is added until you import.");
         choose_log
     });
-    band_header(ui, "Source preview", None);
     result_import_preview(ui, draft, digits);
     choose_log
 }
