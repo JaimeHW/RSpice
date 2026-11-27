@@ -14,7 +14,7 @@ use egui::Ui;
 use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_column_reading};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::{Button, SegmentedWidth, chip, segmented, select};
+use rspice_ui_kit::widgets::{Button, SegmentedWidth, segmented, select};
 
 use crate::presentation::well_hint;
 use crate::requirement_lines::{self, PlotWithRequirements, RequirementLine};
@@ -337,11 +337,14 @@ pub fn domain_bar(
     display_menu(ui, state);
 
     let limits = *show_limits;
-    let response = chip(ui, "Limits", limits).on_hover_text(if limits {
-        "Requirement line drawn with the violating side shaded"
-    } else {
-        "Requirement line hidden"
-    });
+    let response = Button::new("Limits")
+        .selected(limits)
+        .show(ui)
+        .on_hover_text(if limits {
+            "Requirement line drawn with the violating side shaded"
+        } else {
+            "Requirement line hidden"
+        });
     if response.clicked() {
         *show_limits = !limits;
     }

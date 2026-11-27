@@ -29,7 +29,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{fmt_column_reading, fmt_si_significant, fmt_signed_reading};
 use rspice_ui_kit::theme::{self, FontWeight, paint_focus_ring};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
+use rspice_ui_kit::widgets::{Button, SegmentedWidth, segmented, select};
 
 use crate::presentation::well_hint;
 use crate::strip::{self, LegendChip};
@@ -574,21 +574,27 @@ pub fn domain_bar(
     }
 
     let decade_marks = sheet.decade_marks;
-    let response = chip(ui, "Decades", decade_marks).on_hover_text(if decade_marks {
-        "Decade frequency marks on the locus"
-    } else {
-        "Decade frequency marks off"
-    });
+    let response = Button::new("Decades")
+        .selected(decade_marks)
+        .show(ui)
+        .on_hover_text(if decade_marks {
+            "Decade frequency marks on the locus"
+        } else {
+            "Decade frequency marks off"
+        });
     if response.clicked() {
         sheet.decade_marks = !decade_marks;
     }
 
     let normalize = sheet.normalize;
-    let response = chip(ui, "Normalize", normalize).on_hover_text(if normalize {
-        "Radius normalized to this locus' own maximum"
-    } else {
-        "Radius ruled in retained units"
-    });
+    let response = Button::new("Normalize")
+        .selected(normalize)
+        .show(ui)
+        .on_hover_text(if normalize {
+            "Radius normalized to this locus' own maximum"
+        } else {
+            "Radius ruled in retained units"
+        });
     if response.clicked() {
         sheet.normalize = !normalize;
     }

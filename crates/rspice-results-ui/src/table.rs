@@ -1100,7 +1100,9 @@ pub fn inline_actions(
     let model = source.model;
 
     let stride = view.stride;
-    let response = chip(ui, &format!("1/{stride}"), stride > 1)
+    let response = rspice_ui_kit::widgets::Button::new(&format!("1/{stride}"))
+        .selected(stride > 1)
+        .show(ui)
         .on_hover_text("Row stride — show every Nth retained sample");
     if response.clicked() {
         view.cycle_stride();
@@ -1111,14 +1113,12 @@ pub fn inline_actions(
     let has_cursor = model.is_some_and(|model| source.cursor_strip == Some(model.analysis_index()))
         && source.cursor_a.is_some();
     let around = view.around_cursor;
-    let response = ui
-        .add_enabled_ui(has_cursor, |ui| chip(ui, "around A", around))
-        .inner
-        .on_hover_text(if has_cursor {
-            "Window the rows on cursor A"
-        } else {
-            "Place cursor A on this analysis to window the rows on it"
-        });
+    let response = rspice_ui_kit::widgets::Button::new("around A")
+        .selected(around)
+        .enabled(has_cursor)
+        .show(ui)
+        .on_hover_text("Window the rows on cursor A")
+        .on_disabled_hover_text("Place cursor A on this analysis to window the rows on it");
     if response.clicked() {
         view.around_cursor = !around;
     }

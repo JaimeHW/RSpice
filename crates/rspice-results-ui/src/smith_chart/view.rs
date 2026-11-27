@@ -7,7 +7,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_column_reading};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
+use rspice_ui_kit::widgets::{Button, SegmentedWidth, segmented, select};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 
 use super::circles::{ChartCircle, CircleKind, CirclePlane, TwoPortFigures, parse_decibels};
@@ -89,7 +89,9 @@ pub fn domain_bar(
         sheet.grid = SmithGrid::from_index(grid);
     }
     ui.add_space(8.0);
-    if chip(ui, "Q", sheet.q_shown)
+    if Button::new("Q")
+        .selected(sheet.q_shown)
+        .show(ui)
         .on_hover_text("Constant-Q contours: where |X|/R, and so |B|/G, is the same")
         .clicked()
     {
@@ -155,12 +157,19 @@ pub fn domain_bar(
                 "Constant operating-power-gain circles on the load plane",
             ),
         ] {
-            if chip(ui, label, *on).on_hover_text(hover).clicked() {
+            if Button::new(label)
+                .selected(*on)
+                .show(ui)
+                .on_hover_text(hover)
+                .clicked()
+            {
                 *on = !*on;
             }
         }
         if offer.noise
-            && chip(ui, "NF", circles.noise)
+            && Button::new("NF")
+                .selected(circles.noise)
+                .show(ui)
                 .on_hover_text("Constant noise-figure circles on the source plane")
                 .clicked()
         {
@@ -216,7 +225,8 @@ fn reference_field(ui: &mut Ui, sheet: &mut SmithSheetState) {
 /// "+ Expression": a calculator expression to read onto the chart.
 fn expression_field(ui: &mut Ui, sheet: &mut SmithSheetState) -> Option<String> {
     let Some(mut text) = sheet.expression_draft.take() else {
-        if chip(ui, "+ Expression", false)
+        if Button::new("+ Expression")
+            .show(ui)
             .on_hover_text("Add a complex expression, such as V(in)/I(Vin) read as Z")
             .clicked()
         {

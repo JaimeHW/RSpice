@@ -327,11 +327,14 @@ pub fn domain_bar(ui: &mut Ui, settings: &mut HistogramState, names: &[String]) 
     .on_disabled_hover_text("A cumulative or quantile plot reads every sample, unbinned");
     ui.add_space(8.0);
     let fit = settings.normal_fit;
-    let response = rspice_ui_kit::widgets::chip(ui, "Fit", fit).on_hover_text(if fit {
-        "The normal distribution with the sample mean and standard deviation drawn"
-    } else {
-        "The fitted normal distribution hidden"
-    });
+    let response = rspice_ui_kit::widgets::Button::new("Fit")
+        .selected(fit)
+        .show(ui)
+        .on_hover_text(if fit {
+            "The normal distribution with the sample mean and standard deviation drawn"
+        } else {
+            "The fitted normal distribution hidden"
+        });
     if response.clicked() {
         settings.normal_fit = !fit;
     }

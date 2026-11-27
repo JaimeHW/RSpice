@@ -16,7 +16,7 @@ use rspice_ui_kit::plot::{
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey, Tone};
-use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
+use rspice_ui_kit::widgets::{Button, SegmentedWidth, segmented, select};
 
 use crate::fft::view::columns::{Fitting, fitted};
 use crate::presentation::{PlotView, well_hint};
@@ -202,26 +202,36 @@ pub fn domain_bar(
     }
 
     let fit = state.fit;
-    let response = chip(ui, "Fit", fit).on_hover_text(if fit {
-        "Least-squares line and its correlation"
-    } else {
-        "No fit drawn"
-    });
+    let response = Button::new("Fit")
+        .selected(fit)
+        .show(ui)
+        .on_hover_text(if fit {
+            "Least-squares line and its correlation"
+        } else {
+            "No fit drawn"
+        });
     if response.clicked() {
         state.fit = !fit;
     }
 
     let limits = *show_limits;
-    let response = chip(ui, "Limits", limits).on_hover_text(if limits {
-        "Requirement windows shaded on the violating side"
-    } else {
-        "Requirement windows hidden"
-    });
+    let response = Button::new("Limits")
+        .selected(limits)
+        .show(ui)
+        .on_hover_text(if limits {
+            "Requirement windows shaded on the violating side"
+        } else {
+            "Requirement windows hidden"
+        });
     if response.clicked() {
         *show_limits = !limits;
     }
 
-    let response = chip(ui, "\u{21c4}", false).on_hover_text("Swap the two axes");
+    let response = Button::new("\u{21c4}")
+        .mono()
+        .accessible_label("Swap the two axes")
+        .show(ui)
+        .on_hover_text("Swap the two axes");
     if response.clicked() {
         let scatter = &mut *state;
         std::mem::swap(&mut scatter.x, &mut scatter.y);

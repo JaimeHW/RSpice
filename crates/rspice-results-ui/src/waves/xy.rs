@@ -19,7 +19,7 @@ use rspice_results::waveform::{Fetched, SharedWaveformValues};
 use rspice_ui_kit::plot::sample::sample_at_with;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, SampleInterpolation, Trace, XScale};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::chip;
+
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -529,7 +529,7 @@ fn sweep_name(model: &StripModel) -> &str {
 
 /// The width a strip's header leaves for its "t <from> – <to>" field and the
 /// "follow" toggle after it: the sweep's name and the dash in the header's
-/// words, both ends' boxes, and the toggle as the kit's chip sizes it.
+/// words, both ends' boxes, and the toggle as the header's button sizes it.
 pub(crate) fn sweep_range_field_width(ui: &Ui, model: &StripModel) -> f32 {
     let measure = |text: &str, font: egui::FontId| {
         ui.fonts_mut(|fonts| {
@@ -541,19 +541,7 @@ pub(crate) fn sweep_range_field_width(ui: &Ui, model: &StripModel) -> f32 {
     };
     let words = measure(sweep_name(model), crate::strip::header_font())
         + measure("\u{2013}", crate::strip::header_font());
-    let label = measure(
-        FOLLOW,
-        rspice_ui_kit::theme::mono(
-            rspice_ui_kit::tokens::FS_0,
-            rspice_ui_kit::theme::FontWeight::Regular,
-        ),
-    );
-    let tokens = Tokens::get(ui.ctx());
-    let toggle = (label + 18.0).max(if tokens.metrics.is_touch() {
-        tokens.metrics.touch_target()
-    } else {
-        0.0
-    });
+    let toggle = crate::strip::header_button_width(ui, FOLLOW);
     words + 2.0 * SWEEP_RANGE_END_WIDTH + toggle + 4.0 * SWEEP_RANGE_GAP
 }
 
@@ -694,7 +682,9 @@ pub(crate) fn sweep_range_field(
             {
                 changed = Some(SpanEdit::Typed(range));
             }
-            if chip(ui, FOLLOW, strip.follow_view)
+            if crate::strip::header_button(FOLLOW)
+                .selected(strip.follow_view)
+                .show(ui)
                 .on_hover_text(format!(
                     "Follow the {sweep} window shown above: zooming that strip chooses the span \
                      drawn here."
