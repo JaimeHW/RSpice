@@ -208,18 +208,12 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
     let busy = parts.dialog.busy;
     let plan_valid = parts.dialog.preview_plan.is_some();
     let description = match page {
-        HardcopyDialogPage::Main => {
-            "Choose what to print, its page, and where it goes."
-        }
+        HardcopyDialogPage::Main => "Choose what to print, its page, and where it goes.",
         HardcopyDialogPage::PrinterProperties => {
             "Check the paper, resolution and options the selected printer offers."
         }
-        HardcopyDialogPage::CustomPaperMargins => {
-            "Set a paper size and margins of your own."
-        }
-        HardcopyDialogPage::PrintMapping => {
-            "Choose how layers, traces and markers look on paper."
-        }
+        HardcopyDialogPage::CustomPaperMargins => "Set a paper size and margins of your own.",
+        HardcopyDialogPage::PrintMapping => "Choose how layers, traces and markers look on paper.",
     };
     let mut body_scroll_offset = parts.dialog.body_scroll_offset;
     let mut body_action = BodyAction::None;
@@ -1282,9 +1276,7 @@ fn editor_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
 
 fn section_panel_header(ui: &mut Ui, section: HardcopySection) {
     let description = match section {
-        HardcopySection::Source => {
-            "Choose what to print and how much of it."
-        }
+        HardcopySection::Source => "Choose what to print and how much of it.",
         HardcopySection::Page => {
             "Paper, scale, and how a drawing too large for one page is split. None of this changes the drawing sheet itself."
         }

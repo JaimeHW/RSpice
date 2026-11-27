@@ -106,7 +106,9 @@ pub(super) fn color_mapping_label(mapping: ColorMapping) -> &'static str {
     match mapping {
         ColorMapping::PrintSafeEngineeringPalette => "Print-safe engineering palette",
         ColorMapping::ScreenColors => "Screen colors",
-        ColorMapping::GrayscaleWithDashMarkerRedundancy => "Grayscale, told apart by dashes and markers",
+        ColorMapping::GrayscaleWithDashMarkerRedundancy => {
+            "Grayscale, told apart by dashes and markers"
+        }
         ColorMapping::Monochrome => "Monochrome",
     }
 }

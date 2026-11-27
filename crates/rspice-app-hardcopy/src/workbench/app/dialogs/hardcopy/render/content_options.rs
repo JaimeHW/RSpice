@@ -52,9 +52,8 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                             {
                                 action = BodyAction::SelectSource { source_key, scope };
                             } else if candidate.is_none() {
-                                response.on_disabled_hover_text(
-                                    "No document of this kind is open.",
-                                );
+                                response
+                                    .on_disabled_hover_text("No document of this kind is open.");
                             }
                         }
                     });
@@ -122,13 +121,8 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                         let named_sets =
                             named_source_choices(&draft.source_candidates, active_candidate);
                         if named_sets.is_empty() {
-                            ui.add_enabled(
-                                false,
-                                egui::Button::selectable(false, "Print set"),
-                            )
-                            .on_disabled_hover_text(
-                                "This project has no print sets.",
-                            );
+                            ui.add_enabled(false, egui::Button::selectable(false, "Print set"))
+                                .on_disabled_hover_text("This project has no print sets.");
                         } else {
                             for (source_key, scope, name) in named_sets {
                                 let active = active_key.as_deref() == Some(source_key.as_str())
@@ -824,9 +818,7 @@ pub(super) fn identity_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) {
         if !vector {
             embed.on_disabled_hover_text("A printer page or an image carries no fonts.");
         } else if archival {
-            embed.on_disabled_hover_text(
-                "A PDF/A file always carries its fonts.",
-            );
+            embed.on_disabled_hover_text("A PDF/A file always carries its fonts.");
         }
         let searchable = columns[1].add_enabled(
             vector && draft.embed_fonts,
@@ -835,9 +827,7 @@ pub(super) fn identity_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) {
         if !vector {
             searchable.on_disabled_hover_text("A printer page or an image has no text to select.");
         } else if !draft.embed_fonts {
-            searchable.on_disabled_hover_text(
-                "Text a reader can select needs its fonts embedded.",
-            );
+            searchable.on_disabled_hover_text("Text a reader can select needs its fonts embedded.");
         }
     });
     draft.fit_fonts_to_format();

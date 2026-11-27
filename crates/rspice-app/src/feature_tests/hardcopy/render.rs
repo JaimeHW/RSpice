@@ -344,9 +344,7 @@ fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
         // section, so the banner and the rail cannot send the operator to
         // different places.
         assert!(
-            controls
-                .iter()
-                .any(|(label, _)| label == "Blocked in Page"),
+            controls.iter().any(|(label, _)| label == "Blocked in Page"),
             "the transaction strip names the section holding the primary"
         );
     }
