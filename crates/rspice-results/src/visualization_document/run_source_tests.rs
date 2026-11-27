@@ -166,7 +166,7 @@ fn analyses_of_one_run_merge_into_its_reference_and_cannot_be_rewritten() {
             .transact(document.revision(), vec![merge(analysis, AnalysisType::Ac)])
             .unwrap_err()
             .to_string()
-            .contains("cannot be rewritten")
+            .contains("cannot be changed in place")
     );
 }
 
