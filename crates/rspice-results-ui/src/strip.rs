@@ -904,6 +904,7 @@ impl<'a> StripHeader<'a> {
                 && IconButton::new(Icon::ZoomFit)
                     .side(icon_side)
                     .on(self.maximized)
+                    .plain()
                     .tooltip(tip)
                     .show(&mut control(ui, usize::from(self.closable), "maximize"))
                     .clicked()

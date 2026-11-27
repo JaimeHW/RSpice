@@ -54,7 +54,7 @@ pub use advisory_band::{
 };
 pub use button::{Button, IconButton, compact_height, control_height};
 pub use canvas_entry::{CanvasEntry, CanvasEntryChoice, CanvasEntryRows};
-pub use chip::{chip, chip_width, compact_chip};
+pub use chip::{chip, chip_width, compact_chip, plain_chip};
 pub use combo::Combo;
 pub(crate) use command_form::middle_elided;
 pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords, TableColumn};

@@ -426,6 +426,7 @@ impl<'a> Button<'a> {
 pub struct IconButton<'a> {
     icon: Icon,
     on: bool,
+    plain: bool,
     enabled: bool,
     tooltip: Option<&'a str>,
     toggle: bool,
@@ -438,6 +439,7 @@ impl<'a> IconButton<'a> {
         Self {
             icon,
             on: false,
+            plain: false,
             enabled: true,
             tooltip: None,
             toggle: false,
@@ -449,6 +451,14 @@ impl<'a> IconButton<'a> {
     pub fn on(mut self, on: bool) -> Self {
         self.on = on;
         self.toggle = true;
+        self
+    }
+
+    /// Light the latched state without the accent: the pressed fill and the
+    /// full text ink. For a control on a pane or its header, where no accent
+    /// is drawn.
+    pub fn plain(mut self) -> Self {
+        self.plain = true;
         self
     }
 
@@ -533,7 +543,9 @@ impl<'a> IconButton<'a> {
         let pressed = response.is_pointer_button_down_on() && self.enabled;
 
         let opacity = if self.enabled { 1.0 } else { 0.35 };
-        let (fill, icon_color) = if self.on {
+        let (fill, icon_color) = if self.on && self.plain {
+            (c.bg_active, c.text)
+        } else if self.on {
             (c.accent_dim, c.accent)
         } else if pressed {
             (c.bg_active, c.text)

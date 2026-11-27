@@ -32,16 +32,37 @@ fn padded_width(t: &Tokens, text: f32) -> f32 {
 /// it stands level with the selects beside it. Returns the response; the
 /// caller owns the toggle state (`on`).
 pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
+    let height = row_chip_height(ui);
+    chip_sized(ui, label, (on, Lit::Accent), 0.0, height)
+}
+
+/// [`chip`] lit without the accent: a neutral fill, the strong border and
+/// the full text ink. The toggle for chrome on a pane, where no accent is
+/// drawn: a pane header's scale chip, say.
+pub fn plain_chip(ui: &mut Ui, label: &str, on: bool) -> Response {
+    let height = row_chip_height(ui);
+    chip_sized(ui, label, (on, Lit::Plain), 0.0, height)
+}
+
+/// How a chip that is on is lit.
+#[derive(Clone, Copy)]
+enum Lit {
+    Accent,
+    Plain,
+}
+
+/// The height of a [`chip`]: 22 px, or the row's own control height where
+/// the row set one shorter, or a touch target.
+fn row_chip_height(ui: &Ui) -> f32 {
     let t = Tokens::get(ui.ctx());
     let row = super::control_height(ui);
-    let height = if t.metrics.is_touch() {
+    if t.metrics.is_touch() {
         t.metrics.touch_target()
     } else if row < t.metrics.ctl_h {
         row
     } else {
         22.0
-    };
-    chip_sized(ui, label, on, 0.0, height)
+    }
 }
 
 /// [`chip`] at the kit's compact control height, at least `width` wide, its
@@ -50,10 +71,16 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
 /// stand at one width, the widest one's.
 pub fn compact_chip(ui: &mut Ui, label: &str, on: bool, width: f32) -> Response {
     let height = super::compact_height(&Tokens::get(ui.ctx()).metrics);
-    chip_sized(ui, label, on, width, height)
+    chip_sized(ui, label, (on, Lit::Accent), width, height)
 }
 
-fn chip_sized(ui: &mut Ui, label: &str, on: bool, width: f32, height: f32) -> Response {
+fn chip_sized(
+    ui: &mut Ui,
+    label: &str,
+    (on, lit): (bool, Lit),
+    width: f32,
+    height: f32,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let c = &t.color;
 
@@ -72,7 +99,10 @@ fn chip_sized(ui: &mut Ui, label: &str, on: bool, width: f32, height: f32) -> Re
             .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
 
     let (fill, border, text_color) = if on {
-        (c.accent_dim, c.accent, c.text)
+        match lit {
+            Lit::Accent => (c.accent_dim, c.accent, c.text),
+            Lit::Plain => (c.bg_active, c.border_strong, c.text),
+        }
     } else {
         (
             egui::Color32::TRANSPARENT,
