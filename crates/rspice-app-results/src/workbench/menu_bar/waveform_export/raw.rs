@@ -25,7 +25,7 @@
 //! download takes the same bytes.
 
 use super::job::ResultExportJob;
-use super::members::{ExportFile, OwnedMembers, estimated_bytes, exported_members, publish_export};
+use super::members::{ExportFile, OwnedMembers, exported_members, publish_export, read_samples};
 use super::{ExportedSignals, event_nodes};
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
@@ -118,13 +118,7 @@ pub(super) fn export_raw(
                 .collect::<std::collections::BTreeSet<_>>()
         })
         .collect::<Vec<_>>();
-    let bytes = estimated_bytes(
-        &members,
-        match format {
-            RawFormat::Binary => 8,
-            RawFormat::Ascii => 25,
-        },
-    );
+    let samples = read_samples(&members);
     let owned = OwnedMembers::of(&members);
     publish_export(
         state,
@@ -138,7 +132,7 @@ pub(super) fn export_raw(
             mime_type: mime_type(format),
             text: false,
         },
-        bytes,
+        samples,
         move |out| {
             let mut plots = Vec::new();
             for (member, lanes) in owned.members().iter().zip(&lanes) {

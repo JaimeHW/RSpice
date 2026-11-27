@@ -789,7 +789,7 @@ fn results_work_cell<'a>(app: &RSpiceApp, _: &'a StatusReadings) -> Option<Statu
             && let JobState::Running { done, total, .. } = export.state()
         {
             return Some(StatusText {
-                text: Cow::Owned(format!("Exporting {} · Cancel", saved_of(done, total))),
+                text: Cow::Owned(exporting(&export.file_name(), done, total)),
                 mark: StatusMark::None,
                 control: StatusControl::Button,
                 hover: Some(Cow::Borrowed(
@@ -859,6 +859,17 @@ fn cancel_results_save(app: &mut RSpiceApp) {
     let _ = app;
 }
 
+/// What the status bar says of an export of the file `name` while it is written: the file, the
+/// share of the samples it reads that it has read, and Cancel. An export that reads no samples
+/// (a dump of event timelines) has no share to state.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn exporting(name: &str, read: u64, samples: u64) -> String {
+    match read.min(samples).saturating_mul(100).checked_div(samples) {
+        Some(percent) => format!("Exporting {name} · {percent} % · Cancel"),
+        None => format!("Exporting {name} · Cancel"),
+    }
+}
+
 /// `1.2 of 3.4 GB`, or `120 of 850 MB` below a gigabyte: decimal units, as the file manager
 /// counts them.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -876,6 +887,20 @@ fn saved_of(kept: u64, total: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An export names its file and the share of its samples read; one that reads none states no
+    /// share.
+    #[test]
+    fn an_export_names_its_file_and_the_share_it_has_read() {
+        assert_eq!(
+            exporting("out.npz", 14_000, 100_000),
+            "Exporting out.npz \u{00b7} 14 % \u{00b7} Cancel"
+        );
+        assert_eq!(
+            exporting("events.vcd", 0, 0),
+            "Exporting events.vcd \u{00b7} Cancel"
+        );
+    }
 
     /// Results states the run once, in the run segment at the bar's right,
     /// which counts a plan's analyses when the run held several.

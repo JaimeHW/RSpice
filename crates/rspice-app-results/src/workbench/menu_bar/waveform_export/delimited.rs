@@ -19,9 +19,6 @@ use rspice_formats::waveform_io::result::{
     DelimitedExportError, check_delimited_waveforms, write_delimited_waveforms,
 };
 
-/// About how many characters a written value takes, for the export's progress.
-const VALUE_CHARACTERS: u64 = 22;
-
 /// Start writing the displayed analysis's table as `format` says, once the reader picks where
 /// it goes: refused, as the dataset export refuses it, before the picker opens when it cannot
 /// be written.
@@ -84,7 +81,7 @@ pub(super) fn export_delimited_as_read(
     let values = waveforms.iter().fold(1_u64, |values, waveform| {
         values + if waveform.complex.is_some() { 2 } else { 1 }
     });
-    let bytes = rows.saturating_mul(values).saturating_mul(VALUE_CHARACTERS);
+    let samples = rows.saturating_mul(values);
     let analysis = analysis.clone();
 
     let default_name = format!("waveforms.{extension}");
@@ -108,7 +105,7 @@ pub(super) fn export_delimited_as_read(
             return None;
         }
     };
-    Some(start_export_job(label, destination, bytes, move |out| {
+    Some(start_export_job(label, destination, samples, move |out| {
         let waveforms = chosen
             .iter()
             .map(|&index| &analysis.waveforms[index])

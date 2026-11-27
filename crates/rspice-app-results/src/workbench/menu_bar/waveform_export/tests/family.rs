@@ -228,3 +228,36 @@ fn a_one_analysis_format_writes_the_chosen_member() {
     assert!(npy.byte_files.borrow().is_empty());
     assert!(prompt.contains("one"), "{prompt}");
 }
+
+/// What an export's progress is the share of is what it reads: each member's time and V(out)
+/// once, the two columns of a PWL source twice. Nothing else is read for it, on the frame that
+/// starts it or on the job that writes it, so the status bar reaches 100 % as the file ends.
+#[test]
+fn every_format_reads_the_samples_its_progress_counts() {
+    // Three rows of a time and one trace, in each of three members.
+    const MEMBER: u64 = 3 * 2;
+    let mut misread = Vec::new();
+    for (format, analysis, samples) in [
+        (0, None, 3 * MEMBER),
+        (2, None, 3 * MEMBER),
+        (3, None, 3 * MEMBER),
+        (4, None, 3 * MEMBER),
+        (6, Some(1), MEMBER),
+        (7, None, 3 * MEMBER),
+        (8, None, 3 * MEMBER),
+        (9, None, 3 * MEMBER),
+        (10, None, 3 * MEMBER),
+        (11, None, 3 * MEMBER),
+        (12, Some(1), 2 * MEMBER),
+    ] {
+        let before = rspice_results::waveform::samples_read_on_this_thread();
+        let (io, prompt) = exported(format, analysis);
+        let read = rspice_results::waveform::samples_read_on_this_thread() - before;
+        let files = io.byte_files.borrow().len() + io.text_files.borrow().len();
+        assert_eq!(files, 1, "format {format}: {prompt}");
+        if read != samples {
+            misread.push((format, read, samples));
+        }
+    }
+    assert!(misread.is_empty(), "(format, read, counted): {misread:?}");
+}

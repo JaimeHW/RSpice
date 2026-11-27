@@ -2,8 +2,8 @@
 //!
 //! The file is staged beside its destination and put in its place only when the last byte is
 //! written, against the destination the reader accepted after the picker returned: Cancel or a
-//! failure leaves the destination as it was and nothing beside it. The status bar shows how far
-//! it got and cancels it.
+//! failure leaves the destination as it was and nothing beside it. The status bar names the file,
+//! shows the share of the samples the export reads that it has read, and cancels it.
 
 use std::path::PathBuf;
 
@@ -27,9 +27,17 @@ pub struct ResultExportJob {
 }
 
 impl ResultExportJob {
-    /// How far the export got, while it runs.
+    /// How far the export got, while it runs: the samples it has read of those it reads.
     pub fn state(&self) -> JobState {
         self.job.state()
+    }
+
+    /// The name of the file the export writes.
+    pub fn file_name(&self) -> String {
+        self.path.file_name().map_or_else(
+            || self.path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        )
     }
 
     /// Stop the export: the destination stays as it was.
@@ -44,17 +52,18 @@ impl ResultExportJob {
 }
 
 /// Start writing the export `label` at `destination` as `write` makes it. `write` writes the
-/// file and returns what it holds, in the words the completion line quotes; `bytes` is about
-/// how many it writes, for the progress the status bar shows.
+/// file and returns what it holds, in the words the completion line quotes; `samples` is how
+/// many samples it reads ([`super::members::read_samples`]), for the progress the status bar
+/// shows.
 pub(super) fn start_export_job(
     label: &'static str,
     destination: ObservedExportDestination,
-    bytes: u64,
+    samples: u64,
     write: impl FnOnce(&mut dyn std::io::Write) -> Result<String, String> + Send + 'static,
 ) -> ResultExportJob {
     let path = destination.path().to_path_buf();
     let job = ResultsJob::start("result-export", move |job| {
-        job.step("Exporting", bytes);
+        job.step("Exporting", samples);
         let mut detail = None;
         let mut failure = None;
         let published = publish_streamed(&destination, |out| {
@@ -63,7 +72,8 @@ pub(super) fn start_export_job(
                 job,
                 written: 0,
                 checked: 0,
-                bytes,
+                first_read: rspice_results::waveform::samples_read_on_this_thread(),
+                samples,
             };
             match write(&mut out) {
                 Ok(written) => {
@@ -119,15 +129,20 @@ struct JobWriter<'a> {
     job: &'a JobContext,
     written: u64,
     checked: u64,
-    /// About how many bytes the export writes: progress never reports more.
-    bytes: u64,
+    /// The samples the job's thread had read when the export started: what it read since is the
+    /// export's.
+    first_read: u64,
+    /// The samples the export reads.
+    samples: u64,
 }
 
 impl std::io::Write for JobWriter<'_> {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         if self.written - self.checked >= CHECK_BYTES {
             self.checked = self.written;
-            self.job.done(self.written.min(self.bytes));
+            let read = rspice_results::waveform::samples_read_on_this_thread()
+                .wrapping_sub(self.first_read);
+            self.job.done(read.min(self.samples));
             if self.job.cancelled() {
                 return Err(std::io::Error::other("the export was cancelled"));
             }

@@ -26,8 +26,8 @@ pub(crate) use values::report_column_read_failure;
 pub use values::{
     BLOCK_SAMPLES, Blocks, CHECKING_READ, ColumnReadFailure, ColumnSource, ColumnTile,
     PENDING_READ, RowsAround, Samples, SamplesIdentity, SharingKey, StoredWindow, ValueExtent,
-    WaveformValues, WindowLead, column_work, is_pending_read, set_whole_read_budget,
-    take_column_read_failures,
+    WaveformValues, WindowLead, column_work, is_pending_read, samples_read_on_this_thread,
+    set_whole_read_budget, take_column_read_failures,
 };
 
 //=============================================================================

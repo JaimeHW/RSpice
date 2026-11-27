@@ -306,7 +306,9 @@ pub(super) fn export_pwl(
             return None;
         }
     };
-    let bytes = (waveform.x.len() as u64).saturating_mul(50);
+    // Its time and value, read twice: once to check them and count the breakpoints, once to
+    // write them.
+    let samples = (waveform.x.len() as u64).saturating_mul(4);
     publish_export(
         state,
         io,
@@ -319,7 +321,7 @@ pub(super) fn export_pwl(
             mime_type: MIME_TYPE,
             text: false,
         },
-        bytes,
+        samples,
         move |out| {
             let facts = write_pwl(&label, &waveform, out)?;
             Ok(format!(

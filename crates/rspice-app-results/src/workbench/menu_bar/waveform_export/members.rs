@@ -102,9 +102,9 @@ impl OwnedMembers {
     }
 }
 
-/// About how many bytes the members' samples take at `value_bytes` a sample, for an export's
-/// progress: the coordinate and each trace, a complex one twice.
-pub(super) fn estimated_bytes(members: &[Member<'_>], value_bytes: u64) -> u64 {
+/// The samples an export of `members` reads, which its progress is the share of: each member's
+/// coordinate once and each trace once, a complex one as its two components.
+pub(super) fn read_samples(members: &[Member<'_>]) -> u64 {
     members
         .iter()
         .map(|(_, waveforms)| {
@@ -112,7 +112,7 @@ pub(super) fn estimated_bytes(members: &[Member<'_>], value_bytes: u64) -> u64 {
             let values = waveforms.iter().fold(1_u64, |values, waveform| {
                 values + if waveform.complex.is_some() { 2 } else { 1 }
             });
-            rows.saturating_mul(values).saturating_mul(value_bytes)
+            rows.saturating_mul(values)
         })
         .fold(0_u64, u64::saturating_add)
 }
@@ -138,7 +138,7 @@ pub(super) fn publish_export(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     file: ExportFile,
-    bytes: u64,
+    samples: u64,
     write: impl FnOnce(&mut dyn Write) -> Result<String, String> + Send + 'static,
 ) -> Option<ResultExportJob> {
     let destination = choose_destination(
@@ -150,7 +150,7 @@ pub(super) fn publish_export(
             crate::io::file_exchange::ensure_file_extension(path, file.extension);
         },
     )?;
-    write_export(state, io, &file, destination, bytes, write)
+    write_export(state, io, &file, destination, samples, write)
 }
 
 /// Ask where `file` goes, offering `extensions`, with `settle` giving the chosen path the name
@@ -187,12 +187,12 @@ pub(super) fn write_export(
     io: &(impl ExportWorkflowIo + ?Sized),
     file: &ExportFile,
     destination: ObservedExportDestination,
-    bytes: u64,
+    samples: u64,
     write: impl FnOnce(&mut dyn Write) -> Result<String, String> + Send + 'static,
 ) -> Option<ResultExportJob> {
     let failed = format!("{} export failed", file.label);
     if io.writes_as_it_reads() {
-        return Some(start_export_job(file.label, destination, bytes, write));
+        return Some(start_export_job(file.label, destination, samples, write));
     }
     let mut written = Vec::new();
     let published = write(&mut written).and_then(|detail| {

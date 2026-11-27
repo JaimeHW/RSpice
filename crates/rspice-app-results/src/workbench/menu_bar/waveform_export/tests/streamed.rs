@@ -291,7 +291,8 @@ fn a_cancelled_export_leaves_the_destination_as_it_was() {
     let path = scratch.0.join("waveforms.raw");
     std::fs::write(&path, b"the reader's own file").expect("the destination is written");
 
-    cancel_jobs_past_for_tests(Some(4 << 20));
+    // A quarter of the two mebisamples the export reads: its time and one trace.
+    cancel_jobs_past_for_tests(Some(1 << 19));
     let export = start_raw_export(&mut state, &path);
     cancel_jobs_past_for_tests(None);
     finish(&mut state, export, Duration::from_secs(120));

@@ -340,6 +340,23 @@ pub fn take_column_read_failures() -> Vec<ColumnReadFailure> {
 /// Samples a pass over a stored window reads at a time: 64 Ki samples, half a mebibyte.
 pub const BLOCK_SAMPLES: usize = 1 << 16;
 
+thread_local! {
+    static SAMPLES_READ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The samples this thread has taken a block or a range at a time ([`WaveformValues::blocks`],
+/// [`WaveformValues::read_range`] and what reads through them), from memory or from a stored
+/// window: what work that reads columns on a thread of its own counts its progress in, the
+/// difference between two calls being the samples it read between them.
+pub fn samples_read_on_this_thread() -> u64 {
+    SAMPLES_READ.with(std::cell::Cell::get)
+}
+
+#[inline]
+fn count_read(samples: usize) {
+    SAMPLES_READ.with(|read| read.set(read.get().wrapping_add(samples as u64)));
+}
+
 /// The most bytes [`WaveformValues::read_whole`] reads of a stored window: the loaded-results
 /// budget, 1 GiB until the host sets its own.
 static WHOLE_READ_BUDGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 30);
@@ -702,6 +719,7 @@ impl WaveformValues {
             "samples {range:?} of a window of {}",
             self.len()
         );
+        count_read(range.len());
         match &self.0 {
             Repr::Memory(values) => Ok(Cow::Borrowed(&values[range])),
             Repr::Stored(stored) => {
@@ -1143,12 +1161,14 @@ impl<'a> Iterator for Blocks<'a> {
             Repr::Memory(values) => {
                 let block = &values[self.next..self.end];
                 self.next = self.end;
+                count_read(block.len());
                 Some(Ok(Cow::Borrowed(block)))
             }
             Repr::Stored(stored) => {
                 let start = self.next;
                 let mut block = vec![0.0; (self.end - start).min(BLOCK_SAMPLES)];
                 self.next += block.len();
+                count_read(block.len());
                 match stored.read_into(start, &mut block) {
                     Ok(()) => Some(Ok(Cow::Owned(block))),
                     Err(failure) => {

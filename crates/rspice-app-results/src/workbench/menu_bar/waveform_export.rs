@@ -939,7 +939,7 @@ fn export_native_result_bundle(
         );
         return None;
     }
-    let bytes = members::estimated_bytes(&members, 25);
+    let samples = members::read_samples(&members);
     let owned = members::OwnedMembers::of(&members);
     let extension = kind.extension();
     members::publish_export(
@@ -961,7 +961,7 @@ fn export_native_result_bundle(
             mime_type: kind.media_type(),
             text: false,
         },
-        bytes,
+        samples,
         move |out| {
             write_native_bundle(kind, &owned.members(), out)
                 .map(|facts| {
@@ -1113,7 +1113,7 @@ fn export_touchstone(
         })
         .collect::<Vec<_>>();
     let chosen = [member];
-    let bytes = members::estimated_bytes(&chosen, 32);
+    let samples = members::read_samples(&chosen);
     let owned = members::OwnedMembers::of(&chosen);
     // An incompatible result never asks the reader for a destination it cannot publish.
     let Some(ports) =
@@ -1155,7 +1155,7 @@ fn export_touchstone(
             }
         },
     )?;
-    members::write_export(state, io, &file, destination, bytes, move |out| {
+    members::write_export(state, io, &file, destination, samples, move |out| {
         let members = owned.members();
         let member = &members[0];
         let text = touchstone_text(member.analysis, &member.waveforms, version_two)?;
@@ -1370,7 +1370,7 @@ fn export_displayed_stack(
         state.prompt(error.to_string());
         return None;
     }
-    let bytes = members::estimated_bytes(&members, 120);
+    let samples = members::read_samples(&members);
     let owned = members::OwnedMembers::of(&members);
     let dataset_id = displayed.dataset_id;
     let (label, extension, title, filter_name, mime_type) = match delimiter {
@@ -1401,7 +1401,7 @@ fn export_displayed_stack(
             mime_type,
             text: true,
         },
-        bytes,
+        samples,
         move |out| {
             let members = owned.members();
             let stacked = members

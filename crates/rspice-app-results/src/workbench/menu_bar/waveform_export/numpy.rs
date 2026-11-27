@@ -37,7 +37,7 @@
 
 use super::job::ResultExportJob;
 use super::members::{
-    ExportFile, OwnedMembers, estimated_bytes, export_members, exported_members, publish_export,
+    ExportFile, OwnedMembers, export_members, exported_members, publish_export, read_samples,
 };
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
@@ -159,7 +159,7 @@ pub(super) fn export_numpy(
     let member = (members.len() == 1)
         .then(|| members[0].0.family_member().map(|member| member.label()))
         .flatten();
-    let bytes = estimated_bytes(&members, 16);
+    let samples = read_samples(&members);
     let owned = OwnedMembers::of(&members);
     publish_export(
         state,
@@ -173,7 +173,7 @@ pub(super) fn export_numpy(
             mime_type: kind.mime_type(),
             text: false,
         },
-        bytes,
+        samples,
         move |out| {
             let members = owned.members();
             match kind {

@@ -175,7 +175,9 @@ pub(crate) fn checked_coordinate<'a, W: AsRef<RetainedWaveform>>(
 }
 
 /// A column read in row order a block at a time, for a writer that writes a table row by row: a
-/// column of any length costs one block of memory. A column held in memory is read in place.
+/// column of any length costs one block of memory. A column held in memory is borrowed in place
+/// a block at a time too, so a job that counts the samples it has read
+/// ([`rspice_results::waveform::samples_read_on_this_thread`]) counts both alike.
 pub(crate) struct RowReader<'a> {
     signal: &'a str,
     values: &'a WaveformValues,
@@ -190,7 +192,7 @@ impl<'a> RowReader<'a> {
             signal,
             values,
             first: 0,
-            block: values.in_memory().map_or(Cow::Borrowed(&[]), Cow::Borrowed),
+            block: Cow::Borrowed(&[]),
             failure: None,
         }
     }

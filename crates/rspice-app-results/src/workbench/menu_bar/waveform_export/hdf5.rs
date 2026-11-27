@@ -26,7 +26,7 @@
 
 use super::job::ResultExportJob;
 use super::members::{
-    ExportFile, OwnedMembers, estimated_bytes, export_members, exported_members, publish_export,
+    ExportFile, OwnedMembers, export_members, exported_members, publish_export, read_samples,
 };
 use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
@@ -62,7 +62,7 @@ pub(super) fn export_hdf5(
         state.prompt(error.to_string());
         return None;
     }
-    let bytes = estimated_bytes(&members, 8);
+    let samples = read_samples(&members);
     let owned = OwnedMembers::of(&members);
     publish_export(
         state,
@@ -76,7 +76,7 @@ pub(super) fn export_hdf5(
             mime_type: HDF5_MIME_TYPE,
             text: false,
         },
-        bytes,
+        samples,
         move |out| {
             write_hdf5(&owned.members(), exported_waveform_limits(), out)
                 .map(|facts| completion_detail(&facts))
