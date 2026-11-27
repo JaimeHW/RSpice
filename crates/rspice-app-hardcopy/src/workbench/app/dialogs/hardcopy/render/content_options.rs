@@ -279,20 +279,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
             field(ui, "Pages", |ui| {
                 let automatic = draft.preview_plan.as_ref().map_or_else(
                     || "Automatic".to_owned(),
-                    |plan| {
-                        if plan.pagination().sections().is_empty() {
-                            format!(
-                                "Automatic · {} × {} pages",
-                                plan.pagination().columns(),
-                                plan.pagination().rows()
-                            )
-                        } else {
-                            format!(
-                                "Automatic · {} pages, split between sections",
-                                plan.pagination().pages().len()
-                            )
-                        }
-                    },
+                    |plan| format!("Automatic · {}", pages_phrase(plan)),
                 );
                 let selected = match tiling_kind {
                     0 => automatic.clone(),

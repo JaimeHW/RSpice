@@ -3,6 +3,25 @@
 
 use super::*;
 
+/// How many pages a plan prints, said the same way by the Pages field and
+/// the preview: "1 page", "2 × 1 tiles, 2 pages" for a drawing split over a
+/// grid of pages, or "3 pages, split between sections".
+pub(super) fn pages_phrase(plan: &rspice_hardcopy_contract::HardcopyPlan) -> String {
+    let pagination = plan.pagination();
+    let count = pagination.pages().len();
+    if count == 1 {
+        "1 page".to_owned()
+    } else if pagination.sections().is_empty() {
+        format!(
+            "{} × {} tiles, {count} pages",
+            pagination.columns(),
+            pagination.rows()
+        )
+    } else {
+        format!("{count} pages, split between sections")
+    }
+}
+
 pub(super) fn document_kind_label(kind: HardcopyDocumentKind) -> &'static str {
     match kind {
         HardcopyDocumentKind::SchematicOrSymbol => "Schematic / symbol",

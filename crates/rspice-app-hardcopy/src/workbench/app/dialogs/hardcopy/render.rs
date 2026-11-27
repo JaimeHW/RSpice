@@ -983,19 +983,17 @@ fn section_navigation(
                                     .truncate(),
                                 );
                                 ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(
-                                            draft
-                                                .source
-                                                .as_ref()
-                                                .map_or("Nothing to print", |source| {
-                                                    source.display_name()
-                                                }),
-                                        )
-                                        .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                                        .color(t.color.text),
-                                    )
-                                    .truncate(),
+                                    egui::Label::new(two_lines(
+                                        draft
+                                            .source
+                                            .as_ref()
+                                            .map_or("Nothing to print", |source| {
+                                                source.display_name()
+                                            }),
+                                        theme::sans(tokens::FS_1, FontWeight::SemiBold),
+                                        t.color.text,
+                                    ))
+                                    .wrap(),
                                 );
                             });
                     },
@@ -1267,7 +1265,7 @@ pub fn editor_column(
 }
 
 fn editor_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
-    section_panel_header(ui, draft.section);
+    section_panel_header(ui, draft.section, draft.workflow);
     Frame::NONE
         .inner_margin(Margin::symmetric(PANEL_INSET_X, PANEL_INSET_Y))
         .show(ui, |ui| {
@@ -1289,11 +1287,16 @@ fn editor_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
         .inner
 }
 
-fn section_panel_header(ui: &mut Ui, section: HardcopySection) {
+fn section_panel_header(ui: &mut Ui, section: HardcopySection, workflow: HardcopyWorkflow) {
+    let exporting = workflow == HardcopyWorkflow::Export;
     let description = match section {
+        HardcopySection::Source if exporting => "Choose what to export and how much of it.",
         HardcopySection::Source => "Choose what to print and how much of it.",
         HardcopySection::Page => {
             "Paper, scale, and how a drawing too large for one page is split. None of this changes the drawing sheet itself."
+        }
+        HardcopySection::DrawingSheet if exporting => {
+            "How much of the drawing sheet to export, and what to do with anything drawn past its edge."
         }
         HardcopySection::DrawingSheet => {
             "How much of the drawing sheet to print, and what to do with anything drawn past its edge."
@@ -1365,8 +1368,20 @@ pub(super) fn action_row(ui: &mut Ui, label: &str, detail: &str) -> bool {
 /// A bordered label/value readout for facts a section is about but does not
 /// edit. Values are monospaced and truncated, never wrapped, so the block's
 /// height is a function of how many facts there are and nothing else.
+/// `text` laid out to wrap onto a second line where it is too long for one,
+/// and to end in an ellipsis only past that: a document's name is read in
+/// full far more often than it runs past two lines.
+fn two_lines(text: &str, font: egui::FontId, color: egui::Color32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, color, f32::INFINITY);
+    job.wrap.max_rows = 2;
+    job.wrap.overflow_character = Some('…');
+    job
+}
+
 pub(super) fn fact_list(ui: &mut Ui, facts: &[(&'static str, String)]) {
     let t = Tokens::get(ui.ctx());
+    let caption_font = theme::sans(tokens::FS_MICRO, FontWeight::Regular);
+    let value_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     Frame::NONE
         .fill(t.color.bg_inset)
         .stroke(Stroke::new(1.0, t.color.border))
@@ -1375,29 +1390,54 @@ pub(super) fn fact_list(ui: &mut Ui, facts: &[(&'static str, String)]) {
             let content_width = ui.available_width();
             ui.set_min_width(content_width);
             ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
-            for (label, value) in facts {
+            // Every value starts on one line, past the widest caption.
+            let captions = facts
+                .iter()
+                .map(|(label, _)| {
+                    ui.painter().layout_no_wrap(
+                        label.to_uppercase(),
+                        caption_font.clone(),
+                        t.color.text_faint,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let column = captions
+                .iter()
+                .map(|caption| caption.size().x)
+                .fold(0.0, f32::max);
+            let value_width = (content_width - column - 10.0).max(40.0);
+            for (caption, (_, value)) in captions.into_iter().zip(facts) {
+                let mut job = two_lines(value, value_font.clone(), t.color.text);
+                job.wrap.max_width = value_width;
+                let value = ui.painter().layout_job(job);
+                // A value too long for one line takes a second, and its row
+                // grows by that line; the caption stays level with the first.
+                let line = value
+                    .rows
+                    .first()
+                    .map_or(value.size().y, |row| row.height());
+                let height = FACT_ROW_HEIGHT + value.size().y - line;
                 ui.allocate_ui_with_layout(
-                    vec2(content_width, FACT_ROW_HEIGHT),
-                    Layout::left_to_right(Align::Center),
+                    vec2(content_width, height),
+                    Layout::left_to_right(Align::Min),
                     |ui| {
+                        ui.set_min_height(height);
                         ui.allocate_ui_with_layout(
-                            vec2(118.0, FACT_ROW_HEIGHT),
-                            Layout::left_to_right(Align::Center),
+                            vec2(column, height),
+                            Layout::top_down(Align::Min),
                             |ui| {
-                                ui.label(
-                                    egui::RichText::new(label.to_uppercase())
-                                        .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-                                        .color(t.color.text_faint),
-                                );
+                                ui.set_min_width(column);
+                                ui.add_space((FACT_ROW_HEIGHT - caption.size().y) * 0.5);
+                                ui.add(egui::Label::new(caption));
                             },
                         );
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(value)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.text),
-                            )
-                            .truncate(),
+                        ui.allocate_ui_with_layout(
+                            vec2(value_width, height),
+                            Layout::top_down(Align::Min),
+                            |ui| {
+                                ui.add_space((FACT_ROW_HEIGHT - line) * 0.5);
+                                ui.add(egui::Label::new(value));
+                            },
                         );
                     },
                 );
@@ -1849,7 +1889,14 @@ fn length_field(ui: &mut Ui, label: &str, value: &mut String, unit: LengthUnit) 
             .corner_radius(visuals.corner_radius)
             .inner_margin(Margin::symmetric(6, 0))
             .show(ui, |ui| {
-                ui.set_min_size(vec2((available_width - 12.0).max(76.0), control_height));
+                // The frame's margin and its stroke both sit outside this
+                // width; counting only the margin made the field two points
+                // wider than its column and widened the dialog on that step.
+                let border = 2.0 * visuals.bg_stroke.width;
+                ui.set_min_size(vec2(
+                    (available_width - 12.0 - border).max(76.0),
+                    control_height,
+                ));
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let suffix_width = 28.0;

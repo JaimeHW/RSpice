@@ -279,26 +279,7 @@ pub(super) fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, w
 /// What this configuration produces. With no valid page there is no page
 /// count to state: the desk above says why there is no page, once.
 fn preview_facts(draft: &HardcopyDialogState) -> Vec<(&'static str, String)> {
-    let pages = draft.preview_plan.as_ref().map(|plan| {
-        let pagination = plan.pagination();
-        let count = pagination.pages().len();
-        // One page is the whole drawing, split over nothing.
-        let arrangement = if count == 1 {
-            String::new()
-        } else if pagination.sections().is_empty() {
-            format!(
-                " · {} across, {} down",
-                pagination.columns(),
-                pagination.rows()
-            )
-        } else {
-            " · split between sections".to_owned()
-        };
-        format!(
-            "{count} page{}{arrangement}",
-            if count == 1 { "" } else { "s" }
-        )
-    });
+    let pages = draft.preview_plan.as_deref().map(pages_phrase);
     let mut facts = Vec::with_capacity(5);
     if let Some(pages) = pages {
         facts.push(("Pages", pages));
@@ -340,6 +321,9 @@ fn preview_facts_strip(ui: &mut Ui, facts: &[(&'static str, String)], width: f32
                             vec2(label_width, FACT_ROW_HEIGHT),
                             Layout::left_to_right(Align::Center),
                             |ui| {
+                                // The column holds its width, so every value
+                                // starts on one line down the strip.
+                                ui.set_min_width(label_width);
                                 // Sentence case, as every label is.
                                 ui.label(
                                     egui::RichText::new(*label)
