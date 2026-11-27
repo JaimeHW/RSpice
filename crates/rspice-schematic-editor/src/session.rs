@@ -82,7 +82,7 @@ pub struct EditorSession {
 
     /// Model card armed for the next native-device placement.
     ///
-    /// Runtime interaction state only. A pack publishes model cards as native
+    /// Runtime interaction state only. A library publishes model cards as native
     /// devices — a zener is a diode — so the card name and the family's symbol
     /// skin ride alongside the armed device kind rather than inside a cell
     /// binding the device does not have.

@@ -21,8 +21,8 @@ use super::*;
 
 impl ModelLibraryManager {
     /// Stable identity of the persisted model catalogue relevant to source
-    /// preparation. Browser filters, selection, shipped-pack indexes, and
-    /// audit ledgers are deliberately excluded.
+    /// preparation. Browser filters, selection, and audit ledgers are
+    /// deliberately excluded.
     ///
     /// This is the durable one. It is written into a model-validation receipt
     /// and compared before a run is dispatched, so its bytes are a
@@ -45,8 +45,8 @@ impl ModelLibraryManager {
     /// with every mutable access, presentation fields included, which is
     /// exactly what this key must ignore. The manager is replaced *wholesale*
     /// when a project is opened, when a recovery comparison is accepted, when
-    /// design history restores a candidate, and when a model-hub or import
-    /// operation publishes a rebuilt candidate. A replacement arrives carrying
+    /// design history restores a candidate, and when an import operation
+    /// publishes a rebuilt candidate. A replacement arrives carrying
     /// whatever counter it was serialized with, which may be a value this
     /// session has already cached an answer against — and the page would then
     /// state this project's bin geometry from the previous project's cards.
@@ -83,9 +83,7 @@ impl ModelLibraryManager {
     ///
     /// Deliberately absent: `selected_library`, `filter_text`, and
     /// `filter_type` (browser presentation); the model-validation receipt (a
-    /// claim *about* the catalogue that the inspection never reads); the
-    /// shipped-pack index (an inventory of this machine, whose definitions
-    /// reach a deck only once imported into a library); and every authoring,
+    /// claim *about* the catalogue that the inspection never reads); and every authoring,
     /// qualification, correlation, provenance, and presentation field a library
     /// owns. Their absence is the point — expanding a library row in the
     /// browser used to expire the exact model-bin inspection.

@@ -170,7 +170,7 @@ pub struct AttachableTechnology {
 /// Every pairing of an installed model library with a validated PDK package
 /// that forms a binding this session could run, as the attachment dialog
 /// offers them, for a project about to be created. A library the open
-/// project holds (an import, a pack part) stays with that project, so only
+/// project holds (an import) stays with that project, so only
 /// the installation's own libraries are offered.
 pub fn attachable_technologies(model: &Model) -> Vec<AttachableTechnology> {
     use crate::state::model_library::ModelSourceAuthority;

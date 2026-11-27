@@ -18,9 +18,9 @@ winit, wgpu and rfd in its closure.
 | :--- | :--- |
 | `model`, `types` | `DeviceModel`; `ModelType`, with the device each maps onto, and `ModelLevel` |
 | `device_class` | The catalog's device class for a `.model` card (`card_device`), mirrored from the table in `tools/models/build_manifest.py`, so a project's own cards and a pack's land under the same class |
-| `library`, `source_paths` | `ModelLibrary` and `ModelSourceAuthority` (built-in, external, retained import, project-owned): where a library came from and what that entitles it to. The pinned source closure (`ModelSourcePin`), its retained bytes and authenticated include edges, Model Hub pack pins, and portable source-path identities |
+| `library`, `source_paths` | `ModelLibrary` and `ModelSourceAuthority` (built-in, external, retained import, project-owned): where a library came from and what that entitles it to. The pinned source closure (`ModelSourcePin`), its retained bytes and authenticated include edges, and portable source-path identities |
 | `catalog`, `projection` | `ModelCatalog`, the project's library-name map, with atomic commits to project-owned definitions and `model_library_source_digest`; projection of `rspice-core`'s parsed library and subcircuit records into catalog entries and callable interfaces |
-| `source_bundle` | Authentication of an in-memory set of `(portable name, bytes)` members, such as a browser upload or a Model Hub pack part, into one model library |
+| `source_bundle` | Authentication of an in-memory set of `(portable name, bytes)` members, such as a browser upload, into one model library |
 | `corner`, `binding`, `corner_expansion` | `ProcessCorner` and section bindings; `CornerModelBinding`, materialized cards bound to a corner; `RetainedClosure`, the one rule for whether a run can expand a corner from the retained closure |
 | `resolution`, `execution` | `ModelResolutionRecord` provider decisions and `SimulationPlanModelBinding`, a plan's ordered library bindings; `ModelExecutionPlan`, the immutable, content-addressed model namespace of one nominal run, which refuses a contested name instead of falling back to the first definition |
 | `authoring`, `project_revision`, `definition_metadata` | `ProjectModelDefinition`, models a project authors itself; `ProjectModelRevisionDefinition`, which admits a revision only when its source renders and reparses without losing a parameter, section or type; `ModelDefinitionMetadata`, the typed parameters, section inheritance, statistics and temperature behaviour the model editor presents |
@@ -38,7 +38,7 @@ winit, wgpu and rfd in its closure.
   belong to [`rspice-simulation`](../rspice-simulation) `pdk`.
 - Materializing model-bound symbols into design libraries belongs to
   [`rspice-design`](../rspice-design) `model_bound_symbol`.
-- The Model Hub client and the Models workspace belong to
+- The Models workspace belongs to
   [`rspice-app`](../rspice-app).
 
 ## Entry points

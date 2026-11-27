@@ -18,7 +18,7 @@ pub(super) fn announced(ui: &mut Ui, text: RichText, label: &str) {
 ///
 /// The announced text is the sentence alone, because the sentences this page
 /// marks already say what is wrong in their own words and a screen reader
-/// reading "Error:" in front of "the model hub could not be reached" hears
+/// reading "Error:" in front of "the library file could not be read" hears
 /// the severity twice.
 pub(super) fn marked_line(ui: &mut Ui, problem: Problem, text: &str) {
     ui.horizontal(|ui| {

@@ -1860,7 +1860,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
     // version of it is a mutation counter on the model catalogue. That is
     // unsound here: `ModelLibraryManager` is replaced whole when a project is
     // opened, when a recovery comparison is accepted, when design history
-    // restores a candidate, and when a model-hub operation publishes a rebuilt
+    // restores a candidate, and when an import operation publishes a rebuilt
     // one — and a replacement arrives carrying whatever counter it was
     // serialized with, which may be one this session has already cached an
     // answer against. This builds that collision deliberately: every other

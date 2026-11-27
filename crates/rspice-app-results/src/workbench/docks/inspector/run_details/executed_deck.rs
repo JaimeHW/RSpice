@@ -2,12 +2,12 @@
 //!
 //! The receipt beside it names project-owned model *definitions* by digest,
 //! which is a precise fact about a narrow set: only models this project
-//! authored are admitted there at all. A pack release, a built-in card and a
+//! authored are admitted there at all. A library file, a built-in card and a
 //! retained import reach a run without appearing in it.
 //!
 //! What the run's own decks were sealed under covers all of them, because it
 //! is a comment the engine was given rather than a projection of the project.
-//! It is coarser — a release, not a digest per definition — and it is the only
+//! It is coarser — a library, not a digest per definition — and it is the only
 //! statement here that describes every model source a result depends on.
 //!
 //! # It reports; the caller asks for the deck

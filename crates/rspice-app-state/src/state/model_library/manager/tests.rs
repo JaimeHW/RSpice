@@ -1,8 +1,4 @@
-//! Tests for library and pack search.
-//!
-//! Search must be bounded, must ignore an empty query rather than returning
-//! everything, and must carry each hit's redistribution status. A missing
-//! pack tree is a normal absence, not an error.
+//! Tests for library loading, search and imports.
 
 use super::*;
 use crate::state::model_library::{
@@ -1768,7 +1764,7 @@ fn browser_selected_sources_remain_generic_project_imports() {
     let mut manager = ModelLibraryManager::new();
     let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../models/spice/foundation/lib/foundation.lib");
-    let bytes = std::fs::read(entry).expect("foundation pack entry is readable");
+    let bytes = std::fs::read(entry).expect("foundation entry is readable");
     let library = manager
         .load_library_bundle_from_root(
             "foundation.lib",
@@ -1816,7 +1812,7 @@ fn browser_selected_sources_remain_generic_project_imports() {
         .expect("the selected entry ignores an unrelated selected source");
     let imported = extra_manager
         .get_library(&imported_with_unrelated_source)
-        .expect("pack library retained");
+        .expect("imported library retained");
     assert!(!imported.models.contains_key("unrelated"));
     assert_eq!(imported.source_contents.len(), 1);
 }

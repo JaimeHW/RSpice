@@ -1,10 +1,8 @@
 //! Authenticating a named set of in-memory sources into one model library.
 //!
-//! Two callers hand RSpice a bundle rather than a path: a browser upload,
-//! which has no filesystem to read, and a Model Hub pack part, whose bytes
-//! were proved as an archive and only *happen* to be expanded on a disk when
-//! the store is a filesystem one. Both arrive as `(portable name, bytes)`
-//! pairs with one executable root, so both are authenticated here and nowhere
+//! A browser upload hands RSpice a bundle rather than a path, because it has
+//! no filesystem to read. It arrives as `(portable name, bytes)` pairs with
+//! one executable root, and every bundle is authenticated here and nowhere
 //! else — which is what makes a project built in a browser and the same
 //! project built on a desktop the same document.
 //!
@@ -20,8 +18,8 @@
 //!
 //! Reachability is computed from the selected root through `.include`,
 //! sectioned `.lib`, and Verilog-A edges, and only what it reaches is decoded,
-//! validated, or kept. A pack that ships a licence file and a datasheet beside
-//! its models therefore contributes neither to the project nor to its digest.
+//! validated, or kept. A licence file or a datasheet uploaded beside the
+//! models therefore contributes neither to the project nor to its digest.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -278,10 +276,8 @@ fn reachable_browser_bundle_members(
 /// This owns everything an import decides — which member is the root, which
 /// members it can reach, what the retained closure and its resolution edges
 /// are — and decides nothing about the catalog it will join. Publication is
-/// the caller's, because the two callers answer a name collision
-/// differently: a browser upload refuses to replace a library it did not
-/// import, while re-adding the same pinned pack part is the same bytes
-/// under the same identity and reuses what it already produced.
+/// the caller's: a browser upload, for one, refuses to replace a library it
+/// did not import.
 /// The runtime service prepares every HDL entry point before building the catalog
 /// with the captured compiler include edges.
 pub fn prepare<'a>(

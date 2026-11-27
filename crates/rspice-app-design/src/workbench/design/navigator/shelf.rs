@@ -9,8 +9,7 @@
 //! Almost nothing here takes the whole application. A shelf row arms a tool,
 //! writes a pin, or credits a placement, and all three live in the model and
 //! the session — so the handlers take those rather than the application that
-//! holds them. A part the project has not adopted raises the pack confirmation
-//! in the Models workspace through the session's outbox. The three that keep
+//! holds them. The three that keep
 //! the application are the pin placement, which runs the `PlacePin` command,
 //! and the two that hand a row on to it.
 
@@ -716,7 +715,7 @@ pub enum ShelfArm {
 /// Resolve one stored entry into the row the band would paint.
 ///
 /// `None` means the entry names nothing this session can place — a detached
-/// library, an uninstalled pack, a code model this build does not carry. The
+/// library, a part no loaded library holds, a code model this build does not carry. The
 /// stored key is untouched: the band simply does not paint a door that leads
 /// nowhere.
 fn resolve_shelf_entry(
@@ -945,8 +944,7 @@ fn shelf_entry_rows(ui: &mut Ui, model: &mut Model, rows: &[ShelfEntryRow]) -> O
 
 /// The drag payload one armed identity travels to the canvas as.
 ///
-/// A library part has none: its click may have to review and add a pack
-/// first, and a drag that could end in a dialog is not a drag.
+/// A library part has none: it arms by its click.
 fn shelf_drag_payload(arm: &ShelfArm) -> Option<SchematicShelfDragPayload> {
     match arm {
         ShelfArm::Primitive(kind) => SchematicShelfDragPayload::primitive(*kind),
@@ -1333,7 +1331,7 @@ pub fn arm_variant(
 ///
 /// It sits directly under the built-in groups because that is what a
 /// definition is — a source of one of the families above it, with its fields
-/// already filled in — and above the pack and cell catalogs, which publish devices
+/// already filled in — and above the library parts and cell catalogs, which publish devices
 /// rather than excitations. A project that has authored none paints nothing at
 /// all rather than an empty header: the shelf's other sections do the same, and
 /// a heading over nothing is a door that leads nowhere.

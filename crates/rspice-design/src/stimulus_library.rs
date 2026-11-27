@@ -8,10 +8,6 @@
 //! exactly as they were — and what makes "modified" and "behind" comparisons
 //! rather than flags anyone has to remember to set.
 //!
-//! This is the same bargain the model hub already strikes with
-//! `ProjectModelLibrary::pack_pin`: adopt by copy, keep the provenance, offer
-//! to re-adopt when the source moves.
-//!
 //! Realizing a definition (turning it into a card, a `SourceSpec` or a
 //! waveform) is deliberately *not* here. The card comes from the netlist
 //! generator in `rspice-simulation`, which depends on this crate, so

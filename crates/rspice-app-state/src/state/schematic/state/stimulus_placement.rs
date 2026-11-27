@@ -1,6 +1,6 @@
 //! Placing a source that is born having adopted a library definition.
 //!
-//! A definition is a placeable part, exactly as a model pack's card is: the
+//! A definition is a placeable part, exactly as a library part is: the
 //! reader picks it, the cursor carries it, and the instance it becomes already
 //! holds the definition's card and the receipt for it. Anything else would make
 //! placement a two-step ritual — place a default source, then adopt onto it —
