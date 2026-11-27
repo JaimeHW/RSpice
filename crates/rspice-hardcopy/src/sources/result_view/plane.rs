@@ -654,9 +654,6 @@ pub(super) fn quick_smith_plot<W: AsRef<RetainedWaveform>>(
     )
 }
 
-/// The rings a polar chart is ruled in, as the sheet rules them.
-const POLAR_RINGS: u32 = 5;
-
 /// The polar page: each complex quantity on its plane, with rings at the
 /// magnitudes its axis rules and a spoke every 30°.
 pub(super) fn quick_polar_plot<W: AsRef<RetainedWaveform>>(
@@ -674,15 +671,15 @@ pub(super) fn quick_polar_plot<W: AsRef<RetainedWaveform>>(
             "the polar chart has no complex quantity to draw".to_owned(),
         ));
     }
-    // The outer ring is the sheet's: the first 1-2-5 number at or past
-    // the largest magnitude, divided into the sheet's five rings.
-    let outer = rspice_results::plot_axis::polar_ring_ceiling(reach);
+    // The rings are the sheet's: the tightest four to six rings of a
+    // readable step at or past the largest magnitude.
+    let (outer, rings) = rspice_results::plot_axis::polar_rings(reach);
     let plane = Plane::new((-outer * 1.05, outer * 1.05), (-outer * 1.05, outer * 1.05));
     let mut guides = Vec::new();
     let mut captions = Vec::new();
-    for ring in 1..=POLAR_RINGS {
-        let radius = outer * f64::from(ring) / f64::from(POLAR_RINGS);
-        guides.push(plane.guide(&circle((0.0, 0.0), radius, 256), ring == POLAR_RINGS)?);
+    for ring in 1..=rings {
+        let radius = outer * f64::from(ring) / f64::from(rings);
+        guides.push(plane.guide(&circle((0.0, 0.0), radius, 256), ring == rings)?);
         // Up the 90° spoke, inside each ring, as the sheet writes them:
         // clear of the angles round the rim.
         captions.extend(plane.label(

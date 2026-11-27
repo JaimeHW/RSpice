@@ -394,8 +394,8 @@ fn a_printed_bode_key_names_each_trace_as_the_sheet() {
     assert_eq!(keys, ["|V(out)|", "phase(V(out))"]);
 }
 
-/// The polar page reads as the sheet: angles signed about 0°, and five
-/// rings to the sheet's 1-2-5 rim, each named up the 90° spoke.
+/// The polar page reads as the sheet: angles signed about 0°, and the
+/// sheet's rings fitted to the locus, each named up the 90° spoke.
 #[test]
 fn a_printed_polar_reads_its_angles_and_rings_as_the_sheet() {
     let frequency = vec![1.0, 10.0, 100.0];
@@ -422,9 +422,12 @@ fn a_printed_polar_reads_its_angles_and_rings_as_the_sheet() {
         assert!(captions.contains(&label), "{label} in {captions:?}");
     }
     assert!(!captions.contains(&"210\u{b0}"), "{captions:?}");
-    for ring in ["2", "4", "6", "8", "10"] {
+    // A peak of 7.3 is ruled in four rings of 2, as the sheet rules it, not
+    // out to 10.
+    for ring in ["2", "4", "6", "8"] {
         assert!(captions.contains(&ring), "{ring} in {captions:?}");
     }
+    assert!(!captions.contains(&"10"), "{captions:?}");
 }
 
 /// A stored series a page needs whole is asked of the reader service, as the
