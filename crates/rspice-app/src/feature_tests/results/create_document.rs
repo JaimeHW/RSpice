@@ -1415,7 +1415,7 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
                 .unwrap_or_else(|| panic!("{combination}: the reopened project keeps it"));
             assert_eq!(document.title(), combination);
             assert_eq!(document.panes().len(), panes, "{combination}");
-            // Shown as choosing its tab shows it.
+            // Shown as choosing its row in the data browser shows it.
             assert!(
                 rspice_app_workbench::workbench::chrome::document_bar::activate_document_by_id(
                     &mut reopened.app.state,

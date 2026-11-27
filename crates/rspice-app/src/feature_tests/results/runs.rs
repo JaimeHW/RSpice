@@ -620,6 +620,61 @@ fn a_documents_row_menu_renames_and_deletes_it() {
     assert_eq!(browser_rows::document_names(&desk.nodes()), ["Bias sweep"]);
 }
 
+/// A signal's menu makes a new result document over the signal's own run
+/// and analysis, not over the run Results showed, and Results then shows the
+/// signal's run.
+#[test]
+fn a_signals_new_result_document_opens_on_the_signals_run_and_analysis() {
+    let Bench {
+        mut desk,
+        first,
+        other,
+        ..
+    } = bench();
+    let [_, newer] = first;
+    desk.pick(other);
+    assert_eq!(desk.shown(), Some(other));
+    // A query opens every run, so the newer run's signals are listed under
+    // its head while the other plan's run is shown.
+    desk.app.state.workbench.set_navigator_filter("out");
+    let nodes = desk.nodes();
+    let head = browser_rows::run_head(&nodes, &desk.label_of(newer));
+    let mut signals = nodes
+        .iter()
+        .filter(|(_, node)| node.label().is_some_and(|label| label.starts_with("V(out), ")))
+        .filter_map(|(_, node)| node.bounds())
+        .filter(|bounds| bounds.y0 > head.top)
+        .collect::<Vec<_>>();
+    signals.sort_by(|above, below| above.y0.total_cmp(&below.y0));
+    let signal = signals.first().expect("the newer run lists V(out)");
+    desk.right_click(egui::pos2(
+        ((signal.x0 + signal.x1) * 0.5) as f32,
+        ((signal.y0 + signal.y1) * 0.5) as f32,
+    ));
+    // The sheet bar offers the same words; the menu's entry is the one
+    // drawn under the signal.
+    let nodes = desk.nodes();
+    let (entry, _) = nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.role() == Role::Button && node.label() == Some("New result document…")
+        })
+        .filter(|(_, node)| node.bounds().is_some_and(|bounds| bounds.y0 >= signal.y0))
+        .min_by(|(_, above), (_, below)| {
+            let top = |node: &Node| node.bounds().map_or(f64::MAX, |bounds| bounds.y0);
+            top(above).total_cmp(&top(below))
+        })
+        .expect("the signal's menu offers New result document…");
+    desk.click(*entry);
+
+    let draft = &desk.app.state.results.create_result_document;
+    assert!(draft.open, "the form opens");
+    assert_eq!(draft.dataset_id, Some(newer), "on the signal's run");
+    assert_eq!(draft.analysis, Some(0), "and on its analysis");
+    assert_eq!(desk.shown(), Some(newer), "the signal's run shows");
+    assert_eq!(desk.shown_document(), None);
+}
+
 /// The Datasets tab draws the rows in view and no others: of a hundred and
 /// twenty runs, the newest's row is drawn and the oldest's is not.
 #[test]
