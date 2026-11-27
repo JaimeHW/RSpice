@@ -63,6 +63,13 @@ impl<'a> Series<'a> {
         }
     }
 
+    /// Whether a level measure's window is cut on the trace as drawn: it is
+    /// read on a known X axis and not already cut by `clip`, whose own
+    /// window a second cut would read past.
+    pub(super) fn cuts_as_drawn(&self) -> bool {
+        self.drawn.is_some() && self.window.is_none()
+    }
+
     /// The trace as it is drawn on an X axis of `scale`, read between two
     /// samples where the drawn line runs, as a cursor reads it: straight in
     /// log X on a decade axis the trace rises along through positive values,
@@ -252,7 +259,9 @@ impl<'a> Series<'a> {
         final_value
     }
 
-    /// One pass over the samples as (x, y), a window's ends interpolated.
+    /// One pass over the samples as (x, y), a window's ends interpolated:
+    /// along the drawn axis when the trace is read as drawn, as a cursor
+    /// reads them, else straight in X as `clip` cuts them.
     /// A stored sample that cannot be read is NaN, an undefined sample, and
     /// its failure is kept for the run's diagnostics.
     pub(super) fn pairs(&self) -> Box<dyn Iterator<Item = (f64, f64)> + 'a> {
@@ -268,7 +277,9 @@ impl<'a> Series<'a> {
         };
         match self.window {
             None => samples,
-            Some((low, high)) => Box::new(Clipped::new(samples, low, high)),
+            Some((low, high)) => {
+                Box::new(Clipped::new(samples, low, high).along(self.drawn.unwrap_or(|x| x)))
+            }
         }
     }
 }
@@ -280,6 +291,8 @@ pub(super) struct Clipped<I> {
     samples: I,
     low: f64,
     high: f64,
+    /// What `x` an end is interpolated in between two samples.
+    along: fn(f64) -> f64,
     previous: Option<(f64, f64)>,
     ready: VecDeque<(f64, f64)>,
 }
@@ -290,9 +303,17 @@ impl<I> Clipped<I> {
             samples,
             low,
             high,
+            along: |x| x,
             previous: None,
             ready: VecDeque::with_capacity(3),
         }
+    }
+
+    /// Interpolate each end in `along(x)` rather than in X: on the line a
+    /// log axis draws between two samples.
+    fn along(mut self, along: fn(f64) -> f64) -> Self {
+        self.along = along;
+        self
     }
 }
 
@@ -315,10 +336,11 @@ impl<I: Iterator<Item = (f64, f64)>> Iterator for Clipped<I> {
                 } else {
                     &ends[..]
                 };
+                let along = self.along;
                 for &end in ends {
                     if (x0 < end && end < x1) || (x1 < end && end < x0) {
-                        self.ready
-                            .push_back((end, y0 + (y1 - y0) * (end - x0) / (x1 - x0)));
+                        let share = (along(end) - along(x0)) / (along(x1) - along(x0));
+                        self.ready.push_back((end, y0 + (y1 - y0) * share));
                     }
                 }
             }

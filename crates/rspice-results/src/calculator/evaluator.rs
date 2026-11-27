@@ -199,10 +199,11 @@ pub fn evaluate(
                     ctx.get_magnitude(signal, dataset.as_deref())?.checked()
                 };
             }
-            if lower == "yval"
-                && let Some(scale) = ctx.drawn_x_scale()
+            if let Some(scale) = ctx.drawn_x_scale()
+                && let Some(level) = super::levels::lookup(&lower)
+                && (lower == "yval" || args.len() == 3)
             {
-                return drawn_yval(name, args, scale, ctx)?.checked();
+                return drawn_level(name, level, args, scale, ctx)?.checked();
             }
             if let Some(value) = stored_measure(name, &lower, args, ctx)? {
                 return value.checked();
@@ -616,35 +617,45 @@ fn stored_measure(
     }
 }
 
-/// `yval(w, at)` read on the line drawn on an X axis of `scale`, as a cursor
-/// on it reads: a stored trace from the samples around `at`, a real one in
-/// memory from its samples, and anything else as `yval` reads it anywhere.
-fn drawn_yval(
+/// A level measure read on the line drawn on an X axis of `scale`, as a
+/// cursor on it reads: `yval(w, at)` at `at`, and a windowed `avg`, `rms`,
+/// `min`, `max` or `pp` at its window's ends. A stored trace is read from
+/// the samples it needs, a real one in memory from its samples, and anything
+/// else as the measure reads it anywhere.
+fn drawn_level(
     name: &str,
+    level: super::measures::Reduction,
     args: &[CalculatorExpr],
     scale: crate::plot_axis::XScale,
     ctx: &impl EvaluationContext,
 ) -> Result<CalcValue, EvaluationError> {
     use super::series::Series;
-    let yval = super::levels::lookup("yval").expect("yval is a level measure");
-    let [trace, at] = args else {
+    let Some((trace, rest)) = args.split_first() else {
         return Err(EvaluationError::ArgCountMismatch {
             func: name.to_owned(),
             expected: 2,
-            actual: args.len(),
+            actual: 0,
         });
     };
+    let rest = rest
+        .iter()
+        .map(|arg| match arg {
+            CalculatorExpr::Keyword(word) => Ok(Argument::Keyword(word.clone())),
+            _ => evaluate(arg, ctx).map(Argument::Value),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     if let Some(series) = stored_series(trace, ctx)? {
-        let at = [Argument::Value(evaluate(at, ctx)?)];
-        return yval(name, &series.drawn(scale), &at).map(CalcValue::Real);
+        return level(name, &series.drawn(scale), &rest).map(CalcValue::Real);
     }
-    let value = evaluate(trace, ctx)?;
-    let at = Argument::Value(evaluate(at, ctx)?);
-    match value {
+    match evaluate(trace, ctx)? {
         CalcValue::Real(RealValue::Waveform(x, y)) => {
-            yval(name, &Series::memory(&x, &y).drawn(scale), &[at]).map(CalcValue::Real)
+            level(name, &Series::memory(&x, &y).drawn(scale), &rest).map(CalcValue::Real)
         }
-        value => super::measures::dispatch(name, vec![Argument::Value(value), at]),
+        value => {
+            let mut arguments = vec![Argument::Value(value)];
+            arguments.extend(rest);
+            super::measures::dispatch(name, arguments)
+        }
     }
 }
 

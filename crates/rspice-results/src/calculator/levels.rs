@@ -64,12 +64,17 @@ fn scalar(name: &str, what: &str, argument: &Argument) -> Result<f64, Evaluation
 }
 
 /// The trace's statistics over `window`, as `measure_interval` takes them of the same samples
-/// in memory.
+/// in memory. A trace read as drawn has its window's ends read where its drawn line runs, as
+/// a cursor at each end reads it, and is measured in X between them.
 fn statistics(
     name: &str,
     trace: &Series,
     window: Option<(f64, f64)>,
 ) -> Result<crate::measurements::IntervalStatistics, EvaluationError> {
+    let drawn = window
+        .filter(|_| trace.cuts_as_drawn())
+        .and_then(|(from, to)| trace.clone().clipped(from, to).ok());
+    let trace = drawn.as_ref().unwrap_or(trace);
     let measured = match trace.ends() {
         Some(ends) => crate::measurements::measure_pairs(ends, || trace.pairs(), window),
         None => Err(crate::measurements::MeasurementError::Empty),

@@ -102,7 +102,12 @@ impl Places {
             match word {
                 "xA" => self.cursors[0].map(f64::to_bits).hash(&mut hasher),
                 "xB" => self.cursors[1].map(f64::to_bits).hash(&mut hasher),
-                "yval" => self.x_scale.hash(&mut hasher),
+                // A level measure reads its position or window ends where
+                // the drawn line runs, so the axis scale is part of it.
+                "yval" | "avg" | "average" | "rms" | "min" | "max" | "pp" => {
+                    word.hash(&mut hasher);
+                    self.x_scale.hash(&mut hasher);
+                }
                 _ => {
                     if let Some(reading) =
                         rspice_results::calculator::ast::MarkerReading::parse(word)

@@ -396,3 +396,66 @@ fn yval_reads_a_linear_sweep_where_the_cursor_reads_it_on_either_axis() {
         );
     }
 }
+
+/// A windowed level measure reads its window's ends where a cursor there
+/// reads the trace, as `yval` does: on the decade axis an `.AC LIN 1k 4k`
+/// sweep opens on, straight in log f between two samples, and straight in f
+/// once the reader reads the axis linearly. Between its ends the window is
+/// measured over the samples themselves.
+#[test]
+fn windowed_levels_read_their_ends_where_the_cursor_reads_them_on_either_axis() {
+    let x = vec![1.0e3, 2.0e3, 3.0e3, 4.0e3];
+    let mut state = strip_host(AnalysisType::Ac, x);
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Bode;
+    let analysis = key(&state);
+    for text in [
+        "min(V(out), 1500, 3500)",
+        "max(V(out), 1500, 3500)",
+        "avg(V(out), 1500, 3500)",
+    ] {
+        state
+            .results
+            .results
+            .add_expression_trace(&state.model.simulation, analysis, text.to_owned())
+            .expect("the expression is added");
+    }
+    for scale in [XScale::Log10, XScale::Linear] {
+        state
+            .results
+            .results
+            .session
+            .x_scales
+            .insert(analysis, scale);
+        let models = model(&mut state);
+        let strip = &models[0];
+        assert_eq!(strip.x_scale, scale);
+        let trace = strip
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay)
+            .expect("V(out) is drawn");
+        let low = strip.trace_value(trace, 1500.0, SampleInterpolation::Linear);
+        let high = strip.trace_value(trace, 3500.0, SampleInterpolation::Linear);
+        // On the decade axis the cursor reads the line drawn in log f, well
+        // away from the 3000 a straight line in f reads, so the axes differ.
+        assert_eq!(
+            scale == XScale::Log10,
+            (low - 3000.0).abs() > 100.0,
+            "{low}"
+        );
+        // Trapezoids over 1500…2000, 2000…3000 and 3000…3500, the samples
+        // 4000 and 6000 between them.
+        let area = (low + 4000.0) * 0.5 * 500.0 + 5000.0 * 1000.0 + (6000.0 + high) * 0.5 * 500.0;
+        let curves = resolve_strip_exprs(&mut state.results_parts(), strip, &Tokens::default());
+        let read = |index: usize| curves[index].y.sample(0).expect("the measure is drawn");
+        for (index, expected, what) in
+            [(0, low, "min"), (1, high, "max"), (2, area / 2000.0, "avg")]
+        {
+            let measured = read(index);
+            assert!(
+                (measured - expected).abs() <= 1e-9 * expected.abs(),
+                "on a {scale:?} axis {what} reads {measured} where {expected} is expected"
+            );
+        }
+    }
+}
