@@ -21,6 +21,10 @@ pub struct DocumentBarActions {
     pub open_properties: bool,
     /// The index of the page the reader picked.
     pub page: Option<usize>,
+    /// The reader switched the document between Latest and Pinned.
+    pub switch_tracking: bool,
+    /// The reader asked for the document to be archived.
+    pub archive: bool,
 }
 
 /// What the bar is in front of: a dataset's quick view, or a project result
@@ -32,7 +36,42 @@ pub enum DocumentBarSource<'a> {
         /// Page titles in document order, and the page being shown.
         pages: &'a [String],
         page: usize,
+        /// Which results it reads and whether it holds them itself.
+        standing: DocumentStanding<'a>,
     },
+}
+
+/// Which results a saved document reads, and whether it holds them itself:
+/// what its bar says of it beside its own commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentStanding<'a> {
+    pub tracking: DocumentTracking,
+    pub archive: DocumentArchive<'a>,
+}
+
+/// Which run a saved document reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentTracking {
+    /// It names no plan and analysis to follow, so it says nothing.
+    Untracked,
+    /// No completed run of the current design and netlist matches what it
+    /// shows.
+    Historical,
+    /// It follows the newest run of its plan and analysis.
+    Latest,
+    /// It keeps the run it shows, whatever runs after it.
+    Pinned,
+}
+
+/// Whether a saved document holds the samples of the runs it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentArchive<'a> {
+    /// It can take them in.
+    Available,
+    /// It holds them, and reads without the run history.
+    Archived,
+    /// It cannot, for the reason given.
+    Unavailable(&'a str),
 }
 
 /// Width of the page picker: room for a page title without crowding the
@@ -82,13 +121,16 @@ pub fn document_bar(
             // A quick view makes a new result document from the "+" at the
             // end of Results' tabs, so the bar offers only what a document
             // does.
-            if let DocumentBarSource::Document { .. } = source {
+            if let DocumentBarSource::Document { standing, .. } = source {
                 actions.add_pane = viewer_picker(
                     ui,
                     WorkbenchIcon::Add,
                     "Add pane…",
                     "Add a pane to this result document",
                 );
+                viewer_picker_separator(ui);
+                actions.archive = archive_control(ui, standing.archive);
+                actions.switch_tracking = tracking_control(ui, standing.tracking);
             }
             viewer_picker_separator(ui);
 
@@ -100,7 +142,7 @@ pub fn document_bar(
                     // A document of several pages shows one at a time; the
                     // picker leads the row because the tabs below it belong
                     // to the page it names.
-                    if let DocumentBarSource::Document { pages, page } = source
+                    if let DocumentBarSource::Document { pages, page, .. } = source
                         && pages.len() > 1
                     {
                         ui.add_space(PAGE_PICKER_GUTTER);
@@ -124,6 +166,130 @@ pub fn document_bar(
     });
 
     actions
+}
+
+/// Archive: embed the samples of the runs the document reads, so it reads
+/// without the run history; an archived document says so instead. True when
+/// the reader asked for it.
+fn archive_control(ui: &mut Ui, archive: DocumentArchive<'_>) -> bool {
+    match archive {
+        DocumentArchive::Available => bar_command(
+            ui,
+            WorkbenchIcon::Save,
+            "Archive",
+            Ok(
+                "Archive into document: embed the samples of the runs this document reads, \
+                so it reads without the run history.",
+            ),
+        ),
+        DocumentArchive::Archived => bar_command(
+            ui,
+            WorkbenchIcon::Save,
+            "Archived",
+            Err("This document holds its runs' samples and reads without the run history."),
+        ),
+        DocumentArchive::Unavailable(reason) => {
+            bar_command(ui, WorkbenchIcon::Save, "Archive", Err(reason))
+        }
+    }
+}
+
+/// Which run the document reads: Latest or Pinned, which a press switches,
+/// or Historical, which only says so. True when the reader switched it.
+fn tracking_control(ui: &mut Ui, tracking: DocumentTracking) -> bool {
+    match tracking {
+        DocumentTracking::Untracked => false,
+        DocumentTracking::Historical => bar_command(
+            ui,
+            WorkbenchIcon::History,
+            "Historical",
+            Err(
+                "This document still shows the results it was made from, but no completed \
+                 run matches the current design and its netlist.",
+            ),
+        ),
+        DocumentTracking::Latest => bar_command(
+            ui,
+            WorkbenchIcon::Pin,
+            "Latest",
+            Ok(
+                "Tracking latest: this document follows the newest run of its plan and \
+                analysis. Press to pin it to the run it shows.",
+            ),
+        ),
+        DocumentTracking::Pinned => bar_command(
+            ui,
+            WorkbenchIcon::Pin,
+            "Pinned",
+            Ok(
+                "Pinned to this run's results; a rerun does not replace them. Press to \
+                follow the newest run again.",
+            ),
+        ),
+    }
+}
+
+/// A command of the document's bar, drawn as the bar's other commands are:
+/// its icon and words, pressed when `explained` is `Ok` with what it does,
+/// and a statement of the document's state, in the faint ink and not
+/// pressed, when it is `Err` with why. True when pressed.
+fn bar_command(
+    ui: &mut Ui,
+    icon: WorkbenchIcon,
+    label: &str,
+    explained: Result<&str, &str>,
+) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let enabled = explained.is_ok();
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        theme::sans(tokens::FS_1, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    let width = galley.size().x + 36.0;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width, ResultBarMetrics::of(ui).viewer_tab),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, label));
+    if ui.is_rect_visible(rect) {
+        let hovered = enabled && response.hovered();
+        if hovered {
+            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        }
+        let color = match (enabled, hovered) {
+            (false, _) => t.color.text_faint,
+            (true, true) => t.color.text,
+            (true, false) => t.color.text_dim,
+        };
+        icon.paint(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(rect.left() + 14.0, rect.center().y),
+                egui::vec2(13.0, 13.0),
+            ),
+            color,
+        );
+        ui.painter().galley(
+            egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y * 0.5),
+            galley,
+            color,
+        );
+        theme::paint_focus_ring(ui, &response, rect);
+    }
+    let (Ok(words) | Err(words)) = explained;
+    let response = response.on_hover_text(words);
+    if enabled {
+        response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+    } else {
+        false
+    }
 }
 
 pub fn viewer_tabs(

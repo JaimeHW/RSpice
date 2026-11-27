@@ -2883,10 +2883,33 @@ pub(super) fn show_persistent_docbar(
     pages: &[String],
     page: usize,
 ) -> Option<usize> {
+    use crate::workbench::documents::result_document::persistent_document::sources::{
+        ArchiveAvailability, archive_availability,
+    };
+    use chrome::bars::{DocumentArchive, DocumentStanding};
+    let document = shown_saved_document(state.results_reads());
+    let archive = document.map(|document| archive_availability(state.results_reads(), document));
+    let standing = DocumentStanding {
+        tracking: document.map_or(chrome::bars::DocumentTracking::Untracked, |document| {
+            document_tracking(state.results_reads(), document)
+        }),
+        archive: match &archive {
+            Some(ArchiveAvailability::Available) => DocumentArchive::Available,
+            Some(ArchiveAvailability::Archived) => DocumentArchive::Archived,
+            Some(ArchiveAvailability::Unavailable(reason)) => {
+                DocumentArchive::Unavailable(reason.as_str())
+            }
+            None => DocumentArchive::Unavailable("Show a saved result document."),
+        },
+    };
     show_docbar_for(
         ui,
         state,
-        chrome::bars::DocumentBarSource::Document { pages, page },
+        chrome::bars::DocumentBarSource::Document {
+            pages,
+            page,
+            standing,
+        },
     )
 }
 
@@ -2906,7 +2929,100 @@ fn show_docbar_for(
     } else if actions.open_properties {
         document_edit::open_properties(state);
     }
+    if let Some(document) = shown_saved_document(state.results_reads()) {
+        if actions.switch_tracking {
+            switch_tracking(state, document);
+        }
+        if actions.archive
+            && let Err(error) = persistent_document::sources::archive_document(state, document)
+        {
+            state.workbench.prompt(error);
+        }
+    }
     actions.page
+}
+
+/// The saved result document Results shows, if its tab is in front.
+fn shown_saved_document(state: ResultsReads<'_>) -> Option<crate::product::ResultDocumentId> {
+    match state.workbench.documents.active(Workspace::Results) {
+        Some(WorkspaceDocumentId::VisualizationDocument(document)) => Some(*document),
+        _ => None,
+    }
+}
+
+/// Which run the saved document `document` reads, as its bar says it:
+/// Historical when no completed run matches the current design, else Latest
+/// or Pinned. A migrated or imported document that names no plan and
+/// analysis cannot truthfully claim Latest, so its bar says nothing.
+fn document_tracking(
+    state: ResultsReads<'_>,
+    document: crate::product::ResultDocumentId,
+) -> chrome::bars::DocumentTracking {
+    use crate::results::visualization_document::ResultDocumentTrackingMode;
+    use chrome::bars::DocumentTracking;
+    if crate::workbench::chrome::toolbar::results::results_document_is_historical(state) {
+        return DocumentTracking::Historical;
+    }
+    let Some(tracking) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document)
+        .map(|document| document.tracking())
+    else {
+        return DocumentTracking::Untracked;
+    };
+    match (
+        tracking.simulation_plan_id,
+        tracking.authored_analysis_id,
+        tracking.mode,
+    ) {
+        (Some(_), Some(_), ResultDocumentTrackingMode::Pinned) => DocumentTracking::Pinned,
+        (Some(_), Some(_), _) => DocumentTracking::Latest,
+        _ => DocumentTracking::Untracked,
+    }
+}
+
+/// Switch the saved document `document` between following the newest run
+/// of its plan and analysis and keeping the run it shows.
+fn switch_tracking(state: &mut ResultsParts<'_>, document: crate::product::ResultDocumentId) {
+    use crate::results::visualization_document::{
+        DocumentEdit, ResultDocumentTracking, ResultDocumentTrackingMode,
+    };
+    let Some((tracking, revision)) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document)
+        .map(|document| (document.tracking(), document.revision()))
+    else {
+        return;
+    };
+    let (Some(plan_id), Some(analysis_id)) =
+        (tracking.simulation_plan_id, tracking.authored_analysis_id)
+    else {
+        return;
+    };
+    let pinned = tracking.mode == ResultDocumentTrackingMode::Pinned;
+    let next_mode = if pinned {
+        ResultDocumentTrackingMode::Latest
+    } else {
+        ResultDocumentTrackingMode::Pinned
+    };
+    let next = ResultDocumentTracking::for_plan(next_mode, plan_id, analysis_id);
+    match view_edits::apply(
+        state,
+        document,
+        revision,
+        vec![DocumentEdit::SetTracking(next)],
+    ) {
+        Ok(_) => state.workbench.prompt(if pinned {
+            "Result document now follows the latest plan run."
+        } else {
+            "Result document is pinned to its current dataset."
+        }),
+        Err(error) => state.workbench.prompt(error.to_string()),
+    }
 }
 
 /// The domain controls a custom-canvas sheet owns, drawn left-aligned in its

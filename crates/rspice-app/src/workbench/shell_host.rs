@@ -421,9 +421,7 @@ impl Host for RSpiceApp {
                 use rspice_app_project::workbench::chrome::toolbar::project::{
                     no_project_tools, project_tools,
                 };
-                use rspice_app_results::workbench::chrome::toolbar::results::{
-                    offered_tool_groups, results_tracking_button,
-                };
+                use rspice_app_results::workbench::chrome::toolbar::results::offered_tool_groups;
                 use rspice_app_simulate::workbench::chrome::toolbar::simulate::{
                     simulation_tools, verification_tools,
                 };
@@ -507,11 +505,7 @@ impl Host for RSpiceApp {
                             app.after_contribution();
                         }
                         Workspace::Results => {
-                            let groups = offered_tool_groups(app.state.results_reads());
-                            if results_tracking_button(ui, &mut app.state.results_parts(), layout) {
-                                context_separator(ui, layout);
-                            }
-                            for (index, group) in groups.enumerate() {
+                            for (index, group) in offered_tool_groups().enumerate() {
                                 if index > 0 {
                                     context_separator(ui, layout);
                                 }

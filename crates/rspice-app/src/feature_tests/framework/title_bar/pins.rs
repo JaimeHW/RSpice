@@ -245,7 +245,7 @@ fn specifications_is_one_command_that_opens_verify_on_its_view() {
 
     app.state.workbench.workspace = Workspace::Results;
     app.state.simulate.verification_page = VerificationPage::Corners;
-    let offered = offered_tool_groups(app.state.results_reads())
+    let offered = offered_tool_groups()
         .flatten()
         .map(|&(key, _)| key)
         .collect::<Vec<_>>();

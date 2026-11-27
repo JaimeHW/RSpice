@@ -3,15 +3,12 @@
 
 use crate::product::{ContentDigest, ObjectRevision};
 use crate::state::command_catalog::CommandKey;
-use crate::workbench::design_system::{WorkbenchIcon, labeled_icon_button_sized};
+use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::documents::result_document::ResultsReads;
 use crate::workbench::documents::result_document::persistent_document::current_result_source_digest;
-use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::layout::LayoutSpec;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
-
-use rspice_app_workbench::workbench::chrome::toolbar::{explicit_label_width, take_tool_slot};
 
 /// A group of the Results toolbar's commands, drawn as icons and named by
 /// the host, with a rule between one group and the next.
@@ -51,182 +48,11 @@ const DATASET: ToolGroup = &[
 const SPECIFICATIONS: ToolGroup = &[(ids::VERIFY_SPECIFICATIONS, WorkbenchIcon::Verify)];
 
 /// The Results toolbar's groups, in the order it lays them out: the linked
-/// cursors, the calculator, which a historical document is not offered, the
-/// dataset's commands, and the specifications.
-pub fn offered_tool_groups(state: ResultsReads<'_>) -> impl Iterator<Item = ToolGroup> + use<> {
-    let historical = results_document_is_historical(state);
-    [
-        Some(LINKED_CURSORS),
-        (!historical).then_some(CALCULATOR),
-        Some(DATASET),
-        Some(SPECIFICATIONS),
-    ]
-    .into_iter()
-    .flatten()
-}
-
-/// The controls of a saved result document Results shows: its tracking
-/// (Historical when no completed run matches the current design, otherwise
-/// the Latest / Pinned toggle) and Archive into document. The browser's view
-/// has none: the data browser picks its run. Whether it drew anything, for
-/// the rule after it.
-pub fn results_tracking_button(
-    ui: &mut egui::Ui,
-    state: &mut ResultsParts<'_>,
-    layout: LayoutSpec,
-) -> bool {
-    let tracking = tracking_control(ui, state, layout);
-    let archive = archive_control(ui, state, layout);
-    tracking || archive
-}
-
-/// Archive into document: embed the runs the document reads so it stands
-/// alone. An archived document says so instead.
-fn archive_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: LayoutSpec) -> bool {
-    use crate::workbench::documents::result_document::persistent_document::sources::{
-        ArchiveAvailability, archive_availability, archive_document,
-    };
-    use crate::workbench::state::WorkspaceDocumentId;
-
-    let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) = state
-        .workbench
-        .documents
-        .active(Workspace::Results)
-        .cloned()
-    else {
-        return false;
-    };
-    let availability = archive_availability(state.results_reads(), document_id);
-    let archived = availability == ArchiveAvailability::Archived;
-    let label = if archived { "Archived" } else { "Archive" };
-    let width = explicit_label_width(ui, label, archived);
-    if !take_tool_slot(ui, layout, width) {
-        return true;
-    }
-    let enabled = !matches!(availability, ArchiveAvailability::Unavailable(_));
-    let response = ui
-        .add_enabled_ui(enabled, |ui| {
-            labeled_icon_button_sized(
-                ui,
-                WorkbenchIcon::Save,
-                label,
-                archived,
-                width,
-                layout.toolbar_control_height,
-            )
-        })
-        .inner;
-    let response = match &availability {
-        ArchiveAvailability::Available => response.on_hover_text(
-            "Archive into document: embed the samples of the runs this document reads, so it reads without the run history.",
-        ),
-        ArchiveAvailability::Archived => response.on_hover_text(
-            "Archived: this document holds its runs' samples and reads without the run history.",
-        ),
-        ArchiveAvailability::Unavailable(reason) => response.on_disabled_hover_text(reason.as_str()),
-    };
-    if response.clicked()
-        && availability == ArchiveAvailability::Available
-        && let Err(error) = archive_document(state, document_id)
-    {
-        state.workbench.prompt(error);
-    }
-    true
-}
-
-fn tracking_control(ui: &mut egui::Ui, state: &mut ResultsParts<'_>, layout: LayoutSpec) -> bool {
-    use crate::results::visualization_document::{
-        DocumentEdit, ResultDocumentTracking, ResultDocumentTrackingMode,
-    };
-    use crate::workbench::state::WorkspaceDocumentId;
-
-    let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) = state
-        .workbench
-        .documents
-        .active(Workspace::Results)
-        .cloned()
-    else {
-        return false;
-    };
-    if results_document_is_historical(state.results_reads()) {
-        let width = explicit_label_width(ui, "Historical", false);
-        if take_tool_slot(ui, layout, width) {
-            labeled_icon_button_sized(
-                ui,
-                WorkbenchIcon::History,
-                "Historical",
-                false,
-                width,
-                layout.toolbar_control_height,
-            )
-            .on_hover_text(
-                "This document still shows the results it was made from, but no completed run matches the current design and its netlist.",
-            );
-        }
-        return true;
-    }
-    let Some((tracking, revision)) = state
-        .model
-        .workspace
-        .content
-        .visualization_document(document_id)
-        .map(|document| (document.tracking(), document.revision()))
-    else {
-        return false;
-    };
-    let (Some(plan_id), Some(analysis_id)) =
-        (tracking.simulation_plan_id, tracking.authored_analysis_id)
-    else {
-        // A migrated or externally imported historical document cannot
-        // truthfully claim Latest until exact plan and authored-analysis
-        // authority exists.
-        return false;
-    };
-    let pinned = tracking.mode == ResultDocumentTrackingMode::Pinned;
-    let label = if pinned { "Pinned" } else { "Latest" };
-    let width = explicit_label_width(ui, label, pinned);
-    if !take_tool_slot(ui, layout, width) {
-        return true;
-    }
-    let tooltip = if pinned {
-        "Pinned to this run's results; a rerun does not replace them."
-    } else {
-        "Tracking latest: this document follows the newest run of its plan and analysis."
-    };
-    let response = labeled_icon_button_sized(
-        ui,
-        WorkbenchIcon::Pin,
-        label,
-        pinned,
-        width,
-        layout.toolbar_control_height,
-    );
-    let response = response.on_hover_text(tooltip);
-    if response.clicked() {
-        let next_mode = if pinned {
-            ResultDocumentTrackingMode::Latest
-        } else {
-            ResultDocumentTrackingMode::Pinned
-        };
-        let next = ResultDocumentTracking::for_plan(next_mode, plan_id, analysis_id);
-        let result = crate::workbench::documents::result_document::view_edits::apply(
-            state,
-            document_id,
-            revision,
-            vec![DocumentEdit::SetTracking(next)],
-        )
-        .map(|_| ())
-        .map_err(|error| error.to_string());
-        match result {
-            Ok(()) => state.workbench.prompt(if pinned {
-                "Result document now follows the latest plan run."
-            } else {
-                "Result document is pinned to its current dataset."
-            }),
-            Err(error) => state.workbench.prompt(error),
-        }
-    }
-    true
+/// cursors, the calculator, the dataset's commands, and the specifications.
+/// They are the same whichever tab is in front, so the toolbar never moves
+/// under the pointer; what a document says of itself is on its own bar.
+pub fn offered_tool_groups() -> impl Iterator<Item = ToolGroup> {
+    [LINKED_CURSORS, CALCULATOR, DATASET, SPECIFICATIONS].into_iter()
 }
 
 pub fn run_has_current_success_authority(

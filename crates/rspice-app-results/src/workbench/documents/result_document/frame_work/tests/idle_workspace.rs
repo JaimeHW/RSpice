@@ -234,8 +234,8 @@ fn large_workspace(analysis: AnalysisResult) -> (ResultsTestHost, ResultDocument
     (state, document_id)
 }
 
-/// One frame of the workspace: the data browser, the toolbar's Results
-/// controls and what it decides about them, the Latest document, and the
+/// One frame of the workspace: the data browser, what the toolbar decides
+/// about its Results controls, the Latest document with its bar, and the
 /// inspector, side by side as the shell lays them out.
 fn workspace_frame(
     ctx: &egui::Context,
@@ -243,9 +243,6 @@ fn workspace_frame(
     controller: &mut crate::simulation::SimulationController,
     document_id: ResultDocumentId,
 ) {
-    use crate::workbench::chrome::toolbar::results::{
-        offered_tool_groups, results_tracking_button,
-    };
     use crate::workbench::docks::{inspector, navigator};
     use crate::workbench::documents::result_document::document_edit::compare::compare_availability;
 
@@ -284,17 +281,6 @@ fn workspace_frame(
                     &mut state.results_parts(),
                     &mut run_details,
                 );
-                let layout = crate::workbench::layout::LayoutSpec::resolve(
-                    1_680.0,
-                    1_020.0,
-                    &state.workbench,
-                );
-                let _ = results_tracking_button(
-                    &mut child(ui, bar),
-                    &mut state.results_parts(),
-                    layout,
-                );
-                let _ = offered_tool_groups(state.results_reads()).count();
                 let _ = compare_availability(state.results_reads());
                 let _ = results_document_is_historical(state.results_reads());
                 persistent_document::show(
