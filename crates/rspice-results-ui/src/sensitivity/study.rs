@@ -396,10 +396,7 @@ pub fn show(
         }
     };
     if view.evidence.rows.is_empty() {
-        well_hint(
-            ui,
-            "This sensitivity result has no parameter sensitivities",
-        );
+        well_hint(ui, "This sensitivity result has no parameter sensitivities");
         return;
     }
     let Some(plan) = plan else {

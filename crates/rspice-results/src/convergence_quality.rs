@@ -175,9 +175,7 @@ impl TransientConvergenceEvidence {
     pub fn validate(&self) -> Result<(), String> {
         self.transient.validate()?;
         if self.transient.time_basis.is_none() {
-            return Err(
-                "Transient convergence data is missing its time basis".to_owned(),
-            );
+            return Err("Transient convergence data is missing its time basis".to_owned());
         }
         if let Some(initialization) = &self.initialization {
             if !initialization.final_residual.is_finite() || initialization.final_residual < 0.0 {

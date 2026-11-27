@@ -209,9 +209,7 @@ impl PssFloquetRef<'_> {
             rspice_core::analysis::FLOQUET_UNIT_CIRCLE_BAND,
         )?;
         if verdict != expected_verdict {
-            return Err(
-                "PSS stability verdict disagrees with its Floquet multipliers".to_owned(),
-            );
+            return Err("PSS stability verdict disagrees with its Floquet multipliers".to_owned());
         }
         Ok(())
     }

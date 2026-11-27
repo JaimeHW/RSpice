@@ -40,10 +40,7 @@ const NOT_REQUESTED: &str = "Not requested by this run";
 
 pub fn show(ui: &mut Ui, view: Option<TransferFunctionView<'_>>, significant_digits: usize) {
     let Some(view) = view else {
-        well_hint(
-            ui,
-            "Pick a transfer-function analysis in the data browser",
-        );
+        well_hint(ui, "Pick a transfer-function analysis in the data browser");
         return;
     };
     let rows = output_rows(&view, significant_digits);

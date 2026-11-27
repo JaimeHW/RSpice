@@ -368,10 +368,7 @@ mod tests {
             deck_of(6, "second\n.end\n", 1),
         ])
         .expect_err("retaining a run twice replaces it, so two records cannot both exist");
-        assert!(
-            error.contains("more than one executed deck"),
-            "{error}"
-        );
+        assert!(error.contains("more than one executed deck"), "{error}");
     }
 
     #[test]

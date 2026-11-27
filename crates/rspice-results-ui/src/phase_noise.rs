@@ -341,10 +341,7 @@ pub fn show(
         return requested;
     };
     let Some((level_min, level_max)) = level_range else {
-        well_hint(
-            ui,
-            "The phase-noise trace has no finite levels",
-        );
+        well_hint(ui, "The phase-noise trace has no finite levels");
         return requested;
     };
     let (x0, x1) = view.x.unwrap_or((x0, x1));

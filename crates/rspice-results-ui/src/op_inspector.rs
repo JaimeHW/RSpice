@@ -66,10 +66,8 @@ const DEVICE_FAMILY_ORDER: [&str; 3] = ["MOSFET", "BJT", "DIODE"];
 /// After the known families and every other built-in one.
 const MODULE_SECTION_RANK: usize = DEVICE_FAMILY_ORDER.len() + 1;
 const NON_FINITE: &str = "non-finite";
-const NODE_NOT_ON_SCHEMATIC: &str =
-    "This node no longer maps to one net on the schematic.";
-const DEVICE_NOT_ON_SCHEMATIC: &str =
-    "This device no longer matches a part on the schematic.";
+const NODE_NOT_ON_SCHEMATIC: &str = "This node no longer maps to one net on the schematic.";
+const DEVICE_NOT_ON_SCHEMATIC: &str = "This device no longer matches a part on the schematic.";
 const SCHEMATIC_CHANGED: &str = "Schematic changed since this run; cross-probing is off.";
 
 #[derive(Clone)]

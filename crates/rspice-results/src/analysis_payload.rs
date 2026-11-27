@@ -648,9 +648,7 @@ impl AnalysisResultPayload {
                         .chain(mna_branch_names)
                         .any(|name| name.is_empty() || name.trim() != name)
                 {
-                    return Err(
-                        "operating-point solver state is incomplete or invalid".to_owned(),
-                    );
+                    return Err("operating-point solver state is incomplete or invalid".to_owned());
                 }
                 if *run_point_count == 0 || *run_point_index >= *run_point_count {
                     return Err("operating-point run-point position is invalid".to_owned());
@@ -663,9 +661,7 @@ impl AnalysisResultPayload {
                             && nominal.is_finite()
                             && *nominal > 0.0 => {}
                     _ => {
-                        return Err(
-                            "operating-point PVT supply values are invalid".to_owned()
-                        );
+                        return Err("operating-point PVT supply values are invalid".to_owned());
                     }
                 }
             }
@@ -684,14 +680,10 @@ impl AnalysisResultPayload {
                 validate_complex_values(poles, "pole")?;
                 validate_complex_values(zeros, "zero")?;
                 if !pole_evidence.is_consistent_with_count(poles.len()) {
-                    return Err(
-                        "pole-zero pole check disagrees with the poles".to_owned(),
-                    );
+                    return Err("pole-zero pole check disagrees with the poles".to_owned());
                 }
                 if !zero_evidence.is_consistent_with_count(zeros.len()) {
-                    return Err(
-                        "pole-zero zero check disagrees with the zeros".to_owned(),
-                    );
+                    return Err("pole-zero zero check disagrees with the zeros".to_owned());
                 }
                 if gain.is_some_and(|gain| !gain.is_finite()) {
                     return Err("pole-zero gain is non-finite".to_owned());

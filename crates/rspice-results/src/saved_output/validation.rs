@@ -82,14 +82,15 @@ where
                 .as_ref()
                 .is_some_and(|source| receipt.analysis_id != source.source_instance_id())
             {
-                return Err(
-                    "saved output belongs to a different analysis".to_owned(),
-                );
+                return Err("saved output belongs to a different analysis".to_owned());
             }
             for (name, count) in receipt.status.materialized_waveforms() {
                 if self.success && receipt.save_policy == SavedOutputPolicy::FailureDiagnosticsOnly
                 {
-                    return Err("a failure-only saved output holds data from a successful analysis".to_owned());
+                    return Err(
+                        "a failure-only saved output holds data from a successful analysis"
+                            .to_owned(),
+                    );
                 }
                 let waveform = waveforms.get(name).ok_or_else(|| {
                     format!("saved output names signal '{name}', which is missing")
@@ -104,9 +105,7 @@ where
                 SavedOutputMaterializationStatus::MaterializedDcFamily { members } => {
                     let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload
                     else {
-                        return Err(
-                            "saved-output DC members need the DC sweep results".to_owned()
-                        );
+                        return Err("saved-output DC members need the DC sweep results".to_owned());
                     };
                     if self.analysis_type != AnalysisType::DcSweep
                         || matches!(evidence.family, DcSweepFamily::Single)
@@ -193,8 +192,7 @@ where
             && !axis.same_as(source.x)
         {
             return Err(
-                "saved-output DC members differ from the solved primary sweep axis"
-                    .to_owned(),
+                "saved-output DC members differ from the solved primary sweep axis".to_owned(),
             );
         }
         Ok(())

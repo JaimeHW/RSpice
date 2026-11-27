@@ -63,10 +63,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                 return Err("a signal needs a name without control characters".to_owned());
             }
             if !waveform_names.insert(waveform.name.as_str()) {
-                return Err(format!(
-                    "signal name '{}' appears twice",
-                    waveform.name
-                ));
+                return Err(format!("signal name '{}' appears twice", waveform.name));
             }
             if waveform.x.len() != waveform.y.len() {
                 return Err(format!(
@@ -173,10 +170,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         return Err(format!("{group} '{}' appears twice", value.name));
                     }
                     if !value.value.is_finite() {
-                        return Err(format!(
-                            "{group} '{}' has a non-finite value",
-                            value.name
-                        ));
+                        return Err(format!("{group} '{}' has a non-finite value", value.name));
                     }
                 }
             }
@@ -236,9 +230,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                             .map(AsRef::as_ref)
                             .any(|wave| wave.name == "inoise"))
                 {
-                    return Err(
-                        "Input-referred periodic noise needs its input source".into(),
-                    );
+                    return Err("Input-referred periodic noise needs its input source".into());
                 }
                 if !matches!(
                     self.analysis_type,
@@ -262,9 +254,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         .map(AsRef::as_ref)
                         .any(|wave| wave.x.ends() != Some(noise.band))
                 {
-                    return Err(
-                        "Periodic-noise curves must cover their offset band".into(),
-                    );
+                    return Err("Periodic-noise curves must cover their offset band".into());
                 }
             }
             if let Some(figure) = &noise.noise_figure {
@@ -493,9 +483,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                             .binary_search_by(|t| t.total_cmp(&violation.time_s))
                             .map_err(|_| "SOA derating event falls on no saved sample")?;
                         if !same_retained_float(stress[index], violation.actual_value) {
-                            return Err(
-                                "SOA derating event contradicts its stress sample".into(),
-                            );
+                            return Err("SOA derating event contradicts its stress sample".into());
                         }
                         if duration.as_ref().is_some_and(|duration| {
                             soa_duration::severity(duration.verdicts[index])
@@ -570,7 +558,10 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                         let expected_events = derating_traces[&key].2;
                         if derating_event_counts.get(&key).copied().unwrap_or(0) != expected_events
                         {
-                            return Err("SOA derating events do not cover every warning/violation sample".into());
+                            return Err(
+                                "SOA derating events do not cover every warning/violation sample"
+                                    .into(),
+                            );
                         }
                     }
                     let retained_sample_count = u64::try_from(time.len())

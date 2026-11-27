@@ -581,10 +581,7 @@ fn show_current_impulses(
         numbers.exact(history.stop_time_s, "s")
     ));
     if !history.delivery_complete {
-        panel_note(
-            ui,
-            "This preview kept only part of the impulse history.",
-        );
+        panel_note(ui, "This preview kept only part of the impulse history.");
     }
     show_current_impulse_tables(ui, history, order, numbers);
 }
@@ -738,11 +735,7 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
     };
     let total = cache.rows().len() + cache.current_rows().len();
     let shown = kept.rows.len() + cache.current_rows().len();
-    let noun = if exact {
-        "events"
-    } else {
-        "projected changes"
-    };
+    let noun = if exact { "events" } else { "projected changes" };
     let counted = if shown == total {
         format!("{total} {noun}")
     } else {
@@ -1266,7 +1259,8 @@ const EVENT_SELECTION_UNRETAINED_ROW: &str =
     "The selected event has changed or is gone. Select an event row again.";
 const EVENT_SELECTION_OTHER_DATASET: &str =
     "Open the dataset this event was selected from, or select an event in the current dataset.";
-const EVENT_SELECTION_INVALID_EVIDENCE: &str = "This analysis has no valid event data. Run it again to inspect this event.";
+const EVENT_SELECTION_INVALID_EVIDENCE: &str =
+    "This analysis has no valid event data. Run it again to inspect this event.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionAbsence {

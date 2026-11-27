@@ -1467,8 +1467,7 @@ impl VisualizationDocument {
             _ => {
                 return Err(VisualizationError::InvalidValue {
                     field: "visualization-document.datasets",
-                    message: "a run and an embedded table cannot share one source"
-                        .to_owned(),
+                    message: "a run and an embedded table cannot share one source".to_owned(),
                 });
             }
         }
@@ -1501,8 +1500,7 @@ impl VisualizationDocument {
             let Some(TypedValue::Text(analysis_id)) = row.values.get(analysis_index) else {
                 return Err(VisualizationError::InvalidValue {
                     field: "visualization-document.datasets",
-                    message: "every source row must name its analysis"
-                        .to_owned(),
+                    message: "every source row must name its analysis".to_owned(),
                 });
             };
             if projection_analysis.is_some_and(|existing| existing != analysis_id) {
@@ -1537,8 +1535,7 @@ impl VisualizationDocument {
             {
                 return Err(VisualizationError::InvalidValue {
                     field: "visualization-document.datasets",
-                    message: "a run already in this document cannot be changed in place"
-                        .to_owned(),
+                    message: "a run already in this document cannot be changed in place".to_owned(),
                 });
             }
             return Ok(());

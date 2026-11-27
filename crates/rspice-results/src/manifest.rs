@@ -771,8 +771,7 @@ fn qualification_label<A>(run: &SimulationRun<A>, provenance_is_valid: bool) -> 
         | SimulationRunLifecycle::Aborted
         | SimulationRunLifecycle::Interrupted => {
             let Some(receipt) = run.prepared_receipt() else {
-                return "unavailable · no qualification record · non-sign-off"
-                    .to_owned();
+                return "unavailable · no qualification record · non-sign-off".to_owned();
             };
             if !provenance_is_valid {
                 return "blocked · receipt integrity mismatch · non-sign-off".to_owned();
@@ -803,9 +802,7 @@ const fn inventory_title(lifecycle: SimulationRunLifecycle) -> &'static str {
 
 const fn inventory_status(lifecycle: SimulationRunLifecycle) -> &'static str {
     match lifecycle {
-        SimulationRunLifecycle::LegacyUnknown => {
-            "legacy manifest · lock state unknown"
-        }
+        SimulationRunLifecycle::LegacyUnknown => "legacy manifest · lock state unknown",
         SimulationRunLifecycle::Preparing
         | SimulationRunLifecycle::Running
         | SimulationRunLifecycle::Cancelling => "live manifest · digest changes until terminal",

@@ -452,10 +452,7 @@ pub fn show_artifact(
         .collect();
     let columns = fitted_to(
         ui,
-        &[
-            ("Line", Align::Right, true),
-            ("Text", Align::Left, true),
-        ],
+        &[("Line", Align::Right, true), ("Text", Align::Left, true)],
         &sizing,
     );
     let revision = egui::Id::new(("rspice.results.table.artifact", title, lines.len())).value();

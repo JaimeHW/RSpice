@@ -293,9 +293,7 @@ pub(crate) enum Bracket {
 /// axis is refused: nothing is extrapolated.
 pub(crate) fn bracket(axis: &[f64], target: f64) -> Result<Bracket, String> {
     if axis.is_empty() || !target.is_finite() || target < axis[0] || target > axis[axis.len() - 1] {
-        return Err(
-            "The interpolation point lies outside the source's X axis.".to_owned(),
-        );
+        return Err("The interpolation point lies outside the source's X axis.".to_owned());
     }
     match axis.binary_search_by(|value| value.total_cmp(&target)) {
         Ok(index) => Ok(Bracket::On(index)),
@@ -422,9 +420,7 @@ pub fn check_resampling_axis(name: &str, axis: &[f64]) -> Result<(), String> {
 #[cfg(test)]
 fn interpolate_monotone(axis: &[f64], values: &[f64], target: f64) -> Result<f64, String> {
     if axis.len() != values.len() {
-        return Err(
-            "The interpolation point lies outside the source's X axis.".to_owned(),
-        );
+        return Err("The interpolation point lies outside the source's X axis.".to_owned());
     }
     bracket(axis, target)?.value(axis, values)
 }

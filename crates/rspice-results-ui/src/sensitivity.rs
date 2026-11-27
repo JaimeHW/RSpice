@@ -343,10 +343,7 @@ pub fn show(
         }
     };
     if view.rows.is_empty() {
-        well_hint(
-            ui,
-            "This sensitivity result has no parameter sensitivities",
-        );
+        well_hint(ui, "This sensitivity result has no parameter sensitivities");
         return;
     }
 

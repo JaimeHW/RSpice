@@ -56,8 +56,7 @@ pub(super) fn validate<W: AsRef<RetainedWaveform>>(
             || !same_retained_float(limits[i], limit)
         {
             return Err(
-                "SOA current/voltage curve contradicts its voltage, limit or stress"
-                    .into(),
+                "SOA current/voltage curve contradicts its voltage, limit or stress".into(),
             );
         }
         if compare_soa_stress(stress[i], limit, stress[worst], limits[worst]).is_gt() {

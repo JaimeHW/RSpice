@@ -176,10 +176,7 @@ pub(super) fn show(
     };
     let strips = strips(model, settings);
     if strips.is_empty() {
-        well_hint(
-            ui,
-            "This analysis kept no complex coefficient spectrum",
-        );
+        well_hint(ui, "This analysis kept no complex coefficient spectrum");
         return response;
     }
     #[allow(clippy::cast_precision_loss)]

@@ -23,7 +23,9 @@ impl SavedOutputSourceBindings {
         let expected = saved_output_references(receipt.output_kind, &receipt.source_expression)?
             .ok_or_else(|| "this kind of saved output cannot name source signals".to_owned())?;
         if expected.iter().ne(self.references.keys()) {
-            return Err("saved-output sources do not match the signals its expression names".to_owned());
+            return Err(
+                "saved-output sources do not match the signals its expression names".to_owned(),
+            );
         }
         let family = match &analysis.result_payload {
             Some(AnalysisResultPayload::DcSweep { evidence })
@@ -81,7 +83,7 @@ impl SavedOutputSourceBindings {
                         || (deferred || basis.is_some()) && !retained(name) =>
                 {
                     return Err(
-                        "saved-output source does not name data the analysis kept".to_owned(),
+                        "saved-output source does not name data the analysis kept".to_owned()
                     );
                 }
                 SavedOutputBoundSource::DcQuantity { quantity } => {

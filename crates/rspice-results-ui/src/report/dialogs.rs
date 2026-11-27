@@ -343,97 +343,83 @@ fn insert_result_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut 
             .any(|ch| ch.is_control() && ch != '\n' && ch != '\t');
     let writable = host.writable();
     let error = host.editor().transaction_error.clone();
-    let choice = Dialog::new(
-        "Insert result document",
-        "Insert result document",
-    )
-    .description(
-        "Insert this version of a result document, tied to the exact runs it shows.",
-    )
-    .ghost("Cancel")
-    .primary_enabled(valid && writable)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let label_width = 132.0_f32.min(ui.available_width() * 0.34);
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Result document"),
-            );
-            let current = source_options
-                .get(source_index)
-                .map_or("No result documents", String::as_str);
-            if let Some(index) = select(
+    let choice = Dialog::new("Insert result document", "Insert result document")
+        .description("Insert this version of a result document, tied to the exact runs it shows.")
+        .ghost("Cancel")
+        .primary_enabled(valid && writable)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .show_with_initial_body_focus(ctx, |ui| {
+            let label_width = 132.0_f32.min(ui.available_width() * 0.34);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    egui::Label::new("Result document"),
+                );
+                let current = source_options
+                    .get(source_index)
+                    .map_or("No result documents", String::as_str);
+                if let Some(index) = select(
+                    ui,
+                    "report-insert-result-source",
+                    "Result document",
+                    current,
+                    &source_options,
+                    ui.available_width(),
+                ) {
+                    host.select_figure(index, figure_options.get(index));
+                }
+            });
+            ui.add_space(8.0);
+            let focus = input_row(ui, "Caption", &mut host.editor().insert_result_caption);
+            ui.add_space(8.0);
+            input_row(
                 ui,
-                "report-insert-result-source",
-                "Result document",
-                current,
-                &source_options,
-                ui.available_width(),
-            ) {
-                host.select_figure(index,figure_options.get(index));
-            }
-        });
-        ui.add_space(8.0);
-        let focus = input_row(
-            ui,
-            "Caption",
-            &mut host.editor()
-                .insert_result_caption,
-        );
-        ui.add_space(8.0);
-        input_row(
-            ui,
-            "Alternative text",
-            &mut host.editor()
-                .insert_result_alternative_text,
-        );
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Sizing"),
+                "Alternative text",
+                &mut host.editor().insert_result_alternative_text,
             );
-            let sizing_index = host.editor()
-                .insert_result_sizing
-                .min(SIZING_LABELS.len() - 1);
-            let labels = SIZING_LABELS
-                .iter()
-                .map(|label| (*label).to_owned())
-                .collect::<Vec<_>>();
-            if let Some(index) = select(
-                ui,
-                "report-insert-result-sizing",
-                "Result figure sizing",
-                SIZING_LABELS[sizing_index],
-                &labels,
-                ui.available_width(),
-            ) {
-                host.editor()
-                    .insert_result_sizing = index;
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    egui::Label::new("Sizing"),
+                );
+                let sizing_index = host
+                    .editor()
+                    .insert_result_sizing
+                    .min(SIZING_LABELS.len() - 1);
+                let labels = SIZING_LABELS
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                if let Some(index) = select(
+                    ui,
+                    "report-insert-result-sizing",
+                    "Result figure sizing",
+                    SIZING_LABELS[sizing_index],
+                    &labels,
+                    ui.available_width(),
+                ) {
+                    host.editor().insert_result_sizing = index;
+                }
+            });
+            ui.add_space(8.0);
+            ui.checkbox(
+                &mut host.editor().insert_result_frozen,
+                "Embed a copy of the source data in this report",
+            );
+            ui.label(if host.editor().insert_result_frozen {
+                "The report carries its own copy of the source data and the figure image."
+            } else {
+                "The figure stays linked to this version of the result document."
+            });
+            if !writable {
+                problem_line(ui, Problem::Failure, host.blocked_reason());
             }
+            if let Some(error) = &error {
+                problem_line(ui, Problem::Failure, error);
+            }
+            Some(focus.id)
         });
-        ui.add_space(8.0);
-        ui.checkbox(
-            &mut host.editor()
-                .insert_result_frozen,
-            "Embed a copy of the source data in this report",
-        );
-        ui.label(if host.editor()
-            .insert_result_frozen
-        {
-            "The report carries its own copy of the source data and the figure image."
-        } else {
-            "The figure stays linked to this version of the result document."
-        });
-        if !writable {
-            problem_line(ui, Problem::Failure, host.blocked_reason());
-        }
-        if let Some(error) = &error {
-            problem_line(ui, Problem::Failure, error);
-        }
-        Some(focus.id)
-    });
     match choice {
         DialogChoice::Primary if valid && writable => host.commit_insert_result_document(),
         DialogChoice::Ghost | DialogChoice::Cancelled => {

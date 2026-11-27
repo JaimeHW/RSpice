@@ -305,9 +305,7 @@ impl ResultsReads<'_> {
                          impedances, or an AC or HB response",
                     )
                 } else {
-                    ViewerCapability::available(
-                        "Complex traces loaded from the active analysis",
-                    )
+                    ViewerCapability::available("Complex traces loaded from the active analysis")
                 }
             }
             ActiveViewer::EyeDiagram => {
@@ -385,9 +383,7 @@ impl ResultsReads<'_> {
                 if retained {
                     ViewerCapability::available("The active analysis has pole-zero results")
                 } else {
-                    ViewerCapability::unavailable(
-                        "Requires an analysis with pole-zero results",
-                    )
+                    ViewerCapability::unavailable("Requires an analysis with pole-zero results")
                 }
             }
         }

@@ -96,10 +96,9 @@ pub fn show_absent(ui: &mut Ui, reason: SpectrumAbsence<'_>) {
             well_hint(ui, &format!("Spectrum execution failed: {error}"))
         }
         SpectrumAbsence::IncompleteHistory(sentence) => well_hint(ui, &sentence),
-        SpectrumAbsence::Unavailable => well_hint(
-            ui,
-            "This analysis kept no complex coefficient spectrum",
-        ),
+        SpectrumAbsence::Unavailable => {
+            well_hint(ui, "This analysis kept no complex coefficient spectrum")
+        }
     }
 }
 

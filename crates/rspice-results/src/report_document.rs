@@ -257,8 +257,7 @@ impl FrozenReportArtifact {
         if computed != self.content_digest {
             return Err(ReportError::InvalidValue {
                 field: "frozen-artifact.content-digest",
-                message: "the embedded copy does not match its checksum"
-                    .to_owned(),
+                message: "the embedded copy does not match its checksum".to_owned(),
             });
         }
         Ok(())
@@ -301,8 +300,7 @@ impl ReportReferenceSnapshot {
             if !exact_binding {
                 return Err(ReportError::InvalidValue {
                     field: "reference.dataset-bindings",
-                    message: "a run source must name the exact run it reads"
-                        .to_owned(),
+                    message: "a run source must name the exact run it reads".to_owned(),
                 });
             }
         }

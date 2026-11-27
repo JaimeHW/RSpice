@@ -309,9 +309,7 @@ impl FftSpectrumEvidence {
             || (self.sample_interval_s - expected_interval).abs()
                 > expected_interval.abs() * 1.0e-12
         {
-            return Err(
-                "FFT spectrum sample spacing does not match its record and length".into(),
-            );
+            return Err("FFT spectrum sample spacing does not match its record and length".into());
         }
         let expected_resolution = 1.0 / (self.stop_time_s - self.start_time_s);
         if !self.frequency_resolution_hz.is_finite()

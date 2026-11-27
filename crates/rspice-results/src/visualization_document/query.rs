@@ -526,8 +526,7 @@ pub fn compare_source_datasets(
     if baseline.run.is_some() || candidate.run.is_some() {
         return Err(VisualizationError::InvalidValue {
             field: "comparison.source",
-            message: "a run reference holds no samples; compare the runs themselves"
-                .to_owned(),
+            message: "a run reference holds no samples; compare the runs themselves".to_owned(),
         });
     }
     if request.baseline != baseline.binding || request.candidate != candidate.binding {

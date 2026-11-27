@@ -178,9 +178,7 @@ impl StudyMonteCarloCheckpoint {
             let observations = self
                 .observations
                 .get(&member.member.index())
-                .ok_or_else(|| {
-                    "a Monte Carlo trial is missing from its checkpoint".to_owned()
-                })?;
+                .ok_or_else(|| "a Monte Carlo trial is missing from its checkpoint".to_owned())?;
             if member.measurements.len() != observations.len()
                 || observations.iter().any(|expected| {
                     member.evidence_for(&expected.name).is_none_or(|actual| {
@@ -191,9 +189,7 @@ impl StudyMonteCarloCheckpoint {
                     })
                 })
             {
-                return Err(
-                    "Monte Carlo measurements disagree with their checkpoint".into(),
-                );
+                return Err("Monte Carlo measurements disagree with their checkpoint".into());
             }
         }
         Ok(())

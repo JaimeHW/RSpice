@@ -246,14 +246,11 @@ impl DcSweepEvidence {
         }
         if let DcSweepFamily::Nested { source, values } = &self.family {
             if source.trim().is_empty() || source.trim() != source || values.is_empty() {
-                return Err(
-                    "Nested DC sweep is missing its secondary source or points".to_owned(),
-                );
+                return Err("Nested DC sweep is missing its secondary source or points".to_owned());
             }
             if source.eq_ignore_ascii_case(&self.source) {
                 return Err(
-                    "Nested DC sweep must name distinct primary and secondary sources"
-                        .to_owned(),
+                    "Nested DC sweep must name distinct primary and secondary sources".to_owned(),
                 );
             }
             if values.iter().any(|value| !value.is_finite()) {

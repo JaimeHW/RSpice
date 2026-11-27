@@ -233,9 +233,7 @@ impl AnalysisResultFamilyMetadata {
                     );
                 }
                 if *all_converged && (*failures != 0 || runs_completed != runs_requested) {
-                    return Err(
-                        "Monte Carlo all_converged contradicts the run counts".to_owned()
-                    );
+                    return Err("Monte Carlo all_converged contradicts the run counts".to_owned());
                 }
                 let mut names = HashSet::with_capacity(variables.len());
                 for variable in variables {
@@ -326,9 +324,7 @@ impl AnalysisResultFamilyMetadata {
                 if *output_quantity == PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz
                     && carrier_frequency_hz.is_none()
                 {
-                    return Err(
-                        "phase-noise result is missing its carrier frequency".to_owned(),
-                    );
+                    return Err("phase-noise result is missing its carrier frequency".to_owned());
                 }
             }
             Self::SParameter {
