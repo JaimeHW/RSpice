@@ -69,8 +69,8 @@ const ROWS_IN_VIEW: usize = 12;
 /// The room each column but the last keeps after its widest entry, so no
 /// column's words run into the next one's.
 const COLUMN_GAP: f32 = 16.0;
-/// The least height the list keeps when it shows that nothing matches: the
-/// kit's empty state, whole.
+/// The least height the list keeps, so it holds the kit's empty state whole
+/// when nothing matches.
 const EMPTY_HEIGHT: f32 = 132.0;
 
 /// Draw the form over `rows`, the most recently changed first. A
@@ -109,46 +109,49 @@ pub fn show(ctx: &Context, draft: &mut OpenDraft, rows: &[OpenRow]) -> DialogCho
             filter_field(ui, filter, &mut draft.filter);
             ui.add_space(6.0);
             let row_height = LineHeights::list(&Tokens::get(ui.ctx())).row;
-            if shown.is_empty() {
-                // As tall as the list of every row, so the form keeps its
-                // height while the reader types, and never too short for
-                // the empty state.
-                let height =
-                    (row_height * (rows.len().min(ROWS_IN_VIEW) + 1) as f32).max(EMPTY_HEIGHT);
-                let (title, description) = if rows.is_empty() {
-                    (
-                        "No saved result document",
-                        "New result document\u{2026} keeps a view of a run as one.".to_owned(),
-                    )
-                } else {
-                    (
-                        "No document matches",
-                        format!(
-                            "No name, run, analysis or time holds \u{201c}{}\u{201d}.",
-                            draft.filter.trim()
-                        ),
-                    )
-                };
-                ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
-                    ui.set_min_height(height);
+            // The list keeps one height whatever the filter keeps: that of
+            // every row, and never less than the empty state's, so the form
+            // keeps the size it opened with while the reader types.
+            let height = (row_height * (rows.len().min(ROWS_IN_VIEW) + 1) as f32).max(EMPTY_HEIGHT);
+            let list = ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
+                ui.set_min_height(height);
+                if shown.is_empty() {
+                    let (title, description) = if rows.is_empty() {
+                        (
+                            "No saved result document",
+                            "New result document\u{2026} keeps a view of a run as one.".to_owned(),
+                        )
+                    } else {
+                        (
+                            "No document matches",
+                            format!(
+                                "No name, run, analysis or time holds \u{201c}{}\u{201d}.",
+                                draft.filter.trim()
+                            ),
+                        )
+                    };
                     empty_state(ui, WorkbenchIcon::Search, title, &description);
-                });
-                return Some(filter);
-            }
-            let response = DataTable::new(LIST_ID, &columns, shown.len())
-                .state(&mut draft.table)
-                .keys(&keys)
-                .max_height(row_height * (ROWS_IN_VIEW + 1) as f32)
-                .show(ui, |index| {
-                    let row = shown[index];
-                    vec![
-                        Cell::text(row.title.as_str()),
-                        Cell::text(row.run.as_str()),
-                        Cell::text(row.analysis.as_str()),
-                        modified_cell(row),
-                    ]
-                });
-            activated = response.activate.is_some();
+                    return None;
+                }
+                Some(
+                    DataTable::new(LIST_ID, &columns, shown.len())
+                        .state(&mut draft.table)
+                        .keys(&keys)
+                        .max_height(row_height * (ROWS_IN_VIEW + 1) as f32)
+                        .show(ui, |index| {
+                            let row = shown[index];
+                            vec![
+                                Cell::text(row.title.as_str()),
+                                Cell::text(row.run.as_str()),
+                                Cell::text(row.analysis.as_str()),
+                                modified_cell(row),
+                            ]
+                        }),
+                )
+            });
+            activated = list
+                .inner
+                .is_some_and(|response| response.activate.is_some());
             Some(filter)
         });
     if activated && draft.chosen().is_some() {
