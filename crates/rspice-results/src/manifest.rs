@@ -720,7 +720,7 @@ fn expansion_label<W: AsRef<RetainedWaveform>>(analysis: &AnalysisResult<W>) -> 
             if provenance.authored_source_instance_id() == provenance.source_instance_id() {
                 "single task".to_owned()
             } else {
-                "PVT corner".to_owned()
+                "PVT point".to_owned()
             }
         },
     )
