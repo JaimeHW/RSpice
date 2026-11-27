@@ -326,6 +326,38 @@ impl FamilyMembers {
         (quantity == last_quantity).then(|| format!("{quantity} = {from} \u{2026} {to}"))
     }
 
+    /// The quantity the members step and each member's value in it,
+    /// `("C1", ["1n", "2n"])`; `"Member"` and their labels when no one
+    /// quantity names them.
+    #[must_use]
+    pub fn by_value(&self) -> (String, Vec<String>) {
+        let values: Option<Vec<(&str, String)>> = self
+            .members
+            .iter()
+            .map(|(_, label)| member_value(label))
+            .collect();
+        match values {
+            Some(values)
+                if values.first().is_some_and(|(first, _)| {
+                    values.iter().all(|(quantity, _)| quantity == first)
+                }) =>
+            {
+                let quantity = values[0].0.to_owned();
+                (
+                    quantity,
+                    values.into_iter().map(|(_, value)| value).collect(),
+                )
+            }
+            _ => (
+                "Member".to_owned(),
+                self.members
+                    .iter()
+                    .map(|(_, label)| label.clone())
+                    .collect(),
+            ),
+        }
+    }
+
     /// The pane drawing the family, named by its analysis, its span and
     /// its count: `AC · C1 = 1n … 5n (5 members)`. `host_label` is the
     /// host member's own label, `AC · C1=1nF`.

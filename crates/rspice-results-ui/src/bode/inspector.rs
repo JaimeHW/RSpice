@@ -40,6 +40,19 @@ pub struct BodeResponse<'a> {
     /// Every response of the analysis the card can measure, the measured one
     /// among them. With two or more the card offers the choice.
     pub candidates: &'a [String],
+    /// Every member's response, when the analysis is one of a family: the
+    /// quantity the members step, which heads their column, and each one's
+    /// figures, a row each.
+    pub family: Option<(&'a str, &'a [MemberResponse])>,
+}
+
+/// One member of a family's responses, as the card's table reads it.
+#[derive(Debug, Clone)]
+pub struct MemberResponse {
+    /// The member's value in the quantity its family steps, `1n`, or its
+    /// label when no one quantity names it.
+    pub name: String,
+    pub metrics: AcBodeMetrics,
 }
 
 /// Summary facts of the selected retained ordinary-noise spectrum for the
@@ -196,6 +209,7 @@ fn response_card(
         signal,
         loop_gain,
         candidates,
+        family,
     } = response;
     section_header(ui, if loop_gain { "Stability" } else { "Response" }, None);
     let measured = if loop_gain { "Loop gain" } else { "Response" };
@@ -211,7 +225,16 @@ fn response_card(
     if candidates.len() > 1 {
         rows.remove(0);
     }
+    // A family's figures are a row per member under the response they
+    // measure, not the first member's alone.
+    let family = family.filter(|(_, members)| !loop_gain && members.len() > 1);
+    if family.is_some() {
+        rows.truncate(usize::from(candidates.len() <= 1));
+    }
     crate::presentation::stat_table(ui, &rows);
+    if let Some((quantity, members)) = family {
+        member_table(ui, quantity, members, quantity_policy, significant_digits);
+    }
 
     if !loop_gain {
         crate::presentation::panel_note(
@@ -252,6 +275,63 @@ fn response_card(
         );
     }
     picked
+}
+
+/// A family's response figures, one row per member: its value in the
+/// quantity the family steps, its gain at the bottom of the sweep, its
+/// bandwidth and where its gain crosses unity.
+fn member_table(
+    ui: &mut Ui,
+    quantity: &str,
+    members: &[MemberResponse],
+    quantity_policy: &QuantityPresentationPolicy,
+    significant_digits: usize,
+) {
+    use rspice_ui_kit::widgets::table::{Align, Cell, DataTable, SortKey};
+    let adc_is_dc = members.iter().all(|member| member.metrics.adc_is_dc);
+    let (low, bandwidth) = low_frequency_labels(adc_is_dc);
+    let frequency = |value: Option<f64>| {
+        let text = value.map_or_else(
+            || NOT_REACHED.to_owned(),
+            |hertz| frequency_readout(quantity_policy, hertz, significant_digits),
+        );
+        Cell::number(text).sort_by(SortKey::Number(value.unwrap_or(f64::INFINITY)))
+    };
+    let rows: Vec<Vec<Cell>> = members
+        .iter()
+        .enumerate()
+        .map(|(index, member)| {
+            let m = member.metrics;
+            vec![
+                Cell::number(member.name.clone()).sort_by(SortKey::Number(index as f64)),
+                Cell::number(or_dash(m.adc_db.map(|decibels| {
+                    fmt_column_reading(decibels, "dB", significant_digits)
+                })))
+                .sort_by(SortKey::Number(m.adc_db.unwrap_or(f64::NEG_INFINITY))),
+                frequency(m.f3db),
+                frequency(m.ugf),
+            ]
+        })
+        .collect();
+    let mut columns = crate::fft::view::columns::fitted_to(
+        ui,
+        &[
+            (quantity, Align::Left, true),
+            (low, Align::Right, true),
+            ("\u{2212}3 dB", Align::Right, true),
+            ("Unity gain", Align::Right, true),
+        ],
+        &rows,
+    );
+    if let [_, _, bandwidth_column, unity] = columns.as_mut_slice() {
+        *bandwidth_column = bandwidth_column.clone().tooltip(bandwidth);
+        *unity = unity.clone().tooltip("Unity-gain frequency");
+    }
+    crate::presentation::with_table_state(ui, "bode-family", |ui, state| {
+        DataTable::new("rspice.results.bode.family", &columns, rows.len())
+            .state(state)
+            .show(ui, |index| rows[index].clone())
+    });
 }
 
 /// The choice of which response the card measures: a label, then a select

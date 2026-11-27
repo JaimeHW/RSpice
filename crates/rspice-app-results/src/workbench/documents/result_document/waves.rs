@@ -753,12 +753,16 @@ fn active_pane_analysis(tokens: &Tokens, state: &mut ResultsParts<'_>) -> Option
     let model = models
         .iter()
         .find(|model| model.analysis_key == key.analysis)?;
-    state
-        .model
-        .simulation
-        .active_run()
-        .and_then(|run| run.analyses.get(model.analysis_index))
-        .map(|analysis| analysis.label.clone())
+    let run = state.model.simulation.active_run()?;
+    let analysis = run.analyses.get(model.analysis_index)?;
+    // A family's pane draws every member: it is named by them all, not by
+    // the member that hosts it.
+    Some(
+        match rspice_results_ui::waves::family_of(&run.analyses, model.analysis_index) {
+            Some(family) => family.pane_name(&analysis.label),
+            None => analysis.label.clone(),
+        },
+    )
 }
 
 /// The active pane's X and Y intervals, formatted through the strip's own

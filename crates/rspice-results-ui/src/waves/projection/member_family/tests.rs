@@ -648,3 +648,35 @@ fn a_stepped_run_overlays_every_member_on_its_own_counterpart() {
             .all(|trace| trace.run_id == 2)
     );
 }
+
+#[test]
+fn a_family_is_named_by_its_quantity_and_each_members_value() {
+    let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
+    for (index, c) in [1e-9, 2e-9, 5e-9].into_iter().enumerate() {
+        run.analyses.push(point(
+            index as u64 + 1,
+            AnalysisType::Ac,
+            index,
+            c,
+            vec![RetainedTrace::new(
+                "|V(out)|",
+                vec![1.0, 1e3],
+                vec![1.0, 0.5],
+                "",
+            )],
+        ));
+    }
+    let family = family_of(&run.analyses, 1).expect("the second point is a member");
+    assert_eq!(family.span().as_deref(), Some("c = 1n \u{2026} 5n"));
+    assert_eq!(
+        family.pane_name(&run.analyses[0].label),
+        "Sweep · c = 1n \u{2026} 5n (3 members)"
+    );
+    assert_eq!(
+        family.by_value(),
+        (
+            "c".to_owned(),
+            vec!["1n".to_owned(), "2n".to_owned(), "5n".to_owned()]
+        )
+    );
+}

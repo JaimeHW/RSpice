@@ -402,6 +402,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
         }
     }
     let model = build_model(state);
+    let family = model
+        .as_ref()
+        .ok()
+        .filter(|model| !model.loop_gain)
+        .and_then(|model| family_responses(ui, state.results_reads(), model));
     let inspector = match &model {
         Ok(model) => BodeInspector::Response(BodeResponse {
             metrics: model.margins.metrics,
@@ -409,6 +414,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             signal: &model.signal,
             loop_gain: model.loop_gain,
             candidates: &model.candidates,
+            family: family
+                .as_deref()
+                .map(|(quantity, members)| (quantity.as_str(), members.as_slice())),
         }),
         Err(NoMargins::NoResponse) => BodeInspector::NoResponse,
         Err(NoMargins::AnalysisFailed(reason)) => BodeInspector::AnalysisFailed(reason.as_deref()),
@@ -425,6 +433,60 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
             }),
         );
     }
+}
+
+/// The measured response of every member of the family the card's
+/// analysis is one of, each read off its own sweep: the quantity the
+/// members step and each member's figures, kept with the window until the
+/// run history's samples or the measured response change. None for an
+/// analysis drawn on its own.
+fn family_responses(
+    ui: &Ui,
+    state: ResultsReads<'_>,
+    model: &BodeModel,
+) -> Option<std::sync::Arc<(String, Vec<inspector::MemberResponse>)>> {
+    let run = state.model.simulation.active_run()?;
+    let family = rspice_results_ui::waves::family_of(&run.analyses, model.margins.analysis_index)?;
+    let key = egui::Id::new((
+        "rspice.results.bode.family",
+        state.model.simulation.view.data_version,
+        run.dataset_id,
+        &model.signal,
+        family
+            .members
+            .iter()
+            .map(|(analysis, _)| *analysis)
+            .collect::<Vec<_>>(),
+    ));
+    if let Some(held) = ui.data(|data| data.get_temp(key)) {
+        return Some(held);
+    }
+    let (quantity, names) = family.by_value();
+    let members = family
+        .members
+        .iter()
+        .zip(names)
+        .filter_map(|(&(index, _), name)| {
+            let analysis = run.analyses.get(index)?;
+            if !analysis.success {
+                return None;
+            }
+            let kind = analysis.analysis_type;
+            let metrics = retained::ac_bode_summary_for_analysis(
+                kind,
+                &analysis.waveforms,
+                index,
+                |waveform: &RetainedTrace| {
+                    response_signal(kind, &waveform.name).as_deref() == Some(model.signal.as_str())
+                },
+            )?
+            .metrics;
+            Some(inspector::MemberResponse { name, metrics })
+        })
+        .collect();
+    let held = std::sync::Arc::new((quantity, members));
+    ui.data_mut(|data| data.insert_temp(key, std::sync::Arc::clone(&held)));
+    Some(held)
 }
 
 pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
