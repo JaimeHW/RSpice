@@ -4,8 +4,9 @@
 use egui::Color32;
 
 /// How many hues a trace palette cycles through before it repeats them in
-/// another dash.
-pub const TRACE_HUES: usize = 8;
+/// another dash. None of them is green: a plotted net takes its trace's
+/// colour on the schematic, and a green there reads as a wire.
+pub const TRACE_HUES: usize = 7;
 
 const fn color_is_rgb(color: Color32, r: u8, g: u8, b: u8) -> bool {
     color.r() == r && color.g() == g && color.b() == b && color.a() == 255
@@ -91,7 +92,7 @@ pub struct Palette {
     /// Cursor B on a canvas: a neutral no trace hue is near, so the second
     /// cursor never reads as a curve.
     pub canvas_cursor_b: Color32,
-    /// Waveform trace cycle (assignment order for new traces): eight hues
+    /// Waveform trace cycle (assignment order for new traces): seven hues
     /// that stand apart from each other and off the canvas.
     pub traces: [Color32; TRACE_HUES],
     /// Popover/menu shadow color (translucent).
@@ -212,12 +213,12 @@ const ON_DARK_GROUND: ContrastGroundInks = ContrastGroundInks {
     err: Color32::from_rgb(0xff, 0x9a, 0x8c),
     info: Color32::from_rgb(0x8c, 0xd8, 0xff),
     magenta: Color32::from_rgb(0xff, 0x8c, 0xf0),
-    // Eight chromatic hues: white is cursor B's, so no trace takes it.
+    // Seven chromatic hues, none green: white is cursor B's, so no trace
+    // takes it.
     traces: [
         Color32::from_rgb(0xff, 0xe0, 0x33),
         Color32::from_rgb(0x4d, 0xe8, 0xff),
         Color32::from_rgb(0xff, 0x8c, 0xf0),
-        Color32::from_rgb(0x5c, 0xf2, 0x7a),
         Color32::from_rgb(0xff, 0xa8, 0x5c),
         Color32::from_rgb(0x78, 0xa0, 0xff),
         Color32::from_rgb(0xff, 0x78, 0x78),
@@ -244,11 +245,11 @@ const ON_LIGHT_GROUND: ContrastGroundInks = ContrastGroundInks {
     err: Color32::from_rgb(0xa8, 0x00, 0x1c),
     info: Color32::from_rgb(0x00, 0x4a, 0x80),
     magenta: Color32::from_rgb(0x8a, 0x00, 0x72),
-    // Eight chromatic hues: black is cursor B's, so no trace takes it.
+    // Seven chromatic hues, none green: black is cursor B's, so no trace
+    // takes it.
     traces: [
         Color32::from_rgb(0x00, 0x33, 0xa0),
         Color32::from_rgb(0xa8, 0x00, 0x1c),
-        Color32::from_rgb(0x0a, 0x5c, 0x1e),
         Color32::from_rgb(0x8a, 0x00, 0x72),
         Color32::from_rgb(0x7a, 0x42, 0x00),
         Color32::from_rgb(0x00, 0x5a, 0x64),
@@ -370,8 +371,9 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     canvas_bg: Color32::from_rgb(7, 12, 16),
     canvas_grid: Color32::from_rgb(28, 35, 39),
     canvas_frame: Color32::from_rgb(68, 76, 80),
-    // Dark enough that the yellow selection stands 3:1 above it.
-    wire: Color32::from_rgb(68, 140, 96),
+    // A muted grey-teal: no trace hue sits near it, so a plotted net in its
+    // trace colour stands apart, and the yellow selection stands 3:1 above it.
+    wire: Color32::from_rgb(0x4a, 0x6e, 0x6e),
     symbol: Color32::from_rgb(203, 210, 215),
     net_label: Color32::from_rgb(220, 177, 85),
     canvas_select: Color32::from_rgb(255, 226, 92),
@@ -384,16 +386,15 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     canvas_text_faint: Color32::from_rgb(136, 143, 148),
     canvas_cursor_a: Color32::from_rgb(242, 184, 36),
     canvas_cursor_b: Color32::from_rgb(205, 212, 217),
-    // Blue, vermilion, green, violet, cyan, plum, lime, pink: every pair at
+    // Blue, vermilion, violet, cyan, plum, lime, pink: every pair at
     // least 0.1 apart in OKLab to a reader with full colour vision and to one
     // with protanopia, deuteranopia or tritanopia, and none of them the amber
     // of cursor A or the grey of cursor B, so a cursor never reads as a
-    // curve. A dichromat sees the eight in two dimensions, lightness and one
+    // curve. A dichromat sees the seven in two dimensions, lightness and one
     // opponent axis, so the hues are spread in lightness as well as in hue.
     traces: [
         Color32::from_rgb(118, 173, 255),
         Color32::from_rgb(255, 47, 0),
-        Color32::from_rgb(16, 149, 90),
         Color32::from_rgb(150, 96, 255),
         Color32::from_rgb(20, 235, 252),
         Color32::from_rgb(181, 98, 178),
@@ -460,13 +461,12 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
     canvas_text_faint: Color32::from_rgb(0x5c, 0x63, 0x67),
     canvas_cursor_a: Color32::from_rgb(143, 100, 0),
     canvas_cursor_b: Color32::from_rgb(52, 60, 66),
-    // Blue, crimson, green, violet, teal, magenta, orange, navy: each deep
+    // Blue, crimson, violet, teal, magenta, orange, navy: each deep
     // enough to stand 4.5:1 off paper, at least 0.1 apart in OKLab, and none
     // of them the gold of cursor A or the slate of cursor B.
     traces: [
         Color32::from_rgb(30, 105, 190),
         Color32::from_rgb(190, 30, 80),
-        Color32::from_rgb(0, 128, 60),
         Color32::from_rgb(110, 70, 190),
         Color32::from_rgb(0, 122, 128),
         Color32::from_rgb(160, 50, 150),
@@ -494,18 +494,17 @@ pub const INSTRUMENT_LIGHT: Palette = Palette {
     },
 };
 
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_DARK.wire, 0x44, 0x8c, 0x60) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_DARK.wire, 0x4a, 0x6e, 0x6e) as usize];
 const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.wire, 0x4e, 0x34, 0x00) as usize];
 // The print draws a trace in its light-ground colour (`TRACE_PRINT_INKS` in
 // rspice-hardcopy), so a printed sheet is the colour the sheet is.
 const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[0], 30, 105, 190) as usize];
 const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[1], 190, 30, 80) as usize];
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[2], 0, 128, 60) as usize];
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[3], 110, 70, 190) as usize];
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[4], 0, 122, 128) as usize];
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[5], 160, 50, 150) as usize];
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[6], 195, 80, 0) as usize];
-const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[7], 10, 60, 150) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[2], 110, 70, 190) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[3], 0, 122, 128) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[4], 160, 50, 150) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[5], 195, 80, 0) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.traces[6], 10, 60, 150) as usize];
 
 /// sRGB relative luminance (WCAG 2.x).
 fn relative_luminance(color: Color32) -> f64 {

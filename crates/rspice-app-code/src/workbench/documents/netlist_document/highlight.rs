@@ -322,10 +322,10 @@ fn highlight_fields(
         }
 
         if ch == '{' {
-            // Expression: color braces and body green, to the matching brace.
+            // Expression: braces and body in the number hue, to the matching brace.
             let start = i;
             i = expression_end(text, i);
-            push(job, &text[start..i], c.traces[3]);
+            push(job, &text[start..i], c.traces[2]);
             field_index += 1;
             continue;
         }
@@ -355,12 +355,12 @@ fn highlight_fields(
         } else if next_is_assign {
             c.net_label
         } else if looks_numeric(token) {
-            c.traces[3]
+            c.traces[2]
         } else if was_preceded_by_assign(text, start) {
             // Bare-word parameter values remain distinct from circuit nodes.
             c.net_label
         } else {
-            c.traces[2]
+            c.syntax.port_name
         };
         push(job, token, color);
         field_index += 1;
@@ -471,13 +471,13 @@ mod tests {
             vec![
                 ("Rà", c.traces[0]),
                 (" ", c.text),
-                ("in", c.traces[2]),
+                ("in", c.syntax.port_name),
                 ("\u{a0}", c.text),
-                ("out", c.traces[2]),
+                ("out", c.syntax.port_name),
                 ("\u{85}", c.text),
-                ("Å", c.traces[2]),
+                ("Å", c.syntax.port_name),
                 (" ", c.text),
-                ("1k", c.traces[3]),
+                ("1k", c.traces[2]),
             ]
         );
 
@@ -487,9 +487,9 @@ mod tests {
             vec![
                 ("Gain", c.traces[0]),
                 ("\u{a0}", c.text),
-                ("stage", c.traces[2]),
+                ("stage", c.syntax.port_name),
                 (" ", c.text),
-                ("入😀", c.traces[2]),
+                ("入😀", c.syntax.port_name),
             ]
         );
 
@@ -501,11 +501,11 @@ mod tests {
                 (" ", c.text),
                 ("gain", c.net_label),
                 ("=", c.text_faint),
-                ("2", c.traces[3]),
+                ("2", c.traces[2]),
                 ("\u{a0}", c.text),
                 ("vbias", c.net_label),
                 ("=", c.text_faint),
-                ("{gain*à}", c.traces[3]),
+                ("{gain*à}", c.traces[2]),
                 (" ", c.text),
                 ("note", c.net_label),
                 ("=", c.text_faint),
@@ -579,11 +579,11 @@ mod tests {
         );
         let card = row_tokens(deck, "amp.cir", true, 1, 0);
         assert!(
-            card.contains(&("$N_0001".to_owned(), c.traces[2])),
+            card.contains(&("$N_0001".to_owned(), c.syntax.port_name)),
             "{card:?}"
         );
         assert!(
-            card.contains(&("$G_DPWR".to_owned(), c.traces[2])),
+            card.contains(&("$G_DPWR".to_owned(), c.syntax.port_name)),
             "{card:?}"
         );
         assert_eq!(faint(&card), ["$load"]);
@@ -649,7 +649,7 @@ mod tests {
         let closing = row_tokens(deck, "amp.scs", true, 3, 0);
         assert_eq!(faint(&closing), ["*/", "// load"]);
         assert!(
-            closing.contains(&("c1".to_owned(), c.traces[2])),
+            closing.contains(&("c1".to_owned(), c.syntax.port_name)),
             "{closing:?}"
         );
         assert_eq!(faint(&row_tokens(deck, "amp.scs", true, 4, 0)), ["* star"]);

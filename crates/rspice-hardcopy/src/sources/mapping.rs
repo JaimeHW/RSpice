@@ -10,15 +10,14 @@ use rspice_design_model::design_management::{
 pub(crate) const WIRE_PRINT_INK: [u8; 3] = [0x4E, 0x34, 0x00];
 pub(crate) const SYMBOL_PRINT_INK: [u8; 3] = [0x2C, 0x31, 0x35];
 
-/// The sheet's eight trace colours as it draws them on a light ground, in
+/// The sheet's seven trace colours as it draws them on a light ground, in
 /// the order it gives them out: a printed trace is the colour it is on the
 /// sheet, solid, as ADS and ViVA print. The kit's light palette pins the
-/// same eight. A page printed in grey or black draws each series in its
+/// same seven. A page printed in grey or black draws each series in its
 /// own line instead.
-pub(crate) const TRACE_PRINT_INKS: [[u8; 3]; 8] = [
+pub(crate) const TRACE_PRINT_INKS: [[u8; 3]; 7] = [
     [30, 105, 190],
     [190, 30, 80],
-    [0, 128, 60],
     [110, 70, 190],
     [0, 122, 128],
     [160, 50, 150],

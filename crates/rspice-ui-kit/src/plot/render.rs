@@ -178,7 +178,7 @@ struct TraceRedundancy {
 }
 
 /// One (dash, marker) pair per palette hue, so a colour-safe curve is told
-/// apart from the seven others without its colour.
+/// apart from the six others without its colour.
 const COLOR_SAFE_STYLES: [TraceRedundancy; TRACE_HUES] = [
     TraceRedundancy {
         dash: None,
@@ -187,10 +187,6 @@ const COLOR_SAFE_STYLES: [TraceRedundancy; TRACE_HUES] = [
     TraceRedundancy {
         dash: Some((7.0, 4.0)),
         marker: TraceMarkerShape::Square,
-    },
-    TraceRedundancy {
-        dash: Some((2.0, 4.0)),
-        marker: TraceMarkerShape::Diamond,
     },
     TraceRedundancy {
         dash: Some((10.0, 4.0)),
@@ -234,7 +230,7 @@ const COLOR_SAFE_SOLID_AS_DASH: (f32, f32) = (12.0, 2.0);
 /// curve — the one in its own hue by the gap, the others by the marker too.
 ///
 /// Borrowing another hue's dash instead, as a later pass once did, handed
-/// the eighth hue's second pass the first hue's solid stroke.
+/// the last hue's second pass the first hue's solid stroke.
 fn color_safe_pass_dash(hue: usize, pass: usize) -> (f32, f32) {
     let (dash, gap) = COLOR_SAFE_STYLES[hue % TRACE_HUES]
         .dash

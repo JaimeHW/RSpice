@@ -207,7 +207,7 @@ impl Theme {
         if self.mode == Mode::HighContrast {
             return tokens;
         }
-        // Color-safe traces keep the canvas theme's own eight hues, each of
+        // Color-safe traces keep the canvas theme's own seven hues, each of
         // which stands off that canvas, and add a dash and a marker per slot.
         // A substitute set would have to stand 4.5:1 off both canvases, which
         // the colourblind sets' sky blue and orange do not on paper.

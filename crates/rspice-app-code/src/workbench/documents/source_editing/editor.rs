@@ -783,7 +783,7 @@ fn next_token(
             })
             .last()
             .map_or(first.len_utf8(), |(index, ch)| index + ch.len_utf8());
-        return (length, colors.traces[3]);
+        return (length, colors.traces[2]);
     }
     if first.is_alphabetic() || matches!(first, '_' | '$' | '`') {
         let length = text

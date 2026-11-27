@@ -69,10 +69,10 @@ impl SemanticSceneCompiler<'_> {
                     None,
                 )?
             } else if guide.second {
-                // The sheet inks a second family in its seventh trace hue at
+                // The sheet inks a second family in its orange trace hue at
                 // a third of its strength, as a printed Z-Y chart inks its
                 // admittance grid apart from its impedance grid.
-                let [red, green, blue] = crate::sources::TRACE_PRINT_INKS[6];
+                let [red, green, blue] = crate::sources::TRACE_PRINT_INKS[5];
                 let faint = |ink: u8| (255.0 - (255.0 - f64::from(ink)) * 0.32).round() as u8;
                 StrokeStyle::try_new(
                     SemanticColor::Exact(Rgb8::new(faint(red), faint(green), faint(blue))),

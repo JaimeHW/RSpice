@@ -724,9 +724,9 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
     // File-type badges draw from the categorical trace palette —
     // theme-aware in both modes, unlike hand-picked RGB.
     let (badge_color, badge_text) = match file.file_type() {
-        "lib" => (c.traces[2], "LIB"),
+        "lib" => (c.traces[5], "LIB"),
         "scs" => (c.traces[1], "SCS"),
-        "mod" => (c.traces[3], "MOD"),
+        "mod" => (c.traces[2], "MOD"),
         "sp" | "cir" => (c.text_dim, "SP"),
         _ => (c.text_faint, "???"),
     };
