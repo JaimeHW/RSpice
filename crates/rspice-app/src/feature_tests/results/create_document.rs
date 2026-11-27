@@ -1,7 +1,7 @@
 //! Creating a result document through a whole application: what the New
 //! result document form opens on and offers, and a commit the project owns.
 
-use super::browser_rows;
+use super::strip_tabs;
 use crate::workbench::RSpiceApp;
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::create_document::*;
@@ -842,11 +842,11 @@ impl ResultsWindow {
         self.click(*button);
     }
 
-    /// The label the data browser gives the window's run.
-    fn run_label(&self) -> String {
+    /// The name the strip's first tab gives the window's run.
+    fn run_name(&self) -> String {
         self.app.state.model.simulation.retained.runs[0]
-            .label
-            .clone()
+            .name()
+            .to_owned()
     }
 }
 
@@ -861,90 +861,88 @@ fn drawn(
         .any(|(_, node)| node.role() == role && node.label() == Some(label))
 }
 
-/// Each saved document's row in the data browser, top to bottom: its name,
-/// and whether it is marked unsaved.
-#[cfg(not(target_arch = "wasm32"))]
-fn row_marks(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<(String, bool)> {
-    browser_rows::documents(nodes)
-        .into_iter()
-        .map(|row| (row.label, row.unsaved))
-        .collect()
-}
-
 /// What the Results workspace draws, through whole frames of the
 /// application, once a result document is created: the stage draws the
-/// document, the data browser lists it and its row alone reads as shown, and
-/// the toolbar's document control agrees with the stage in the same frame.
-/// Picking the run's analysis in the browser keeps the saved document and
-/// puts the run's own viewer back, and the toolbar's control goes with it.
+/// document, the strip gives it a tab after the run's and brings it forward,
+/// and the toolbar's document control agrees with the stage in the same
+/// frame. The run's tab, chosen again, keeps the saved document and puts the
+/// run's own viewer back, and the toolbar's control goes with it; a middle
+/// click closes the document's tab and keeps the document.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn a_created_document_is_drawn_and_its_row_reads_as_shown() {
+fn a_created_document_is_drawn_under_a_tab_of_its_own() {
     use egui::accesskit::Role;
 
-    // What only each surface draws: the stage's bar offers to create a
-    // document over a dataset's viewer and to add a pane over a document, and
-    // the toolbar's tracking control exists only for a document. No plan
-    // produced this run, so the control reads Historical.
-    const DATASET_STAGE: &str = "New result document…";
+    // What only a document draws: the stage's bar offers to add a pane over
+    // it, and the toolbar's tracking control exists only beside one. No plan
+    // produced this run, so the control reads Historical. The strip offers a
+    // new document over either.
+    const CREATE: &str = "New result document\u{2026}";
     const DOCUMENT_STAGE: &str = "Add a pane to this result document";
     const DOCUMENT_TOOLBAR: &str = "Historical";
 
     let mut window = ResultsWindow::new();
+    let run = window.run_name();
     let nodes = window.frames(Vec::new());
-    assert!(drawn(&nodes, Role::Button, DATASET_STAGE));
+    assert!(
+        drawn(&nodes, Role::Button, CREATE),
+        "the strip offers no new document"
+    );
+    assert!(!drawn(&nodes, Role::Button, DOCUMENT_STAGE));
     assert!(!drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR));
+    assert_eq!(
+        strip_tabs::labels(&nodes),
+        [run.clone()],
+        "the run's tab stands alone"
+    );
 
     let document_id = window.create("Transient review").expect("document commits");
     let nodes = window.frames(Vec::new());
-
     assert!(
         drawn(&nodes, Role::Button, DOCUMENT_STAGE),
         "the stage draws the created document"
     );
     assert!(
-        !drawn(&nodes, Role::Button, DATASET_STAGE),
-        "the stage still draws the dataset's viewer"
-    );
-    assert!(
         drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
         "the toolbar's document control is missing beside the document"
     );
+    let tabs = strip_tabs::tabs(&nodes);
     assert_eq!(
-        browser_rows::shown(&nodes),
-        ["Transient review"],
-        "the created document's row is not the one that reads as shown"
-    );
-
-    let run = window.run_label();
-    let nodes = window.click(browser_rows::analysis_under(&nodes, &run).id);
-
-    assert!(
-        window
-            .app
-            .state
-            .model
-            .workspace
-            .content
-            .visualization_document(document_id)
-            .is_some(),
-        "picking the run deleted the saved document"
+        strip_tabs::labels(&nodes),
+        [run.as_str(), "Transient review"]
     );
     assert!(
-        drawn(&nodes, Role::Button, DATASET_STAGE),
-        "the stage does not draw the run's viewer once the run is picked"
+        tabs[1].selected && !tabs[0].selected,
+        "the document's tab is not the one in front"
     );
-    assert!(!drawn(&nodes, Role::Button, DOCUMENT_STAGE));
+
+    let nodes = window.click(tabs[0].id);
+    let kept = |window: &ResultsWindow| {
+        let content = &window.app.state.model.workspace.content;
+        content.visualization_document(document_id).is_some()
+    };
+    assert!(
+        kept(&window),
+        "choosing the run's tab deleted the saved document"
+    );
+    assert!(
+        !drawn(&nodes, Role::Button, DOCUMENT_STAGE),
+        "the stage keeps the document over the run"
+    );
     assert!(
         !drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
         "the toolbar keeps the document's control over the run"
     );
+    let tabs = strip_tabs::tabs(&nodes);
+    assert!(tabs[0].selected && !tabs[1].selected);
+
+    window.press(tabs[1].centre, egui::PointerButton::Middle);
+    assert!(kept(&window), "closing the tab deleted the saved document");
     assert_eq!(
-        browser_rows::document_names(&nodes),
-        ["Transient review"],
-        "the document is still listed"
+        strip_tabs::labels(&window.frames(Vec::new())),
+        [run],
+        "the closed document still has a tab"
     );
-    assert!(!browser_rows::documents(&nodes)[0].shown);
 }
 
 /// The analysis rows of the strips the frame draws, top to bottom and left
@@ -1119,19 +1117,20 @@ fn a_press_in_another_pane_moves_the_selected_fill_and_the_inspectors_pane() {
     assert!(!texts.iter().any(|text| text == "Top \u{b7} analysis"));
 }
 
-/// An edit to one of two saved documents puts the unsaved mark on that
-/// document's row in the data browser and not the other's, and saving the
-/// project clears the mark.
+/// An edit to one of two saved documents marks that document's tab and not
+/// the other's, and saving the project clears the mark.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn an_edit_marks_only_its_own_documents_row_until_the_project_is_saved() {
+fn an_edit_marks_only_its_own_documents_tab_until_the_project_is_saved() {
     let mut window = ResultsWindow::new();
     let first = window.create("Review A").expect("A commits");
     window.create("Review B").expect("B commits");
     window.save();
+    let run = window.run_name();
     assert_eq!(
-        row_marks(&window.frames(Vec::new())),
+        strip_tabs::marks(&window.frames(Vec::new())),
         [
+            (run.clone(), false),
             ("Review A".to_owned(), false),
             ("Review B".to_owned(), false),
         ]
@@ -1156,19 +1155,21 @@ fn an_edit_marks_only_its_own_documents_row_until_the_project_is_saved() {
         .expect("A takes the edit");
     assert!(window.project_unsaved());
     assert_eq!(
-        row_marks(&window.frames(Vec::new())),
+        strip_tabs::marks(&window.frames(Vec::new())),
         [
+            (run.clone(), false),
             ("Review A".to_owned(), true),
             ("Review B".to_owned(), false),
         ],
-        "only the edited document's row is marked"
+        "only the edited document's tab is marked"
     );
 
     window.save();
     assert!(!window.project_unsaved());
     assert_eq!(
-        row_marks(&window.frames(Vec::new())),
+        strip_tabs::marks(&window.frames(Vec::new())),
         [
+            (run, false),
             ("Review A".to_owned(), false),
             ("Review B".to_owned(), false),
         ],
@@ -1188,18 +1189,18 @@ fn plot(state: &mut crate::workbench::app_state::AppState, expression: &str) {
     state.results.calculator_panel = panel;
 }
 
-/// An expression the calculator plots is kept by the view in front. Over
-/// the run the browser picked, the run's working view keeps it: no
-/// document's row is marked and the project reads unsaved. Over a saved
-/// document that document keeps it, and its row alone is marked.
+/// An expression the calculator plots is kept by the view in front. On the
+/// run's tab the run's working view keeps it: no document's tab is marked
+/// and the project reads unsaved. On a saved document's tab that document
+/// keeps it, and its tab alone is marked.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_plotted_expression_is_kept_by_the_view_in_front() {
     let mut window = ResultsWindow::new();
     let document_id = window.create("Review A").expect("A commits");
-    let run = window.run_label();
-    let nodes = window.frames(Vec::new());
-    window.click(browser_rows::analysis_under(&nodes, &run).id);
+    let run = window.run_name();
+    let tabs = strip_tabs::tabs(&window.frames(Vec::new()));
+    window.click(tabs[0].id);
     assert!(
         window
             .app
@@ -1209,7 +1210,7 @@ fn a_plotted_expression_is_kept_by_the_view_in_front() {
             .session
             .persistent_pane_context
             .is_none(),
-        "the picked run shows its own view"
+        "the run's tab shows the run's own view"
     );
     window.save();
     assert!(!window.project_unsaved());
@@ -1218,14 +1219,14 @@ fn a_plotted_expression_is_kept_by_the_view_in_front() {
     assert_eq!(window.app.state.prompt_text(), Some("Plotted V(out)*2"));
     assert!(window.project_unsaved(), "the plotted trace is not unsaved");
     assert_eq!(
-        row_marks(&window.frames(Vec::new())),
-        [("Review A".to_owned(), false)],
-        "an expression on the run's own view marked a document's row"
+        strip_tabs::marks(&window.frames(Vec::new())),
+        [(run.clone(), false), ("Review A".to_owned(), false)],
+        "an expression on the run's own view marked a document's tab"
     );
 
     window.save();
-    let nodes = window.frames(Vec::new());
-    window.click(browser_rows::documents(&nodes)[0].id);
+    let tabs = strip_tabs::tabs(&window.frames(Vec::new()));
+    window.click(tabs[1].id);
     window.save();
     window
         .app
@@ -1251,14 +1252,14 @@ fn a_plotted_expression_is_kept_by_the_view_in_front() {
         "the document in front keeps the expression"
     );
     assert_eq!(
-        row_marks(&window.frames(Vec::new())),
-        [("Review A".to_owned(), true)],
+        strip_tabs::marks(&window.frames(Vec::new())),
+        [(run, false), ("Review A".to_owned(), true)],
         "only the document in front is marked"
     );
 }
 
 /// A create refused after it reached the catalog is rolled back whole: the
-/// document is gone and no row carries a mark for it.
+/// document is gone and no tab carries a mark for it.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_rolled_back_create_leaves_no_mark() {
@@ -1276,9 +1277,10 @@ fn a_rolled_back_create_leaves_no_mark() {
     assert!(!content.visualization_documents_dirty);
 
     window.app.state.workbench.activate(Workspace::Results);
+    let run = window.run_name();
     assert_eq!(
-        row_marks(&window.frames(Vec::new())),
-        [("Review A".to_owned(), false)]
+        strip_tabs::marks(&window.frames(Vec::new())),
+        [(run, false), ("Review A".to_owned(), false)]
     );
 }
 

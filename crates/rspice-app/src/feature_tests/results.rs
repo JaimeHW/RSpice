@@ -43,69 +43,40 @@ use rspice_app_results::workbench::documents::result_document::ResultsParts;
 use rspice_app_runs::simulation::controller::SimulationController;
 
 /// The data browser's rows as one frame's accessibility tree reads them: the
-/// saved documents' rows, and the heads of the runs and their analyses.
+/// heads of the runs and their analyses.
 mod browser_rows {
     use egui::accesskit::{Node, NodeId, Toggled};
 
-    /// One row: what it reads, whether it reads as what Results shows,
-    /// whether it is marked unsaved, and where it stands.
+    /// One head: what it reads, whether it reads as what Results shows, and
+    /// where it stands.
     #[derive(Clone, Debug)]
     pub(super) struct Row {
         pub(super) id: NodeId,
         pub(super) label: String,
         pub(super) shown: bool,
-        pub(super) unsaved: bool,
         pub(super) top: f64,
-        pub(super) centre: egui::Pos2,
-    }
-
-    fn row(id: NodeId, node: &Node) -> Option<Row> {
-        let bounds = node.bounds()?;
-        Some(Row {
-            id,
-            label: node.label()?.to_owned(),
-            shown: node.toggled() == Some(Toggled::True),
-            unsaved: node
-                .description()
-                .is_some_and(|description| description.ends_with("unsaved changes")),
-            top: bounds.y0,
-            centre: egui::pos2(
-                ((bounds.x0 + bounds.x1) * 0.5) as f32,
-                ((bounds.y0 + bounds.y1) * 0.5) as f32,
-            ),
-        })
-    }
-
-    fn top_down(nodes: &[(NodeId, Node)], keep: impl Fn(&Node) -> bool) -> Vec<Row> {
-        let mut rows = nodes
-            .iter()
-            .filter(|(_, node)| keep(node))
-            .filter_map(|(id, node)| row(*id, node))
-            .collect::<Vec<_>>();
-        rows.sort_by(|above, below| above.top.total_cmp(&below.top));
-        rows
-    }
-
-    /// The saved documents' rows, top to bottom.
-    pub(super) fn documents(nodes: &[(NodeId, Node)]) -> Vec<Row> {
-        top_down(nodes, |node| {
-            node.description()
-                .is_some_and(|description| description.starts_with("Saved result document"))
-        })
-    }
-
-    /// The names the documents' rows read, top to bottom.
-    pub(super) fn document_names(nodes: &[(NodeId, Node)]) -> Vec<String> {
-        documents(nodes).into_iter().map(|row| row.label).collect()
     }
 
     /// The heads of runs and analyses, top to bottom: each says how many
     /// quantities it holds.
     fn heads(nodes: &[(NodeId, Node)]) -> Vec<Row> {
-        top_down(nodes, |node| {
-            node.label()
-                .is_some_and(|label| label.contains(" quantities, "))
-        })
+        let mut rows = nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.label()
+                    .is_some_and(|label| label.contains(" quantities, "))
+            })
+            .filter_map(|(id, node)| {
+                Some(Row {
+                    id: *id,
+                    label: node.label()?.to_owned(),
+                    shown: node.toggled() == Some(Toggled::True),
+                    top: node.bounds()?.y0,
+                })
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|above, below| above.top.total_cmp(&below.top));
+        rows
     }
 
     /// The head of the run labelled `run`.
@@ -132,14 +103,83 @@ mod browser_rows {
             .unwrap_or_else(|| panic!("{run} lists an analysis"))
     }
 
-    /// The rows that read as what Results shows.
+    /// The heads that read as what Results shows.
     pub(super) fn shown(nodes: &[(NodeId, Node)]) -> Vec<String> {
-        let mut rows = documents(nodes);
-        rows.extend(heads(nodes));
-        rows.into_iter()
+        heads(nodes)
+            .into_iter()
             .filter(|row| row.shown)
             .map(|row| row.label)
             .collect()
+    }
+}
+
+/// The document strip's tabs as one frame's accessibility tree reads them.
+mod strip_tabs {
+    use egui::accesskit::{Node, NodeId, Role};
+
+    /// One tab: what it reads, whether it is in front, whether it is marked
+    /// unsaved, whether it closes, and where it stands.
+    #[derive(Clone, Debug)]
+    pub(super) struct Tab {
+        pub(super) id: NodeId,
+        pub(super) label: String,
+        pub(super) selected: bool,
+        pub(super) unsaved: bool,
+        pub(super) closable: bool,
+        pub(super) centre: egui::Pos2,
+    }
+
+    /// The strip's tabs, left to right. They are the tabs that say how they
+    /// close or that they never do; a viewer's tabs say neither.
+    pub(super) fn tabs(nodes: &[(NodeId, Node)]) -> Vec<Tab> {
+        let mut tabs = nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::Tab)
+            .filter_map(|(id, node)| {
+                let description = node.description()?;
+                let closable = description.ends_with("Press Delete to close.");
+                let pinned =
+                    description == "Pinned primary document." || description == "Unsaved changes.";
+                if !closable && !pinned {
+                    return None;
+                }
+                let bounds = node.bounds()?;
+                Some(Tab {
+                    id: *id,
+                    label: node.label()?.to_owned(),
+                    selected: node.is_selected() == Some(true),
+                    unsaved: description.starts_with("Unsaved changes"),
+                    closable,
+                    centre: egui::pos2(
+                        ((bounds.x0 + bounds.x1) * 0.5) as f32,
+                        ((bounds.y0 + bounds.y1) * 0.5) as f32,
+                    ),
+                })
+            })
+            .collect::<Vec<_>>();
+        tabs.sort_by(|left, right| left.centre.x.total_cmp(&right.centre.x));
+        tabs
+    }
+
+    /// What the strip's tabs read, left to right.
+    pub(super) fn labels(nodes: &[(NodeId, Node)]) -> Vec<String> {
+        tabs(nodes).into_iter().map(|tab| tab.label).collect()
+    }
+
+    /// Each tab's label and whether it is marked unsaved, left to right.
+    pub(super) fn marks(nodes: &[(NodeId, Node)]) -> Vec<(String, bool)> {
+        tabs(nodes)
+            .into_iter()
+            .map(|tab| (tab.label, tab.unsaved))
+            .collect()
+    }
+
+    /// The tab labelled `label`.
+    pub(super) fn tab(nodes: &[(NodeId, Node)], label: &str) -> Tab {
+        tabs(nodes)
+            .into_iter()
+            .find(|tab| tab.label == label)
+            .unwrap_or_else(|| panic!("the strip has no tab {label}"))
     }
 }
 

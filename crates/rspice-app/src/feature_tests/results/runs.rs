@@ -1,8 +1,8 @@
 //! A retained run as the reader handles it in Results: picked in the data
-//! browser beside the saved documents it lists, stepped through, and kept
-//! across a save and reopen.
+//! browser and shown under the strip's first tab, beside the tabs of the
+//! saved documents, stepped through, and kept across a save and reopen.
 
-use super::browser_rows;
+use super::{browser_rows, strip_tabs};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::ShellCommand;
@@ -11,6 +11,7 @@ use rspice_app_results::workbench::chrome::document_bar::results::{show_run, sho
 use rspice_app_results::workbench::documents::result_document::{
     AnalysisPresentationKey, ResultViewer, working_view,
 };
+use rspice_app_results::workbench::results::commands::ResultsCommand;
 use rspice_app_runs::simulation::controller::SimulationController;
 use rspice_app_runs::simulation::controller::test_execution::{
     run_generated_batches, state_with_current_clean_drc,
@@ -20,7 +21,9 @@ use rspice_app_state::state::{
     AnalysisResult, AnalysisType, RetainedTrace, SimulationRunLifecycle,
 };
 use rspice_app_state::workbench::workspace::Workspace;
+use rspice_app_workbench::workbench::chrome::document_bar::activate_document;
 use rspice_app_workbench::workbench::framework::command_registry::{CommandAvailability, ids};
+use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 use rspice_simulation_contract::plan_catalog::SimulationPlanCloneOptions;
 
@@ -291,6 +294,12 @@ impl Desk {
         self.settle();
     }
 
+    /// Choose the strip's tab labelled `label`, as a click on it does.
+    fn click_tab(&mut self, label: &str) {
+        let tab = strip_tabs::tab(&self.nodes(), label);
+        self.click(tab.id);
+    }
+
     /// Right-click at `at` with the mouse and draw the frames it takes.
     fn right_click(&mut self, at: egui::Pos2) {
         let button = |pressed| egui::Event::PointerButton {
@@ -313,6 +322,58 @@ impl Desk {
             .find(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
             .unwrap_or_else(|| panic!("{label} is offered"));
         self.click(*button);
+    }
+
+    /// Choose the button labelled `label` nearest below `top`: the item of
+    /// the menu opened there, or the form's button under its list.
+    fn choose_below(&mut self, label: &str, top: f32) {
+        let nodes = self.nodes();
+        let (button, _) = nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
+            .filter_map(|(id, node)| Some((*id, node.bounds()?.y0)))
+            .filter(|(_, y)| *y >= f64::from(top))
+            .min_by(|(_, above), (_, below)| above.total_cmp(below))
+            .unwrap_or_else(|| panic!("{label} is offered below {top}"));
+        self.click(button);
+    }
+
+    /// The rows Open result document lists, top to bottom, by the name of
+    /// the document each leads with, among `names`.
+    fn listed(&mut self, names: &[&str]) -> Vec<(NodeId, String, f32)> {
+        let nodes = self.nodes();
+        let mut rows = nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::Row)
+            .filter_map(|(id, node)| {
+                let label = node.label()?;
+                let name = names
+                    .iter()
+                    .find(|name| label.starts_with(&format!("{name}, ")))?;
+                Some((*id, (*name).to_owned(), node.bounds()?.y1 as f32))
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by(|above, below| above.2.total_cmp(&below.2));
+        rows
+    }
+
+    /// Open the document named `name` from Open result document: its row,
+    /// then the form's Open.
+    fn open_listed(&mut self, name: &str) {
+        let (row, _, bottom) = self
+            .listed(&[name])
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("the form lists {name}"));
+        self.click(row);
+        self.choose_below("Open", bottom);
+    }
+
+    /// Run the command `key`, as its menu row does, and draw the frames it
+    /// takes.
+    fn run(&mut self, key: rspice_app_state::state::command_catalog::CommandKey) {
+        self.app.execute_command_key(key);
+        self.settle();
     }
 
     /// The run Results draws.
@@ -476,34 +537,26 @@ fn stepping_through_a_plans_runs_keeps_the_panes_the_x_range_and_the_cursors() {
     assert_eq!(cursors(&desk), (Some(0.5), None));
 }
 
-/// Results draws no document tabs: neither the run the browser shows nor a
-/// saved document is a tab, and the commands that stepped through or closed
-/// tabs say why they do nothing here.
+/// The strip's first tab is the run the browser picked, and it never
+/// closes; each saved document's tab follows it. The commands that step
+/// through and close tabs work on the strip: Next and Previous move between
+/// the run and the document, and Close, Close others and Close all close a
+/// document's tab, keep the document, and leave the run's tab.
 #[test]
-fn results_draws_no_document_tabs() {
+fn the_run_tab_leads_and_the_tab_commands_work_on_the_strip() {
     let Bench {
         mut desk,
         first,
-        other,
+        saved,
         ..
     } = bench();
-    let names = [
-        desk.name_of(first[1]),
-        desk.name_of(other),
-        "Bias".to_owned(),
-    ];
+    let run = desk.name_of(first[1]);
     let nodes = desk.nodes();
-    let tabbed = nodes.iter().find(|(_, node)| {
-        node.role() == Role::Tab
-            && node
-                .label()
-                .is_some_and(|label| names.iter().any(|name| label.starts_with(name.as_str())))
-    });
-    assert!(
-        tabbed.is_none(),
-        "a document is a tab: {:?}",
-        tabbed.map(|(_, node)| node.label())
-    );
+    let tabs = strip_tabs::tabs(&nodes);
+    assert_eq!(strip_tabs::labels(&nodes), [run.as_str(), "Bias"]);
+    assert!(tabs[0].selected, "the run's tab is not in front");
+    assert!(!tabs[0].closable, "the run's tab offers a close");
+    assert!(tabs[1].closable, "the document's tab offers no close");
     for command in [
         ShellCommand::PreviousDocument,
         ShellCommand::NextDocument,
@@ -512,53 +565,112 @@ fn results_draws_no_document_tabs() {
     ] {
         assert_eq!(
             command.availability(&desk.app),
-            CommandAvailability::Disabled("Results picks what it shows in the data browser"),
+            CommandAvailability::Available,
             "{command:?}"
         );
     }
-}
 
-/// The saved documents are listed above every run, each by its name.
-#[test]
-fn a_saved_document_is_listed_above_the_runs() {
-    let Bench {
-        mut desk,
-        first,
-        other,
-        ..
-    } = bench();
-    let nodes = desk.nodes();
-    let documents = browser_rows::documents(&nodes);
-    assert_eq!(browser_rows::document_names(&nodes), ["Bias"]);
-    for run in [first[0], first[1], other] {
-        let head = browser_rows::run_head(&nodes, &desk.label_of(run));
-        assert!(
-            documents[0].top < head.top,
-            "the document is listed below {}",
-            head.label
+    desk.run(ShellCommand::NextDocument.key());
+    assert_eq!(
+        desk.shown_document(),
+        Some(saved),
+        "Next shows the document"
+    );
+    assert!(strip_tabs::tab(&desk.nodes(), "Bias").selected);
+    desk.run(ShellCommand::PreviousDocument.key());
+    assert_eq!(desk.shown_document(), None, "Previous shows the run");
+    assert_eq!(desk.shown(), Some(first[1]));
+
+    let kept = |desk: &Desk| {
+        let content = &desk.app.state.model.workspace.content;
+        content.visualization_document(saved).is_some()
+    };
+    let document = WorkspaceDocumentId::VisualizationDocument(saved);
+    for close in [
+        ShellCommand::CloseActiveDocument,
+        ShellCommand::CloseOtherDocuments,
+        ShellCommand::CloseAllDocuments,
+    ] {
+        assert!(activate_document(&mut desk.app.state, &document));
+        desk.settle();
+        if close == ShellCommand::CloseOtherDocuments {
+            desk.click_tab(&run);
+        }
+        assert_eq!(
+            close.availability(&desk.app),
+            CommandAvailability::Available,
+            "{close:?}"
         );
+        desk.run(close.key());
+        assert_eq!(
+            strip_tabs::labels(&desk.nodes()),
+            [run.clone()],
+            "{close:?} leaves the document's tab"
+        );
+        assert!(kept(&desk), "{close:?} deleted the document");
+        assert_eq!(desk.shown_document(), None);
+        assert_eq!(desk.shown(), Some(first[1]));
     }
 }
 
-/// A document's row shows the document, and then it alone reads as shown;
-/// a run's analysis shows the run again, and the document's row reads as
-/// shown no more.
+/// The data browser lists data only: runs, their analyses and signals, on
+/// either of its tabs, and no saved document, whose tab shows it instead.
 #[test]
-fn a_documents_row_shows_it_and_a_runs_analysis_shows_the_run() {
+fn the_browser_lists_no_saved_document() {
+    let Bench { mut desk, .. } = bench();
+    let documents = |nodes: &[(NodeId, Node)]| {
+        nodes
+            .iter()
+            .filter(|(_, node)| node.role() != Role::Tab)
+            .filter(|(_, node)| {
+                node.label().is_some_and(|label| {
+                    label.starts_with("Bias") || label.starts_with("Documents")
+                }) || node
+                    .description()
+                    .is_some_and(|description| description.starts_with("Saved result document"))
+            })
+            .map(|(_, node)| node.label().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let nodes = desk.nodes();
+    assert_eq!(
+        documents(&nodes),
+        Vec::<String>::new(),
+        "on the Signals tab"
+    );
+    let (datasets, _) = nodes
+        .iter()
+        .find(|(_, node)| {
+            node.label()
+                .is_some_and(|label| label.starts_with("Datasets,"))
+        })
+        .expect("the Datasets tab");
+    desk.click(*datasets);
+    assert_eq!(
+        documents(&desk.nodes()),
+        Vec::<String>::new(),
+        "on the Datasets tab"
+    );
+}
+
+/// A document's tab shows the document, and no run's head reads as shown
+/// under it. Picking a run's analysis in the browser brings the run's tab
+/// forward on that run and keeps the document's tab; so does picking a run's
+/// row on the Datasets tab.
+#[test]
+fn a_browser_pick_over_a_document_brings_the_run_tab_forward() {
     let Bench {
         mut desk,
+        first,
         saved,
         other,
-        ..
     } = bench();
-    let bias = browser_rows::documents(&desk.nodes())[0].clone();
-    assert!(!bias.shown, "the browser shows a run");
-    desk.click(bias.id);
+    desk.click_tab("Bias");
     assert_eq!(desk.shown_document(), Some(saved));
     assert_eq!(
         browser_rows::shown(&desk.nodes()),
-        ["Bias"],
-        "only the document's row reads as shown"
+        Vec::<String>::new(),
+        "a run's head reads as shown under the document"
     );
 
     // The other plan's run is folded: open it, then pick its analysis.
@@ -570,24 +682,105 @@ fn a_documents_row_shows_it_and_a_runs_analysis_shows_the_run() {
     assert_eq!(desk.shown_document(), None);
     assert_eq!(desk.shown(), Some(other));
     let nodes = desk.nodes();
-    assert!(!browser_rows::documents(&nodes)[0].shown);
+    let tabs = strip_tabs::tabs(&nodes);
+    assert_eq!(
+        strip_tabs::labels(&nodes),
+        [desk.name_of(other).as_str(), "Bias"]
+    );
+    assert!(tabs[0].selected && !tabs[1].selected);
     assert!(browser_rows::run_head(&nodes, &label).shown);
+
+    desk.click_tab("Bias");
+    assert_eq!(desk.shown_document(), Some(saved));
+    desk.pick(first[0]);
+    assert_eq!(desk.shown_document(), None);
+    assert_eq!(desk.shown(), Some(first[0]));
+    let nodes = desk.nodes();
+    assert_eq!(strip_tabs::tabs(&nodes)[0].label, desk.name_of(first[0]));
+    assert!(strip_tabs::tabs(&nodes)[0].selected);
 }
 
-/// A document's row menu renames the document and deletes it. Deleting asks
-/// nothing, since Undo puts the document back, and Results goes back to the
-/// run the browser showed.
+/// Open result document lists every saved document, the newest first.
+/// Opening a document whose tab was closed adds its tab and brings it
+/// forward; opening one whose tab is open brings that tab forward and adds
+/// no second.
 #[test]
-fn a_documents_row_menu_renames_and_deletes_it() {
+fn open_result_document_adds_a_tab_or_brings_its_tab_forward() {
     let Bench {
         mut desk,
         first,
         saved,
         ..
     } = bench();
-    let bias = browser_rows::documents(&desk.nodes())[0].clone();
+    let view = working_view::view_of_run(desk.app.state.results_reads(), first[1])
+        .expect("the plan's view");
+    working_view::save_as_document(&mut desk.app.state.results_parts(), view, "Settling")
+        .expect("the view saves as a document");
+    let run = desk.name_of(first[1]);
+    assert_eq!(
+        strip_tabs::labels(&desk.nodes()),
+        [run.as_str(), "Bias", "Settling"]
+    );
+    desk.run(ShellCommand::CloseAllDocuments.key());
+    assert_eq!(strip_tabs::labels(&desk.nodes()), [run.clone()]);
+
+    desk.run(ResultsCommand::OpenResultDocument.key());
+    assert!(
+        matches!(
+            desk.app.state.results.result_document_dialog,
+            Some(ResultDocumentDialog::Open(_))
+        ),
+        "the form opens"
+    );
+    let listed = desk
+        .listed(&["Bias", "Settling"])
+        .into_iter()
+        .map(|(_, name, _)| name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        listed,
+        ["Settling", "Bias"],
+        "the newest is not listed first"
+    );
+    desk.open_listed("Bias");
+    assert!(
+        desk.app.state.results.result_document_dialog.is_none(),
+        "the form stays open"
+    );
+    let nodes = desk.nodes();
+    assert_eq!(strip_tabs::labels(&nodes), [run.as_str(), "Bias"]);
+    assert!(strip_tabs::tab(&nodes, "Bias").selected);
+    assert_eq!(desk.shown_document(), Some(saved));
+
+    desk.click_tab(&run);
+    assert_eq!(desk.shown_document(), None);
+    desk.run(ResultsCommand::OpenResultDocument.key());
+    desk.open_listed("Bias");
+    let nodes = desk.nodes();
+    assert_eq!(
+        strip_tabs::labels(&nodes),
+        [run.as_str(), "Bias"],
+        "the document took a second tab"
+    );
+    assert!(strip_tabs::tab(&nodes, "Bias").selected);
+    assert_eq!(desk.shown_document(), Some(saved));
+}
+
+/// A document's tab menu renames the document, closes its tab and deletes
+/// it. Closing keeps the document; deleting asks nothing, since Undo puts
+/// the document back, and the run's tab comes forward.
+#[test]
+fn a_document_tabs_menu_renames_closes_and_deletes_it() {
+    let Bench {
+        mut desk,
+        first,
+        saved,
+        ..
+    } = bench();
+    let run = desk.name_of(first[1]);
+    let bias = strip_tabs::tab(&desk.nodes(), "Bias");
     desk.right_click(bias.centre);
-    desk.choose("Rename\u{2026}");
+    desk.choose_below("Rename\u{2026}", bias.centre.y);
     let Some(ResultDocumentDialog::Rename(mut draft)) =
         desk.app.state.results.result_document_dialog.clone()
     else {
@@ -597,14 +790,29 @@ fn a_documents_row_menu_renames_and_deletes_it() {
     draft.title = "Bias sweep".to_owned();
     desk.app.state.results.result_document_dialog = Some(ResultDocumentDialog::Rename(draft));
     desk.choose("Rename");
-    assert_eq!(browser_rows::document_names(&desk.nodes()), ["Bias sweep"]);
+    let nodes = desk.nodes();
+    assert_eq!(strip_tabs::labels(&nodes), [run.as_str(), "Bias sweep"]);
+    let tab = strip_tabs::tab(&nodes, "Bias sweep");
+    assert!(tab.selected, "the renamed document is not in front");
 
-    let row = browser_rows::documents(&desk.nodes())[0].clone();
-    desk.right_click(row.centre);
-    desk.choose("Delete");
+    desk.right_click(tab.centre);
+    desk.choose_below("Close", tab.centre.y);
+    assert_eq!(strip_tabs::labels(&desk.nodes()), [run.clone()]);
+    let content = &desk.app.state.model.workspace.content;
+    assert!(
+        content.visualization_document(saved).is_some(),
+        "closing the tab deleted the document"
+    );
+    assert_eq!(desk.shown(), Some(first[1]));
+
+    let document = WorkspaceDocumentId::VisualizationDocument(saved);
+    assert!(activate_document(&mut desk.app.state, &document));
+    let tab = strip_tabs::tab(&desk.nodes(), "Bias sweep");
+    desk.right_click(tab.centre);
+    desk.choose_below("Delete", tab.centre.y);
     let content = &desk.app.state.model.workspace.content;
     assert!(content.visualization_document(saved).is_none());
-    assert!(browser_rows::documents(&desk.nodes()).is_empty());
+    assert_eq!(strip_tabs::labels(&desk.nodes()), [run.clone()]);
     assert_eq!(desk.shown_document(), None);
     assert_eq!(
         desk.shown(),
@@ -617,7 +825,10 @@ fn a_documents_row_menu_renames_and_deletes_it() {
     );
 
     desk.app.execute_command_key(ids::UNDO);
-    assert_eq!(browser_rows::document_names(&desk.nodes()), ["Bias sweep"]);
+    assert_eq!(
+        strip_tabs::labels(&desk.nodes()),
+        [run.as_str(), "Bias sweep"]
+    );
 }
 
 /// A signal's menu makes a new result document over the signal's own run
