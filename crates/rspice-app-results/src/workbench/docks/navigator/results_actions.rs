@@ -562,8 +562,14 @@ pub(super) fn result_signal_context_menu(
             create.clone().on_disabled_hover_text(error);
         }
         if create.clicked() {
+            // Results shows the signal's run, and the form opens on its
+            // analysis with the signal ticked.
             select_result_signal_by_key(state, &key);
-            crate::workbench::documents::result_document::open_create_document(state);
+            crate::workbench::documents::result_document::create_document::open_on(
+                state,
+                key.analysis(),
+                &[key.source_name().to_owned()],
+            );
             ui.close();
         }
         ui.separator();

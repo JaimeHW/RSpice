@@ -621,10 +621,10 @@ fn a_documents_row_menu_renames_and_deletes_it() {
 }
 
 /// A signal's menu makes a new result document over the signal's own run
-/// and analysis, not over the run Results showed, and Results then shows the
-/// signal's run.
+/// and analysis, not over the run Results showed, with that signal ticked and
+/// no other, and Results then shows the signal's run.
 #[test]
-fn a_signals_new_result_document_opens_on_the_signals_run_and_analysis() {
+fn a_signals_new_result_document_opens_on_its_run_and_analysis_with_it_ticked() {
     let Bench {
         mut desk,
         first,
@@ -674,6 +674,7 @@ fn a_signals_new_result_document_opens_on_the_signals_run_and_analysis() {
     assert!(draft.open, "the form opens");
     assert_eq!(draft.dataset_id, Some(newer), "on the signal's run");
     assert_eq!(draft.analysis, Some(0), "and on its analysis");
+    assert_eq!(draft.signals, ["V(out)"], "with the signal ticked");
     assert_eq!(desk.shown(), Some(newer), "the signal's run shows");
     assert_eq!(desk.shown_document(), None);
 }
