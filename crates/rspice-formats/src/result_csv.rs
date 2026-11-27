@@ -10,7 +10,10 @@ mod operating_point_report;
 mod optimization;
 mod selection;
 mod typed;
-pub use analysis_stack::{AnalysisStackCsv, AnalysisStackCsvError};
+pub use analysis_stack::{
+    AnalysisStackCsvError, AnalysisStackFacts, StackAnalysis, StackDelimiter, check_analysis_stack,
+    write_analysis_stack,
+};
 pub use correlation::{CorrelationCsvError, encode_correlation_csv};
 pub use network_matrix::encode_network_matrix_csv;
 pub use noise_report::NoiseReportCsv;

@@ -118,20 +118,12 @@ pub(crate) fn check_export_shape(
     Ok(())
 }
 
-/// Apply the receiving host's sample limits before cloning any source array.
-/// A complex signal retains its rectangular components and a magnitude; the
-/// shared coordinate is counted once, regardless of the number of signals.
-pub(crate) fn shared_coordinate<'a, W: AsRef<RetainedWaveform>>(
-    waveforms: &[&'a W],
-    limits: WaveformImportLimits,
-) -> Result<Cow<'a, [f64]>, WaveformExportError> {
-    let reference = checked_coordinate(waveforms, limits)?;
-    export_samples(&reference.name, &reference.x)
-}
-
 /// The waveform whose coordinate every exported signal shares, once the receiving host's sample
 /// limits and the table's shape are checked: no sample is read, so a writer can refuse a table
 /// before it writes a byte and then read the coordinate a block at a time.
+///
+/// A complex signal retains its rectangular components and a magnitude; the shared coordinate
+/// is counted once, regardless of the number of signals.
 pub(crate) fn checked_coordinate<'a, W: AsRef<RetainedWaveform>>(
     waveforms: &[&'a W],
     limits: WaveformImportLimits,
@@ -246,6 +238,71 @@ impl<'a> RowReader<'a> {
     }
 }
 
+/// One analysis an export writes, with the traces of it the export writes: the one analysis of
+/// most exports, one member of a `.step` or Monte Carlo family of an export of every member.
+pub struct ExportMember<'a, W> {
+    pub analysis: &'a rspice_results::analysis_result::AnalysisResult<W>,
+    pub waveforms: Vec<&'a W>,
+}
+
+impl<'a, W> ExportMember<'a, W> {
+    pub fn new(
+        analysis: &'a rspice_results::analysis_result::AnalysisResult<W>,
+        waveforms: Vec<&'a W>,
+    ) -> Self {
+        Self {
+            analysis,
+            waveforms,
+        }
+    }
+}
+
+impl<W: AsRef<RetainedWaveform>> ExportMember<'_, W> {
+    /// What the member is called in a file of every member: its parameter values, `r=2k`, as
+    /// every route names a member, or its analysis's label when it is no member of a family.
+    pub fn label(&self) -> String {
+        self.analysis
+            .family_member()
+            .map_or_else(|| self.analysis.label.clone(), |member| member.label())
+    }
+
+    /// [`Self::label`] as a name inside a file, which a path separator or a `..` would split or
+    /// escape: each becomes `_`.
+    pub fn file_label(&self) -> String {
+        let label = self.label().replace(['/', '\\'], "_").replace("..", "_");
+        if label.trim().is_empty() {
+            "member".to_owned()
+        } else {
+            label
+        }
+    }
+}
+
+/// The windows a column of `rows` samples is read in, in order: one block each.
+pub(crate) fn windows(rows: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
+    (0..rows)
+        .step_by(rspice_results::waveform::BLOCK_SAMPLES)
+        .map(move |first| first..first.saturating_add(rspice_results::waveform::BLOCK_SAMPLES).min(rows))
+}
+
+/// Samples `window` of `values`, the signal `signal`: borrowed from memory, or one block read
+/// from its results store, refused with the store's reason when it cannot be read.
+pub(crate) fn window<'a>(
+    signal: &str,
+    values: &'a WaveformValues,
+    window: std::ops::Range<usize>,
+) -> Result<Cow<'a, [f64]>, WaveformExportError> {
+    let end = window.end.min(values.len());
+    match values.blocks(window.start.min(end)..end).next() {
+        Some(Ok(block)) => Ok(block),
+        Some(Err(failure)) => Err(WaveformExportError::Unreadable {
+            signal: signal.to_owned(),
+            reason: failure.to_string(),
+        }),
+        None => Ok(Cow::Borrowed(&[])),
+    }
+}
+
 /// The samples of `values`, the signal `signal`, for a writer that takes them as one array:
 /// borrowed when they are in memory, read whole from their results store when the loaded results
 /// may hold them, refused with the store's reason otherwise.
@@ -281,14 +338,15 @@ mod tests {
                 max_values,
                 ..EXPORT_TEST_LIMITS
             };
+            let members = [ExportMember::new(&analysis, waveforms.clone())];
             for result in [
-                crate::hdf5::result::prepare_hdf5(&analysis, &waveforms, limits)
+                crate::hdf5::result::check_hdf5(&members, limits)
                     .map(|_| ())
                     .map_err(|e| e.to_string()),
-                crate::matlab::result::prepare_matlab(&analysis, &waveforms, limits)
+                crate::matlab::result::check_matlab(&members, limits)
                     .map(|_| ())
                     .map_err(|e| e.to_string()),
-                crate::numpy::result::prepare_numpy(&analysis, &waveforms, limits)
+                crate::numpy::result::check_npz(&members, limits)
                     .map(|_| ())
                     .map_err(|e| e.to_string()),
             ] {
@@ -332,7 +390,7 @@ mod tests {
                 .collect::<Vec<_>>();
             let borrowed = waveforms.iter().collect::<Vec<_>>();
             for limit in [values - 1, values] {
-                let result = shared_coordinate(
+                let result = checked_coordinate(
                     &borrowed,
                     WaveformImportLimits {
                         max_values: limit,
@@ -340,7 +398,7 @@ mod tests {
                     },
                 );
                 if limit == values {
-                    assert_eq!(result.unwrap()[0].to_bits(), (-0.0_f64).to_bits());
+                    assert_eq!(result.unwrap().x.len(), 2);
                 } else {
                     assert!(
                         matches!(result, Err(WaveformExportError::ValueLimit { values: Some(actual), .. }) if actual == values)
@@ -363,12 +421,12 @@ mod tests {
                 .with_complex_components("imag", vec![1.0, 2.0], vec![1.0]),
         ] {
             assert!(matches!(
-                shared_coordinate(&[&malformed], EXPORT_TEST_LIMITS),
+                checked_coordinate(&[&malformed], EXPORT_TEST_LIMITS),
                 Err(WaveformExportError::SampleCount { .. })
             ));
         }
         assert!(matches!(
-            shared_coordinate(
+            checked_coordinate(
                 &[&valid],
                 WaveformImportLimits {
                     max_rows: 1,
@@ -378,7 +436,7 @@ mod tests {
             Err(WaveformExportError::RowLimit { .. })
         ));
         assert!(matches!(
-            shared_coordinate(
+            checked_coordinate(
                 &[&valid],
                 WaveformImportLimits {
                     max_columns: 1,

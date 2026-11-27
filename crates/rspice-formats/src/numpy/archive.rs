@@ -1,13 +1,11 @@
 //! Named NumPy arrays in NPZ archives.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::io::Read;
 
 use super::reader::{NumpyReadError, NumpyReadFailure, read_error};
-use super::{MAX_COLUMNS, NamedArray, NumpyWriteError, encode_complex_array, encode_real_array};
+use super::NumpyWriteError;
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal, stated_coordinate_names};
-use crate::zip::deterministic_stored_zip;
-use num_complex::Complex64;
 
 /// A member name RSpice's own archive reader will accept.
 ///
@@ -16,7 +14,7 @@ use num_complex::Complex64;
 /// signals whose names differ only in case collide. Every one of those is
 /// refused here, by name, rather than published as an archive this product
 /// would not reopen.
-fn archive_member_name(name: &str) -> Result<String, NumpyWriteError> {
+pub(crate) fn archive_member_name(name: &str) -> Result<String, NumpyWriteError> {
     if name.trim().is_empty() {
         return Err(NumpyWriteError::EmptyMemberName);
     }
@@ -32,77 +30,6 @@ fn archive_member_name(name: &str) -> Result<String, NumpyWriteError> {
 fn array_name(member: &str) -> Option<&str> {
     let (name, extension) = member.rsplit_once('.')?;
     (!name.is_empty() && extension.eq_ignore_ascii_case("npy")).then_some(name)
-}
-
-/// One `.npy` member per signal, plus the coordinate, in a stored ZIP.
-pub fn encode_npz(
-    coordinate_name: &str,
-    coordinate: &[f64],
-    signals: &[NamedArray<'_>],
-) -> Result<Vec<u8>, NumpyWriteError> {
-    let members = signals
-        .len()
-        .checked_add(1)
-        .ok_or(NumpyWriteError::ArchiveMemberLimit { members: None })?;
-    if members > MAX_COLUMNS {
-        return Err(NumpyWriteError::ArchiveMemberLimit {
-            members: Some(members),
-        });
-    }
-    if coordinate.is_empty() || signals.is_empty() {
-        return Err(NumpyWriteError::EmptyArchive);
-    }
-    for signal in signals {
-        if signal.real.len() != coordinate.len()
-            || signal
-                .imag
-                .is_some_and(|imag| imag.len() != coordinate.len())
-        {
-            return Err(NumpyWriteError::SampleCount {
-                name: signal.name.to_owned(),
-                real: signal.real.len(),
-                imag: signal.imag.map(<[f64]>::len),
-                coordinate: coordinate.len(),
-            });
-        }
-    }
-    let rows = [coordinate.len() as u64];
-    let mut names = Vec::with_capacity(members);
-    let mut seen = BTreeSet::new();
-    names.push(archive_member_name(coordinate_name)?);
-    seen.insert(coordinate_name.to_ascii_lowercase());
-    for signal in signals {
-        let member = archive_member_name(signal.name)?;
-        if !seen.insert(signal.name.to_ascii_lowercase()) {
-            return Err(NumpyWriteError::DuplicateMemberName(signal.name.to_owned()));
-        }
-        names.push(member);
-    }
-
-    let mut payloads = Vec::with_capacity(members);
-    payloads.push(encode_real_array(&rows, coordinate)?);
-    for signal in signals {
-        let bytes = match signal.imag {
-            Some(imag) => {
-                let values = signal
-                    .real
-                    .iter()
-                    .zip(imag)
-                    .map(|(re, im)| Complex64::new(*re, *im))
-                    .collect::<Vec<_>>();
-                encode_complex_array(&rows, &values)?
-            }
-            None => encode_real_array(&rows, signal.real)?,
-        };
-        payloads.push(bytes);
-    }
-
-    let entries = names
-        .iter()
-        .map(String::as_str)
-        .zip(payloads.iter().map(Vec::as_slice))
-        .collect::<Vec<_>>();
-    deterministic_stored_zip(&entries).map_err(NumpyWriteError::Zip)
 }
 
 /// Limits imposed by the caller's import transaction before decoding an NPZ.
@@ -292,24 +219,28 @@ pub fn decode_npz(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        NamedArray, NpzReadLimits, NumpyReadFailure, decode_npz, decode_npz_arrays, encode_npz,
-    };
+    use super::{NpzReadLimits, NumpyReadFailure, decode_npz, decode_npz_arrays};
     use crate::zip::deterministic_stored_zip;
 
     #[test]
     fn npz_round_trip_preserves_hierarchical_signal_and_coordinate_names() {
         for names in [vec!["V(top/out)"], vec!["V(top/out)", "V(other/out)"]] {
-            let signals = names
-                .iter()
-                .map(|name| NamedArray {
-                    name,
-                    real: &[2.0, 3.0],
-                    imag: None,
-                })
-                .collect::<Vec<_>>();
+            let coordinate = crate::numpy::encode_real_array(&[2], &[0.0, 1.0]).unwrap();
+            let signal = crate::numpy::encode_real_array(&[2], &[2.0, 3.0]).unwrap();
             for coordinate_name in ["time", "analysis/time"] {
-                let bytes = encode_npz(coordinate_name, &[0.0, 1.0], &signals).unwrap();
+                let members = std::iter::once(coordinate_name)
+                    .chain(names.iter().copied())
+                    .map(|name| format!("{name}.npy"))
+                    .collect::<Vec<_>>();
+                let entries = members
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| {
+                        let bytes = if index == 0 { &coordinate } else { &signal };
+                        (name.as_str(), bytes.as_slice())
+                    })
+                    .collect::<Vec<_>>();
+                let bytes = deterministic_stored_zip(&entries).unwrap();
                 let decoded = decode_npz(
                     &bytes,
                     NpzReadLimits {
@@ -370,16 +301,9 @@ mod tests {
 
     #[test]
     fn numeric_decode_budget_is_shared_by_every_archive_member() {
-        let bytes = encode_npz(
-            "time",
-            &[0.0, 1.0],
-            &[NamedArray {
-                name: "out",
-                real: &[2.0, 3.0],
-                imag: None,
-            }],
-        )
-        .unwrap();
+        let time = crate::numpy::encode_real_array(&[2], &[0.0, 1.0]).unwrap();
+        let out = crate::numpy::encode_real_array(&[2], &[2.0, 3.0]).unwrap();
+        let bytes = deterministic_stored_zip(&[("time.npy", &time), ("out.npy", &out)]).unwrap();
         for max_numeric_values in [3, 4] {
             let result = decode_npz(
                 &bytes,
@@ -400,19 +324,6 @@ mod tests {
                 ));
             }
         }
-    }
-
-    #[test]
-    fn rejects_unbalanced_columns_before_writing_archive_members() {
-        let signal = NamedArray {
-            name: "V(out)",
-            real: &[1.0],
-            imag: None,
-        };
-        let error = encode_npz("time", &[0.0, 1.0], &[signal]).unwrap_err();
-        assert!(
-            matches!(error, super::NumpyWriteError::SampleCount { name, real: 1, imag: None, coordinate: 2 } if name == "V(out)")
-        );
     }
 
     #[test]

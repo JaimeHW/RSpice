@@ -1,6 +1,9 @@
 //! Deterministic stored ZIP32 encoding for engineering-data packages.
 
 pub(crate) mod reader;
+mod streamed;
+
+pub use streamed::StreamedZip;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoredZipError {

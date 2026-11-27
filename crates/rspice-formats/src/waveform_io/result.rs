@@ -3,9 +3,9 @@
 mod bounds;
 mod delimited;
 mod export;
-pub use bounds::WaveformExportError;
+pub use bounds::{ExportMember, WaveformExportError};
 pub(crate) use bounds::{
-    RowReader, check_export_shape, checked_coordinate, export_samples, shared_coordinate,
+    RowReader, check_export_shape, checked_coordinate, export_samples, window, windows,
 };
 pub use delimited::{
     DelimitedExportError, DelimitedTable, check_delimited_waveforms, write_delimited_waveforms,
@@ -21,6 +21,33 @@ pub(crate) const EXPORT_TEST_LIMITS:
         max_values: 8 * 1024 * 1024,
         max_signal_name_bytes: 1_024,
     };
+
+/// Make `analysis` point `index` of a `.step` sweep of `coordinate`, as an imported member is.
+#[cfg(test)]
+pub(crate) fn step_member<W>(
+    analysis: &mut rspice_results::analysis_result::AnalysisResult<W>,
+    index: usize,
+    coordinate: &[(&str, f64)],
+) {
+    use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
+    analysis.import_source = Some(rspice_results::result_import::ResultImportSource {
+        source_name: "stepped.raw".to_owned(),
+        format: ResultImportFormat::SpiceRaw,
+        coordinate: None,
+        family_member: Some(AnalysisResultFamilyMember::StepPoint {
+            index,
+            coordinate: coordinate
+                .iter()
+                .map(|(name, value)| AnalysisResultStepCoordinate {
+                    name: (*name).to_owned(),
+                    value: *value,
+                    unit: String::new(),
+                })
+                .collect(),
+        }),
+        event_dump: None,
+    });
+}
 mod runtime_export;
 #[cfg(any(
     feature = "native-bundle",

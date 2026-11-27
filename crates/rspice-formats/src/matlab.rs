@@ -31,6 +31,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::io::{self, Write};
 
 pub mod publication;
 pub mod reader;
@@ -60,6 +61,7 @@ const MI_DOUBLE: u32 = 9;
 const MI_MATRIX: u32 = 14;
 
 // *Array Types (Classes)* and the array-flags bits above them.
+const MX_STRUCT_CLASS: u32 = 2;
 const MX_DOUBLE_CLASS: u32 = 6;
 const MX_COMPLEX: u32 = 0x0800;
 
@@ -101,6 +103,10 @@ pub enum MatWriteError {
     },
     /// More rows than the dimensions field, which is `miINT32`, can state.
     TooManyRows(String, usize),
+    /// A variable of more bytes than its tag, which is `u32`, can state.
+    TooLarge(String, u64),
+    /// The destination refused a write.
+    Write(String),
 }
 
 impl fmt::Display for MatWriteError {
@@ -134,6 +140,12 @@ impl fmt::Display for MatWriteError {
                 formatter,
                 "'{name}' has {rows} rows; a MAT dimension is a signed 32-bit count"
             ),
+            Self::TooLarge(name, bytes) => write!(
+                formatter,
+                "'{name}' takes {bytes} bytes; a MAT v5 variable holds at most 4 GiB. Export \
+                 HDF5, which has no such limit"
+            ),
+            Self::Write(reason) => write!(formatter, "the MAT file could not be written: {reason}"),
         }
     }
 }
@@ -156,18 +168,22 @@ pub fn write_mat_v5(
     variables: &[MatVariable],
 ) -> Result<Vec<u8>, MatWriteError> {
     let rows = validate(header_text, variables)?;
-    let mut bytes = Vec::with_capacity(
-        HEADER_BYTES + variables.iter().map(matrix_element_bytes).sum::<usize>(),
-    );
-    write_header(&mut bytes, header_text);
+    let mut bytes = Vec::new();
+    write_header(&mut bytes, header_text).expect("writing to memory cannot fail");
     for (variable, rows) in variables.iter().zip(rows) {
-        write_matrix_element(&mut bytes, variable, rows);
+        write_column_start(&mut bytes, &variable.name, rows, variable.imag.is_some())
+            .expect("writing to memory cannot fail");
+        write_values(&mut bytes, &variable.real);
+        if let Some(imag) = &variable.imag {
+            write_part_tag(&mut bytes, rows).expect("writing to memory cannot fail");
+            write_values(&mut bytes, imag);
+        }
     }
     Ok(bytes)
 }
 
 /// A dimension is written as `miINT32`, so a row count has to fit one.
-fn row_dimension(name: &str, rows: usize) -> Result<i32, MatWriteError> {
+pub(crate) fn row_dimension(name: &str, rows: usize) -> Result<i32, MatWriteError> {
     i32::try_from(rows).map_err(|_| MatWriteError::TooManyRows(name.to_owned(), rows))
 }
 
@@ -209,12 +225,14 @@ fn validate(header_text: &str, variables: &[MatVariable]) -> Result<Vec<i32>, Ma
             });
         }
         rows.push(row_dimension(&variable.name, variable.real.len())?);
+        column_size(&variable.name, variable.real.len(), variable.imag.is_some())?;
     }
     Ok(rows)
 }
 
-/// *Level 5 MAT-File Header Format*.
-fn write_header(bytes: &mut Vec<u8>, header_text: &str) {
+/// *Level 5 MAT-File Header Format*, for a header text no longer than its field.
+pub(crate) fn write_header(out: &mut dyn Write, header_text: &str) -> io::Result<()> {
+    let mut bytes = Vec::with_capacity(HEADER_BYTES);
     let text = header_text.as_bytes();
     bytes.extend_from_slice(text);
     // The text field is space-padded, as MATLAB writes it.
@@ -227,73 +245,142 @@ fn write_header(bytes: &mut Vec<u8>, header_text: &str) {
     bytes.extend_from_slice(&0x0100_u16.to_le_bytes());
     bytes.extend_from_slice(b"IM");
     debug_assert_eq!(bytes.len(), HEADER_BYTES);
+    out.write_all(&bytes)
 }
 
 /// Bytes an element's payload is padded by to reach the next 8-byte boundary.
-const fn padding(length: usize) -> usize {
-    (ALIGNMENT - length % ALIGNMENT) % ALIGNMENT
+const fn padding(length: u64) -> u64 {
+    (ALIGNMENT as u64 - length % ALIGNMENT as u64) % ALIGNMENT as u64
 }
 
-/// The whole of one variable, tag included.
-fn matrix_element_bytes(variable: &MatVariable) -> usize {
-    ALIGNMENT + matrix_payload_bytes(variable)
-}
-
-fn matrix_payload_bytes(variable: &MatVariable) -> usize {
-    let name = variable.name.len();
-    let values = ALIGNMENT + size_of_val(variable.real.as_slice());
+/// The bytes of one numeric column's element after its tag: array flags, dimensions, name, the
+/// real part and, when complex, the imaginary part.
+fn column_payload_bytes(name: &str, rows: usize, complex: bool) -> u64 {
+    let name = name.len() as u64;
+    let part = ALIGNMENT as u64 + rows as u64 * 8;
     // Array flags and dimensions are two 8-byte subelements each.
-    16 + 16
-        + (ALIGNMENT + name + padding(name))
-        + values
-        + if variable.imag.is_some() { values } else { 0 }
+    16 + 16 + (ALIGNMENT as u64 + name + padding(name)) + if complex { 2 * part } else { part }
+}
+
+/// The size a column `name` of `rows` values states in its tag, refused when it is more than
+/// the `u32` the tag holds.
+pub(crate) fn column_size(name: &str, rows: usize, complex: bool) -> Result<u64, MatWriteError> {
+    let bytes = column_payload_bytes(name, rows, complex);
+    if bytes > u64::from(u32::MAX) {
+        return Err(MatWriteError::TooLarge(name.to_owned(), bytes));
+    }
+    Ok(bytes)
 }
 
 /// *The Data Element*, long form: type then byte count, both `u32`.
-fn write_tag(bytes: &mut Vec<u8>, data_type: u32, byte_size: usize) {
-    bytes.extend_from_slice(&data_type.to_le_bytes());
-    bytes.extend_from_slice(&(byte_size as u32).to_le_bytes());
+fn write_tag(out: &mut dyn Write, data_type: u32, byte_size: u64) -> io::Result<()> {
+    let size = u32::try_from(byte_size)
+        .map_err(|_| io::Error::other("a MAT element is larger than its tag can state"))?;
+    out.write_all(&data_type.to_le_bytes())?;
+    out.write_all(&size.to_le_bytes())
 }
 
-fn write_doubles(bytes: &mut Vec<u8>, values: &[f64]) {
-    write_tag(bytes, MI_DOUBLE, size_of_val(values));
+/// The array flags, dimensions and name of an array of `rows` x `columns` of `class`.
+fn write_array_head(
+    out: &mut dyn Write,
+    class: u32,
+    rows: i32,
+    columns: i32,
+    name: &str,
+) -> io::Result<()> {
+    write_tag(out, MI_UINT32, 8)?;
+    out.write_all(&class.to_le_bytes())?;
+    // nzmax is for sparse arrays only.
+    out.write_all(&0_u32.to_le_bytes())?;
+    write_tag(out, MI_INT32, 8)?;
+    out.write_all(&rows.to_le_bytes())?;
+    out.write_all(&columns.to_le_bytes())?;
+    let name = name.as_bytes();
+    write_tag(out, MI_INT8, name.len() as u64)?;
+    out.write_all(name)?;
+    out.write_all(&[0; ALIGNMENT][..padding(name.len() as u64) as usize])
+}
+
+/// One numeric column's `miMATRIX` up to its real values: the element's tag, array flags,
+/// dimensions, name and the real part's tag. Its `rows` values follow as little-endian `f64`,
+/// then, when complex, [`write_part_tag`] and the imaginary values.
+///
+/// A column vector: one value per row, one column. Two dimensions is the fewest the spec
+/// allows, and the shape every MATLAB reader treats as a signal rather than a matrix.
+pub(crate) fn write_column_start(
+    out: &mut dyn Write,
+    name: &str,
+    rows: i32,
+    complex: bool,
+) -> io::Result<()> {
+    let count = usize::try_from(rows).unwrap_or_default();
+    write_tag(out, MI_MATRIX, column_payload_bytes(name, count, complex))?;
+    let class = MX_DOUBLE_CLASS | if complex { MX_COMPLEX } else { 0 };
+    write_array_head(out, class, rows, 1, name)?;
+    write_part_tag(out, rows)
+}
+
+/// The tag of one part of a column of `rows` values: every double is eight bytes, so the part
+/// is always aligned.
+pub(crate) fn write_part_tag(out: &mut dyn Write, rows: i32) -> io::Result<()> {
+    write_tag(out, MI_DOUBLE, u64::try_from(rows).unwrap_or_default() * 8)
+}
+
+fn write_values(bytes: &mut Vec<u8>, values: &[f64]) {
     for value in values {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    // Every double is eight bytes, so this subelement is always aligned.
 }
 
-/// One `miMATRIX`: array flags, dimensions, name, real part, imaginary part.
-fn write_matrix_element(bytes: &mut Vec<u8>, variable: &MatVariable, rows: i32) {
-    write_tag(bytes, MI_MATRIX, matrix_payload_bytes(variable));
+/// The width each field name of a structure takes: `namelengthmax` and its terminating NUL.
+const FIELD_NAME_BYTES: u64 = MAX_NAME_CHARS as u64 + 1;
 
-    write_tag(bytes, MI_UINT32, 8);
-    let class = MX_DOUBLE_CLASS
-        | if variable.imag.is_some() {
-            MX_COMPLEX
-        } else {
-            0
-        };
-    bytes.extend_from_slice(&class.to_le_bytes());
-    // nzmax is for sparse arrays only.
-    bytes.extend_from_slice(&0_u32.to_le_bytes());
-
-    write_tag(bytes, MI_INT32, 8);
-    // A column vector: one value per row, one column. Two dimensions is the
-    // fewest the spec allows, and the shape every MATLAB reader treats as a
-    // signal rather than a matrix.
-    bytes.extend_from_slice(&rows.to_le_bytes());
-    bytes.extend_from_slice(&1_i32.to_le_bytes());
-
-    let name = variable.name.as_bytes();
-    write_tag(bytes, MI_INT8, name.len());
-    bytes.extend_from_slice(name);
-    bytes.resize(bytes.len() + padding(name.len()), 0);
-
-    write_doubles(bytes, &variable.real);
-    if let Some(imag) = &variable.imag {
-        write_doubles(bytes, imag);
+/// The size a structure `name` of numeric column `fields` (name, rows, complex) states in its
+/// tag, refused when it is more than the `u32` the tag holds.
+pub(crate) fn struct_size(name: &str, fields: &[(&str, usize, bool)]) -> Result<u64, MatWriteError> {
+    let name_bytes = name.len() as u64;
+    let names = fields.len() as u64 * FIELD_NAME_BYTES;
+    let bytes = 16
+        + 16
+        + (ALIGNMENT as u64 + name_bytes + padding(name_bytes))
+        + 16
+        + (ALIGNMENT as u64 + names + padding(names))
+        + fields
+            .iter()
+            .map(|(_, rows, complex)| ALIGNMENT as u64 + column_payload_bytes("", *rows, *complex))
+            .sum::<u64>();
+    if bytes > u64::from(u32::MAX) {
+        return Err(MatWriteError::TooLarge(name.to_owned(), bytes));
     }
+    Ok(bytes)
+}
+
+/// One 1x1 structure's `miMATRIX` up to its fields: the element's tag, array flags, dimensions,
+/// name, field name length and field names (*MAT-File Format*, structure arrays). Each field
+/// follows as a column ([`write_column_start`] with an empty name, then its values) in the
+/// order `fields` names them.
+pub(crate) fn write_struct_start(
+    out: &mut dyn Write,
+    name: &str,
+    fields: &[(&str, usize, bool)],
+) -> Result<(), MatWriteError> {
+    let size = struct_size(name, fields)?;
+    let write = |out: &mut dyn Write| -> io::Result<()> {
+        write_tag(out, MI_MATRIX, size)?;
+        write_array_head(out, MX_STRUCT_CLASS, 1, 1, name)?;
+        write_tag(out, MI_INT32, 4)?;
+        out.write_all(&(FIELD_NAME_BYTES as i32).to_le_bytes())?;
+        out.write_all(&[0; 4])?;
+        let names = fields.len() as u64 * FIELD_NAME_BYTES;
+        write_tag(out, MI_INT8, names)?;
+        for (field, ..) in fields {
+            let mut cell = field.as_bytes().to_vec();
+            cell.resize(FIELD_NAME_BYTES as usize, 0);
+            out.write_all(&cell)?;
+        }
+        out.write_all(&[0; ALIGNMENT][..padding(names) as usize])
+    };
+    write(out).map_err(|error| MatWriteError::Write(error.to_string()))
 }
 
 #[cfg(test)]

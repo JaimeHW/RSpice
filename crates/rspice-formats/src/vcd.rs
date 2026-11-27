@@ -65,6 +65,29 @@ pub struct EncodedVcd {
     pub change_count: usize,
 }
 
+/// What a written dump declares and records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VcdFacts {
+    pub node_count: usize,
+    pub change_count: usize,
+}
+
+/// Whether `analysis` has an event history to dump, checked without projecting it: a history
+/// that cannot be dumped exactly is refused by [`write_result_vcd`] before it writes a byte.
+pub fn check_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<(), VcdWriteError> {
+    match analysis.result_payload.as_ref() {
+        Some(AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces,
+            ..
+        }) if digital_traces.is_empty() && real_traces.is_empty() => {
+            Err(VcdWriteError::EmptyEventHistory)
+        }
+        Some(AnalysisResultPayload::TransientEvents { .. }) => Ok(()),
+        _ => Err(VcdWriteError::MissingEventHistory),
+    }
+}
+
 /// Serialise one analysis's retained event history as a dump.
 ///
 /// An imported dump's variables are declared in the source's scope and in the source's order
@@ -73,6 +96,22 @@ pub struct EncodedVcd {
 /// Missing or empty histories, invalid event codes and event times that VCD
 /// cannot represent are refused before bytes are returned.
 pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, VcdWriteError> {
+    let mut bytes = Vec::new();
+    let facts = write_result_vcd(analysis, &mut bytes)?;
+    Ok(EncodedVcd {
+        bytes,
+        node_count: facts.node_count,
+        change_count: facts.change_count,
+    })
+}
+
+/// [`encode_result_vcd`] written to `out`. The history is in memory beside the run, so the
+/// dump is projected whole and then written; a refusal comes before the first byte.
+pub fn write_result_vcd<W>(
+    analysis: &AnalysisResult<W>,
+    out: &mut dyn std::io::Write,
+) -> Result<VcdFacts, VcdWriteError> {
+    check_result_vcd(analysis)?;
     let Some(AnalysisResultPayload::TransientEvents {
         digital_traces,
         real_traces,
@@ -82,9 +121,6 @@ pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, 
     else {
         return Err(VcdWriteError::MissingEventHistory);
     };
-    if digital_traces.is_empty() && real_traces.is_empty() {
-        return Err(VcdWriteError::EmptyEventHistory);
-    }
     let (digital, real) = core_event_traces(digital_traces, real_traces)
         .map_err(VcdWriteError::InvalidEventEvidence)?;
     // The declarations go through as the result holds them. A bus is one
@@ -112,10 +148,11 @@ pub fn encode_result_vcd<W>(analysis: &AnalysisResult<W>) -> Result<EncodedVcd, 
         .iter()
         .map(|signal| signal.changes.len())
         .sum();
-    let mut bytes = Vec::new();
-    write_vcd(&mut bytes, &document).map_err(VcdWriteError::Write)?;
-    Ok(EncodedVcd {
-        bytes,
+    let mut out = std::io::BufWriter::new(out);
+    write_vcd(&mut out, &document).map_err(VcdWriteError::Write)?;
+    std::io::Write::flush(&mut out)
+        .map_err(|error| VcdWriteError::Write(rspice_core::io::VcdError::Io(error)))?;
+    Ok(VcdFacts {
         node_count,
         change_count,
     })

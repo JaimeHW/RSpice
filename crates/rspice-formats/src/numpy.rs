@@ -1,7 +1,6 @@
 //! NumPy NPY byte encoding for real and complex arrays.
 
 pub mod archive;
-pub mod matrix;
 pub mod reader;
 #[cfg(feature = "result-waveform")]
 pub mod result;
@@ -12,34 +11,18 @@ use num_complex::Complex64;
 /// Maximum coordinate-plus-signal columns or members accepted by RSpice's NumPy readers.
 pub const MAX_COLUMNS: usize = 1_024;
 
-/// A named real or rectangular complex column borrowed from a result table.
-#[derive(Debug, Clone, Copy)]
-pub struct NamedArray<'a> {
-    pub name: &'a str,
-    pub real: &'a [f64],
-    pub imag: Option<&'a [f64]>,
-}
-
 #[derive(Debug)]
 pub enum NumpyWriteError {
     #[cfg(feature = "result-waveform")]
     PublicationBounds(crate::waveform_io::result::WaveformExportError),
     Io(std::io::Error),
-    Zip(crate::zip::StoredZipError),
     MatrixColumnLimit {
-        columns: Option<usize>,
+        columns: usize,
     },
     ArchiveMemberLimit {
-        members: Option<usize>,
+        members: usize,
     },
-    EmptyMatrix,
     EmptyArchive,
-    SampleCount {
-        name: String,
-        real: usize,
-        imag: Option<usize>,
-        coordinate: usize,
-    },
     MatrixSizeOverflow {
         rows: usize,
         columns: usize,
@@ -55,41 +38,17 @@ impl std::fmt::Display for NumpyWriteError {
             #[cfg(feature = "result-waveform")]
             Self::PublicationBounds(source) => source.fmt(f),
             Self::Io(source) => write!(f, "The NumPy array could not be written: {source}"),
-            Self::Zip(source) => source.fmt(f),
-            Self::MatrixColumnLimit { columns: None } => {
-                f.write_str("NumPy matrix has too many columns")
-            }
-            Self::MatrixColumnLimit {
-                columns: Some(columns),
-            } => write!(
+            Self::MatrixColumnLimit { columns } => write!(
                 f,
                 "This result has {columns} columns; RSpice reads at most {MAX_COLUMNS} from a NumPy source."
             ),
-            Self::ArchiveMemberLimit { members: None } => write!(
-                f,
-                "This result needs too many archive members; RSpice reads at most {MAX_COLUMNS}."
-            ),
-            Self::ArchiveMemberLimit {
-                members: Some(members),
-            } => write!(
+            Self::ArchiveMemberLimit { members } => write!(
                 f,
                 "This result needs {members} archive members; RSpice reads at most {MAX_COLUMNS}."
             ),
-            Self::EmptyMatrix => {
-                f.write_str("A NumPy matrix needs coordinate samples and at least one signal.")
-            }
             Self::EmptyArchive => {
                 f.write_str("A NumPy archive needs coordinate samples and at least one signal.")
             }
-            Self::SampleCount {
-                name,
-                real,
-                coordinate,
-                ..
-            } => write!(
-                f,
-                "'{name}' has {real} samples against {coordinate} coordinate samples; the export is refused rather than padded or truncated."
-            ),
             Self::MatrixSizeOverflow { .. } => {
                 f.write_str("NumPy matrix exceeds the supported sample count")
             }
@@ -116,7 +75,6 @@ impl std::error::Error for NumpyWriteError {
             #[cfg(feature = "result-waveform")]
             Self::PublicationBounds(source) => Some(source),
             Self::Io(source) => Some(source),
-            Self::Zip(source) => Some(source),
             _ => None,
         }
     }
