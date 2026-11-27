@@ -658,6 +658,14 @@ pub fn active_shared_x_status(
     }
     let presentation = state.results_reads().presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
+    // The Nyquist plane plots no interval of its own: its locus spans the
+    // loop gain's frequencies, which the bar states instead.
+    if state.results.session.viewer == super::ResultViewer::Nyquist {
+        return super::nyquist::frequency_span(state.results_reads()).map(|span| SharedXStatus {
+            span: hertz_range_text(span, quantity_policy),
+            zoom: 1.0,
+        });
+    }
     let active = state
         .results
         .session

@@ -457,8 +457,18 @@ pub fn show(
     for _ in 0..2 {
         let plot = plot::plot_rect(&plot_ui, &spec).size();
         ranges = plot::equal_scale_ranges(plot, (x0, x1), (y0, y1));
-        spec.x = plane.axis(ranges.0.0, ranges.0.1, "σ");
-        spec.y = plane.axis(ranges.1.0, ranges.1.1, "jω");
+        // The linear plane is ruled at one step on both axes, so its cells
+        // are square as its scale is.
+        (spec.x, spec.y) = match plane {
+            Plane::Linear => {
+                let (sigma, omega) = crate::presentation::plane_axes(ranges, ("rad/s", "rad/s"));
+                (sigma.with_label("σ"), omega.with_label("jω"))
+            }
+            Plane::Logarithmic { .. } => (
+                plane.axis(ranges.0.0, ranges.0.1, "σ"),
+                plane.axis(ranges.1.0, ranges.1.1, "jω"),
+            ),
+        };
     }
     spec.bands = vec![plot::Band {
         x0: ranges.0.0,

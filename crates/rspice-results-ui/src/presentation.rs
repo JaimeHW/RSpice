@@ -3,6 +3,7 @@
 use egui::{Ui, WidgetInfo, WidgetType};
 use rspice_ui_kit::panels::inspector::toned_inspector_copy;
 use rspice_ui_kit::panels::{PANEL_ROW_H, panel_inset};
+use rspice_ui_kit::plot;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
@@ -165,6 +166,54 @@ pub fn square_xy_view_change(
 /// [`square_xy_view_change`] for a plane `plot` points across that is not
 /// square: a zoom or pan along one axis carries the other with it at the
 /// same points per unit, and a zoom box keeps all it took in.
+/// A plane's axes over `ranges`, which it reads on one scale, both ruled
+/// at one step, the finer of their two ladders' while that is no more than
+/// [`plot::MAX_AXIS_TICKS`] ticks, so the grid's cells are as square as the
+/// scale is; each axis in its unit of `units`. A ladder stated as offsets
+/// from an anchor, at a zoom too deep for whole labels, keeps its own ticks.
+pub(crate) fn plane_axes(
+    ((x0, x1), (y0, y1)): ((f64, f64), (f64, f64)),
+    (x_unit, y_unit): (&str, &str),
+) -> (plot::Axis, plot::Axis) {
+    let (x, y) = (
+        plot::Axis::linear(x0, x1, x_unit),
+        plot::Axis::linear(y0, y1, y_unit),
+    );
+    let step = |axis: &plot::Axis| match axis.ticks.as_slice() {
+        [first, second, ..] if axis.offset_anchor().is_none() => second.0 - first.0,
+        _ => f64::NAN,
+    };
+    let (x_step, y_step) = (step(&x), step(&y));
+    if !(x_step.is_finite() && y_step.is_finite() && x_step > 0.0 && y_step > 0.0) {
+        return (x, y);
+    }
+    let positions = |low: f64, high: f64, step: f64| -> Vec<f64> {
+        ((low / step).ceil() as i64..=(high / step).floor() as i64)
+            .map(|index| index as f64 * step)
+            .collect()
+    };
+    let fine = x_step.min(y_step);
+    let common = if positions(x0, x1, fine)
+        .len()
+        .max(positions(y0, y1, fine).len())
+        <= plot::MAX_AXIS_TICKS
+    {
+        fine
+    } else {
+        x_step.max(y_step)
+    };
+    let ruled = |low: f64, high: f64, unit: &str| {
+        let values = positions(low, high, common);
+        let mut axis = plot::Axis::with_ticks(low, high, unit, &values);
+        let labels = plot::format::axis_tick_labels(&values, common);
+        for ((_, label), text) in axis.ticks.iter_mut().zip(labels) {
+            *label = text;
+        }
+        axis
+    };
+    (ruled(x0, x1, x_unit), ruled(y0, y1, y_unit))
+}
+
 pub fn equal_scale_view_change(
     current_x: (f64, f64),
     current_y: (f64, f64),

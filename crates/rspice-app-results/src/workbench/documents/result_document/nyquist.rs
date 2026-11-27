@@ -57,6 +57,23 @@ pub(crate) fn loop_gain_source(state: ResultsReads<'_>) -> Option<LoopGainSource
         .or_else(|| (0..run.analyses.len()).find_map(source))
 }
 
+/// The frequencies the shown run's loop gain spans, lowest to highest, once
+/// the sheet has read its locus.
+pub(crate) fn frequency_span(state: ResultsReads<'_>) -> Option<(f64, f64)> {
+    let source = loop_gain_source(state)?;
+    let held = state
+        .results
+        .nyquist
+        .get(&source)
+        .filter(|held| held.version == state.model.simulation.view.data_version)?;
+    let (first, last) = (held.locus.points.first()?, held.locus.points.last()?);
+    let (low, high) = (
+        first.frequency.min(last.frequency),
+        first.frequency.max(last.frequency),
+    );
+    (low.is_finite() && high.is_finite() && low < high).then_some((low, high))
+}
+
 /// One stability analysis's locus and the numbers read off it, kept until
 /// the run history's samples change.
 #[derive(Debug, Clone)]

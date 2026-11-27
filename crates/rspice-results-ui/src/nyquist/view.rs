@@ -81,45 +81,6 @@ pub fn locus_frame(real: &[f64], imaginary: &[f64]) -> ((f64, f64), (f64, f64)) 
     ((center - half, center + half), (-half, half))
 }
 
-/// The plane's axes over `ranges`, both ticked at one of their two ladders'
-/// steps, the finer where it is not too many ticks, so the grid's cells are
-/// square as its scale is. A ladder stated as offsets from an anchor, at a
-/// zoom too deep for whole labels, keeps its own ticks.
-fn plane_axes(((x0, x1), (y0, y1)): ((f64, f64), (f64, f64))) -> (Axis, Axis) {
-    let (re, im) = (Axis::linear(x0, x1, "Re"), Axis::linear(y0, y1, "Im"));
-    let step = |axis: &Axis| match axis.ticks.as_slice() {
-        [first, second, ..] if axis.offset_anchor().is_none() => second.0 - first.0,
-        _ => f64::NAN,
-    };
-    let (re_step, im_step) = (step(&re), step(&im));
-    if !(re_step.is_finite() && im_step.is_finite() && re_step > 0.0 && im_step > 0.0) {
-        return (re, im);
-    }
-    let positions = |low: f64, high: f64, step: f64| -> Vec<f64> {
-        ((low / step).ceil() as i64..=(high / step).floor() as i64)
-            .map(|index| index as f64 * step)
-            .collect()
-    };
-    let fine = re_step.min(im_step);
-    let common = if positions(x0, x1, fine)
-        .len()
-        .max(positions(y0, y1, fine).len())
-        <= plot::MAX_AXIS_TICKS
-    {
-        fine
-    } else {
-        re_step.max(im_step)
-    };
-    let ticked = |low: f64, high: f64, unit: &str| {
-        let mut axis = Axis::with_ticks(low, high, unit, &positions(low, high, common));
-        for (value, label) in &mut axis.ticks {
-            *label = plot::format::tick_label_with_step(*value, common);
-        }
-        axis
-    };
-    (ticked(x0, x1, "Re"), ticked(y0, y1, "Im"))
-}
-
 /// The sheet's own controls in its bar: frame the critical point, as the
 /// sheet opens, or the whole locus.
 pub fn domain_bar(ui: &mut Ui) -> Option<NyquistFrame> {
@@ -261,7 +222,7 @@ pub fn show(
             glyph: strip::LegendGlyph::Line,
         },
     ];
-    strip::StripHeader::new(kind_tag, &format!("{point_count} pts"), &legend).show(ui);
+    strip::StripHeader::new(kind_tag, &format!("{point_count} points"), &legend).show(ui);
 
     // Opened on the critical point; the reader's zoom, or the bar's whole
     // locus, replaces it until a double-click brings it back.
@@ -269,12 +230,16 @@ pub fn show(
     let (x0, x1) = view.x.unwrap_or(frame_x);
     let (y0, y1) = view.y.unwrap_or(frame_y);
 
+    // The plane's coordinates are numbers: its axes are captioned by what
+    // they read, `Re L(jω)` and `Im L(jω)`, and carry no unit.
+    let (real_caption, imaginary_caption) = (format!("Re {name}"), format!("Im {name}"));
     let mut spec = PlotSpec::new(
-        Axis::linear(x0, x1, "Re"),
+        Axis::linear(x0, x1, "").with_label(&real_caption),
         XScale::Linear,
-        Axis::linear(y0, y1, "Im"),
+        Axis::linear(y0, y1, "").with_label(&imaginary_caption),
     )
     .accessible_name("Nyquist plot")
+    .with_y_without_unit(&imaginary_caption)
     .pinch_zooms_both_axes();
     // Both axes through the origin, alike.
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
@@ -363,7 +328,9 @@ pub fn show(
     for _ in 0..2 {
         let plot = plot::plot_rect(&plot_ui, &spec).size();
         ranges = plot::equal_scale_ranges(plot, (x0, x1), (y0, y1));
-        (spec.x, spec.y) = plane_axes(ranges);
+        let (real, imaginary) = crate::presentation::plane_axes(ranges, ("", ""));
+        spec.x = real.with_label(&real_caption);
+        spec.y = imaginary.with_label(&imaginary_caption);
     }
 
     let stats_for_readout = stats;
