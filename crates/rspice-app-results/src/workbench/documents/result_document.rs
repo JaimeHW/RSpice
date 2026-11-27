@@ -2872,7 +2872,7 @@ fn viewer_well_is_open(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
 }
 
 fn show_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    show_docbar_for_family(ui, state, None, chrome::bars::DocumentBarSource::QuickView);
+    show_docbar_for(ui, state, chrome::bars::DocumentBarSource::QuickView);
 }
 
 /// The docbar over a project result document. Returns the index of the page
@@ -2880,28 +2880,23 @@ fn show_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 pub(super) fn show_persistent_docbar(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
-    family_label: &str,
     pages: &[String],
     page: usize,
 ) -> Option<usize> {
-    show_docbar_for_family(
+    show_docbar_for(
         ui,
         state,
-        Some(family_label),
         chrome::bars::DocumentBarSource::Document { pages, page },
     )
 }
 
-fn show_docbar_for_family(
+fn show_docbar_for(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
-    family_label: Option<&str>,
     source: chrome::bars::DocumentBarSource<'_>,
 ) -> Option<usize> {
-    let available = ResultViewer::all().filter(|&viewer| {
-        family_label.is_none_or(|family| family_allows_viewer(family, viewer))
-            && viewer_availability(state.results_reads(), viewer).available
-    });
+    let available = ResultViewer::all()
+        .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available);
     let actions = chrome::bars::document_bar(ui, state.results.session.viewer, available, source);
     if let Some(viewer) = actions.viewer {
         state.results.session.viewer = viewer;
@@ -3092,22 +3087,6 @@ fn viewer_tabs(ui: &mut Ui, state: &mut ResultsTestHost) {
     {
         state.results.results.session.viewer = viewer;
     }
-}
-
-/// Which sheets a persistent result document's docbar offers.
-///
-/// The family owns the answer, next to the `includes` list the Create dialog
-/// composes documents from, so the two cannot drift: this restated the mapping
-/// once and drifted immediately — the digital family bound its first pane to
-/// the waveform renderer and then refused every waveform sheet, and the
-/// phase-noise and table sheets were unreachable in families the dialog binds
-/// them for.
-///
-/// Imported or renamed pages resolve to no family and keep every sheet their
-/// dataset can feed reachable.
-fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
-    rspice_results::document_creation::ResultDocumentFamily::from_label(family_label)
-        .is_none_or(|family| family.offers_sheet(viewer))
 }
 
 /// Keep the canvas on a view of the shown analysis: the sheet it is on while

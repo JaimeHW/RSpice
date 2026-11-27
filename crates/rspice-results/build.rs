@@ -220,52 +220,6 @@ fn generate_results_contract(manifest_dir: &std::path::Path, out_dir: &std::path
             rust_string_slice(analysis_ids, "analysisIds"),
         ));
     }
-    generated.push_str("];\n\n");
-
-    let creation_families = contract
-        .get("creationFamilies")
-        .and_then(serde_json::Value::as_object)
-        .expect("Results contract creationFamilies must be an object");
-    let declared_family_count = contract
-        .pointer("/counts/creationFamilies")
-        .and_then(serde_json::Value::as_u64)
-        .expect("Results contract counts.creationFamilies must be an integer");
-    assert_eq!(
-        usize::try_from(declared_family_count).expect("family count must fit usize"),
-        creation_families.len(),
-        "Results contract family count does not match creationFamilies"
-    );
-    generated.push_str(&format!(
-        "pub const CANONICAL_CREATION_FAMILY_COUNT: usize = {};\n\n",
-        creation_families.len()
-    ));
-    generated
-        .push_str("pub const RESULT_CREATION_FAMILIES: &[ResultCreationFamilyDefinition] = &[\n");
-    for (id, family) in creation_families {
-        let viewer_ids = family
-            .get("viewerIds")
-            .and_then(serde_json::Value::as_array)
-            .expect("Results creation-family viewerIds must be an array");
-        let quick_mode_ids = family
-            .get("quickModeIds")
-            .and_then(serde_json::Value::as_array)
-            .expect("Results creation-family quickModeIds must be an array");
-        let default_viewer_id = family
-            .get("defaultViewerId")
-            .and_then(serde_json::Value::as_str)
-            .map_or_else(
-                || "None".to_owned(),
-                |value| format!("Some({})", rust_string(value)),
-            );
-        generated.push_str(&format!(
-            "    ResultCreationFamilyDefinition {{ id: {}, label: {}, description: {}, default_viewer_id: {default_viewer_id}, viewer_ids: {}, quick_mode_ids: {} }},\n",
-            rust_string(id),
-            rust_string(&contract_string(family, "label")),
-            rust_string(&contract_string(family, "description")),
-            rust_string_slice(viewer_ids, "viewerIds"),
-            rust_string_slice(quick_mode_ids, "quickModeIds"),
-        ));
-    }
     generated.push_str("];\n");
     fs::write(out_dir.join("results_contract.rs"), generated)
         .expect("generated Results contract should be writable");

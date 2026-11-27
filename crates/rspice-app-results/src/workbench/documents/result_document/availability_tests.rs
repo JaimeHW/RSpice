@@ -755,65 +755,6 @@ fn hidden_wave_strips_make_the_instrument_restore_control_reachable() {
     assert_eq!(hidden_wave_strip_count(state.results_reads()), 1);
 }
 
-#[test]
-fn persistent_document_families_scope_to_their_own_plot_types() {
-    assert!(family_allows_viewer(
-        "Waveform worksheet",
-        ResultViewer::Waves
-    ));
-    assert!(family_allows_viewer(
-        "Waveform worksheet",
-        ResultViewer::DcSweep
-    ));
-    assert!(family_allows_viewer(
-        "Waveform worksheet",
-        ResultViewer::Eye
-    ));
-    assert!(!family_allows_viewer(
-        "Waveform worksheet",
-        ResultViewer::Smith
-    ));
-
-    assert!(family_allows_viewer(
-        "Frequency & stability",
-        ResultViewer::Bode
-    ));
-    assert!(family_allows_viewer(
-        "Frequency & stability",
-        ResultViewer::PoleZero
-    ));
-    assert!(!family_allows_viewer(
-        "Frequency & stability",
-        ResultViewer::Hist
-    ));
-
-    assert!(family_allows_viewer(
-        "Statistics & yield",
-        ResultViewer::Contribution
-    ));
-    assert!(!family_allows_viewer(
-        "Statistics & yield",
-        ResultViewer::Nyquist
-    ));
-
-    assert!(!family_allows_viewer(
-        "Fields & physical",
-        ResultViewer::Waves
-    ));
-    assert!(!family_allows_viewer("Photonics", ResultViewer::Waves));
-}
-
-/// Pages carry their family only as their title, so a renamed or imported
-/// page resolves to no family at all. It must fall back to offering every
-/// sheet the dataset can feed, never to hiding all of them.
-#[test]
-fn a_page_outside_the_mockup_families_keeps_every_sheet_reachable() {
-    for viewer in ResultViewer::all() {
-        assert!(family_allows_viewer("Transient review", viewer));
-        assert!(family_allows_viewer("Waveform worksheet · 01", viewer));
-    }
-}
-
 /// Every campaign analysis the Simulate catalog can launch must land on a
 /// sheet that draws it. These four sheets shipped in the repository for
 /// months with no `mod` declaration, so SOA, optimizer and event

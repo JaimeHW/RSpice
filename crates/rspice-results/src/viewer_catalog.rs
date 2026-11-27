@@ -180,19 +180,6 @@ impl ViewerDocumentDefinition {
     }
 }
 
-/// Canonical result-document creation family generated with the viewer
-/// catalog. Keeping membership beside the viewer inventory prevents the
-/// creation dialog from maintaining a second, drifting classification table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ResultCreationFamilyDefinition {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub description: &'static str,
-    pub default_viewer_id: Option<&'static str>,
-    pub viewer_ids: &'static [&'static str],
-    pub quick_mode_ids: &'static [&'static str],
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ViewerCapabilities<'a> {
     pub analysis_ids: &'a [&'a str],
@@ -233,15 +220,6 @@ impl ViewerCompatibility {
 include!(concat!(env!("OUT_DIR"), "/results_contract.rs"));
 
 const _: [(); CANONICAL_VIEWER_COUNT] = [(); VIEWER_DOCUMENTS.len()];
-const _: [(); CANONICAL_CREATION_FAMILY_COUNT] = [(); RESULT_CREATION_FAMILIES.len()];
-
-#[must_use]
-pub fn result_creation_family(id: &str) -> Option<&'static ResultCreationFamilyDefinition> {
-    RESULT_CREATION_FAMILIES
-        .iter()
-        .find(|family| family.id == id)
-}
-
 #[must_use]
 pub fn viewer_document(id: &str) -> Option<&'static ViewerDocumentDefinition> {
     VIEWER_DOCUMENTS.iter().find(|document| document.id == id)
@@ -296,43 +274,6 @@ mod tests {
         for document in VIEWER_DOCUMENTS {
             assert!(document_ids.insert(document.id), "{}", document.id);
             assert_eq!(viewer_document(document.id), Some(document));
-        }
-    }
-
-    #[test]
-    fn creation_families_are_generated_from_the_same_contract() {
-        assert_eq!(
-            RESULT_CREATION_FAMILIES.len(),
-            CANONICAL_CREATION_FAMILY_COUNT
-        );
-        assert_eq!(CANONICAL_CREATION_FAMILY_COUNT, 9);
-        assert_eq!(
-            RESULT_CREATION_FAMILIES
-                .iter()
-                .map(|family| family.id)
-                .collect::<Vec<_>>(),
-            [
-                "waveform-worksheet",
-                "frequency-stability",
-                "rf-network",
-                "statistics-yield",
-                "digital-ams-events",
-                "verification-optimization",
-                "fields-physical",
-                "photonics",
-                "report-page",
-            ]
-        );
-        for family in RESULT_CREATION_FAMILIES {
-            assert!(!family.label.is_empty());
-            assert!(!family.description.is_empty());
-            for viewer_id in family.viewer_ids {
-                assert!(
-                    viewer_document(viewer_id).is_some(),
-                    "{} references unknown viewer {viewer_id}",
-                    family.id
-                );
-            }
         }
     }
 

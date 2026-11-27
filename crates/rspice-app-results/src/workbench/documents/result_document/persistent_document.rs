@@ -157,9 +157,7 @@ pub fn show(
         return;
     }
     super::prepare_viewer_state(state);
-    if let Some(viewer) =
-        compatible_active_viewer(state.results_reads(), &page.page.title, active_pane)
-    {
+    if let Some(viewer) = compatible_active_viewer(state.results_reads(), active_pane) {
         state.results.session.viewer = viewer;
     }
     let page_titles = document
@@ -172,15 +170,13 @@ pub fn show(
         .iter()
         .position(|candidate| candidate.page.id == selected_page_id)
         .unwrap_or_default();
-    if let Some(picked) =
-        super::show_persistent_docbar(ui, state, &page.page.title, &page_titles, page_index)
+    if let Some(picked) = super::show_persistent_docbar(ui, state, &page_titles, page_index)
         && picked != page_index
     {
         select_page(state, document_id, picked);
         ui.ctx().request_repaint();
     }
-    let active_viewer =
-        compatible_active_viewer(state.results_reads(), &page.page.title, active_pane);
+    let active_viewer = compatible_active_viewer(state.results_reads(), active_pane);
     if let Some(viewer) = active_viewer {
         state.results.session.viewer = viewer;
         if let Err(reason) = project_pane_presentation(state, active_pane, viewer) {
@@ -313,21 +309,13 @@ fn resolved_active_pane_id(
     first
 }
 
-fn compatible_active_viewer(
-    state: ResultsReads<'_>,
-    family_label: &str,
-    pane: &Pane,
-) -> Option<ResultViewer> {
+fn compatible_active_viewer(state: ResultsReads<'_>, pane: &Pane) -> Option<ResultViewer> {
     let selected = state.results.session.viewer;
-    if super::family_allows_viewer(family_label, selected)
-        && super::viewer_is_available(state, selected)
-    {
+    if super::viewer_is_available(state, selected) {
         return Some(selected);
     }
-    ResultViewer::from_viewer_document_id(&pane.viewer_id).filter(|viewer| {
-        super::family_allows_viewer(family_label, *viewer)
-            && super::viewer_is_available(state, *viewer)
-    })
+    ResultViewer::from_viewer_document_id(&pane.viewer_id)
+        .filter(|viewer| super::viewer_is_available(state, *viewer))
 }
 
 /// The digest of the netlist a current run is made from, when the netlist is
