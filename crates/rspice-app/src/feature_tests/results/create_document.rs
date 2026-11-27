@@ -985,7 +985,7 @@ fn a_created_document_is_drawn_under_a_tab_of_its_own() {
     );
 }
 
-//// The analysis tags the frame writes, top to bottom and left to right, each
+/// The analysis tags the frame writes, top to bottom and left to right, each
 /// with whether it reports itself selected: one for each strip a waveform
 /// document's panes draw, at the start of its top pane's legend row, or of
 /// a row of its own where it has no pane.
