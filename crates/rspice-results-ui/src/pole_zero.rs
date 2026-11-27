@@ -333,7 +333,7 @@ pub fn show(
     let legend = [
         LegendChip {
             name: "poles",
-            color: c.traces[5],
+            color: c.traces[0],
             on: true,
             glyph: strip::LegendGlyph::Cross,
         },
@@ -411,7 +411,7 @@ pub fn show(
         Plane::Linear => 0,
         Plane::Logarithmic { .. } => extent.ceil() as usize,
     };
-    let pole_color = c.traces[5];
+    let pole_color = c.traces[0];
     let zero_color = c.traces[1];
     let grid = c.canvas_grid;
     // The imaginary axis is the stability boundary, so it is drawn as the
@@ -539,7 +539,7 @@ pub fn show(
         let pos =
             crate::presentation::xy_screen_pos(response.plot_rect, places[i], ranges.0, ranges.1);
         let color = if root.is_pole() {
-            c.traces[5]
+            c.traces[0]
         } else {
             c.traces[1]
         };
