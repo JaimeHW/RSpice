@@ -43,7 +43,7 @@ mod units;
 pub use projection::{
     AcDisplay, ComplexSource, FamilyMembers, ProjectionOptions, Retick, SignalLookup,
     StripProjection, build_models, drawn_projection, family_color, family_of,
-    matching_overlay_analysis, project_strips, retick, set_projection,
+    matching_overlay_analysis, member_title, project_strips, retick, set_projection,
 };
 pub use rspice_ui_kit::plot::format::unit_carries_its_decade;
 use units::signal_unit;

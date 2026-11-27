@@ -244,6 +244,29 @@ pub(super) fn family_subtitle(host_label: &str, family: &Family) -> String {
     )
 }
 
+/// An analysis' title with its member named as the family's legend names
+/// it, `AC · C1=1nF` as `AC · C1 = 1n`, so a member reads one way in the
+/// browser, the legend and the details. A title of an analysis drawn on
+/// its own, or of a member no single quantity names, stands as it is.
+pub fn member_title<A: AsRef<AnalysisResult<RetainedTrace>>>(
+    analysis: &A,
+) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    let analysis = analysis.as_ref();
+    let title = analysis.label.as_str();
+    let Some(member) = analysis.family_member() else {
+        return Cow::Borrowed(title);
+    };
+    let label = member.label();
+    let base = host_base(title, &label);
+    match member_value(&label) {
+        Some((quantity, value)) if base.len() < title.len() => {
+            Cow::Owned(format!("{base} \u{b7} {quantity} = {value}"))
+        }
+        _ => Cow::Borrowed(title),
+    }
+}
+
 /// The host's label without its own member: `AC` of `AC · C1=1nF`.
 fn host_base<'l>(host_label: &'l str, member: &str) -> &'l str {
     host_label

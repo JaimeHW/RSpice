@@ -2764,6 +2764,7 @@ pub(crate) fn analysis_label(analysis: &crate::state::AnalysisResult) -> String 
     {
         analysis.kind_display_name().to_owned()
     } else {
-        analysis.label.clone()
+        // A family's member is named as its legend names it.
+        rspice_results_ui::waves::member_title(analysis).into_owned()
     }
 }

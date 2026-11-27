@@ -735,4 +735,6 @@ fn a_family_is_named_by_its_quantity_and_each_members_value() {
             vec!["1n".to_owned(), "2n".to_owned(), "5n".to_owned()]
         )
     );
+    // Each member's own title names it as the legend does.
+    assert_eq!(member_title(&run.analyses[1]), "Sweep · c = 2n");
 }
