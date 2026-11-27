@@ -390,9 +390,11 @@ fn commit_is_project_owned_dirty_and_stably_selected() {
     assert_eq!(document.title(), "Transient review");
     assert_eq!(document.panes().len(), 2);
     assert_eq!(document.axes().len(), 4);
-    assert_eq!(document.traces().len(), 2);
+    // One unit ticked: the first pane plots it and the second starts empty.
+    assert_eq!(document.traces().len(), 1);
     assert!(document.traces().iter().all(|trace| {
-        trace.label == "V(out)"
+        trace.pane_id == document.panes()[0].id
+            && trace.label == "V(out)"
             && &*trace.coordinate_key == "x"
             && &*trace.signal_key == "y"
             && trace.row_predicates.len() == 3
