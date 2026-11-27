@@ -157,6 +157,13 @@ impl<'u> FormRows<'u> {
         }
     }
 
+    /// Rows laid straight into `ui` on the form's own label column, for a
+    /// dialog that sets a form's rows among parts of its own, such as one
+    /// step of a review: they read as the rows of every [`CommandForm`].
+    pub fn in_ui(ui: &'u mut Ui) -> Self {
+        Self::new(ui, form::LABEL_COL)
+    }
+
     /// The air over what comes next: `gap`, and whatever the row above held
     /// back.
     fn gap(&mut self, gap: f32) {
