@@ -30,7 +30,23 @@ pub fn resolve_x_ranges(models: &mut [StripModel]) {
         if model.x_bounds.is_none() {
             model.x_bounds = super::stack::visible_x_bounds(model);
         }
-        let data = x_range(model);
+        // On a linear axis with no event lane shown, the strip's extent is
+        // the visible traces' bounds, which the model already holds: an axis
+        // held in memory is read once as the model is built, not twice.
+        let data = if model.x_scale == XScale::Linear
+            && !model.lane_traces.iter().any(|lane| lane.visible)
+        {
+            note_extent(0);
+            model.x_bounds.map(|(x0, x1)| {
+                if x1 > x0 {
+                    (x0, x1)
+                } else {
+                    (x0 - 1.0, x1 + 1.0)
+                }
+            })
+        } else {
+            x_range(model)
+        };
         // A running transient's strip spans the run from start to stop while it runs, so the
         // trace grows across a still axis rather than the axis stretching under it.
         model.x_range = match model.live_frame {
