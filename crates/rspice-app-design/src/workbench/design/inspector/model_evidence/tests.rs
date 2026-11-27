@@ -107,9 +107,7 @@ fn bound_model_evidence_uses_the_instance_model_and_section_overrides() {
 
 /// Metadata stating `sections` and nothing else.
 fn sectioned(sections: &[&str]) -> crate::state::model_library::ModelDefinitionMetadata {
-    use crate::state::model_library::{
-        ModelDefinitionMetadata, ModelSectionDefinition, ModelSectionQualification,
-    };
+    use crate::state::model_library::{ModelDefinitionMetadata, ModelSectionDefinition};
     ModelDefinitionMetadata {
         schema_version: 1,
         source_identity: None,
@@ -121,7 +119,6 @@ fn sectioned(sections: &[&str]) -> crate::state::model_library::ModelDefinitionM
                 parent: None,
                 overrides: std::collections::BTreeMap::new(),
                 model_files: Vec::new(),
-                qualification: ModelSectionQualification::Unqualified,
             })
             .collect(),
         statistics: Default::default(),

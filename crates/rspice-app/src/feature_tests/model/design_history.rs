@@ -7,24 +7,15 @@
 //! see on screen.
 
 use crate::workbench::app_state::AppState;
-use rspice_app_state::product::ObjectRevision;
 use rspice_app_state::state::CellViewRef;
 use rspice_app_state::state::DesignManagementCatalog;
 use rspice_app_state::state::OpenCellView;
 use rspice_app_state::state::SchematicSnapshot;
 use rspice_app_state::state::SchematicState;
-use rspice_app_state::state::model_library::CorrelationDatasetClass;
-use rspice_app_state::state::model_library::CorrelationDatasetRevision;
-use rspice_app_state::state::model_library::CorrelationSuite;
-use rspice_app_state::state::model_library::ModelCorrelationState;
-use rspice_app_state::state::model_library::ModelSourceAuthority;
-use rspice_app_state::state::model_library::ModelSourceEvidenceBinding;
 use rspice_app_state::state::model_library::ProjectModelDefinition;
-use rspice_app_state::state::model_library::ProjectModelRevisionDefinition;
 use rspice_app_state::state::write_policy::LocalSafeModeOptions;
 use rspice_app_state::state::{Cell, ComponentType, LibraryCellInstance, Point, View, ViewType};
 use rspice_app_state::workbench::app_state::design_history::*;
-use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 use std::collections::BTreeMap;
 
 #[test]
@@ -987,131 +978,6 @@ fn project_model_publication_is_atomic_dirty_and_globally_undoable() {
     );
     assert!(state.model.workspace.content.project.revision() > undo_revision);
     assert_eq!(state.model.model_library_manager.filter_text, "nch");
-}
-
-#[test]
-fn project_model_correlation_publication_is_history_guarded() {
-    let mut state = AppState::default();
-    state.open_project_session();
-    let mut model_candidate = state.model.model_library_manager.clone();
-    let model_commit = model_candidate
-        .create_project_model("history-models", &owned_model_definition(0.48))
-        .expect("candidate model validates");
-    state
-        .model
-        .publish_project_model_candidate(
-            model_candidate,
-            model_commit,
-            "create project model history_nch",
-        )
-        .expect("model publishes");
-
-    let library = state
-        .model
-        .model_library_manager
-        .get_library("history-models")
-        .expect("project model library");
-    let ModelSourceAuthority::ProjectOwned {
-        source_id,
-        revision: library_revision,
-        ..
-    } = library.source_authority
-    else {
-        panic!("history model must be project-owned");
-    };
-    let definition = ProjectModelRevisionDefinition::new(
-        ProjectModelDefinition::from_device_model(&library.models["history_nch"]),
-        library.model_definition_metadata["history_nch"].clone(),
-    );
-    let model_identity = definition
-        .project_source_identity()
-        .expect("valid project source identity")
-        .expect("bound project source identity");
-    let source_binding = ModelSourceEvidenceBinding::try_new_project_bound(
-        "history_nch",
-        source_id,
-        model_identity.content_digest,
-        model_identity.revision,
-    )
-    .expect("valid correlation source binding");
-    let dataset = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
-        id: "bench-reference".to_owned(),
-        revision: ObjectRevision::INITIAL,
-        name: "Bench reference".to_owned(),
-        class: CorrelationDatasetClass::BenchMeasurement,
-        authority: "test authority".to_owned(),
-        device_or_lot: "lot-1".to_owned(),
-        fixture: "fixture-1".to_owned(),
-        calibration: "calibration-1".to_owned(),
-        source_name: "reference.csv".to_owned(),
-        raw_source: b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec(),
-        model_source: None,
-        simulation_provenance: None,
-    })
-    .expect("valid retained correlation dataset");
-    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
-        id: "history-correlation".to_owned(),
-        revision: ObjectRevision::INITIAL,
-        name: "History correlation".to_owned(),
-        owner_id: "model-owner".to_owned(),
-        source: source_binding,
-        datasets: vec![dataset],
-        metrics: Vec::new(),
-        dispositions: Vec::new(),
-    })
-    .expect("valid correlation suite");
-    let correlation =
-        ModelCorrelationState::try_new(vec![suite], Vec::new()).expect("valid correlation");
-    let mut correlation_candidate = state.model.model_library_manager.clone();
-    let correlation_commit = correlation_candidate
-        .replace_project_model_correlation(
-            "history-models",
-            source_id,
-            library_revision,
-            model_identity.revision,
-            model_identity.content_digest,
-            "history_nch",
-            &correlation,
-        )
-        .expect("correlation candidate validates");
-    assert!(!correlation_commit.affects_execution);
-
-    state
-        .model
-        .publish_project_model_candidate(
-            correlation_candidate,
-            correlation_commit,
-            "publish history_nch correlation",
-        )
-        .expect("correlation-only publication must not be rejected as a no-op");
-    assert!(state.model.can_undo_project_design());
-    assert_eq!(
-        state.undo_project_design().expect("undo correlation"),
-        Some("publish history_nch correlation".to_owned())
-    );
-    assert!(
-        !state
-            .model
-            .model_library_manager
-            .get_library("history-models")
-            .expect("library remains after correlation undo")
-            .model_correlation
-            .contains_key("history_nch")
-    );
-    assert_eq!(
-        state.redo_project_design().expect("redo correlation"),
-        Some("publish history_nch correlation".to_owned())
-    );
-
-    state
-        .model
-        .model_library_manager
-        .get_library_mut("history-models")
-        .expect("project model library")
-        .model_correlation
-        .remove("history_nch");
-    assert!(!state.model.can_undo_project_design());
-    assert_eq!(state.undo_project_design().expect("guarded undo"), None);
 }
 
 #[test]

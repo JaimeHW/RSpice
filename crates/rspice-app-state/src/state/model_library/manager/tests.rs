@@ -6,11 +6,9 @@
 
 use super::*;
 use crate::state::model_library::{
-    CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSimulationProvenance,
-    CorrelationSuite, FiniteF64, ModelDefinitionMetadata, ParameterDataType, ParameterDefinition,
-    ParameterSource, ParameterValue,
+    FiniteF64, ModelDefinitionMetadata, ParameterDataType, ParameterDefinition, ParameterSource,
+    ParameterValue,
 };
-use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1458,8 +1456,6 @@ fn editable_project_copy_preserves_catalog_metadata_and_rebinds_source_identity(
     assert_eq!(project.pdk_name, "Example PDK");
     assert_eq!(project.technology_node, "28nm");
     assert!(project.source_authority.is_project_owned());
-    assert!(project.model_qualification.is_empty());
-    assert!(project.model_correlation.is_empty());
 
     let copied = &project.models["nch_reference"];
     assert_eq!(copied.description, "Authenticated foundry reference");
@@ -1517,212 +1513,6 @@ fn editable_project_copy_rejects_owned_sources_and_name_collisions_atomically() 
     );
 }
 
-fn current_model_source(
-    library: &ModelLibrary,
-) -> (
-    ModelSourceId,
-    ObjectRevision,
-    ObjectRevision,
-    ContentDigest,
-    ModelSourceEvidenceBinding,
-) {
-    let ModelSourceAuthority::ProjectOwned {
-        source_id,
-        revision: library_revision,
-        ..
-    } = library.source_authority
-    else {
-        panic!("fixture model must be project-owned");
-    };
-    let model = &library.models["owned_nch"];
-    let metadata = library.model_definition_metadata["owned_nch"].clone();
-    let definition = ProjectModelRevisionDefinition::new(
-        ProjectModelDefinition::from_device_model(model),
-        metadata,
-    );
-    let canonical = definition.canonical_source().unwrap();
-    let model_digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
-    let model_revision = definition
-        .project_source_identity()
-        .unwrap()
-        .expect("project source identity")
-        .revision;
-    let binding = ModelSourceEvidenceBinding::try_new_project_bound(
-        "owned_nch",
-        source_id,
-        model_digest,
-        model_revision,
-    )
-    .unwrap();
-    (
-        source_id,
-        library_revision,
-        model_revision,
-        model_digest,
-        binding,
-    )
-}
-
-fn correlation_suite(
-    source: ModelSourceEvidenceBinding,
-    revision: ObjectRevision,
-) -> CorrelationSuite {
-    let reference_bytes = b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec();
-    let simulation_bytes = b"id,quantity,value,unit\ns1,gain,1,V\n".to_vec();
-    let reference = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
-        id: "reference".to_owned(),
-        revision: ObjectRevision::INITIAL,
-        name: "Reference".to_owned(),
-        class: CorrelationDatasetClass::BenchMeasurement,
-        authority: "test authority".to_owned(),
-        device_or_lot: "lot-1".to_owned(),
-        fixture: "fixture-1".to_owned(),
-        calibration: "calibration-1".to_owned(),
-        source_name: "reference.csv".to_owned(),
-        raw_source: reference_bytes,
-        model_source: None,
-        simulation_provenance: None,
-    })
-    .unwrap();
-    let simulation_digest = ContentDigest::from_bytes(Sha256::digest(&simulation_bytes).into());
-    let simulation = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
-        id: "simulation".to_owned(),
-        revision: ObjectRevision::INITIAL,
-        name: "Simulation".to_owned(),
-        class: CorrelationDatasetClass::ModelSimulation,
-        authority: "RSpice".to_owned(),
-        device_or_lot: "owned_nch".to_owned(),
-        fixture: "retained-plan".to_owned(),
-        calibration: "numeric-contract".to_owned(),
-        source_name: "simulation.csv".to_owned(),
-        raw_source: simulation_bytes,
-        model_source: Some(source.clone()),
-        simulation_provenance: Some(CorrelationSimulationProvenance {
-            run_id: "run-1".to_owned(),
-            run_dataset_id: "dataset-1".to_owned(),
-            analysis_id: 1,
-            analysis_result_digest: ContentDigest::from_bytes([0x40; 32]),
-            plan_id: "plan-1".to_owned(),
-            project_revision: ObjectRevision::INITIAL,
-            prepared_snapshot_digest: ContentDigest::from_bytes([0x41; 32]),
-            source_content_digest: ContentDigest::from_bytes([0x42; 32]),
-            task_config_digest: ContentDigest::from_bytes([0x43; 32]),
-            execution_target: "Local desktop engine".to_owned(),
-            export_digest: simulation_digest,
-            model_source: source.clone(),
-            executed_at_unix_ms: 1,
-        }),
-    })
-    .unwrap();
-    CorrelationSuite::try_new(CorrelationSuiteInput {
-        id: "owned-nch-correlation".to_owned(),
-        revision,
-        name: "Owned NCH correlation".to_owned(),
-        owner_id: "model-owner".to_owned(),
-        source,
-        datasets: vec![reference, simulation],
-        metrics: Vec::new(),
-        dispositions: Vec::new(),
-    })
-    .unwrap()
-}
-
-#[test]
-fn project_model_correlation_commit_is_guarded_append_only_and_source_bound() {
-    let mut manager = ModelLibraryManager::new();
-    let created = manager
-        .create_project_model("owned_models", &project_definition(0.48, "r1"))
-        .expect("create project model");
-    let (source_id, library_revision, model_revision, model_digest, current_source) =
-        current_model_source(&created.after);
-    let first_suite = correlation_suite(current_source.clone(), ObjectRevision::INITIAL);
-    let first_state =
-        ModelCorrelationState::try_new(vec![first_suite.clone()], Vec::new()).unwrap();
-    manager
-        .replace_project_model_correlation(
-            "owned_models",
-            source_id,
-            library_revision,
-            model_revision,
-            model_digest,
-            "owned_nch",
-            &first_state,
-        )
-        .expect("first correlation revision commits without changing model bytes");
-
-    let second_revision = ObjectRevision::INITIAL.next().unwrap();
-    let second_suite = correlation_suite(current_source.clone(), second_revision);
-    let second_state =
-        ModelCorrelationState::try_new(vec![first_suite.clone(), second_suite.clone()], Vec::new())
-            .unwrap();
-    let appended = manager
-        .replace_project_model_correlation(
-            "owned_models",
-            source_id,
-            library_revision,
-            model_revision,
-            model_digest,
-            "owned_nch",
-            &second_state,
-        )
-        .expect("suite history appends atomically");
-    assert!(!appended.affects_execution);
-
-    let deleted_history =
-        ModelCorrelationState::try_new(vec![second_suite.clone()], Vec::new()).unwrap();
-    let error = manager
-        .replace_project_model_correlation(
-            "owned_models",
-            source_id,
-            library_revision,
-            model_revision,
-            model_digest,
-            "owned_nch",
-            &deleted_history,
-        )
-        .unwrap_err();
-    assert!(error.contains("immutable") && error.contains("cannot be removed"));
-
-    let stale_source = ModelSourceEvidenceBinding::try_new_project_bound(
-        "owned_nch",
-        source_id,
-        ContentDigest::from_bytes([0xee; 32]),
-        model_revision,
-    )
-    .unwrap();
-    let third_revision = second_revision.next().unwrap();
-    let stale_suite = correlation_suite(stale_source, third_revision);
-    let stale_state =
-        ModelCorrelationState::try_new(vec![first_suite, second_suite, stale_suite], Vec::new())
-            .unwrap();
-    let error = manager
-        .replace_project_model_correlation(
-            "owned_models",
-            source_id,
-            library_revision,
-            model_revision,
-            model_digest,
-            "owned_nch",
-            &stale_state,
-        )
-        .unwrap_err();
-    assert!(error.contains("exact current model source revision"));
-
-    let wrong_library_revision = library_revision.next().unwrap();
-    let error = manager
-        .replace_project_model_correlation(
-            "owned_models",
-            source_id,
-            wrong_library_revision,
-            model_revision,
-            model_digest,
-            "owned_nch",
-            &second_state,
-        )
-        .unwrap_err();
-    assert!(error.contains("changed after correlation review began"));
-}
-
 fn sectioned_project_revision(vth0: f64) -> ProjectModelRevisionDefinition {
     let base = project_definition(vth0, "r1");
     let metadata = base
@@ -1740,7 +1530,6 @@ fn sectioned_project_revision(vth0: f64) -> ProjectModelRevisionDefinition {
                 ParameterValue::Numeric(FiniteF64::new(0.49).expect("finite fixture")),
             )]),
             model_files: Vec::new(),
-            qualification: crate::state::model_library::ModelSectionQualification::Unqualified,
         });
     definition
 }
@@ -1749,11 +1538,7 @@ fn sectioned_project_revision(vth0: f64) -> ProjectModelRevisionDefinition {
 fn complete_project_revision_publishes_sections_and_executes_selected_corner() {
     let mut manager = ModelLibraryManager::new();
     let created = manager
-        .create_project_model_revision(
-            "owned_sections",
-            &sectioned_project_revision(0.48),
-            &ModelQualificationState::default(),
-        )
+        .create_project_model_revision("owned_sections", &sectioned_project_revision(0.48))
         .expect("create complete model revision");
     let ModelSourceAuthority::ProjectOwned {
         source_id,
@@ -1792,7 +1577,6 @@ fn complete_project_revision_publishes_sections_and_executes_selected_corner() {
             "owned_nch",
             digest,
             &metadata_only,
-            &ModelQualificationState::default(),
         )
         .expect("metadata-only change creates a complete revision");
     assert_eq!(

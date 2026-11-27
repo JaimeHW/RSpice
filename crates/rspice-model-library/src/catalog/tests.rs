@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::CapturedHdlSources;
-use crate::qualification::ModelQualificationState;
 use crate::source_bundle::ImportLimits;
 use rspice_core_netlist::library::{
     LibParseResult, LibParser, ResolvedLibDependency, ResolvedLibSource,
@@ -132,11 +131,7 @@ fn definition(value: f64) -> ProjectModelRevisionDefinition {
 fn guarded_revision_publishes_only_after_complete_validation() {
     let mut catalog = ModelCatalog::default();
     let created = catalog
-        .create_project_model_revision(
-            "owned",
-            &definition(0.4),
-            &ModelQualificationState::default(),
-        )
+        .create_project_model_revision("owned", &definition(0.4))
         .unwrap();
     let ModelSourceAuthority::ProjectOwned {
         source_id,
@@ -167,11 +162,7 @@ fn guarded_revision_publishes_only_after_complete_validation() {
     ] {
         assert!(
             catalog
-                .replace_project_model_revision_in_library(
-                    stale,
-                    &definition(0.5),
-                    &ModelQualificationState::default(),
-                )
+                .replace_project_model_revision_in_library(stale, &definition(0.5),)
                 .unwrap_err()
                 .contains("changed after")
         );
@@ -185,22 +176,14 @@ fn guarded_revision_publishes_only_after_complete_validation() {
         .insert("vth0".to_owned(), f64::NAN);
     assert!(
         catalog
-            .replace_project_model_revision_in_library(
-                target,
-                &invalid,
-                &ModelQualificationState::default(),
-            )
+            .replace_project_model_revision_in_library(target, &invalid,)
             .unwrap_err()
             .contains("must be finite")
     );
     assert_eq!(serde_json::to_value(&catalog).unwrap(), before);
 
     let commit = catalog
-        .replace_project_model_revision_in_library(
-            target,
-            &definition(0.5),
-            &ModelQualificationState::default(),
-        )
+        .replace_project_model_revision_in_library(target, &definition(0.5))
         .unwrap();
     assert_eq!(commit.after.models["nch"].parameters["vth0"], 0.5);
     assert_eq!(

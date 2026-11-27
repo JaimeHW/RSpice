@@ -19,25 +19,15 @@ pub use compatibility::{
 };
 pub use rspice_model_library::ProjectModelDefinition;
 pub use rspice_model_library::RetainedClosure;
-pub use rspice_model_library::correlation::{
-    CorrelationAggregation, CorrelationAlignmentEvidence, CorrelationAlignmentPolicy,
-    CorrelationCalculation, CorrelationDatasetClass, CorrelationDatasetRevision,
-    CorrelationEvaluation, CorrelationEvidence, CorrelationExtrapolationPolicy,
-    CorrelationMetricDefinition, CorrelationMetricDomain, CorrelationMetricOutcome,
-    CorrelationObservation, CorrelationOutlierDecision, CorrelationOutlierDisposition,
-    CorrelationReleaseRole, CorrelationReviewDecision, CorrelationSimulationProvenance,
-    CorrelationSuite, MAX_CORRELATION_ROWS, MAX_CORRELATION_TEXT_BYTES, ModelCorrelationState,
-};
 pub use rspice_model_library::device_class::{SUBCIRCUIT_CLASS, card_device};
 pub use rspice_model_library::{
     CornerSectionBinding, CornerSectionDomain, ProcessCorner, stated_temperatures,
 };
 pub use rspice_model_library::{
     CorrelationMatrix, FiniteBounds, FiniteF64, LookupInterpolation, ModelDefinitionMetadata,
-    ModelFileIdentity, ModelSectionDefinition, ModelSectionQualification, ParameterDataType,
-    ParameterDefinition, ParameterSource, ParameterValue, StatisticalDistribution,
-    StatisticalHierarchyScope, TemperatureExtrapolationPolicy, TemperatureLawDefinition,
-    TemperatureLawRepresentation,
+    ModelFileIdentity, ModelSectionDefinition, ParameterDataType, ParameterDefinition,
+    ParameterSource, ParameterValue, StatisticalDistribution, StatisticalHierarchyScope,
+    TemperatureExtrapolationPolicy, TemperatureLawDefinition, TemperatureLawRepresentation,
 };
 // Metadata fixtures used by application integration tests.
 pub use manager::model_library_source_digest;
@@ -51,23 +41,6 @@ pub use rspice_model_library::first_unreachable_source;
 pub use rspice_model_library::is_foreign_platform_absolute_path;
 #[cfg(any(test, feature = "test-support"))]
 pub use rspice_model_library::is_portable_absolute_path;
-pub use rspice_model_library::qualification::{
-    ApprovalDecision, CompatibilityAssessment, CompatibilityDisposition, ConsumerChange,
-    ConsumerImpactAssessment, DocumentReference, DocumentationDeclaration, DocumentationSet,
-    FiniteValue, LicenseDeclaration, LicenseScope, ModelQualificationState, ModelReleaseCandidate,
-    ModelReleaseIdentity, ModelSourceEvidenceBinding, NonNegativeFinite,
-    PlatformCompatibilityEvidence, PromotionApproval, PromotionApprovalRole, QualificationAnalysis,
-    QualificationErrorCode, QualificationEvidence, QualificationOutputDefinition,
-    QualificationPlatform, QualificationPlatformRun, QualificationProbe, QualificationReference,
-    QualificationSample, QualificationSuite, QualificationVector, QualificationVectorDisposition,
-    QualificationVectorDispositionCause, QualificationVectorOutcome,
-    QualificationVectorRequiredAction, ReleaseCandidateIdentity, RequiredDocumentation,
-};
-#[cfg(any(test, feature = "test-support"))]
-pub use rspice_model_library::qualification::{
-    MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
-    QualificationPlatformVectorOutcome,
-};
 pub use rspice_model_library::{BinFamily, BindableModel, model_bin_family};
 pub use rspice_model_library::{ClosureFacts, closure_facts, envelope_is_invalid};
 pub use rspice_model_library::{

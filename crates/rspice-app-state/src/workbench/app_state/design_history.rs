@@ -1708,8 +1708,6 @@ fn model_library_semantics_match(
                 && observed.source_edges == expected.source_edges
                 && observed.models == expected.models
                 && observed.model_definition_metadata == expected.model_definition_metadata
-                && observed.model_qualification == expected.model_qualification
-                && observed.model_correlation == expected.model_correlation
                 && observed.corners == expected.corners
                 && observed.selected_corner == expected.selected_corner
                 && observed.version == expected.version

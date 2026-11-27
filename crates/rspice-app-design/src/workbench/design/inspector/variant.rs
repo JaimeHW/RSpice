@@ -872,8 +872,7 @@ mod tests {
     #[test]
     fn the_section_row_offers_the_substitute_models_sections_and_keeps_the_pick() {
         use crate::state::model_library::{
-            DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelSectionDefinition,
-            ModelSectionQualification, ModelType,
+            DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelSectionDefinition, ModelType,
         };
         use crate::state::{AssemblyVariantDraft, ComponentType, Point, VariantQualificationPlan};
         use crate::workbench::framework::feature::harness::FeatureHarness;
@@ -897,7 +896,6 @@ mod tests {
                         parent: None,
                         overrides: BTreeMap::new(),
                         model_files: Vec::new(),
-                        qualification: ModelSectionQualification::Unqualified,
                     })
                     .into(),
                 statistics: Default::default(),

@@ -7,17 +7,12 @@
 use super::*;
 use crate::product::ContentDigest;
 use crate::product::ObjectRevision;
+use crate::state::model_library::{CornerSectionBinding, CornerSectionDomain};
 use crate::state::model_library::{
-    CornerSectionBinding, CornerSectionDomain, CorrelationDatasetClass, CorrelationDatasetRevision,
-    CorrelationSuite,
-};
-use crate::state::model_library::{
-    ModelCorrelationState, ModelQualificationState, ModelSectionQualification, ModelSourceContent,
-    ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin, ProjectModelDefinition,
+    ModelSourceContent, ModelSourceEdge, ModelSourcePin, ProjectModelDefinition,
     ProjectModelRevisionDefinition, is_portable_absolute_path,
 };
 use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind, AnalysisLifecycleState};
-use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 use rspice_project::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
@@ -321,81 +316,14 @@ fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
         .expect("create project model");
     let expected_bytes = committed.after.source_contents[0].bytes.clone();
     let expected_authority = committed.after.source_authority;
-    let ModelSourceAuthority::ProjectOwned {
-        source_id,
-        revision: _,
-        ..
-    } = expected_authority
-    else {
-        panic!("project model must be source-bound");
-    };
-    let model = &committed.after.models["owned_nch"];
-    let definition = ProjectModelRevisionDefinition::new(
-        ProjectModelDefinition::from_device_model(model),
-        committed.after.model_definition_metadata["owned_nch"].clone(),
-    );
-    let canonical = definition.canonical_source().unwrap();
-    let model_digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
-    let model_revision = definition
-        .project_source_identity()
-        .unwrap()
-        .expect("project source identity")
-        .revision;
-    let source = ModelSourceEvidenceBinding::try_new_project_bound(
-        "owned_nch",
-        source_id,
-        model_digest,
-        model_revision,
-    )
-    .unwrap();
-    let reference = CorrelationDatasetRevision::try_from_csv(CorrelationDatasetImport {
-        id: "bench-reference".to_owned(),
-        revision: crate::product::ObjectRevision::INITIAL,
-        name: "Bench reference".to_owned(),
-        class: CorrelationDatasetClass::BenchMeasurement,
-        authority: "test lab".to_owned(),
-        device_or_lot: "lot-1".to_owned(),
-        fixture: "fixture-1".to_owned(),
-        calibration: "calibration-1".to_owned(),
-        source_name: "bench.csv".to_owned(),
-        raw_source: b"id,quantity,value,unit\nr1,gain,1,V\n".to_vec(),
-        model_source: None,
-        simulation_provenance: None,
-    })
-    .unwrap();
-    let suite = CorrelationSuite::try_new(CorrelationSuiteInput {
-        id: "owned-nch-correlation".to_owned(),
-        revision: crate::product::ObjectRevision::INITIAL,
-        name: "Owned NCH correlation".to_owned(),
-        owner_id: "model-owner".to_owned(),
-        source,
-        datasets: vec![reference],
-        metrics: Vec::new(),
-        dispositions: Vec::new(),
-    })
-    .unwrap();
-    let expected_correlation = ModelCorrelationState::try_new(vec![suite], Vec::new()).unwrap();
-    manager
-        .get_library_mut("owned-models")
-        .unwrap()
-        .model_correlation
-        .insert("owned_nch".to_owned(), expected_correlation.clone());
-    let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
-    let mut foreign_evidence = context.clone();
-    foreign_evidence.model_libraries[0]
-        .model_correlation
-        .get_mut("owned_nch")
-        .unwrap()
-        .suites[0]
-        .source
-        .source_id = Some(crate::product::ModelSourceId::new());
-    let error = foreign_evidence
-        .validate()
-        .expect_err("foreign project source identity must be rejected");
     assert!(
-        error.contains("different project source identity"),
-        "{error}"
+        matches!(
+            expected_authority,
+            ModelSourceAuthority::ProjectOwned { .. }
+        ),
+        "project model must be source-bound"
     );
+    let context = context_from_state(&SimSetupState::new(), &manager).expect("context validates");
     let json = serde_json::to_string(&context).expect("context serializes");
     let restored: ProjectExecutionContext =
         serde_json::from_str(&json).expect("context deserializes");
@@ -403,14 +331,6 @@ fn project_owned_model_round_trip_preserves_authority_bytes_and_revision() {
         crate::io::restore_execution_context(restored).expect("project-owned model restores");
 
     assert!(warnings.is_empty(), "{warnings:?}");
-    assert_eq!(
-        restored_manager
-            .get_library("owned-models")
-            .unwrap()
-            .model_correlation
-            .get("owned_nch"),
-        Some(&expected_correlation)
-    );
     let library = restored_manager
         .get_library("owned-models")
         .expect("library restored");
@@ -542,15 +462,10 @@ fn project_model_identity_is_bound_to_its_member_digest_and_independent_revision
             parent: None,
             overrides: std::collections::BTreeMap::new(),
             model_files: Vec::new(),
-            qualification: ModelSectionQualification::Unqualified,
         });
     let revision = ProjectModelRevisionDefinition::new(definition, metadata);
     manager
-        .create_project_model_revision(
-            "sectioned-model",
-            &revision,
-            &ModelQualificationState::default(),
-        )
+        .create_project_model_revision("sectioned-model", &revision)
         .expect("sectioned source is published");
     let library = manager
         .get_library_mut("sectioned-model")
@@ -698,90 +613,6 @@ fn project_owned_load_rejects_a_tampered_serialized_model_projection() {
         .validate()
         .expect_err("serialized projection cannot diverge from retained model cards");
     assert!(error.contains("not an exact projection"), "{error}");
-}
-
-#[test]
-fn project_load_rejects_qualified_section_without_exact_retained_evidence() {
-    let definition = crate::state::model_library::ProjectModelDefinition {
-        name: "owned_nch".to_owned(),
-        spice_type: "NMOS".to_owned(),
-        description: "Persisted project model".to_owned(),
-        numeric_parameters: std::collections::BTreeMap::from([
-            ("level".to_owned(), 1.0),
-            ("kp".to_owned(), 0.001),
-        ]),
-        string_parameters: std::collections::BTreeMap::new(),
-    };
-    let mut manager = ModelLibraryManager::new();
-    manager
-        .create_project_model("owned-models", &definition)
-        .expect("create project model");
-    let mut context =
-        context_from_state(&SimSetupState::new(), &manager).expect("base context validates");
-    let library = context
-        .model_libraries
-        .iter_mut()
-        .find(|library| library.name == "owned-models")
-        .expect("project model library persists");
-    let ModelSourceAuthority::ProjectOwned {
-        source_id,
-        revision,
-        digest,
-    } = library.source_authority
-    else {
-        panic!("fixture source is project-owned");
-    };
-    library
-        .model_definition_metadata
-        .get_mut("owned_nch")
-        .expect("fixture metadata")
-        .sections
-        .push(crate::state::model_library::ModelSectionDefinition {
-            name: "TT".to_owned(),
-            parent: None,
-            overrides: std::collections::BTreeMap::new(),
-            model_files: vec![crate::state::model_library::ModelFileIdentity {
-                source_id: source_id.to_string(),
-                revision: revision.get(),
-                content_digest: digest.to_string(),
-                display_name: "definition.model".to_owned(),
-            }],
-            qualification: ModelSectionQualification::Qualified {
-                evidence_digest: Some("0".repeat(64)),
-            },
-        });
-    let bound = ProjectModelRevisionDefinition::new(
-        ProjectModelDefinition::from_device_model(&library.models["owned_nch"]),
-        library.model_definition_metadata["owned_nch"].clone(),
-    )
-    .bind_project_source_identity(source_id, revision, "definition.model")
-    .expect("fixture section identity binds to its canonical model digest");
-    let canonical_source = bound
-        .canonical_source()
-        .expect("fixture canonical source renders")
-        .into_bytes();
-    let identity = bound
-        .project_source_identity()
-        .expect("fixture source identity validates")
-        .expect("sectioned fixture has a source identity");
-    library
-        .model_definition_metadata
-        .insert("owned_nch".to_owned(), bound.metadata);
-    library.source_authority = ModelSourceAuthority::ProjectOwned {
-        source_id,
-        revision,
-        digest: identity.content_digest,
-    };
-    library.source_closure[0].digest = identity.content_digest;
-    library.source_contents[0].bytes = canonical_source;
-
-    let error = context
-        .validate()
-        .expect_err("a qualified section cannot invent its evidence digest");
-    assert!(
-        error.contains("claims qualified evidence without a retained qualification record"),
-        "{error}"
-    );
 }
 
 #[test]
@@ -1115,8 +946,6 @@ fn foreign_platform_source_binding_is_retained_without_filesystem_probe() {
             section_models: HashMap::new(),
             subcircuits: HashMap::new(),
             model_definition_metadata: HashMap::new(),
-            model_qualification: HashMap::new(),
-            model_correlation: HashMap::new(),
             corners: HashMap::new(),
             selected_corner: None,
             version: String::new(),
@@ -1190,8 +1019,6 @@ fn source_ordering_is_enforced_for_either_desktop_path_syntax() {
                     section_models: HashMap::new(),
                     subcircuits: HashMap::new(),
                     model_definition_metadata: HashMap::new(),
-                    model_qualification: HashMap::new(),
-                    model_correlation: HashMap::new(),
                     corners: HashMap::new(),
                     selected_corner: None,
                     version: String::new(),
@@ -1296,8 +1123,6 @@ fn disconnected_source_subgraph_is_rejected_even_when_every_member_has_an_edge()
             section_models: HashMap::new(),
             subcircuits: HashMap::new(),
             model_definition_metadata: HashMap::new(),
-            model_qualification: HashMap::new(),
-            model_correlation: HashMap::new(),
             corners: HashMap::new(),
             selected_corner: None,
             version: String::new(),

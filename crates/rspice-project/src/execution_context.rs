@@ -8,24 +8,20 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
-use rspice_model_library::correlation::ModelCorrelationState;
-use rspice_model_library::qualification::{ModelQualificationState, ModelSourceEvidenceBinding};
 use rspice_model_library::{ModelCatalog, ModelResolutionRecords};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use rspice_model_library::{
     DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelResolutionRecord,
-    ModelSectionQualification, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge,
-    ModelSourcePin, ModelSubcircuitInterface, ModelType, ModelValidationReceipt, ParameterDataType,
-    ParameterValue, ProcessCorner as LibraryProcessCorner, ProjectModelDefinition,
-    ProjectModelRevisionDefinition, RetainedClosure, first_unreachable_source,
-    is_portable_absolute_path, subcircuit_interface_key,
+    ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
+    ModelSubcircuitInterface, ModelType, ModelValidationReceipt, ParameterDataType, ParameterValue,
+    ProcessCorner as LibraryProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
+    RetainedClosure, first_unreachable_source, is_portable_absolute_path, subcircuit_interface_key,
 };
 use rspice_simulation_contract::setup_state::SimulationSetup;
-use rspice_vocabulary::product::ContentDigest;
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 18;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 19;
 
 /// Versioned, project-owned inputs required to reproduce a simulation plan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,10 +78,6 @@ pub struct ProjectModelLibrary {
     pub subcircuits: HashMap<String, ModelSubcircuitInterface>,
     #[serde(default)]
     pub model_definition_metadata: HashMap<String, ModelDefinitionMetadata>,
-    #[serde(default)]
-    pub model_qualification: HashMap<String, ModelQualificationState>,
-    #[serde(default)]
-    pub model_correlation: HashMap<String, ModelCorrelationState>,
     pub corners: HashMap<String, LibraryProcessCorner>,
     pub selected_corner: Option<String>,
     pub version: String,
@@ -232,8 +224,6 @@ impl From<&ModelLibrary> for ProjectModelLibrary {
             section_models: library.section_models.clone(),
             subcircuits: library.subcircuits.clone(),
             model_definition_metadata: library.model_definition_metadata.clone(),
-            model_qualification: library.model_qualification.clone(),
-            model_correlation: library.model_correlation.clone(),
             corners: library.corners.clone(),
             selected_corner: library.selected_corner.clone(),
             version: library.version.clone(),
@@ -346,8 +336,6 @@ impl ProjectModelLibrary {
             section_models: self.section_models,
             subcircuits: self.subcircuits,
             model_definition_metadata: self.model_definition_metadata,
-            model_qualification: self.model_qualification,
-            model_correlation: self.model_correlation,
             corners: self.corners,
             selected_corner: self.selected_corner,
             version: self.version,
@@ -1156,9 +1144,9 @@ fn validate_authenticated_source_projection(
     library: &ProjectModelLibrary,
     source_paths: &HashSet<&PathBuf>,
 ) -> Result<(), String> {
-    // Authoring evidence is a narrower semantic contract than the derived
-    // section-catalog maps. Diagnose an invented qualification first even if
-    // the same tampered draft also changed the canonical source projection.
+    // Authoring records are a narrower semantic contract than the derived
+    // section-catalog maps. Diagnose an invented record first even if the
+    // same tampered draft also changed the canonical source projection.
     validate_model_authoring_records(context, library)?;
     let root = library
         .root_path
@@ -1423,62 +1411,6 @@ fn validate_model_authoring_records(
         }
     }
 
-    let mut qualification_names = HashSet::with_capacity(library.model_qualification.len());
-    for (model_name, qualification) in &library.model_qualification {
-        if !qualification_names.insert(model_name.to_ascii_lowercase()) {
-            return Err(format!(
-                "{context}.model_qualification contains duplicate case-insensitive model names"
-            ));
-        }
-        if !library.models.contains_key(model_name) {
-            return Err(format!(
-                "{context}.model_qualification['{model_name}'] has no exact model projection"
-            ));
-        }
-        qualification
-            .validate_for_model(model_name)
-            .map_err(|error| {
-                format!("{context}.model_qualification['{model_name}'] is invalid: {error}")
-            })?;
-    }
-
-    let mut correlation_names = HashSet::with_capacity(library.model_correlation.len());
-    for (model_name, correlation) in &library.model_correlation {
-        if !correlation_names.insert(model_name.to_ascii_lowercase()) {
-            return Err(format!(
-                "{context}.model_correlation contains duplicate case-insensitive model names"
-            ));
-        }
-        if !library.models.contains_key(model_name) {
-            return Err(format!(
-                "{context}.model_correlation['{model_name}'] has no exact model projection"
-            ));
-        }
-        correlation
-            .validate_for_model(model_name)
-            .map_err(|error| {
-                format!("{context}.model_correlation['{model_name}'] is invalid: {error}")
-            })?;
-        let ModelSourceAuthority::ProjectOwned { source_id, .. } = library.source_authority else {
-            return Err(format!(
-                "{context}.model_correlation['{model_name}'] requires a project-owned source authority"
-            ));
-        };
-        if correlation
-            .suites
-            .iter()
-            .any(|suite| suite.source.source_id != Some(source_id))
-            || correlation
-                .evidence
-                .iter()
-                .any(|evidence| evidence.source.source_id != Some(source_id))
-        {
-            return Err(format!(
-                "{context}.model_correlation['{model_name}'] contains evidence from a different project source identity"
-            ));
-        }
-    }
-
     for (model_name, metadata) in &library.model_definition_metadata {
         if metadata.source_identity.is_none() && metadata.sections.is_empty() {
             continue;
@@ -1549,57 +1481,6 @@ fn validate_model_authoring_records(
                 "{context}.models['{model_name}'] canonical definition must occur exactly once in authenticated source '{}' (found {occurrences})",
                 model_path.display()
             ));
-        }
-
-        let source = ModelSourceEvidenceBinding::try_new_project_bound(
-            model_name,
-            identity.source_id,
-            identity.content_digest,
-            identity.revision,
-        )
-        .map_err(|error| {
-            format!(
-                "{context}.model_definition_metadata['{model_name}'] has an invalid evidence source binding: {error}"
-            )
-        })?;
-        for section in &metadata.sections {
-            let ModelSectionQualification::Qualified { evidence_digest } = &section.qualification
-            else {
-                continue;
-            };
-            let qualification = library.model_qualification.get(model_name).ok_or_else(|| {
-                format!(
-                    "{context}.model_definition_metadata['{model_name}'].sections['{}'] claims qualified evidence without a retained qualification record",
-                    section.name
-                )
-            })?;
-            let evidence_digest = evidence_digest
-                .as_deref()
-                .ok_or_else(|| {
-                    format!(
-                        "{context}.model_definition_metadata['{model_name}'].sections['{}'] is qualified without an evidence digest",
-                        section.name
-                    )
-                })?
-                .parse::<ContentDigest>()
-                .map_err(|error| {
-                    format!(
-                        "{context}.model_definition_metadata['{model_name}'].sections['{}'] has an invalid evidence digest: {error}",
-                        section.name
-                    )
-                })?;
-            qualification
-                .validate_exact_section_evidence_digest(
-                    &source,
-                    &section.name,
-                    evidence_digest,
-                )
-                .map_err(|error| {
-                    format!(
-                        "{context}.model_definition_metadata['{model_name}'].sections['{}'] does not resolve to passing evidence for the exact canonical model source: {error}",
-                        section.name
-                    )
-                })?;
         }
     }
     Ok(())

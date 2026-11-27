@@ -118,15 +118,6 @@ impl AppState {
         );
     }
 
-    /// The parts opening a model in the editor writes.
-    #[cfg(test)]
-    pub(crate) fn model_editor_parts(
-        &mut self,
-    ) -> rspice_app_models::workbench::documents::model_editor::ModelEditorParts<'_> {
-        self.models
-            .model_editor_parts(&mut self.model, &mut self.workbench, &self.platform)
-    }
-
     /// The parts the results workspace's predicates read.
     pub(crate) fn results_reads(&self) -> ResultsReads<'_> {
         self.results.reads(&self.model, &self.workbench)

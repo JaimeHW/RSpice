@@ -37,11 +37,11 @@ use rspice_model_library::{
 #[cfg(any(test, feature = "test-support"))]
 use super::ProjectModelDefinition;
 use super::{
-    DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
-    ModelSourceAuthority, ModelType, ProcessCorner, ProjectModelRevisionDefinition,
+    DeviceModel, ModelLibrary, ModelSourceAuthority, ModelType, ProcessCorner,
+    ProjectModelRevisionDefinition,
 };
 #[cfg(test)]
-use super::{ModelLevel, ModelSourceEdge, ModelSourceEvidenceBinding, ModelSourcePin};
+use super::{ModelLevel, ModelSourceEdge, ModelSourcePin};
 use crate::product::{ContentDigest, ModelSourceId, ObjectRevision};
 #[cfg(test)]
 use rspice_model_library::CornerModelBinding;

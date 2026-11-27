@@ -5,11 +5,9 @@
 //! was — there is no partially-created model and no half-applied revision.
 
 use super::ModelCatalog;
-use crate::correlation::ModelCorrelationState;
-use crate::qualification::{ModelQualificationState, ModelSourceEvidenceBinding};
 use crate::{
-    DeviceModel, ModelLibrary, ModelSectionQualification, ModelSourceAuthority, ModelSourceContent,
-    ModelSourcePin, ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
+    DeviceModel, ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourcePin,
+    ProcessCorner, ProjectModelDefinition, ProjectModelRevisionDefinition,
 };
 use rspice_vocabulary::product::{ContentDigest, ModelSourceId, ObjectRevision};
 use sha2::{Digest as _, Sha256};
@@ -22,12 +20,11 @@ pub struct ProjectModelCommit {
     pub model_name: String,
     pub before: Option<ModelLibrary>,
     pub after: ModelLibrary,
-    /// Definition/source changes invalidate downstream execution; evidence-
-    /// only commits do not alter the executable model closure.
+    /// Whether the commit changes the executable model closure.
     pub affects_execution: bool,
 }
 
-/// Exact source revision selected when an edit or evidence review begins.
+/// Exact source revision selected when an edit begins.
 #[derive(Debug, Clone, Copy)]
 pub struct ProjectModelTarget<'a> {
     pub library_name: &'a str,
@@ -43,9 +40,7 @@ impl ModelCatalog {
     /// external or built-in catalog model.
     ///
     /// The copy preserves the source model's editable typed metadata and its
-    /// PDK/technology provenance, but deliberately starts with no qualification
-    /// or correlation evidence: those records are bound to the original source
-    /// identity and cannot authenticate a newly-owned revision.
+    /// PDK/technology provenance.
     pub fn create_editable_project_copy(
         &mut self,
         source_library_name: &str,
@@ -89,14 +84,9 @@ impl ModelCatalog {
         metadata.source_identity = None;
         for section in &mut metadata.sections {
             section.model_files.clear();
-            section.qualification = ModelSectionQualification::Unqualified;
         }
         let definition = ProjectModelRevisionDefinition::new(base, metadata);
-        let mut commit = self.create_project_model_revision(
-            project_library_name,
-            &definition,
-            &ModelQualificationState::default(),
-        )?;
+        let mut commit = self.create_project_model_revision(project_library_name, &definition)?;
 
         let project_library = self
             .get_library_mut(project_library_name)
@@ -119,7 +109,6 @@ impl ModelCatalog {
         &mut self,
         library_name: &str,
         definition: &ProjectModelRevisionDefinition,
-        qualification: &ModelQualificationState,
     ) -> Result<ProjectModelCommit, String> {
         validate_project_library_name(library_name)?;
         if let Some(existing) = self
@@ -141,7 +130,6 @@ impl ModelCatalog {
             revision,
             root,
             definition,
-            qualification,
         )?;
         let model_name = definition.base.name.clone();
         self.libraries
@@ -164,7 +152,6 @@ impl ModelCatalog {
         &mut self,
         target: ProjectModelTarget<'_>,
         definition: &ProjectModelRevisionDefinition,
-        qualification: &ModelQualificationState,
     ) -> Result<ProjectModelCommit, String> {
         let ProjectModelTarget {
             library_name,
@@ -283,7 +270,7 @@ impl ModelCatalog {
                     .map(str::to_owned)
             })
             .unwrap_or_else(|| format!("{library_name}.model"));
-        let mut bound = definition
+        let bound = definition
             .clone()
             .bind_project_source_identity(source_id, next_model_revision, display_name)
             .map_err(|error| format!("Project model revision is invalid: {error}"))?;
@@ -293,63 +280,15 @@ impl ModelCatalog {
         bound
             .verify_source_round_trip(&new_source)
             .map_err(|error| format!("Project model source is invalid: {error}"))?;
-        let identity = bound
+        bound
             .project_source_identity()
             .map_err(|error| format!("Project model source identity is invalid: {error}"))?
             .ok_or_else(|| "Project model source identity was not bound".to_owned())?;
-        for section in &mut bound.metadata.sections {
-            if !matches!(
-                section.qualification,
-                ModelSectionQualification::Unqualified
-            ) {
-                section.qualification = ModelSectionQualification::Unqualified;
-            }
-        }
-        qualification
-            .validate_for_model(&bound.base.name)
-            .map_err(|error| format!("Project model qualification is invalid: {error}"))?;
-        let current_source = ModelSourceEvidenceBinding::try_new_project_bound(
-            &bound.base.name,
-            source_id,
-            identity.content_digest,
-            next_model_revision,
-        )
-        .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-        let retained_qualification = qualification
-            .reconcile_after_source_revision(&current_source)
-            .map_err(|error| {
-                format!("Project model qualification migration is invalid: {error}")
-            })?;
-        bound
-            .metadata
-            .validate_section_qualification_evidence(&retained_qualification, &current_source)?;
         if bound.base.name != expected_model_name && before.models.contains_key(&bound.base.name) {
             return Err(format!(
                 "Model '{}' already exists in library '{library_name}'",
                 bound.base.name
             ));
-        }
-        if bound.base.name != expected_model_name
-            && before
-                .model_qualification
-                .get(expected_model_name)
-                .is_some_and(|retained| *retained != ModelQualificationState::default())
-        {
-            return Err(
-                "A qualified model cannot be renamed without an explicit release-lineage migration"
-                    .to_owned(),
-            );
-        }
-        if bound.base.name != expected_model_name
-            && before
-                .model_correlation
-                .get(expected_model_name)
-                .is_some_and(|retained| *retained != ModelCorrelationState::default())
-        {
-            return Err(
-                "A model with correlation history cannot be renamed without an explicit evidence-lineage migration"
-                    .to_owned(),
-            );
         }
 
         let mut parser = rspice_core_netlist::library::LibParser::new(
@@ -405,15 +344,6 @@ impl ModelCatalog {
         after
             .model_definition_metadata
             .insert(bound.base.name.clone(), bound.metadata.clone());
-        after.model_qualification.remove(expected_model_name);
-        if retained_qualification != ModelQualificationState::default() {
-            after
-                .model_qualification
-                .insert(bound.base.name.clone(), retained_qualification);
-        }
-        if bound.base.name != expected_model_name {
-            after.model_correlation.remove(expected_model_name);
-        }
         after.version = next_library_revision.get().to_string();
         self.libraries
             .insert(library_name.to_owned(), after.clone());
@@ -426,362 +356,13 @@ impl ModelCatalog {
         })
     }
 
-    /// Replace only the qualification/release aggregate for an exact
-    /// project-owned model source. The source identity, bytes, digest, and
-    /// revision remain unchanged so newly produced evidence does not become
-    /// stale as a side effect of persisting it.
-    pub fn replace_project_model_qualification(
-        &mut self,
-        target: ProjectModelTarget<'_>,
-        qualification: &ModelQualificationState,
-    ) -> Result<ProjectModelCommit, String> {
-        let ProjectModelTarget {
-            library_name,
-            source_id: expected_source_id,
-            library_revision: expected_library_revision,
-            model_revision: expected_model_revision,
-            model_name,
-            model_digest: expected_model_digest,
-        } = target;
-
-        let before = self
-            .libraries
-            .get(library_name)
-            .cloned()
-            .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
-        let ModelSourceAuthority::ProjectOwned {
-            source_id,
-            revision,
-            ..
-        } = before.source_authority
-        else {
-            return Err(format!(
-                "Model library '{library_name}' is not project-owned; create an editable project copy before changing it"
-            ));
-        };
-        if source_id != expected_source_id || revision != expected_library_revision {
-            return Err(format!(
-                "Model library '{library_name}' changed after qualification began; rerun against the current source revision"
-            ));
-        }
-        before.validate_project_owned_retained_closure()?;
-        let Some(model) = before.models.get(model_name) else {
-            return Err(format!(
-                "Model library '{library_name}' does not contain model '{model_name}'"
-            ));
-        };
-        let metadata = before
-            .model_definition_metadata
-            .get(model_name)
-            .ok_or_else(|| {
-                format!("Model '{model_name}' has no typed project-owned definition metadata")
-            })?;
-        let definition = ProjectModelRevisionDefinition::new(
-            ProjectModelDefinition::from_device_model(model),
-            metadata.clone(),
-        );
-        let canonical = definition
-            .canonical_source()
-            .map_err(|error| format!("Retained model revision is invalid: {error}"))?;
-        let model_digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
-        let model_identity = definition
-            .project_source_identity()
-            .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-        let model_revision = model_identity
-            .as_ref()
-            .map_or(revision, |identity| identity.revision);
-        if model_identity
-            .as_ref()
-            .is_some_and(|identity| identity.source_id != source_id)
-            || model_revision != expected_model_revision
-            || model_digest != expected_model_digest
-        {
-            return Err(format!(
-                "Model '{model_name}' changed after qualification began; rerun against the current source revision"
-            ));
-        }
-        let source_path = model.file_path.as_ref().ok_or_else(|| {
-            format!("Model '{model_name}' has no retained source-file projection")
-        })?;
-        let source_bytes = before
-            .source_contents
-            .iter()
-            .find(|content| content.path == *source_path)
-            .map(|content| content.bytes.as_slice())
-            .ok_or_else(|| {
-                format!(
-                    "Model '{model_name}' points outside the retained source closure at '{}'",
-                    source_path.display()
-                )
-            })?;
-        let occurrences = exact_subslice_offsets(source_bytes, canonical.as_bytes()).len();
-        if occurrences != 1 {
-            return Err(format!(
-                "Model '{model_name}' canonical revision must occur exactly once in retained source '{}' (found {occurrences})",
-                source_path.display()
-            ));
-        }
-        qualification
-            .validate_for_model(model_name)
-            .map_err(|error| format!("Project model qualification is invalid: {error}"))?;
-        let current_source = ModelSourceEvidenceBinding::try_new_project_bound(
-            model_name,
-            source_id,
-            model_digest,
-            model_revision,
-        )
-        .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-        metadata.validate_section_qualification_evidence(qualification, &current_source)?;
-        let retained = before
-            .model_qualification
-            .get(model_name)
-            .cloned()
-            .unwrap_or_default();
-        if retained == *qualification {
-            return Err("Model qualification has no semantic changes to save".to_owned());
-        }
-
-        let mut after = before.clone();
-        if *qualification == ModelQualificationState::default() {
-            after.model_qualification.remove(model_name);
-        } else {
-            after
-                .model_qualification
-                .insert(model_name.to_owned(), qualification.clone());
-        }
-        self.libraries
-            .insert(library_name.to_owned(), after.clone());
-        Ok(ProjectModelCommit {
-            library_name: library_name.to_owned(),
-            model_name: model_name.to_owned(),
-            before: Some(before),
-            after,
-            affects_execution: false,
-        })
-    }
-
-    /// Replace only the measurement-correlation aggregate for an exact
-    /// project-owned model source. Source bytes and revisions remain
-    /// unchanged; historical suites may remain retained while every new suite
-    /// binds the exact source revision selected by its author.
-    pub fn replace_project_model_correlation(
-        &mut self,
-        target: ProjectModelTarget<'_>,
-        correlation: &ModelCorrelationState,
-    ) -> Result<ProjectModelCommit, String> {
-        let ProjectModelTarget {
-            library_name,
-            source_id: expected_source_id,
-            library_revision: expected_library_revision,
-            model_revision: expected_model_revision,
-            model_name,
-            model_digest: expected_model_digest,
-        } = target;
-
-        let before = self
-            .libraries
-            .get(library_name)
-            .cloned()
-            .ok_or_else(|| format!("Model library '{library_name}' does not exist"))?;
-        let ModelSourceAuthority::ProjectOwned {
-            source_id,
-            revision,
-            ..
-        } = before.source_authority
-        else {
-            return Err(format!(
-                "Model library '{library_name}' is not project-owned; create an editable project copy before changing it"
-            ));
-        };
-        if source_id != expected_source_id || revision != expected_library_revision {
-            return Err(format!(
-                "Model library '{library_name}' changed after correlation review began; reload the current source revision"
-            ));
-        }
-        before.validate_project_owned_retained_closure()?;
-        let model = before.models.get(model_name).ok_or_else(|| {
-            format!("Model library '{library_name}' does not contain model '{model_name}'")
-        })?;
-        let metadata = before
-            .model_definition_metadata
-            .get(model_name)
-            .ok_or_else(|| {
-                format!("Model '{model_name}' has no typed project-owned definition metadata")
-            })?;
-        let definition = ProjectModelRevisionDefinition::new(
-            ProjectModelDefinition::from_device_model(model),
-            metadata.clone(),
-        );
-        let canonical = definition
-            .canonical_source()
-            .map_err(|error| format!("Retained model revision is invalid: {error}"))?;
-        let model_digest = ContentDigest::from_bytes(Sha256::digest(canonical.as_bytes()).into());
-        let model_identity = definition
-            .project_source_identity()
-            .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-        let model_revision = model_identity
-            .as_ref()
-            .map_or(revision, |identity| identity.revision);
-        if model_identity
-            .as_ref()
-            .is_some_and(|identity| identity.source_id != source_id)
-            || model_revision != expected_model_revision
-            || model_digest != expected_model_digest
-        {
-            return Err(format!(
-                "Model '{model_name}' changed after correlation review began; reload the current source revision"
-            ));
-        }
-        let source_path = model.file_path.as_ref().ok_or_else(|| {
-            format!("Model '{model_name}' has no retained source-file projection")
-        })?;
-        let source_bytes = before
-            .source_contents
-            .iter()
-            .find(|content| content.path == *source_path)
-            .map(|content| content.bytes.as_slice())
-            .ok_or_else(|| {
-                format!(
-                    "Model '{model_name}' points outside the retained source closure at '{}'",
-                    source_path.display()
-                )
-            })?;
-        let occurrences = exact_subslice_offsets(source_bytes, canonical.as_bytes()).len();
-        if occurrences != 1 {
-            return Err(format!(
-                "Model '{model_name}' canonical revision must occur exactly once in retained source '{}' (found {occurrences})",
-                source_path.display()
-            ));
-        }
-        correlation
-            .validate_for_model(model_name)
-            .map_err(|error| format!("Project model correlation state is invalid: {error}"))?;
-        let current_source = ModelSourceEvidenceBinding::try_new_project_bound(
-            model_name,
-            source_id,
-            model_digest,
-            model_revision,
-        )
-        .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-        let retained = before
-            .model_correlation
-            .get(model_name)
-            .cloned()
-            .unwrap_or_default();
-        if retained == *correlation {
-            return Err("Model correlation has no semantic changes to save".to_owned());
-        }
-        for existing in &retained.suites {
-            let replacement = correlation
-                .suites
-                .iter()
-                .find(|candidate| {
-                    candidate.id.eq_ignore_ascii_case(&existing.id)
-                        && candidate.revision == existing.revision
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "Correlation suite '{}@{}' is immutable and cannot be removed",
-                        existing.id,
-                        existing.revision.get()
-                    )
-                })?;
-            if replacement != existing {
-                return Err(format!(
-                    "Correlation suite '{}@{}' is immutable and cannot be replaced",
-                    existing.id,
-                    existing.revision.get()
-                ));
-            }
-        }
-        for existing in &retained.evidence {
-            let replacement = correlation
-                .evidence
-                .iter()
-                .find(|candidate| candidate.id.eq_ignore_ascii_case(&existing.id))
-                .ok_or_else(|| {
-                    format!(
-                        "Correlation evidence '{}' is immutable and cannot be removed",
-                        existing.id
-                    )
-                })?;
-            if replacement != existing {
-                return Err(format!(
-                    "Correlation evidence '{}' is immutable and cannot be replaced",
-                    existing.id
-                ));
-            }
-        }
-        for suite in correlation.suites.iter().filter(|candidate| {
-            !retained.suites.iter().any(|existing| {
-                existing.id.eq_ignore_ascii_case(&candidate.id)
-                    && existing.revision == candidate.revision
-            })
-        }) {
-            if suite.source != current_source {
-                return Err(format!(
-                    "New correlation suite '{}@{}' must bind the exact current model source revision",
-                    suite.id,
-                    suite.revision.get()
-                ));
-            }
-            if retained
-                .suites
-                .iter()
-                .filter(|existing| existing.id.eq_ignore_ascii_case(&suite.id))
-                .any(|existing| existing.revision >= suite.revision)
-            {
-                return Err(format!(
-                    "New correlation suite revision '{}@{}' does not advance retained history",
-                    suite.id,
-                    suite.revision.get()
-                ));
-            }
-        }
-        for evidence in correlation.evidence.iter().filter(|candidate| {
-            !retained
-                .evidence
-                .iter()
-                .any(|existing| existing.id.eq_ignore_ascii_case(&candidate.id))
-        }) {
-            if evidence.source != current_source {
-                return Err(format!(
-                    "New correlation evidence '{}' must bind the exact current model source revision",
-                    evidence.id
-                ));
-            }
-        }
-
-        let mut after = before.clone();
-        if *correlation == ModelCorrelationState::default() {
-            after.model_correlation.remove(model_name);
-        } else {
-            after
-                .model_correlation
-                .insert(model_name.to_owned(), correlation.clone());
-        }
-        self.libraries
-            .insert(library_name.to_owned(), after.clone());
-        Ok(ProjectModelCommit {
-            library_name: library_name.to_owned(),
-            model_name: model_name.to_owned(),
-            before: Some(before),
-            after,
-            affects_execution: false,
-        })
-    }
-
     fn build_new_project_model_library(
         library_name: &str,
         source_id: ModelSourceId,
         revision: ObjectRevision,
         root: PathBuf,
         definition: &ProjectModelRevisionDefinition,
-        qualification: &ModelQualificationState,
     ) -> Result<ModelLibrary, String> {
-        qualification
-            .validate_for_model(&definition.base.name)
-            .map_err(|error| format!("Project model qualification is invalid: {error}"))?;
         let bound = definition
             .clone()
             .bind_project_source_identity(source_id, revision, format!("{library_name}.model"))
@@ -796,21 +377,6 @@ impl ModelCatalog {
             .project_source_identity()
             .map_err(|error| format!("Project model source identity is invalid: {error}"))?
             .ok_or_else(|| "Project model source identity was not bound".to_owned())?;
-        let current_source = ModelSourceEvidenceBinding::try_new_project_bound(
-            &bound.base.name,
-            source_id,
-            identity.content_digest,
-            revision,
-        )
-        .map_err(|error| format!("Project model source identity is invalid: {error}"))?;
-        let retained_qualification = qualification
-            .reconcile_after_source_revision(&current_source)
-            .map_err(|error| {
-                format!("Project model qualification migration is invalid: {error}")
-            })?;
-        bound
-            .metadata
-            .validate_section_qualification_evidence(&retained_qualification, &current_source)?;
         let bytes = source.into_bytes();
 
         let mut parser = rspice_core_netlist::library::LibParser::new(
@@ -872,12 +438,6 @@ impl ModelCatalog {
         library
             .model_definition_metadata
             .insert(bound.base.name.clone(), bound.metadata.clone());
-        library.model_qualification.clear();
-        if retained_qualification != Default::default() {
-            library
-                .model_qualification
-                .insert(bound.base.name.clone(), retained_qualification);
-        }
         library.corners.clear();
         let selected_corner = bound
             .metadata

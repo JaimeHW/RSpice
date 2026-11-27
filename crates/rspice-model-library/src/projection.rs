@@ -178,8 +178,6 @@ impl ModelLibrary {
         self.section_models.clear();
         self.subcircuits.clear();
         self.model_definition_metadata.clear();
-        self.model_qualification.clear();
-        self.model_correlation.clear();
         self.corners.clear();
         self.selected_corner = None;
         self.skipped_definitions = skipped_definitions(result);

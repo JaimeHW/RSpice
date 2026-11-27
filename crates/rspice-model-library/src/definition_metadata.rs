@@ -12,9 +12,6 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use thiserror::Error;
 
-use crate::qualification::{ModelQualificationState, ModelSourceEvidenceBinding};
-use rspice_vocabulary::product::ContentDigest;
-
 /// Current persisted schema for [`ModelDefinitionMetadata`].
 pub const MODEL_DEFINITION_METADATA_SCHEMA_VERSION: u16 = 1;
 
@@ -198,15 +195,6 @@ pub struct ModelFileIdentity {
     pub display_name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum ModelSectionQualification {
-    Unqualified,
-    Pending,
-    Qualified { evidence_digest: Option<String> },
-    Failed { summary: String },
-}
-
 /// One process section and its delta from an optional parent section.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -215,7 +203,6 @@ pub struct ModelSectionDefinition {
     pub parent: Option<String>,
     pub overrides: BTreeMap<String, ParameterValue>,
     pub model_files: Vec<ModelFileIdentity>,
-    pub qualification: ModelSectionQualification,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -376,47 +363,6 @@ impl Default for ModelDefinitionMetadata {
 }
 
 impl ModelDefinitionMetadata {
-    /// Require each qualified section to name exact retained evidence for this source.
-    pub fn validate_section_qualification_evidence(
-        &self,
-        qualification: &ModelQualificationState,
-        source: &ModelSourceEvidenceBinding,
-    ) -> Result<(), String> {
-        for (index, section) in self.sections.iter().enumerate() {
-            let evidence_digest = match &section.qualification {
-                ModelSectionQualification::Qualified {
-                    evidence_digest: Some(evidence_digest),
-                } => evidence_digest,
-                ModelSectionQualification::Qualified {
-                    evidence_digest: None,
-                } => {
-                    return Err(format!(
-                        "Model section {:?} is qualified without an evidence digest",
-                        section.name
-                    ));
-                }
-                ModelSectionQualification::Unqualified
-                | ModelSectionQualification::Pending
-                | ModelSectionQualification::Failed { .. } => continue,
-            };
-            let evidence_digest = evidence_digest.parse::<ContentDigest>().map_err(|error| {
-                format!(
-                    "Model section {:?} has an invalid qualification evidence digest: {error}",
-                    section.name
-                )
-            })?;
-            qualification
-                .validate_exact_section_evidence_digest(source, &section.name, evidence_digest)
-                .map_err(|error| {
-                    format!(
-                        "Model section {:?} qualification at sections[{index}] is not backed by exact retained evidence: {error}",
-                        section.name
-                    )
-                })?;
-        }
-        Ok(())
-    }
-
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -608,7 +554,6 @@ impl ModelDefinitionMetadata {
                     );
                 }
             }
-            validate_qualification(&format!("{path}.qualification"), &section.qualification)?;
         }
 
         for (index, section) in self.sections.iter().enumerate() {
@@ -1009,27 +954,6 @@ fn validate_parameter_value(
         validate_display_text(path, value, false)?;
     }
     Ok(())
-}
-
-fn validate_qualification(
-    path: &str,
-    qualification: &ModelSectionQualification,
-) -> Result<(), DefinitionMetadataError> {
-    match qualification {
-        ModelSectionQualification::Qualified {
-            evidence_digest: Some(digest),
-        } => validate_sha256(&format!("{path}.evidence_digest"), digest),
-        ModelSectionQualification::Failed { summary } => {
-            validate_display_text(&format!("{path}.summary"), summary, false)
-        }
-        ModelSectionQualification::Qualified {
-            evidence_digest: None,
-        } => invalid(
-            &format!("{path}.evidence_digest"),
-            "a qualified model section requires the exact retained evidence digest",
-        ),
-        ModelSectionQualification::Unqualified | ModelSectionQualification::Pending => Ok(()),
-    }
 }
 
 fn validate_distribution(
@@ -1578,9 +1502,6 @@ mod tests {
                     parent: None,
                     overrides: BTreeMap::new(),
                     model_files: vec![file("base", 'a')],
-                    qualification: ModelSectionQualification::Qualified {
-                        evidence_digest: Some(digest('b')),
-                    },
                 },
                 ModelSectionDefinition {
                     name: "TT".to_owned(),
@@ -1590,7 +1511,6 @@ mod tests {
                         ParameterValue::Numeric(finite(0.4821)),
                     )]),
                     model_files: vec![file("tt", 'c')],
-                    qualification: ModelSectionQualification::Pending,
                 },
             ],
             statistics: StatisticalDefinition {
@@ -1829,16 +1749,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_bad_file_identity_and_qualification_evidence() {
+    fn rejects_bad_file_identity() {
         let mut metadata = valid_metadata();
         metadata.sections[0].model_files[0].content_digest = "ABC".to_owned();
         assert_invalid(&metadata, "sections[0].model_files[0].content_digest");
-
-        let mut metadata = valid_metadata();
-        metadata.sections[0].qualification = ModelSectionQualification::Failed {
-            summary: "".to_owned(),
-        };
-        assert_invalid(&metadata, "sections[0].qualification.summary");
     }
 
     #[test]

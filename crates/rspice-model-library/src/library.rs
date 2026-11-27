@@ -5,8 +5,6 @@
 //! cannot seal a run. The authority is carried with the model rather than
 //! inferred from its path.
 
-use crate::correlation::ModelCorrelationState;
-use crate::qualification::ModelQualificationState;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -42,8 +40,8 @@ pub fn sealed_model_sources(deck: &str) -> Vec<String> {
 /// External libraries are re-authenticated from the live filesystem for every
 /// native run. Project-owned sources and retained imports execute from their
 /// digest-checked bytes on every platform. A retained import remains
-/// read-only and does not acquire project-authoring or qualification metadata
-/// merely because its bytes travel with the project. Built-in catalogs have no
+/// read-only and does not acquire project-authoring metadata merely because
+/// its bytes travel with the project. Built-in catalogs have no
 /// source deck and therefore contribute no executable model cards through the
 /// source resolver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -338,16 +336,9 @@ pub struct ModelLibrary {
     pub subcircuits: HashMap<String, ModelSubcircuitInterface>,
     /// Project-owned typed authoring metadata keyed by exact model name.
     /// External and built-in libraries may omit it; its absence is displayed
-    /// honestly rather than synthesized into qualification claims.
+    /// honestly rather than synthesized.
     #[serde(default)]
     pub model_definition_metadata: HashMap<String, ModelDefinitionMetadata>,
-    /// Versioned qualification and release records keyed by exact model name.
-    #[serde(default)]
-    pub model_qualification: HashMap<String, ModelQualificationState>,
-    /// Versioned measurement-correlation suites and immutable reviewer
-    /// evidence keyed by exact model name.
-    #[serde(default)]
-    pub model_correlation: HashMap<String, ModelCorrelationState>,
     /// Process corners
     pub corners: HashMap<String, ProcessCorner>,
     /// Execution-active corner. The serialized field keeps its historical

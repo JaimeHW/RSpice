@@ -21,10 +21,9 @@ impl ModelLibraryManager {
         &mut self,
         library_name: &str,
         definition: &ProjectModelRevisionDefinition,
-        qualification: &ModelQualificationState,
     ) -> Result<ProjectModelCommit, String> {
         self.catalog
-            .create_project_model_revision(library_name, definition, qualification)
+            .create_project_model_revision(library_name, definition)
     }
 
     pub fn replace_project_model_revision_in_library(
@@ -36,7 +35,6 @@ impl ModelLibraryManager {
         expected_model_name: &str,
         expected_model_digest: ContentDigest,
         definition: &ProjectModelRevisionDefinition,
-        qualification: &ModelQualificationState,
     ) -> Result<ProjectModelCommit, String> {
         self.catalog.replace_project_model_revision_in_library(
             ProjectModelTarget {
@@ -48,53 +46,6 @@ impl ModelLibraryManager {
                 model_digest: expected_model_digest,
             },
             definition,
-            qualification,
-        )
-    }
-
-    pub fn replace_project_model_qualification(
-        &mut self,
-        library_name: &str,
-        expected_source_id: ModelSourceId,
-        expected_library_revision: ObjectRevision,
-        expected_model_revision: ObjectRevision,
-        expected_model_digest: ContentDigest,
-        model_name: &str,
-        qualification: &ModelQualificationState,
-    ) -> Result<ProjectModelCommit, String> {
-        self.catalog.replace_project_model_qualification(
-            ProjectModelTarget {
-                library_name,
-                source_id: expected_source_id,
-                library_revision: expected_library_revision,
-                model_revision: expected_model_revision,
-                model_name,
-                model_digest: expected_model_digest,
-            },
-            qualification,
-        )
-    }
-
-    pub fn replace_project_model_correlation(
-        &mut self,
-        library_name: &str,
-        expected_source_id: ModelSourceId,
-        expected_library_revision: ObjectRevision,
-        expected_model_revision: ObjectRevision,
-        expected_model_digest: ContentDigest,
-        model_name: &str,
-        correlation: &ModelCorrelationState,
-    ) -> Result<ProjectModelCommit, String> {
-        self.catalog.replace_project_model_correlation(
-            ProjectModelTarget {
-                library_name,
-                source_id: expected_source_id,
-                library_revision: expected_library_revision,
-                model_revision: expected_model_revision,
-                model_name,
-                model_digest: expected_model_digest,
-            },
-            correlation,
         )
     }
 }
@@ -111,7 +62,6 @@ impl ModelLibraryManager {
         self.create_project_model_revision(
             library_name,
             &ProjectModelRevisionDefinition::new(definition.clone(), metadata),
-            &ModelQualificationState::default(),
         )
     }
 }

@@ -181,13 +181,13 @@ impl ProjectModelRevisionDefinition {
         self.verify_parsed_source(source, &prepared)
     }
 
-    /// Render the exact standalone model card executed by a qualification
-    /// vector. `None` selects the top-level base card; a named section selects
-    /// that section's fully resolved effective card. The returned bytes are a
-    /// literal contiguous slice of [`Self::canonical_source`], allowing the
-    /// qualification domain to prove section selection without consulting
-    /// mutable manager state or reconstructing an override graph.
-    pub fn qualification_model_source(
+    /// Render the exact standalone model card of this revision. `None`
+    /// selects the top-level base card; a named section selects that section's
+    /// fully resolved effective card. The returned bytes are a literal
+    /// contiguous slice of [`Self::canonical_source`], so a caller can prove
+    /// section selection without consulting mutable manager state or
+    /// reconstructing an override graph.
+    pub fn standalone_model_source(
         &self,
         section: Option<&str>,
     ) -> Result<String, ProjectModelRevisionError> {
@@ -203,7 +203,7 @@ impl ProjectModelRevisionDefinition {
                     .iter()
                     .find(|candidate| candidate.name.eq_ignore_ascii_case(section_name))
                     .ok_or_else(|| ProjectModelRevisionError::Invalid {
-                        path: "qualification.section".to_owned(),
+                        path: "model_source.section".to_owned(),
                         message: format!("model section {section_name:?} does not exist"),
                     })?;
                 ProjectModelDefinition {
@@ -224,8 +224,8 @@ impl ProjectModelRevisionDefinition {
             .any(|bytes| bytes == source.as_bytes())
         {
             return invalid(
-                "qualification.model_source",
-                "qualification model card is not a literal member of the canonical source",
+                "model_source",
+                "standalone model card is not a literal member of the canonical source",
             );
         }
         Ok(source)
@@ -765,7 +765,7 @@ mod tests {
     use super::*;
     use crate::{
         FiniteF64, MODEL_DEFINITION_METADATA_SCHEMA_VERSION, ModelSectionDefinition,
-        ModelSectionQualification, ParameterDefinition, ParameterSource, StatisticalDefinition,
+        ParameterDefinition, ParameterSource, StatisticalDefinition,
     };
 
     fn finite(value: f64) -> FiniteF64 {
@@ -809,7 +809,6 @@ mod tests {
                 .map(|(name, value)| (name.to_owned(), value))
                 .collect(),
             model_files: vec![source.clone()],
-            qualification: ModelSectionQualification::Unqualified,
         }
     }
 
