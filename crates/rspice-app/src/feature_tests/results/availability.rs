@@ -1002,9 +1002,6 @@ fn every_sheet_opens_as_a_document_pane() {
     use rspice_app_results::workbench::documents::result_document::{
         create_document, show_persistent_document,
     };
-    use rspice_results::document_creation::ResultDocumentFamily;
-    use rspice_results::viewer_catalog::viewer_document;
-    use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
     for viewer in ResultViewer::all() {
         let viewer_id = viewer.viewer_document_id();
@@ -1014,28 +1011,18 @@ fn every_sheet_opens_as_a_document_pane() {
                 AnalysisType::Pss;
         }
         app.state.results.results.session.viewer = viewer;
-        let definition = viewer_document(viewer_id).expect("a catalogued viewer document");
-        let family = ResultDocumentFamily::ALL
-            .into_iter()
-            .find(|family| {
-                *family != ResultDocumentFamily::ReportPage && family.includes(definition)
-            })
-            .unwrap_or(ResultDocumentFamily::ReportPage);
-        app.state.results.create_result_document = CreateResultDocumentDialogState {
-            open: true,
-            name: format!("{viewer:?} review"),
-            name_touched: true,
-            dataset_id: app
-                .state
-                .model
-                .simulation
-                .active_run()
-                .map(|run| run.dataset_id),
-            family_id: family.id().to_owned(),
-            viewer_id: viewer_id.to_owned(),
-            layout_id: "single-pane".to_owned(),
-            validation_error: None,
-        };
+        app.state.results.create_result_document =
+            rspice_app_results::workbench::documents::result_document::create_document::draft_over(
+                app.state.results_reads(),
+                format!("{viewer:?} review"),
+                app.state
+                    .model
+                    .simulation
+                    .active_run()
+                    .map(|run| run.dataset_id),
+                viewer_id.to_owned(),
+                rspice_results::document_creation::ResultDocumentLayout::SinglePane,
+            );
         let document_id = create_document::commit(&mut app.state.results_parts())
             .unwrap_or_else(|error| panic!("{viewer:?} cannot be a document pane: {error}"));
         let ctx = egui::Context::default();

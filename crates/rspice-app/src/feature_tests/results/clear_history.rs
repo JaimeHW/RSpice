@@ -11,7 +11,6 @@ use rspice_app_state::state::{
     AnalysisResult, AnalysisType, RetainedTrace, RunRetention, SimulationRun,
     SimulationRunLifecycle,
 };
-use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
 fn completed_run(id: u64) -> SimulationRun {
     let mut run = SimulationRun::new(id);
@@ -127,16 +126,14 @@ fn clearing_keeps_a_pinned_run_and_a_run_a_saved_document_reads() {
             .simulation
             .set_run_retention(pinned.run_id, RunRetention::GoldenBaseline)
     );
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Saved review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(read.dataset_id),
-        family_id: "waveform-worksheet".to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: "single-pane".to_owned(),
-        validation_error: None,
-    };
+    app.state.results.create_result_document =
+        rspice_app_results::workbench::documents::result_document::create_document::draft_over(
+            app.state.results_reads(),
+            "Saved review".to_owned(),
+            Some(read.dataset_id),
+            "viewer-waveform".to_owned(),
+            rspice_results::document_creation::ResultDocumentLayout::SinglePane,
+        );
     create_document::commit(&mut app.state.results_parts()).expect("the document commits");
     app.state.results.create_result_document.open = false;
 

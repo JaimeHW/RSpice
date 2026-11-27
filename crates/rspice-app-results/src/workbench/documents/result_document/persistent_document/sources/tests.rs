@@ -52,14 +52,12 @@ fn host(runs: &[&SimulationRun]) -> ResultsTestHost {
     state
 }
 
-/// Save the active run as a single-pane view, as Create Result Document does.
+/// Save the active run as a single-pane view, as New result document does.
 fn save_view(state: &mut ResultsTestHost) -> ResultDocumentId {
     let mut parts = state.results_parts();
     create_document::open(&mut parts);
-    parts.create_result_document.layout_id =
-        rspice_results::document_creation::ResultDocumentLayout::SinglePane
-            .id()
-            .to_owned();
+    parts.create_result_document.layout =
+        rspice_results::document_creation::ResultDocumentLayout::SinglePane;
     create_document::commit(&mut parts).expect("the view is saved")
 }
 

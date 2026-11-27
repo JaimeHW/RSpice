@@ -1200,7 +1200,7 @@ mod tests {
     /// The population's result document, one histogram pane of `gain_dc`,
     /// with the yield against [39, 41.2] dB kept on it through the form.
     fn kept_yield() -> (ResultsTestHost, crate::product::ResultDocumentId) {
-        use rspice_results::document_creation::{ResultDocumentFamily, ResultDocumentLayout};
+        use rspice_results::document_creation::ResultDocumentLayout;
         let mut host = population_host();
         host.results.analysis.histogram_state.selected = Some("gain_dc".to_owned());
         host.results.analysis.histogram_state.bin_count = 24;
@@ -1208,9 +1208,8 @@ mod tests {
             let mut parts = host.results_parts();
             super::super::super::create_document::open(&mut parts);
             let draft = &mut *parts.create_result_document;
-            draft.family_id = ResultDocumentFamily::StatisticsAndYield.id().to_owned();
             draft.viewer_id = "viewer-histogram".to_owned();
-            draft.layout_id = ResultDocumentLayout::SinglePane.id().to_owned();
+            draft.layout = ResultDocumentLayout::SinglePane;
             super::super::super::create_document::commit(&mut parts).expect("a document")
         };
         let draft = MeasurementDraft {

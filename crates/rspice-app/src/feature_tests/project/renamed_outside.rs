@@ -113,7 +113,6 @@ fn saved_project(file: &Path, capacitance: &str) -> AppState {
     assert!(state.model.simulation.select_run(0));
     assert!(state.model.simulation.select_analysis(0));
     create_document::open(&mut state.results_parts());
-    state.results.create_result_document.layout_id = "single-pane".to_owned();
     create_document::commit(&mut state.results_parts()).expect("the document is created");
     assert!(state.save_project_to_path(file), "the project saves");
     state

@@ -1,7 +1,8 @@
-//! Creating a result document through a whole application: the dialog's
-//! family, name and viewer choices, and a commit that the project owns.
+//! Creating a result document through a whole application: what the New
+//! result document form opens on and offers, and a commit the project owns.
 
 use crate::workbench::RSpiceApp;
+use rspice_app_results::workbench::documents::result_document::ResultViewer;
 use rspice_app_results::workbench::documents::result_document::create_document::*;
 use rspice_app_state::results::visualization_document::ResultDocumentTracking;
 use rspice_app_state::state::AnalysisResult;
@@ -20,133 +21,237 @@ use rspice_app_state::state::SoaViolationEvidence;
 use rspice_app_state::state::SoaViolationSeverityEvidence;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
-use rspice_results::document_creation::ResultDocumentFamily;
 use rspice_results::document_creation::ResultDocumentLayout;
-use rspice_results_ui::create_document::{CreateDocumentHost, CreateResultDocumentDialogState};
+use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
 fn retained_run_with(analysis_type: AnalysisType) -> SimulationRun {
     let mut run = SimulationRun::new(7);
     run.lifecycle = SimulationRunLifecycle::Completed;
-    let (name, x) = if analysis_type.is_bode_response() {
-        ("|V(out)|", vec![1.0, 2.0, 3.0])
+    run.analyses
+        .push(analysis_of(11, analysis_type, "analysis"));
+    run
+}
+
+/// An analysis of `analysis_type` holding V(in) and V(out) over three
+/// points, labelled `label`.
+fn analysis_of(id: u64, analysis_type: AnalysisType, label: &str) -> AnalysisResult {
+    let (names, x) = if analysis_type.is_bode_response() {
+        (["|V(in)|", "|V(out)|"], vec![1.0, 2.0, 3.0])
     } else if analysis_type.is_raw_frequency_curve() {
-        ("V(out)", vec![1.0, 2.0, 3.0])
+        (["V(in)", "V(out)"], vec![1.0, 2.0, 3.0])
     } else {
-        ("V(out)", vec![0.0, 0.5, 1.0])
+        (["V(in)", "V(out)"], vec![0.0, 0.5, 1.0])
     };
-    run.analyses.push(
-        AnalysisResult::new(11, analysis_type, "analysis").with_waveforms(vec![
-            RetainedTrace::new(name, x, vec![0.0, 1.0, 0.0], "#55aaff"),
-        ]),
-    );
+    AnalysisResult::new(id, analysis_type, label).with_waveforms(
+        names
+            .iter()
+            .map(|name| RetainedTrace::new(*name, x.clone(), vec![0.0, 1.0, 0.0], "#55aaff"))
+            .collect(),
+    )
+}
+
+/// The form over the analysis at `analysis` of `run`, drawn on `viewer` in
+/// `layout`, plotting `signals`, under a name the reader typed.
+fn draft(
+    name: &str,
+    run: &SimulationRun,
+    analysis: usize,
+    viewer: &str,
+    layout: ResultDocumentLayout,
+    signals: &[&str],
+) -> CreateResultDocumentDialogState {
+    CreateResultDocumentDialogState {
+        open: true,
+        name: name.to_owned(),
+        name_touched: true,
+        dataset_id: Some(run.dataset_id),
+        analysis: Some(analysis),
+        viewer_id: viewer.to_owned(),
+        layout,
+        signals: signals.iter().map(|signal| (*signal).to_owned()).collect(),
+        validation_error: None,
+    }
+}
+
+/// A finished run holding a transient and, second, an AC analysis.
+fn transient_and_ac_run() -> SimulationRun {
+    let mut run = SimulationRun::new(7);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.analyses
+        .push(analysis_of(11, AnalysisType::Transient, "Step response"));
+    run.analyses
+        .push(analysis_of(12, AnalysisType::Ac, "Loop gain"));
     run
 }
 
 #[test]
-fn compatible_filter_uses_the_selected_dataset_not_the_active_dataset() {
+fn the_sheets_offered_are_the_ones_that_draw_the_chosen_analysis() {
     let mut app = RSpiceApp::test_instance();
-    let transient = retained_run_with(AnalysisType::Transient);
-    let transient_id = transient.dataset_id;
-    let ac = retained_run_with(AnalysisType::Ac);
-    let ac_id = ac.dataset_id;
-    app.state.model.simulation.retained.runs = vec![transient, ac].into();
+    let run = transient_and_ac_run();
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    let sheets = |analysis: usize| -> Vec<&'static str> {
+        let form = draft(
+            "x",
+            &run,
+            analysis,
+            "",
+            ResultDocumentLayout::SinglePane,
+            &[],
+        );
+        choices(app.state.results_reads(), &form)
+            .viewers
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect()
+    };
 
-    assert_eq!(
-        first_compatible_viewer(
-            app.state.results_reads(),
-            Some(transient_id),
-            ResultDocumentFamily::WaveformWorksheet,
-        ),
-        Some("viewer-waveform")
-    );
-    assert_eq!(
-        first_compatible_viewer(
-            app.state.results_reads(),
-            Some(ac_id),
-            ResultDocumentFamily::FrequencyAndStability,
-        ),
-        Some("viewer-bode")
-    );
+    let transient = sheets(0);
+    assert!(transient.contains(&"viewer-waveform"), "{transient:?}");
+    assert!(!transient.contains(&"viewer-bode"), "{transient:?}");
+    let ac = sheets(1);
+    assert!(ac.contains(&"viewer-bode"), "{ac:?}");
+    assert!(!ac.contains(&"viewer-waveform"), "{ac:?}");
 }
 
 #[test]
-fn explicit_nondefault_viewer_choice_is_creatable_and_resolves_unchanged() {
+fn an_explicit_sheet_other_than_the_default_resolves_unchanged() {
     let mut app = RSpiceApp::test_instance();
     let run = retained_run_with(AnalysisType::Transient);
-    let dataset_id = run.dataset_id;
-    app.state.model.simulation.retained.runs = vec![run].into();
-    let family = ResultDocumentFamily::WaveformWorksheet;
-    assert!(viewer_is_creatable(
-        app.state.results_reads(),
-        Some(dataset_id),
-        family,
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    let form = draft(
+        "Eye review",
+        &run,
+        0,
         "eye-viewer",
-    ));
-    let draft = CreateResultDocumentDialogState {
-        open: true,
-        name: "Eye review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: family.id().to_owned(),
-        viewer_id: "eye-viewer".to_owned(),
-        layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
-        validation_error: None,
-    };
+        ResultDocumentLayout::SinglePane,
+        &["V(out)"],
+    );
 
     let resolved =
-        resolve_draft(app.state.results_reads(), &draft).expect("explicit viewer resolves");
+        resolve_draft(app.state.results_reads(), &form).expect("explicit viewer resolves");
 
     assert_eq!(resolved.viewer.id, "eye-viewer");
 }
 
+/// The form opens on what Results shows: the run, the analysis the data
+/// browser picked (not the run's first), the sheet on the canvas, and the
+/// signals plotted, named for the run and the analysis.
 #[test]
-fn untouched_default_name_follows_the_selected_family() {
+fn the_form_opens_on_the_run_analysis_and_sheet_results_shows() {
     let mut app = RSpiceApp::test_instance();
+    let older = retained_run_with(AnalysisType::Transient);
+    let shown = transient_and_ac_run();
+    app.state.model.simulation.retained.runs = vec![older, shown.clone()].into();
+    assert!(app.state.model.simulation.select_run_analysis(1, 1));
+    app.state.results.results.session.viewer = ResultViewer::Nyquist;
+
     open(&mut app.state.results_parts());
-    let mut draft = app.state.results.create_result_document.clone();
-    let family = ResultDocumentFamily::FrequencyAndStability;
 
-    CreateDocumentSources(app.state.results_reads()).select_family(&mut draft, family);
-
-    assert_eq!(draft.name, format!("{} · 01", family.label()));
-    assert!(!draft.name_touched);
+    let form = &app.state.results.create_result_document;
+    assert!(form.open);
+    assert_eq!(form.dataset_id, Some(shown.dataset_id));
+    assert_eq!(form.analysis, Some(1));
+    assert_eq!(form.viewer_id, "viewer-bode");
+    assert_eq!(form.signals, ["|V(in)|", "|V(out)|"]);
+    assert_eq!(form.name, format!("{} \u{2014} Loop gain", shown.name()));
+    assert!(!form.name_touched);
 }
 
+/// A second document over the same analysis is offered the same name with
+/// the first free number after it, never a bare counter.
 #[test]
-fn typed_name_survives_a_family_change() {
+fn the_default_name_says_what_it_shows_and_is_never_taken() {
     let mut app = RSpiceApp::test_instance();
+    let run = transient_and_ac_run();
+    let base = format!("{} \u{2014} Step response", run.name());
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run_analysis(0, 0));
+
     open(&mut app.state.results_parts());
-    let mut draft = app.state.results.create_result_document.clone();
-    draft.name = "Loop gain review".to_owned();
-    draft.name_touched = true;
+    assert_eq!(app.state.results.create_result_document.name, base);
+    commit(&mut app.state.results_parts()).expect("the first document commits");
+    open(&mut app.state.results_parts());
 
-    CreateDocumentSources(app.state.results_reads())
-        .select_family(&mut draft, ResultDocumentFamily::FrequencyAndStability);
-
-    assert_eq!(draft.name, "Loop gain review");
     assert_eq!(
-        draft.family_id,
-        ResultDocumentFamily::FrequencyAndStability.id()
+        app.state.results.create_result_document.name,
+        format!("{base} 2")
     );
-    assert!(draft.name_touched);
+    commit(&mut app.state.results_parts()).expect("the offered name is free");
+}
+
+/// Choosing another analysis moves the sheet to one that draws it, ticks
+/// its plotted signals, and renames an untouched name; a typed name stays.
+#[test]
+fn choosing_another_analysis_follows_with_sheet_signals_and_an_untouched_name() {
+    let mut app = RSpiceApp::test_instance();
+    let run = transient_and_ac_run();
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    assert!(app.state.model.simulation.select_run_analysis(0, 0));
+    open(&mut app.state.results_parts());
+    let before = app.state.results.create_result_document.clone();
+    assert_eq!(before.viewer_id, "viewer-waveform");
+
+    let mut form = before.clone();
+    form.analysis = Some(1);
+    reconcile(app.state.results_reads(), &before, &mut form);
+    assert_eq!(form.viewer_id, "viewer-bode");
+    assert_eq!(form.signals, ["|V(in)|", "|V(out)|"]);
+    assert_eq!(form.name, format!("{} \u{2014} Loop gain", run.name()));
+
+    let mut typed = before.clone();
+    typed.name = "Loop gain review".to_owned();
+    typed.name_touched = true;
+    let held = typed.clone();
+    typed.analysis = Some(1);
+    reconcile(app.state.results_reads(), &held, &mut typed);
+    assert_eq!(typed.name, "Loop gain review");
+}
+
+/// The document's panes plot the signals ticked in the form and no other;
+/// with none ticked the pane plots nothing until the reader adds a signal.
+#[test]
+fn the_document_plots_the_signals_ticked_in_the_form() {
+    let mut app = RSpiceApp::test_instance();
+    let run = transient_and_ac_run();
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    let plotted = |app: &mut RSpiceApp, name: &str, ticked: &[&str]| {
+        app.state.results.create_result_document = draft(
+            name,
+            &run,
+            0,
+            "viewer-waveform",
+            ResultDocumentLayout::SinglePane,
+            ticked,
+        );
+        let document_id = commit(&mut app.state.results_parts()).expect("document commits");
+        app.state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .expect("the project owns it")
+            .traces()
+            .iter()
+            .map(|trace| trace.label.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(plotted(&mut app, "Inputs", &["V(in)"]), ["V(in)"]);
+    assert_eq!(plotted(&mut app, "Empty", &[]), Vec::<String>::new());
 }
 
 #[test]
 fn commit_is_project_owned_dirty_and_stably_selected() {
     let mut app = RSpiceApp::test_instance();
     let run = retained_run_with(AnalysisType::Transient);
-    let dataset_id = run.dataset_id;
-    app.state.model.simulation.retained.runs = vec![run].into();
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Transient review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: ResultDocumentFamily::WaveformWorksheet.id().to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: ResultDocumentLayout::TwoLinkedPanes.id().to_owned(),
-        validation_error: None,
-    };
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    app.state.results.create_result_document = draft(
+        "Transient review",
+        &run,
+        0,
+        "viewer-waveform",
+        ResultDocumentLayout::TwoLinkedPanes,
+        &["V(out)"],
+    );
 
     let document_id = commit(&mut app.state.results_parts()).expect("document commits");
 
@@ -185,7 +290,7 @@ fn commit_is_project_owned_dirty_and_stably_selected() {
     );
     assert_eq!(
         app.state.results.results.session.viewer,
-        rspice_app_results::workbench::documents::result_document::ResultViewer::Waves
+        ResultViewer::Waves
     );
 }
 
@@ -205,18 +310,15 @@ fn release_target_table_commits_from_typed_operating_point_without_waveforms() {
     let mut run = SimulationRun::new(7);
     run.lifecycle = SimulationRunLifecycle::Completed;
     run.analyses.push(analysis);
-    let dataset_id = run.dataset_id;
-    app.state.model.simulation.retained.runs = vec![run].into();
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Typed OP datasheet".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: ResultDocumentFamily::StatisticsAndYield.id().to_owned(),
-        viewer_id: "viewer-table".to_owned(),
-        layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
-        validation_error: None,
-    };
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    app.state.results.create_result_document = draft(
+        "Typed OP datasheet",
+        &run,
+        0,
+        "viewer-table",
+        ResultDocumentLayout::SinglePane,
+        &[],
+    );
 
     let document_id = commit(&mut app.state.results_parts()).expect("typed OP table commits");
     let document = app
@@ -336,44 +438,26 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
             member_measurements: Vec::new(),
         });
 
-    for (analysis, family, viewer_id) in [
-        (
-            events,
-            ResultDocumentFamily::DigitalAndAmsEvents,
-            "viewer-digital-events",
-        ),
-        (
-            soa,
-            ResultDocumentFamily::VerificationAndOptimization,
-            "viewer-soa",
-        ),
-        (
-            optimization,
-            ResultDocumentFamily::VerificationAndOptimization,
-            "viewer-optimization",
-        ),
-        (
-            sweep,
-            ResultDocumentFamily::WaveformWorksheet,
-            "viewer-sweep",
-        ),
+    for (analysis, viewer_id) in [
+        (events, "viewer-digital-events"),
+        (soa, "viewer-soa"),
+        (optimization, "viewer-optimization"),
+        (sweep, "viewer-sweep"),
     ] {
         let mut app = RSpiceApp::test_instance();
         let mut run = SimulationRun::new(31);
         run.lifecycle = SimulationRunLifecycle::Completed;
         run.analyses.push(analysis);
         let dataset_id = run.dataset_id;
-        app.state.model.simulation.retained.runs = vec![run].into();
-        app.state.results.create_result_document = CreateResultDocumentDialogState {
-            open: true,
-            name: format!("{viewer_id} review"),
-            name_touched: true,
-            dataset_id: Some(dataset_id),
-            family_id: family.id().to_owned(),
-            viewer_id: viewer_id.to_owned(),
-            layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
-            validation_error: None,
-        };
+        app.state.model.simulation.retained.runs = vec![run.clone()].into();
+        app.state.results.create_result_document = draft(
+            &format!("{viewer_id} review"),
+            &run,
+            0,
+            viewer_id,
+            ResultDocumentLayout::SinglePane,
+            &[],
+        );
 
         let document_id =
             commit(&mut app.state.results_parts()).expect("typed release-target viewer commits");
@@ -401,18 +485,15 @@ fn typed_release_target_campaign_viewers_commit_with_embedded_source_evidence() 
 fn duplicate_name_revalidation_leaves_project_unchanged() {
     let mut app = RSpiceApp::test_instance();
     let run = retained_run_with(AnalysisType::Transient);
-    let dataset_id = run.dataset_id;
-    app.state.model.simulation.retained.runs = vec![run].into();
-    let draft = CreateResultDocumentDialogState {
-        open: true,
-        name: "Transient review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: ResultDocumentFamily::WaveformWorksheet.id().to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
-        validation_error: None,
-    };
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    let draft = draft(
+        "Transient review",
+        &run,
+        0,
+        "viewer-waveform",
+        ResultDocumentLayout::SinglePane,
+        &["V(out)"],
+    );
     app.state.results.create_result_document = draft.clone();
     commit(&mut app.state.results_parts()).expect("first document commits");
     app.state.results.create_result_document = draft;
@@ -506,7 +587,7 @@ impl ResultsWindow {
     }
 
     /// Create a two-pane waveform document named `name` over the run, the
-    /// way the Create result document form commits it.
+    /// way the New result document form commits it.
     fn create(
         &mut self,
         name: &str,
@@ -516,9 +597,10 @@ impl ResultsWindow {
             name: name.to_owned(),
             name_touched: true,
             dataset_id: Some(self.dataset_id),
-            family_id: ResultDocumentFamily::WaveformWorksheet.id().to_owned(),
+            analysis: Some(0),
             viewer_id: "viewer-waveform".to_owned(),
-            layout_id: ResultDocumentLayout::TwoLinkedPanes.id().to_owned(),
+            layout: ResultDocumentLayout::TwoLinkedPanes,
+            signals: vec!["V(out)".to_owned()],
             validation_error: None,
         };
         commit(&mut self.app.state.results_parts())
@@ -1006,9 +1088,10 @@ fn a_bode_document_of_a_temperature_run_draws_every_member() {
         name: "Bode over temperature".to_owned(),
         name_touched: true,
         dataset_id: Some(dataset_id),
-        family_id: ResultDocumentFamily::FrequencyAndStability.id().to_owned(),
+        analysis: Some(0),
         viewer_id: "viewer-bode".to_owned(),
-        layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
+        layout: ResultDocumentLayout::SinglePane,
+        signals: vec!["|V(OUT)|".to_owned()],
         validation_error: None,
     };
     commit(&mut window.app.state.results_parts()).expect("the document commits");
@@ -1031,4 +1114,207 @@ fn a_bode_document_of_a_temperature_run_draws_every_member() {
         sheet,
         "the document draws the members the sheet drew"
     );
+}
+
+/// A name another document has is refused in the form's footer, and Create
+/// is disabled: Enter makes nothing and the form stays open.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_taken_name_is_refused_in_the_footer_and_create_is_disabled() {
+    use egui::accesskit::Role;
+    use egui::{Event, Key, Modifiers};
+
+    let mut window = ResultsWindow::new();
+    window
+        .create("Transient review")
+        .expect("the first document commits");
+    open(&mut window.app.state.results_parts());
+    {
+        let form = &mut window.app.state.results.create_result_document;
+        form.name = "transient review".to_owned();
+        form.name_touched = true;
+    }
+    let nodes = window.frames(Vec::new());
+
+    let refusal = "A document named \u{201c}transient review\u{201d} already exists.";
+    assert!(
+        nodes.iter().any(|(_, node)| {
+            [node.label(), node.description(), node.value()].contains(&Some(refusal))
+        }),
+        "the form states why it refuses"
+    );
+    let create = nodes
+        .iter()
+        .find(|(_, node)| node.role() == Role::Button && node.label() == Some("Create"))
+        .expect("the form draws Create");
+    assert!(create.1.is_disabled(), "Create is disabled");
+
+    let documents = |window: &ResultsWindow| {
+        window
+            .app
+            .state
+            .model
+            .workspace
+            .content
+            .visualization_documents
+            .len()
+    };
+    let before = documents(&window);
+    window.frames(vec![Event::Key {
+        key: Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    assert_eq!(documents(&window), before, "Enter makes nothing");
+    assert!(window.app.state.results.create_result_document.open);
+}
+
+/// A transient and an AC analysis of one RC low-pass, every signal plotted.
+const LOW_PASS_DECK: &str = "* rc low-pass\nV1 in 0 PULSE(0 1 0 1u 1u 50u 100u) AC 1\n\
+R1 in out 1k\nC1 out 0 10n\n.tran 1u 200u\n.ac dec 10 10 1meg\n.end\n";
+/// An operating point of a divider.
+const DIVIDER_DECK: &str = "* divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n";
+/// A DC sweep of the same divider.
+const SWEPT_DIVIDER_DECK: &str =
+    "* swept divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.dc V1 0 1 0.1\n.end\n";
+
+/// What one pane-full of a document shows once it is drawn: its plots'
+/// traces for a sheet of signals, a raster such as an eye for a sheet that
+/// paints its own, else its table's rows.
+#[cfg(not(target_arch = "wasm32"))]
+fn shown_items(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> usize {
+    let rasters = nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.role() == egui::accesskit::Role::GraphicsDocument
+                && node
+                    .label()
+                    .is_some_and(|label| label.contains("custom-rendered engineering data"))
+        })
+        .count();
+    drawn_traces(nodes)
+        + rasters
+        + nodes
+            .iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::Row)
+            .count()
+}
+
+/// Every sheet the form offers for every analysis of a solved run, in every
+/// layout, makes a document Results draws with the run's data in each pane,
+/// and the project brings each one back, drawn, after a save and a reopen.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() {
+    use rspice_app_runs::simulation::controller::test_execution::{
+        plot_every_signal, run_manual_batch,
+    };
+    for deck in [LOW_PASS_DECK, DIVIDER_DECK, SWEPT_DIVIDER_DECK] {
+        let mut run = plot_every_signal(run_manual_batch(deck));
+        // A project saves a run only once its provenance is classified; a
+        // run the deck classified already keeps its own.
+        let _ = run.restore_provenance(
+            rspice_app_state::state::SimulationRunProvenance::LegacyUnattributed,
+        );
+        let dataset_id = run.dataset_id;
+        let mut window = ResultsWindow::new();
+        window.dataset_id = dataset_id;
+        window.app.state.model.simulation.retained.runs = vec![run.clone()].into();
+        assert!(window.app.state.model.simulation.select_run(0));
+        window.frames(Vec::new());
+
+        let mut made = Vec::new();
+        for (index, analysis) in run.analyses.iter().enumerate() {
+            assert!(
+                window
+                    .app
+                    .state
+                    .model
+                    .simulation
+                    .select_run_analysis(0, index)
+            );
+            open(&mut window.app.state.results_parts());
+            let opened = window.app.state.results.create_result_document.clone();
+            let sheets = choices(window.app.state.results_reads(), &opened).viewers;
+            assert!(
+                !sheets.is_empty(),
+                "{deck}: a sheet draws {}",
+                analysis.label
+            );
+            for (sheet, _) in sheets {
+                for layout in ResultDocumentLayout::ALL {
+                    let mut form = opened.clone();
+                    form.viewer_id = sheet.to_owned();
+                    reconcile(window.app.state.results_reads(), &opened, &mut form);
+                    form.layout = layout;
+                    form.name = format!("{} {sheet} {}", analysis.label, layout.label());
+                    form.name_touched = true;
+                    let combination = form.name.clone();
+                    window.app.state.results.create_result_document = form;
+                    let document_id = commit(&mut window.app.state.results_parts())
+                        .unwrap_or_else(|error| panic!("{combination}: {error}"));
+                    let nodes = window.frames(Vec::new());
+                    let shown = shown_items(&nodes);
+                    assert!(
+                        shown >= layout.pane_count(),
+                        "{combination}: {shown} items drawn over {} panes",
+                        layout.pane_count()
+                    );
+                    made.push((document_id, combination, layout.pane_count(), shown));
+                }
+            }
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "rspice-new-result-document-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("a scratch folder");
+        let path = root.join("documents.rspiceproj");
+        assert!(
+            window.app.state.save_project_to_path(&path),
+            "the project saves"
+        );
+        let mut reopened = ResultsWindow::new();
+        reopened.app.state.model.simulation.retained.runs = Vec::new().into();
+        assert!(
+            reopened.app.state.load_project_from_path(&path),
+            "the project reopens"
+        );
+        reopened.app.state.workbench.activate(Workspace::Results);
+        for (document_id, combination, panes, shown) in made {
+            let document = reopened
+                .app
+                .state
+                .model
+                .workspace
+                .content
+                .visualization_document(document_id)
+                .unwrap_or_else(|| panic!("{combination}: the reopened project keeps it"));
+            assert_eq!(document.title(), combination);
+            assert_eq!(document.panes().len(), panes, "{combination}");
+            assert!(
+                rspice_app_results::workbench::chrome::document_bar::results::activate_visualization_document(
+                    &mut reopened.app.state.results_parts(),
+                    &document_id,
+                ),
+                "{combination}: the reopened document shows"
+            );
+            reopened
+                .app
+                .state
+                .workbench
+                .documents
+                .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
+            let nodes = reopened.frames(Vec::new());
+            assert_eq!(
+                shown_items(&nodes),
+                shown,
+                "{combination}: the reopened document draws what it drew"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

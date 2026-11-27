@@ -1176,6 +1176,60 @@ fn take_in_next_run_expressions(
     }
 }
 
+/// The signals Results plots of `analysis` of `run`, by name, in the run's
+/// order: what the view draws of it, else what the run plots, with the
+/// reader's ticks the view has not taken in yet.
+pub(crate) fn shown_signals(
+    state: ResultsReads<'_>,
+    run: &SimulationRun,
+    analysis: &crate::state::AnalysisResult,
+) -> Vec<String> {
+    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+    let set: HashMap<&str, bool> = state
+        .results
+        .session
+        .waveform_visibility
+        .iter()
+        .filter(|(signal, _)| signal.analysis() == key)
+        .map(|(signal, visible)| (signal.source_name(), *visible))
+        .collect();
+    let drawn = drawn_signals(state, run, analysis);
+    analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| {
+            set.get(waveform.name.as_str()).copied().unwrap_or_else(|| {
+                drawn.as_ref().map_or(waveform.visible, |drawn| {
+                    drawn.contains(&waveform.name.as_str())
+                })
+            })
+        })
+        .map(|waveform| waveform.name.clone())
+        .collect()
+}
+
+/// The signals the view of `run` draws of `analysis`, or `None` when it has
+/// no pane over it.
+fn drawn_signals<'a>(
+    state: ResultsReads<'a>,
+    run: &SimulationRun,
+    analysis: &crate::state::AnalysisResult,
+) -> Option<Vec<&'a str>> {
+    let view = view_of(state, source_of(run))?;
+    let document = state.model.workspace.content.visualization_document(view)?;
+    let pane = document.pane_of_analysis(super::create_document::source_analysis_identity(
+        run, analysis,
+    ))?;
+    Some(
+        document
+            .traces()
+            .iter()
+            .filter(|trace| trace.pane_id == pane.id && trace.visible)
+            .map(trace_signal)
+            .collect(),
+    )
+}
+
 /// The signals a plan's first run plots: the outputs it marks for plotting,
 /// and any the reader plotted or took off before the run was first shown
 /// (from a deck's Plot command, say).

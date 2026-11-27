@@ -105,71 +105,40 @@ impl ResultDocumentFamily {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResultDocumentLayout {
-    TwoLinkedPanes,
     SinglePane,
+    TwoLinkedPanes,
     EngineeringGrid,
-    FreeformReviewPage,
 }
 
 impl ResultDocumentLayout {
-    pub const ALL: [Self; 4] = [
-        Self::TwoLinkedPanes,
+    pub const ALL: [Self; 3] = [
         Self::SinglePane,
+        Self::TwoLinkedPanes,
         Self::EngineeringGrid,
-        Self::FreeformReviewPage,
     ];
-
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::TwoLinkedPanes => "two-linked-panes",
-            Self::SinglePane => "single-pane",
-            Self::EngineeringGrid => "engineering-grid-2x2",
-            Self::FreeformReviewPage => "freeform-review-page",
-        }
-    }
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::TwoLinkedPanes => "Two linked panes",
-            Self::SinglePane => "Single pane",
-            Self::EngineeringGrid => "2 × 2 engineering sheet",
-            Self::FreeformReviewPage => "Freeform review page",
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "two-linked-panes" => Some(Self::TwoLinkedPanes),
-            "single-pane" => Some(Self::SinglePane),
-            "engineering-grid-2x2" => Some(Self::EngineeringGrid),
-            "freeform-review-page" => Some(Self::FreeformReviewPage),
-            _ => None,
+            Self::SinglePane => "One pane",
+            Self::TwoLinkedPanes => "Two panes, linked X",
+            Self::EngineeringGrid => "Four panes, 2 \u{d7} 2",
         }
     }
 
     pub const fn pane_count(self) -> usize {
         match self {
-            Self::SinglePane | Self::FreeformReviewPage => 1,
+            Self::SinglePane => 1,
             Self::TwoLinkedPanes => 2,
             Self::EngineeringGrid => 4,
         }
     }
 
+    /// Two panes that share an X stack, so the reader reads one X down both.
     pub const fn page_layout(self) -> PageLayout {
         match self {
             Self::SinglePane => PageLayout::SinglePane,
-            Self::TwoLinkedPanes => PageLayout::Columns,
+            Self::TwoLinkedPanes => PageLayout::Rows,
             Self::EngineeringGrid => PageLayout::Grid { columns: 2 },
-            // The review template owns free placement; Rows is its
-            // deterministic initial flow before the user moves objects.
-            Self::FreeformReviewPage => PageLayout::Rows,
-        }
-    }
-
-    pub const fn template_id(self) -> &'static str {
-        match self {
-            Self::FreeformReviewPage => "review-freeform",
-            Self::SinglePane | Self::TwoLinkedPanes | Self::EngineeringGrid => "engineering-dark",
         }
     }
 }

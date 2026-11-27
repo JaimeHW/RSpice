@@ -50,7 +50,8 @@ fn latest_document(state: &mut ResultsTestHost, analysis: AnalysisResult) -> Res
     assert!(state.model.simulation.select_analysis(0));
     let mut parts = state.results_parts();
     create_document::open(&mut parts);
-    parts.create_result_document.layout_id = "single-pane".to_owned();
+    parts.create_result_document.layout =
+        rspice_results::document_creation::ResultDocumentLayout::SinglePane;
     let document_id = create_document::commit(&mut parts).expect("the document is created");
     let revision = state
         .model

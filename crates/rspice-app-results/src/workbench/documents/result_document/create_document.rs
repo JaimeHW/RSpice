@@ -1,29 +1,29 @@
-//! Dataset-driven Create Result Document workflow.
+//! New result document: a project-owned document over one analysis of a
+//! retained run.
 //!
-//! The modal is a transaction editor, not a navigation shortcut. Every
-//! dataset, family, viewer, layout, and title is re-resolved when Create is
-//! pressed; only a fully validated [`VisualizationDocument`] enters the
-//! project-owned collection. Solver samples and retained run history are
-//! never mutated.
+//! The form opens on the run, analysis, sheet and signals Results shows.
+//! Every choice is resolved again when Create is pressed; only a fully
+//! validated [`VisualizationDocument`] enters the project-owned collection.
+//! Solver samples and retained run history are never mutated.
 
-use rspice_results::document_creation::{ResultDocumentFamily, ResultDocumentLayout};
+use rspice_results::document_creation::ResultDocumentLayout;
 use rspice_results_ui::create_document::{
-    self, CreateDocumentHost, CreateResultDocumentDialogState, ViewerChoice,
+    self, CreateDocumentChoices, CreateResultDocumentDialogState,
 };
+use rspice_ui_kit::widgets::DialogChoice;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::{
     AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId, ResultDocumentId,
 };
 use crate::results::viewer_catalog::{
-    VIEWER_DOCUMENTS, ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
-    ViewerReleaseClass, viewer_compatibility, viewer_document,
+    VIEWER_DOCUMENTS, ViewerArt, ViewerDocumentDefinition, ViewerReleaseClass, viewer_document,
 };
 use crate::results::visualization_document::{
     AxisOrientation, AxisScale, DocumentEdit, EntityRef, LinkKind, NewPagePane, NewPane,
     PageUpdatePolicy, PaneDataBinding, PaneKind, PanePlacement, ResultDocumentTracking,
     ResultDocumentTrackingMode, RunSourceAnalysis, SourceDataset, VisualizationDocument,
-    VisualizationError,
+    VisualizationError, WorkingViewSource,
 };
 use crate::state::workspace::VisualizationDocumentPersistenceError;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationRunLifecycle};
@@ -43,155 +43,282 @@ pub enum CreateResultDocumentError {
     Persistence(#[from] VisualizationDocumentPersistenceError),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ResolvedDraft<'a> {
     name: &'a str,
     run: &'a SimulationRun,
     analysis: &'a AnalysisResult,
     pub viewer: &'static ViewerDocumentDefinition,
-    family: ResultDocumentFamily,
     layout: ResultDocumentLayout,
+    /// What each pane plots, by signal name.
+    plotted: Vec<String>,
 }
 
-/// Open a fresh, dataset-aware transaction draft.
+/// Open the form on what Results shows: its run, the analysis the data
+/// browser picked, the sheet on the canvas and the signals it plots.
 pub fn open(state: &mut ResultsParts<'_>) {
-    let dataset_id = state
-        .model
-        .simulation
-        .active_run()
-        .or_else(|| state.model.simulation.retained.runs.last())
-        .map(|run| run.dataset_id);
-    let family = ResultDocumentFamily::WaveformWorksheet;
-    let viewer_id = first_compatible_viewer(state.results_reads(), dataset_id, family)
-        .unwrap_or("viewer-waveform");
-    let name = next_document_name(state.results_reads(), family);
-    *state.create_result_document = CreateResultDocumentDialogState {
+    let reads = state.results_reads();
+    let simulation = &reads.model.simulation;
+    let shown = simulation.active_run().filter(|run| finished(run));
+    // The history lists its newest run first.
+    let run = shown.or_else(|| simulation.retained.runs.iter().find(|run| finished(run)));
+    let analysis = run.and_then(|run| {
+        let picked = shown
+            .filter(|shown| shown.dataset_id == run.dataset_id)
+            .and(simulation.view.active_analysis_idx)
+            .filter(|index| *index < run.analyses.len());
+        picked.or_else(|| (!run.analyses.is_empty()).then_some(0))
+    });
+    let mut draft = CreateResultDocumentDialogState {
         open: true,
-        name,
-        name_touched: false,
-        dataset_id,
-        family_id: family.id().to_owned(),
-        viewer_id: viewer_id.to_owned(),
-        layout_id: ResultDocumentLayout::TwoLinkedPanes.id().to_owned(),
-        validation_error: None,
+        dataset_id: run.map(|run| run.dataset_id),
+        analysis,
+        ..CreateResultDocumentDialogState::default()
     };
+    let shown_sheet = reads.results.session.viewer.viewer_document_id();
+    settle(reads, &mut draft, Some(shown_sheet));
+    *state.create_result_document = draft;
 }
 
-/// Render the modal transaction editor.
+/// Draw the form and carry out what the reader asked of it.
 pub(crate) fn show(ctx: &egui::Context, state: &mut ResultsParts<'_>) {
     if !state.create_result_document.open {
         return;
     }
     let mut draft = state.create_result_document.clone();
-    let submit = create_document::show(
-        ctx,
-        &mut draft,
-        &CreateDocumentSources(state.results_reads()),
-    );
+    let before = draft.clone();
+    let offered = choices(state.results_reads(), &draft);
+    let choice = create_document::show(ctx, &mut draft, &offered);
+    reconcile(state.results_reads(), &before, &mut draft);
     *state.create_result_document = draft;
-    if submit {
-        let name = state.create_result_document.name.trim().to_owned();
-        match commit(state) {
-            Ok(_) => {
-                state.record(
-                    LogSeverity::Info,
-                    LogSource::Studio,
-                    format!("Created result document {name}."),
-                );
-            }
-            Err(error) => {
-                state.create_result_document.validation_error = Some(error.to_string());
+    match choice {
+        DialogChoice::Primary => {
+            let name = state.create_result_document.name.trim().to_owned();
+            match commit(state) {
+                Ok(_) => {
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!("Created result document {name}."),
+                    );
+                }
+                Err(error) => {
+                    state.create_result_document.validation_error = Some(error.to_string());
+                }
             }
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            *state.create_result_document = CreateResultDocumentDialogState::default();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
-pub struct CreateDocumentSources<'a>(pub ResultsReads<'a>);
-
-impl CreateDocumentHost for CreateDocumentSources<'_> {
-    fn validation_message(&self, draft: &CreateResultDocumentDialogState) -> Option<String> {
-        resolve_draft(self.0, draft)
-            .as_ref()
-            .err()
-            .map(ToString::to_string)
-    }
-
-    fn can_create(&self, draft: &CreateResultDocumentDialogState) -> bool {
-        resolve_draft(self.0, draft).is_ok()
-    }
-
-    fn select_family(
-        &self,
-        draft: &mut CreateResultDocumentDialogState,
-        family: ResultDocumentFamily,
-    ) {
-        draft.family_id = family.id().to_owned();
-        if !draft.name_touched {
-            draft.name = next_document_name(self.0, family);
-        }
-        if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
-            draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
-                .unwrap_or_default()
-                .to_owned();
-        }
-        draft.validation_error = None;
-    }
-
-    fn select_dataset(&self, draft: &mut CreateResultDocumentDialogState, dataset_id: DatasetId) {
-        draft.dataset_id = Some(dataset_id);
-        let family = ResultDocumentFamily::from_id(&draft.family_id)
-            .unwrap_or(ResultDocumentFamily::WaveformWorksheet);
-        if !viewer_is_creatable(self.0, draft.dataset_id, family, &draft.viewer_id) {
-            draft.viewer_id = first_compatible_viewer(self.0, draft.dataset_id, family)
-                .unwrap_or_default()
-                .to_owned();
-        }
-        draft.validation_error = None;
-    }
-
-    fn dataset_label(&self, dataset_id: Option<DatasetId>) -> String {
-        dataset_id
-            .and_then(|id| retained_run(self.0, id))
-            .map_or_else(|| "Select retained dataset".to_owned(), dataset_label)
-    }
-
-    fn datasets(&self) -> impl Iterator<Item = (DatasetId, String)> {
-        self.0
-            .model
-            .simulation
-            .retained
-            .runs
+/// What the form offers for `draft`, and why Create is refused, if it is.
+pub fn choices(
+    state: ResultsReads<'_>,
+    draft: &CreateResultDocumentDialogState,
+) -> CreateDocumentChoices {
+    let runs = state
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .filter(|run| finished(run))
+        .map(|run| (run.dataset_id, run.name().to_owned()))
+        .collect();
+    let run = draft.dataset_id.and_then(|id| retained_run(state, id));
+    let analyses = run.map_or_else(Vec::new, |run| {
+        run.analyses
             .iter()
-            .map(|run| (run.dataset_id, dataset_label(run)))
+            .enumerate()
+            .map(|(index, analysis)| (index, analysis_name(analysis)))
+            .collect()
+    });
+    let analysis = run
+        .zip(draft.analysis)
+        .and_then(|(run, index)| run.analyses.get(index));
+    let viewers = analysis.map_or_else(Vec::new, |analysis| {
+        sheets_of(analysis)
+            .map(|viewer| (viewer.id, viewer.title.to_owned()))
+            .collect()
+    });
+    let signals = analysis
+        .zip(viewer_document(&draft.viewer_id))
+        .filter(|(_, viewer)| plots_signals(viewer))
+        .map_or_else(Vec::new, |(analysis, _)| signal_names(analysis));
+    CreateDocumentChoices {
+        runs,
+        analyses,
+        viewers,
+        signals,
+        refusal: resolve_draft(state, draft)
+            .err()
+            .map(|error| error.to_string()),
     }
+}
 
-    fn viewer_catalog(&self, dataset_id: Option<DatasetId>) -> impl Iterator<Item = ViewerChoice> {
-        let capabilities = dataset_id
-            .and_then(|id| retained_run(self.0, id))
-            .map(run_analysis_ids)
-            .unwrap_or_default();
-        VIEWER_DOCUMENTS.iter().map(move |viewer| {
-            let compatibility = viewer_compatibility(
-                viewer.id,
-                ViewerCapabilities {
-                    analysis_ids: &capabilities,
-                    external_capabilities: &[],
-                },
-            );
-            let renderer_available = dataset_id
-                .and_then(|id| retained_run(self.0, id))
-                .is_some_and(|run| {
-                    run.analyses.iter().any(|analysis| {
-                        super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
-                    })
-                });
-            ViewerChoice {
-                viewer,
-                compatibility,
-                renderer_available,
-            }
-        })
+/// Follow a change the reader made: another run opens on its analysis of the
+/// same kind, another analysis on a sheet that draws it, and either on the
+/// signals it plots. A name the reader did not type follows them.
+pub fn reconcile(
+    state: ResultsReads<'_>,
+    before: &CreateResultDocumentDialogState,
+    draft: &mut CreateResultDocumentDialogState,
+) {
+    if draft.dataset_id != before.dataset_id {
+        let kind = before
+            .dataset_id
+            .and_then(|id| retained_run(state, id))
+            .zip(before.analysis)
+            .and_then(|(run, index)| run.analyses.get(index))
+            .map(|analysis| analysis.analysis_type);
+        draft.analysis = draft
+            .dataset_id
+            .and_then(|id| retained_run(state, id))
+            .and_then(|run| {
+                kind.and_then(|kind| {
+                    run.analyses
+                        .iter()
+                        .position(|analysis| analysis.analysis_type == kind)
+                })
+                .or_else(|| (!run.analyses.is_empty()).then_some(0))
+            });
     }
+    if draft.dataset_id != before.dataset_id || draft.analysis != before.analysis {
+        let kept = before.viewer_id.clone();
+        draft.signals.clear();
+        settle(state, draft, viewer_document(&kept).map(|viewer| viewer.id));
+    } else if draft.viewer_id != before.viewer_id && draft.signals.is_empty() {
+        draft.signals = default_signals(state, draft);
+    }
+}
+
+/// Give `draft` the sheet `preferred` when it draws the chosen analysis, else
+/// the analysis' own, its default signals, and a name if the reader typed
+/// none.
+fn settle(
+    state: ResultsReads<'_>,
+    draft: &mut CreateResultDocumentDialogState,
+    preferred: Option<&str>,
+) {
+    let analysis = chosen_analysis(state, draft);
+    draft.viewer_id = analysis
+        .and_then(|(_, analysis)| {
+            preferred
+                .and_then(|id| sheets_of(analysis).find(|viewer| viewer.id == id))
+                .or_else(|| view_pane_viewer(analysis))
+        })
+        .map_or_else(String::new, |viewer| viewer.id.to_owned());
+    draft.signals = default_signals(state, draft);
+    if !draft.name_touched {
+        draft.name = analysis.map_or_else(String::new, |(run, analysis)| {
+            default_name(state, run, analysis)
+        });
+    }
+    draft.validation_error = None;
+}
+
+fn chosen_analysis<'a>(
+    state: ResultsReads<'a>,
+    draft: &CreateResultDocumentDialogState,
+) -> Option<(&'a SimulationRun, &'a AnalysisResult)> {
+    let run = retained_run(state, draft.dataset_id?)?;
+    Some((run, run.analyses.get(draft.analysis?)?))
+}
+
+/// What a new pane over the chosen analysis plots: what Results plots of it
+/// now, else what its run first plots.
+fn default_signals(
+    state: ResultsReads<'_>,
+    draft: &CreateResultDocumentDialogState,
+) -> Vec<String> {
+    let Some((run, analysis)) = chosen_analysis(state, draft) else {
+        return Vec::new();
+    };
+    if !viewer_document(&draft.viewer_id).is_some_and(plots_signals) {
+        return Vec::new();
+    }
+    super::working_view::shown_signals(state, run, analysis)
+}
+
+/// "<plan or run> — <analysis>", or that and the first number after it that
+/// no document of the project is titled.
+fn default_name(state: ResultsReads<'_>, run: &SimulationRun, analysis: &AnalysisResult) -> String {
+    let source = super::working_view::source_of(run);
+    let owner = match source {
+        WorkingViewSource::Plan { .. } => {
+            crate::workbench::chrome::document_bar::results::view_title(state.model, source, run)
+        }
+        WorkingViewSource::Imported { .. } => run.name().to_owned(),
+    };
+    let base = format!("{owner} \u{2014} {}", analysis_name(analysis));
+    let taken = |title: &str| title_taken(state, title);
+    if !taken(&base) {
+        return base;
+    }
+    (2..)
+        .map(|number| format!("{base} {number}"))
+        .find(|title| !taken(title))
+        .unwrap_or(base)
+}
+
+fn title_taken(state: ResultsReads<'_>, title: &str) -> bool {
+    state
+        .model
+        .workspace
+        .content
+        .visualization_documents
+        .iter()
+        .any(|document| document.title().eq_ignore_ascii_case(title))
+}
+
+/// What the data browser calls `analysis`.
+fn analysis_name(analysis: &AnalysisResult) -> String {
+    crate::workbench::docks::navigator::results::analysis_label(analysis)
+}
+
+/// A run a document can read: one that has stopped and kept an analysis.
+fn finished(run: &SimulationRun) -> bool {
+    !matches!(
+        run.lifecycle,
+        SimulationRunLifecycle::Preparing
+            | SimulationRunLifecycle::Running
+            | SimulationRunLifecycle::Cancelling
+    ) && !run.analyses.is_empty()
+}
+
+/// The sheets this build draws `analysis` on, in catalogue order.
+fn sheets_of(analysis: &AnalysisResult) -> impl Iterator<Item = &'static ViewerDocumentDefinition> {
+    VIEWER_DOCUMENTS
+        .iter()
+        .filter(|viewer| draws(viewer, analysis))
+}
+
+fn draws(viewer: &ViewerDocumentDefinition, analysis: &AnalysisResult) -> bool {
+    viewer.release == ViewerReleaseClass::ReleaseTarget
+        && analysis_matches_viewer(viewer, analysis.analysis_type)
+        && super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
+}
+
+/// Whether a pane of `viewer` draws each signal the reader ticks as a trace
+/// of its own. A table or chart of the analysis as a whole draws no ticked
+/// signal, and the spectrum and eye sheets transform the one source their
+/// own bar picks.
+fn plots_signals(viewer: &ViewerDocumentDefinition) -> bool {
+    matches!(
+        viewer.art,
+        ViewerArt::Wave | ViewerArt::Bode | ViewerArt::Phase | ViewerArt::Smith | ViewerArt::Polar
+    )
+}
+
+fn signal_names(analysis: &AnalysisResult) -> Vec<String> {
+    analysis
+        .waveforms
+        .iter()
+        .map(|waveform| waveform.name.clone())
+        .collect()
 }
 
 fn retained_run(state: ResultsReads<'_>, dataset_id: DatasetId) -> Option<&SimulationRun> {
@@ -202,40 +329,6 @@ fn retained_run(state: ResultsReads<'_>, dataset_id: DatasetId) -> Option<&Simul
         .runs
         .iter()
         .find(|run| run.dataset_id == dataset_id)
-}
-
-fn dataset_label(run: &SimulationRun) -> String {
-    let lifecycle = match run.lifecycle {
-        SimulationRunLifecycle::LegacyUnknown => "legacy retained",
-        SimulationRunLifecycle::Preparing => "preparing",
-        SimulationRunLifecycle::Running => "running",
-        SimulationRunLifecycle::Cancelling => "cancelling",
-        SimulationRunLifecycle::Completed => "completed",
-        SimulationRunLifecycle::Failed => "failed · partial",
-        SimulationRunLifecycle::Aborted => "aborted · partial",
-        SimulationRunLifecycle::Interrupted => "interrupted · partial",
-    };
-    format!(
-        "Run {} · {} · {} analyses · {lifecycle}",
-        run.id,
-        run.label,
-        run.analyses.len()
-    )
-}
-
-fn run_analysis_ids(run: &SimulationRun) -> Vec<&'static str> {
-    let mut ids = run
-        .analyses
-        .iter()
-        .flat_map(|analysis| {
-            let analysis_type = analysis.analysis_type;
-            std::iter::once(analysis_manifest_id(analysis_type))
-                .chain((analysis_type == AnalysisType::Corner).then_some("temp"))
-        })
-        .collect::<Vec<_>>();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
 }
 
 pub(super) fn analysis_matches_viewer(
@@ -288,218 +381,102 @@ pub(super) const fn analysis_manifest_id(analysis: AnalysisType) -> &'static str
     }
 }
 
-pub fn first_compatible_viewer(
-    state: ResultsReads<'_>,
-    dataset_id: Option<DatasetId>,
-    family: ResultDocumentFamily,
-) -> Option<&'static str> {
-    let run = dataset_id.and_then(|id| retained_run(state, id))?;
-    let analysis_ids = run_analysis_ids(run);
-    VIEWER_DOCUMENTS
-        .iter()
-        .find(|viewer| viewer_is_creatable_for_run(run, family, viewer, &analysis_ids))
-        .map(|viewer| viewer.id)
-}
-
-pub fn viewer_is_creatable(
-    state: ResultsReads<'_>,
-    dataset_id: Option<DatasetId>,
-    family: ResultDocumentFamily,
-    viewer_id: &str,
-) -> bool {
-    let Some(run) = dataset_id.and_then(|id| retained_run(state, id)) else {
-        return false;
-    };
-    let Some(viewer) = viewer_document(viewer_id) else {
-        return false;
-    };
-    let analysis_ids = run_analysis_ids(run);
-    viewer_is_creatable_for_run(run, family, viewer, &analysis_ids)
-}
-
-fn viewer_is_creatable_for_run(
-    run: &SimulationRun,
-    family: ResultDocumentFamily,
-    viewer: &ViewerDocumentDefinition,
-    analysis_ids: &[&str],
-) -> bool {
-    family.includes(viewer)
-        && viewer.release == ViewerReleaseClass::ReleaseTarget
-        && viewer_compatibility(
-            viewer.id,
-            ViewerCapabilities {
-                analysis_ids,
-                external_capabilities: &[],
-            },
-        )
-        .is_compatible()
-        && run.analyses.iter().any(|analysis| {
-            super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
-        })
-}
-
-fn next_document_name(state: ResultsReads<'_>, family: ResultDocumentFamily) -> String {
-    for sequence in 1..=u32::MAX {
-        let candidate = format!("{} · {sequence:02}", family.label());
-        if !state
-            .model
-            .workspace
-            .content
-            .visualization_documents
-            .iter()
-            .any(|document| document.title().eq_ignore_ascii_case(&candidate))
-        {
-            return candidate;
-        }
-    }
-    family.label().to_owned()
-}
-
+/// Resolve the draft against the retained runs, or say why it cannot be
+/// created.
 pub fn resolve_draft<'a>(
     state: ResultsReads<'a>,
     draft: &'a CreateResultDocumentDialogState,
 ) -> Result<ResolvedDraft<'a>, CreateResultDocumentError> {
-    resolve(state, draft, None)
-}
-
-/// [`resolve_draft`], binding the analysis at `analysis_index` of the run
-/// when one is named, otherwise the run's first the viewer renders.
-fn resolve<'a>(
-    state: ResultsReads<'a>,
-    draft: &'a CreateResultDocumentDialogState,
-    analysis_index: Option<usize>,
-) -> Result<ResolvedDraft<'a>, CreateResultDocumentError> {
+    let invalid = |message: String| Err(CreateResultDocumentError::InvalidDraft(message));
     let name = draft.name.as_str();
     if name.trim().is_empty() {
-        return Err(CreateResultDocumentError::InvalidDraft(
-            "Enter a document name.".to_owned(),
-        ));
+        return invalid("Enter a name.".to_owned());
     }
     if name != name.trim() {
-        return Err(CreateResultDocumentError::InvalidDraft(
-            "Document names cannot begin or end with whitespace.".to_owned(),
-        ));
+        return invalid("A name cannot begin or end with a space.".to_owned());
     }
     if name.len() > MAX_DOCUMENT_NAME_BYTES {
-        return Err(CreateResultDocumentError::InvalidDraft(format!(
-            "Document names cannot exceed {MAX_DOCUMENT_NAME_BYTES} UTF-8 bytes."
-        )));
+        return invalid(format!(
+            "A name is at most {MAX_DOCUMENT_NAME_BYTES} bytes long."
+        ));
     }
     if name.chars().any(char::is_control) {
-        return Err(CreateResultDocumentError::InvalidDraft(
-            "Document names cannot contain control characters.".to_owned(),
+        return invalid("A name cannot hold a control character.".to_owned());
+    }
+    if title_taken(state, name) {
+        return invalid(format!(
+            "A document named \u{201c}{name}\u{201d} already exists."
         ));
     }
-    if state
-        .model
-        .workspace
-        .content
-        .visualization_documents
-        .iter()
-        .any(|document| document.title().eq_ignore_ascii_case(name))
-    {
-        return Err(CreateResultDocumentError::InvalidDraft(format!(
-            "A result document named '{name}' already exists."
-        )));
-    }
-
-    let family = ResultDocumentFamily::from_id(&draft.family_id).ok_or_else(|| {
-        CreateResultDocumentError::InvalidDraft(
-            "Select a registered result-document family.".to_owned(),
-        )
-    })?;
-    let layout = ResultDocumentLayout::from_id(&draft.layout_id).ok_or_else(|| {
-        CreateResultDocumentError::InvalidDraft(
-            "Select a registered result-document layout.".to_owned(),
-        )
-    })?;
-    let dataset_id = draft.dataset_id.ok_or_else(|| {
-        CreateResultDocumentError::InvalidDraft("Select a retained result dataset.".to_owned())
-    })?;
-    let run = retained_run(state, dataset_id).ok_or_else(|| {
-        CreateResultDocumentError::InvalidDraft(
-            "The selected result dataset is no longer retained.".to_owned(),
-        )
-    })?;
-    if matches!(
-        run.lifecycle,
-        SimulationRunLifecycle::Preparing
-            | SimulationRunLifecycle::Running
-            | SimulationRunLifecycle::Cancelling
-    ) {
-        return Err(CreateResultDocumentError::InvalidDraft(
-            "A result document requires a retained, non-running dataset.".to_owned(),
-        ));
-    }
-    if run.analyses.is_empty() {
-        return Err(CreateResultDocumentError::InvalidDraft(
-            "The selected dataset contains no retained analyses.".to_owned(),
-        ));
-    }
-
-    let viewer = viewer_document(&draft.viewer_id).ok_or_else(|| {
-        CreateResultDocumentError::InvalidDraft("Select a viewer type.".to_owned())
-    })?;
-    if !family.includes(viewer) {
-        return Err(CreateResultDocumentError::InvalidDraft(format!(
-            "{} is not part of the {} document family.",
-            viewer.title,
-            family.label()
-        )));
-    }
-    let analysis_ids = run_analysis_ids(run);
-    match viewer_compatibility(
-        viewer.id,
-        ViewerCapabilities {
-            analysis_ids: &analysis_ids,
-            external_capabilities: &[],
-        },
-    ) {
-        ViewerCompatibility::Compatible => {}
-        ViewerCompatibility::MissingAnalysis {
-            accepted_analysis_ids,
-        } => {
-            return Err(CreateResultDocumentError::InvalidDraft(format!(
-                "{} requires {} analysis data.",
-                viewer.title,
-                accepted_analysis_ids.join(" / ").to_ascii_uppercase()
-            )));
-        }
-        ViewerCompatibility::MissingExternalCapability { capability_id } => {
-            return Err(CreateResultDocumentError::InvalidDraft(format!(
-                "{} requires a qualified {capability_id} specialist dataset.",
-                viewer.title
-            )));
-        }
-        ViewerCompatibility::UnknownDocument => {
-            return Err(CreateResultDocumentError::InvalidDraft(
-                "The selected viewer is not registered.".to_owned(),
-            ));
-        }
-    }
-    let renders = |analysis: &&AnalysisResult| {
-        analysis_matches_viewer(viewer, analysis.analysis_type)
-            && super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
+    let Some(run) = draft.dataset_id.and_then(|id| retained_run(state, id)) else {
+        return invalid("Choose a run.".to_owned());
     };
-    let analysis = match analysis_index {
-        Some(index) => run.analyses.get(index).filter(renders),
-        None => run.analyses.iter().find(renders),
+    if !finished(run) {
+        return invalid(format!("{} has not finished.", run.name()));
     }
-    .ok_or_else(|| {
-        CreateResultDocumentError::InvalidDraft(format!(
-            "{} cannot render any retained analysis in the selected dataset without substituting a different result contract.",
-            viewer.title
-        ))
-    })?;
-
+    let Some(analysis) = draft.analysis.and_then(|index| run.analyses.get(index)) else {
+        return invalid("Choose an analysis.".to_owned());
+    };
+    let Some(viewer) = viewer_document(&draft.viewer_id).filter(|viewer| draws(viewer, analysis))
+    else {
+        return invalid(if sheets_of(analysis).next().is_none() {
+            format!("No sheet draws {}.", analysis_name(analysis))
+        } else {
+            "Choose a sheet.".to_owned()
+        });
+    };
+    // No tick gives an empty pane the reader plots into, as Add pane does.
+    let plotted = if plots_signals(viewer) {
+        let names = signal_names(analysis);
+        draft
+            .signals
+            .iter()
+            .filter(|signal| names.contains(signal))
+            .cloned()
+            .collect()
+    } else {
+        deck_plotted(analysis)
+    };
     Ok(ResolvedDraft {
         name,
         run,
         analysis,
         viewer,
-        family,
-        layout,
+        layout: draft.layout,
+        plotted,
     })
+}
+
+/// The form over the first analysis of the run `dataset_id` names that the
+/// sheet `viewer_id` draws, plotting what Results plots of it, under a name
+/// the reader typed.
+#[cfg(any(test, feature = "test-support"))]
+pub fn draft_over(
+    state: ResultsReads<'_>,
+    name: String,
+    dataset_id: Option<DatasetId>,
+    viewer_id: String,
+    layout: ResultDocumentLayout,
+) -> CreateResultDocumentDialogState {
+    let run = dataset_id.and_then(|id| retained_run(state, id));
+    let analysis = run.and_then(|run| {
+        let viewer = viewer_document(&viewer_id)?;
+        run.analyses
+            .iter()
+            .position(|analysis| draws(viewer, analysis))
+    });
+    let mut draft = CreateResultDocumentDialogState {
+        open: true,
+        name,
+        name_touched: true,
+        dataset_id,
+        analysis,
+        viewer_id,
+        layout,
+        ..CreateResultDocumentDialogState::default()
+    };
+    draft.signals = default_signals(state, &draft);
+    draft
 }
 
 pub fn source_analysis_identity(
@@ -613,10 +590,11 @@ fn build_document(
             kind: pane_kind(resolved.viewer.art),
             viewer_id: resolved.viewer.id.to_owned(),
             binding: Some(binding),
-            plotted: deck_plotted(resolved.analysis),
+            plotted: resolved.plotted.clone(),
         },
     )?;
     let page_id = document.pages()[0].id;
+    let template_id = document.pages()[0].template_id.clone();
     let first_pane_id = document.panes()[0].id;
     document.transact(
         document.revision(),
@@ -624,12 +602,12 @@ fn build_document(
             DocumentEdit::SetTracking(tracking),
             DocumentEdit::Rename {
                 entity: EntityRef::Page(page_id),
-                value: resolved.family.label().to_owned(),
+                value: analysis_name(resolved.analysis),
             },
             DocumentEdit::SetPageComposition {
                 page_id,
                 layout: resolved.layout.page_layout(),
-                template_id: resolved.layout.template_id().to_owned(),
+                template_id,
                 update_policy: PageUpdatePolicy::RefreshLinkedFigures,
             },
             DocumentEdit::Rename {
@@ -666,7 +644,7 @@ fn build_document(
                 viewer_id: resolved.viewer.id.to_owned(),
                 binding: Some(binding),
                 placement,
-                plotted: deck_plotted(resolved.analysis),
+                plotted: resolved.plotted.clone(),
             })],
         )?;
         let pane_id = receipt
@@ -743,9 +721,8 @@ fn document_tracking(
 /// Revalidate and commit the current draft into the project authority.
 pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateResultDocumentError> {
     let draft = state.create_result_document.clone();
-    let document_id = insert(state, &draft, None)?;
-    state.create_result_document.open = false;
-    state.create_result_document.validation_error = None;
+    let document_id = insert(state, &draft)?;
+    *state.create_result_document = CreateResultDocumentDialogState::default();
     Ok(document_id)
 }
 
@@ -773,9 +750,8 @@ pub(super) fn view_pane_viewer(
 fn insert(
     state: &mut ResultsParts<'_>,
     draft: &CreateResultDocumentDialogState,
-    analysis_index: Option<usize>,
 ) -> Result<ResultDocumentId, CreateResultDocumentError> {
-    let resolved = resolve(state.results_reads(), draft, analysis_index)?;
+    let resolved = resolve_draft(state.results_reads(), draft)?;
     let tracking = document_tracking(
         &state.model.simulation.retained.runs,
         resolved.run,
@@ -916,4 +892,65 @@ fn insert(
         ));
     }
     Ok(document_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::RetainedTrace;
+
+    /// Whatever the analysis, every sheet the form offers is a released one
+    /// that a sheet of this build draws: a designed view no sheet draws is
+    /// not a choice.
+    #[test]
+    fn the_form_offers_only_sheets_this_build_draws() {
+        use AnalysisType as A;
+        for analysis_type in [
+            A::DcOp,
+            A::DcSweep,
+            A::Parametric,
+            A::Ac,
+            A::Disto,
+            A::Transient,
+            A::Noise,
+            A::PoleZero,
+            A::Tf,
+            A::Sensitivity,
+            A::Pac,
+            A::Pnoise,
+            A::Pxf,
+            A::Pstb,
+            A::Stb,
+            A::MonteCarlo,
+            A::Corner,
+            A::Optimization,
+            A::Soa,
+            A::SParameter,
+            A::Envelope,
+            A::Fourier,
+            A::HarmonicBalance,
+            A::Pss,
+            A::Qpss,
+            A::Hbsp,
+            A::Hbnoise,
+            A::Psp,
+            A::Qpac,
+            A::Qpnoise,
+            A::Qpxf,
+            A::TransientNoise,
+            A::DcMismatch,
+        ] {
+            let analysis = AnalysisResult::new(1, analysis_type, "analysis").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![1.0, 2.0], vec![0.0, 1.0], "#55aaff"),
+            ]);
+            for viewer in sheets_of(&analysis) {
+                assert_eq!(viewer.release, ViewerReleaseClass::ReleaseTarget);
+                assert!(
+                    ResultViewer::from_viewer_document_id(viewer.id).is_some(),
+                    "{} is offered for {analysis_type:?} with no sheet to draw it",
+                    viewer.id
+                );
+            }
+        }
+    }
 }

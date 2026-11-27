@@ -26,7 +26,6 @@ use rspice_app_state::state::SimulationRunLifecycle;
 use rspice_app_state::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun,
 };
-use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 
 /// A document that follows the newest run of one authored analysis, plus
 /// the identities a second run needs to be a candidate for it.
@@ -126,16 +125,14 @@ fn latest_tracking_fixture() -> LatestFixture {
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Latest transient review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: "waveform-worksheet".to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: "single-pane".to_owned(),
-        validation_error: None,
-    };
+    app.state.results.create_result_document =
+        rspice_app_results::workbench::documents::result_document::create_document::draft_over(
+            app.state.results_reads(),
+            "Latest transient review".to_owned(),
+            Some(dataset_id),
+            "viewer-waveform".to_owned(),
+            rspice_results::document_creation::ResultDocumentLayout::SinglePane,
+        );
     let document_id = create_document::commit(&mut app.state.results_parts())
         .expect("persistent document commits");
     let revision = app
@@ -549,7 +546,9 @@ fn saved_cursor_a(app: &RSpiceApp, document_id: ResultDocumentId, pane_id: PaneI
 }
 
 fn persistent_transient_fixture() -> (RSpiceApp, ResultDocumentId) {
-    transient_fixture_with_layout("single-pane")
+    transient_fixture_with_layout(
+        rspice_results::document_creation::ResultDocumentLayout::SinglePane,
+    )
 }
 
 /// Project the fixture's one pane, exactly as a drawn frame does, and
@@ -593,7 +592,9 @@ fn placement(
     }
 }
 
-fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
+fn transient_fixture_with_layout(
+    layout: rspice_results::document_creation::ResultDocumentLayout,
+) -> (RSpiceApp, ResultDocumentId) {
     let mut app = RSpiceApp::test_instance();
     let mut run = SimulationRun::new(1);
     run.lifecycle = SimulationRunLifecycle::Completed;
@@ -611,16 +612,14 @@ fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentI
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Durable transient review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: "waveform-worksheet".to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: layout_id.to_owned(),
-        validation_error: None,
-    };
+    app.state.results.create_result_document =
+        rspice_app_results::workbench::documents::result_document::create_document::draft_over(
+            app.state.results_reads(),
+            "Durable transient review".to_owned(),
+            Some(dataset_id),
+            "viewer-waveform".to_owned(),
+            layout,
+        );
     let document_id =
         rspice_app_results::workbench::documents::result_document::create_document::commit(
             &mut app.state.results_parts(),
@@ -1191,16 +1190,14 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
 #[test]
 fn pane_selection_belongs_to_the_document_it_was_made_in() {
     let (mut app, first) = persistent_transient_fixture();
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Second transient review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(app.state.model.simulation.retained.runs[0].dataset_id),
-        family_id: "waveform-worksheet".to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: "two-linked-panes".to_owned(),
-        validation_error: None,
-    };
+    app.state.results.create_result_document =
+        rspice_app_results::workbench::documents::result_document::create_document::draft_over(
+            app.state.results_reads(),
+            "Second transient review".to_owned(),
+            Some(app.state.model.simulation.retained.runs[0].dataset_id),
+            "viewer-waveform".to_owned(),
+            rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes,
+        );
     let second =
         rspice_app_results::workbench::documents::result_document::create_document::commit(
             &mut app.state.results_parts(),
@@ -1468,7 +1465,9 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
 /// The viewer wrote only the zoomed pane's own axis, so the link did nothing.
 #[test]
 fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
-    let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
+    let (mut app, document_id) = transient_fixture_with_layout(
+        rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes,
+    );
     reload(&mut app, document_id);
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
@@ -1586,7 +1585,9 @@ fn zoom_previous_steps_a_result_document_back_through_its_kept_windows() {
 /// and moving the A cursor in one pane moves it in the other.
 #[test]
 fn linked_cursors_are_kept_by_the_document_and_move_together() {
-    let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
+    let (mut app, document_id) = transient_fixture_with_layout(
+        rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes,
+    );
     drive_frame(|ui| {
         super::with_surface_parts(&mut app, |state, run_controller| {
             show(ui, state, run_controller, document_id)

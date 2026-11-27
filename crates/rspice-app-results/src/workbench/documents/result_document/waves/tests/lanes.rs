@@ -476,10 +476,8 @@ fn radix_and_expansion_survive_save_and_reopen() {
     let document_id = {
         let mut parts = state.results_parts();
         super::super::super::create_document::open(&mut parts);
-        parts.create_result_document.layout_id =
-            rspice_results::document_creation::ResultDocumentLayout::SinglePane
-                .id()
-                .to_owned();
+        parts.create_result_document.layout =
+            rspice_results::document_creation::ResultDocumentLayout::SinglePane;
         super::super::super::create_document::commit(&mut parts).expect("the view is saved")
     };
     // The reader's lanes reach the document over the frames that draw them:

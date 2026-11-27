@@ -23,9 +23,7 @@ use rspice_app_state::product::ResultDocumentId;
 use rspice_app_state::state::RetainedTrace;
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::framework::command_registry::WorkbenchCommand;
-use rspice_results::document_creation::{ResultDocumentFamily, ResultDocumentLayout};
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
-use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
@@ -332,16 +330,14 @@ fn create_document(state: &mut AppState) -> ResultDocumentId {
         .active_run()
         .expect("a shown run")
         .dataset_id;
-    state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: ResultDocumentFamily::WaveformWorksheet.id().to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
-        validation_error: None,
-    };
+    state.results.create_result_document =
+        rspice_app_results::workbench::documents::result_document::create_document::draft_over(
+            state.results_reads(),
+            "Review".to_owned(),
+            Some(dataset_id),
+            "viewer-waveform".to_owned(),
+            rspice_results::document_creation::ResultDocumentLayout::SinglePane,
+        );
     create_document::commit(&mut state.results_parts()).expect("the document is made")
 }
 

@@ -15,7 +15,6 @@ use rspice_app_state::state::AnalysisResult;
 use rspice_app_state::state::{AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle};
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
-use rspice_results_ui::create_document::CreateResultDocumentDialogState;
 use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 
 fn transient_run(id: u64) -> SimulationRun {
@@ -32,23 +31,23 @@ fn transient_run(id: u64) -> SimulationRun {
 
 /// A project result document over one retained transient, created through
 /// the same commit the Create dialog uses, and open in the Results workspace.
-fn document_fixture(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
+fn document_fixture(
+    layout: rspice_results::document_creation::ResultDocumentLayout,
+) -> (RSpiceApp, ResultDocumentId) {
     let mut app = RSpiceApp::test_instance();
     let run = transient_run(1);
     let dataset_id = run.dataset_id;
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
-    app.state.results.create_result_document = CreateResultDocumentDialogState {
-        open: true,
-        name: "Transient review".to_owned(),
-        name_touched: true,
-        dataset_id: Some(dataset_id),
-        family_id: "waveform-worksheet".to_owned(),
-        viewer_id: "viewer-waveform".to_owned(),
-        layout_id: layout_id.to_owned(),
-        validation_error: None,
-    };
+    app.state.results.create_result_document =
+        rspice_app_results::workbench::documents::result_document::create_document::draft_over(
+            app.state.results_reads(),
+            "Transient review".to_owned(),
+            Some(dataset_id),
+            "viewer-waveform".to_owned(),
+            layout,
+        );
     let document_id =
         rspice_app_results::workbench::documents::result_document::create_document::commit(
             &mut app.state.results_parts(),
@@ -144,7 +143,8 @@ fn commit_add_pane(app: &mut RSpiceApp) {
 
 #[test]
 fn adding_a_pane_binds_it_after_the_selected_pane_and_selects_it() {
-    let (mut app, document_id) = document_fixture("single-pane");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::SinglePane);
     show_document(&mut app, document_id);
     let anchor = ordered_panes(&app, document_id)[0].clone();
 
@@ -175,7 +175,8 @@ fn adding_a_pane_binds_it_after_the_selected_pane_and_selects_it() {
 
 #[test]
 fn a_pane_from_another_run_attaches_that_run_to_the_document() {
-    let (mut app, document_id) = document_fixture("single-pane");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::SinglePane);
     let second = transient_run(2);
     let second_dataset = second.dataset_id;
     app.state.model.simulation.retained.runs.push(second);
@@ -212,7 +213,8 @@ fn a_pane_from_another_run_attaches_that_run_to_the_document() {
 
 #[test]
 fn the_add_pane_form_draws_over_the_document() {
-    let (mut app, document_id) = document_fixture("two-linked-panes");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes);
     show_document(&mut app, document_id);
     open_add_pane(&mut app.state.results_parts());
     drive_frame(|ui| {
@@ -244,7 +246,8 @@ fn horizontal_link_members(app: &RSpiceApp, document_id: ResultDocumentId) -> Ve
 
 #[test]
 fn removing_a_linked_pane_takes_it_out_of_its_link_group() {
-    let (mut app, document_id) = document_fixture("two-linked-panes");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes);
     show_document(&mut app, document_id);
     // The new pane follows a linked pane, so it joins that pane's X group.
     commit_add_pane(&mut app);
@@ -294,7 +297,8 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
     use rspice_app_state::results::visualization_document::{
         NewPage, NewPagePane, PageUpdatePolicy, PaneKind,
     };
-    let (mut app, document_id) = document_fixture("single-pane");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::SinglePane);
     let binding = fixture_binding(&app);
     transact(
         &mut app.state.results_parts(),
@@ -354,7 +358,8 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
 /// the menu stops offering moves past either end of the page.
 #[test]
 fn a_moved_pane_keeps_its_place_in_the_saved_document() {
-    let (mut app, document_id) = document_fixture("two-linked-panes");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes);
     show_document(&mut app, document_id);
     let before = ordered_panes(&app, document_id);
     let (first, second) = (before[0].id, before[1].id);
@@ -393,7 +398,8 @@ fn a_moved_pane_keeps_its_place_in_the_saved_document() {
 
 #[test]
 fn the_last_pane_on_a_page_is_not_removable() {
-    let (mut app, document_id) = document_fixture("single-pane");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::SinglePane);
     let pane = ordered_panes(&app, document_id)[0].id;
     assert!(!pane_menu(app.state.results_reads(), document_id, pane).removable);
     remove_pane(&mut app.state.results_parts(), document_id, pane);
@@ -462,7 +468,8 @@ fn verdict_of(
 #[test]
 fn a_comparison_over_a_document_is_kept_with_it() {
     use rspice_results_ui::document_dialogs::compare::Verdict;
-    let (mut app, document_id) = document_fixture("single-pane");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::SinglePane);
     let baseline = baseline_run(2);
     let baseline_id = baseline.dataset_id;
     app.state.model.simulation.retained.runs.push(baseline);
@@ -587,7 +594,8 @@ fn measurement_preview(
 /// and could not make them.
 #[test]
 fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
-    let (mut app, document_id) = document_fixture("two-linked-panes");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes);
     show_document(&mut app, document_id);
     let panes = ordered_panes(&app, document_id);
     app.state
@@ -630,7 +638,8 @@ fn a_measurement_added_over_the_plot_page_is_on_the_measurements_page() {
     use egui::accesskit::Role;
     use rspice_app_workbench::workbench::state::workbench_session::ConsolePage;
 
-    let (app, document_id) = document_fixture("two-linked-panes");
+    let (app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::TwoLinkedPanes);
     assert_eq!(
         app.state.workbench.documents.active(Workspace::Results),
         Some(&WorkspaceDocumentId::VisualizationDocument(document_id)),
@@ -702,7 +711,8 @@ fn a_measurement_added_over_the_plot_page_is_on_the_measurements_page() {
 /// show, is refused under the field and keeps nothing.
 #[test]
 fn a_measurement_must_reduce_to_a_number() {
-    let (mut app, document_id) = document_fixture("single-pane");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::SinglePane);
     show_document(&mut app, document_id);
     let preview = measurement_preview(&mut app, "V(out)");
     assert!(
@@ -1157,7 +1167,8 @@ fn shown_digits(app: &RSpiceApp) -> u8 {
 /// The result viewer ignored both; only the Studio honored them.
 #[test]
 fn a_document_s_digits_and_phase_are_applied_as_saved() {
-    let (mut app, document_id) = document_fixture("single-pane");
+    let (mut app, document_id) =
+        document_fixture(rspice_results::document_creation::ResultDocumentLayout::SinglePane);
     app.state.workbench.workspace = Workspace::Results;
     show_document(&mut app, document_id);
     let own_digits = shown_digits(&app);

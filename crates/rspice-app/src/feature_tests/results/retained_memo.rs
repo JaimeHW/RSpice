@@ -36,16 +36,13 @@ fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
     let mut app = RSpiceApp::test_instance();
     app.state = retained_state(AnalysisType::Transient, 3);
     app.state.results.create_result_document =
-        rspice_results_ui::create_document::CreateResultDocumentDialogState {
-            open: true,
-            name: "Pinned evidence".to_owned(),
-            name_touched: true,
-            dataset_id: Some(app.state.model.simulation.retained.runs[0].dataset_id),
-            family_id: "waveform-worksheet".to_owned(),
-            viewer_id: "viewer-waveform".to_owned(),
-            layout_id: "single-pane".to_owned(),
-            validation_error: None,
-        };
+        rspice_app_results::workbench::documents::result_document::create_document::draft_over(
+            app.state.results_reads(),
+            "Pinned evidence".to_owned(),
+            Some(app.state.model.simulation.retained.runs[0].dataset_id),
+            "viewer-waveform".to_owned(),
+            rspice_results::document_creation::ResultDocumentLayout::SinglePane,
+        );
     let document = create_document::commit(&mut app.state.results_parts()).unwrap();
     let bound = view_context::resolve_displayed_result_view(app.state.results_reads()).unwrap();
     assert!(

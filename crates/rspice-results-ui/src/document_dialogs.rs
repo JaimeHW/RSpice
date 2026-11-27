@@ -34,7 +34,7 @@ pub enum ResultDocumentDialog {
 }
 
 /// Option labels for a select row, and the label of the selected entry.
-fn labels_and_selection<K: PartialEq + Copy>(
+pub(crate) fn labels_and_selection<K: PartialEq + Copy>(
     entries: &[(K, String)],
     selected: Option<K>,
 ) -> (Vec<String>, String) {
