@@ -655,24 +655,18 @@ pub fn active_shared_x_status(
             zoom: 1.0,
         });
     }
-    // The linear pole-zero plane states the span of σ and of jω it shows.
-    if state.results.session.viewer == super::ResultViewer::PoleZero
-        && !super::sheet_settings::logarithmic_plane(state.results_reads())
-    {
+    // The pole-zero plane states the span of σ and of jω it shows, in rad/s
+    // on either plane.
+    if state.results.session.viewer == super::ResultViewer::PoleZero {
         use super::axis_range::compact_axis_range;
-        return state
-            .results
-            .session
-            .drawn_axes
-            .get(&super::ResultViewer::PoleZero)
-            .map(|&(sigma, omega)| SharedXStatus {
-                span: format!(
-                    "\u{3c3} {} \u{b7} j\u{3c9} {}",
-                    compact_axis_range(sigma, "rad/s"),
-                    compact_axis_range(omega, "rad/s")
-                ),
-                zoom: 1.0,
-            });
+        return super::pz::drawn_span(state.results_reads()).map(|(sigma, omega)| SharedXStatus {
+            span: format!(
+                "\u{3c3} {} \u{b7} j\u{3c9} {}",
+                compact_axis_range(sigma, "rad/s"),
+                compact_axis_range(omega, "rad/s")
+            ),
+            zoom: 1.0,
+        });
     }
     let active = state
         .results

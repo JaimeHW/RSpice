@@ -86,6 +86,20 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     }
 }
 
+/// The spans of σ and of jω in rad/s the plane last drew, on either plane:
+/// on the logarithmic one, the signed |s| its edges stand at.
+pub(super) fn drawn_span(state: ResultsReads<'_>) -> Option<((f64, f64), (f64, f64))> {
+    let axes = state
+        .results
+        .session
+        .drawn_axes
+        .get(&super::ResultViewer::PoleZero)
+        .copied()?;
+    let data = active_data(state)?;
+    let logarithmic = super::sheet_settings::logarithmic_plane(state);
+    Some(view::plane_span(&data, logarithmic, axes))
+}
+
 /// The sheet's bar: the plane on linear or logarithmic axes. The choice is
 /// the view's; the zoom, made on the other plane's axes, is let go.
 pub(super) fn domain_bar(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {

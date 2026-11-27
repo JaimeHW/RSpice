@@ -74,6 +74,22 @@ impl Plane {
         (real / magnitude * radius, imaginary / magnitude * radius)
     }
 
+    /// The value in rad/s a coordinate of the map stands at along an axis:
+    /// itself on the linear plane; on the logarithmic one |s| signed, as
+    /// the axis' ticks label it, and inside the unit radius, where no root
+    /// stands, the floor's share of it.
+    fn value_at(self, coordinate: f64) -> f64 {
+        let Self::Logarithmic { floor } = self else {
+            return coordinate;
+        };
+        let reach = coordinate.abs();
+        if reach >= 1.0 {
+            coordinate.signum() * floor * 10f64.powf(reach - 1.0)
+        } else {
+            coordinate * floor
+        }
+    }
+
     /// The axis over `[min, max]` of the map, quantity `label`, in rad/s.
     fn axis(self, min: f64, max: f64, label: &str) -> Axis {
         let Self::Logarithmic { floor } = self else {
@@ -103,6 +119,21 @@ impl Plane {
             .collect();
         axis
     }
+}
+
+/// The spans of σ and of jω in rad/s that the plane's drawn `axes` show:
+/// the map's own coordinates on the linear plane, and on the logarithmic
+/// one the signed |s| its edges stand at, so a status bar states either
+/// plane's view in the units its ticks read.
+#[must_use]
+pub fn plane_span(
+    data: &PoleZeroData,
+    logarithmic: bool,
+    (sigma, omega): ((f64, f64), (f64, f64)),
+) -> ((f64, f64), (f64, f64)) {
+    let plane = Plane::of(data, logarithmic);
+    let span = |(low, high): (f64, f64)| (plane.value_at(low), plane.value_at(high));
+    (span(sigma), span(omega))
 }
 
 /// The sheet's own control in its bar: the plane on linear or logarithmic
@@ -675,6 +706,24 @@ pub fn right_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The status bar states the logarithmic plane's view as its ticks read
+    /// it: the signed |s| each edge stands at, in rad/s, not the map's own
+    /// radii. The linear plane's coordinates are rad/s already.
+    #[test]
+    fn the_logarithmic_plane_spans_what_its_ticks_read() {
+        let mut data = PoleZeroData::new("PZ");
+        data.roots.push(ComplexRoot::pole(-2.0e3, 6.0e3));
+        data.roots.push(ComplexRoot::pole(-8.0e3, 0.0));
+        data.roots.push(ComplexRoot::zero(-4.0e3, 0.0));
+        // The smallest root, 4k, sets the floor at the decade 1k.
+        let drawn = ((-3.0, 3.0), (-0.5, 2.0));
+        let ((sigma_low, sigma_high), (omega_low, omega_high)) = plane_span(&data, true, drawn);
+        let near = |value: f64, expected: f64| (value - expected).abs() <= 1.0e-9 * expected.abs();
+        assert!(near(sigma_low, -1.0e5) && near(sigma_high, 1.0e5));
+        assert!(near(omega_low, -500.0) && near(omega_high, 1.0e4));
+        assert_eq!(plane_span(&data, false, drawn), drawn);
+    }
 
     /// The words of one row of the root table.
     fn row_text(name: &str, root: &ComplexRoot) -> Vec<String> {
