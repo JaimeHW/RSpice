@@ -81,6 +81,45 @@ pub fn locus_frame(real: &[f64], imaginary: &[f64]) -> ((f64, f64), (f64, f64)) 
     ((center - half, center + half), (-half, half))
 }
 
+/// The plane's axes over `ranges`, both ticked at one of their two ladders'
+/// steps, the finer where it is not too many ticks, so the grid's cells are
+/// square as its scale is. A ladder stated as offsets from an anchor, at a
+/// zoom too deep for whole labels, keeps its own ticks.
+fn plane_axes(((x0, x1), (y0, y1)): ((f64, f64), (f64, f64))) -> (Axis, Axis) {
+    let (re, im) = (Axis::linear(x0, x1, "Re"), Axis::linear(y0, y1, "Im"));
+    let step = |axis: &Axis| match axis.ticks.as_slice() {
+        [first, second, ..] if axis.offset_anchor().is_none() => second.0 - first.0,
+        _ => f64::NAN,
+    };
+    let (re_step, im_step) = (step(&re), step(&im));
+    if !(re_step.is_finite() && im_step.is_finite() && re_step > 0.0 && im_step > 0.0) {
+        return (re, im);
+    }
+    let positions = |low: f64, high: f64, step: f64| -> Vec<f64> {
+        ((low / step).ceil() as i64..=(high / step).floor() as i64)
+            .map(|index| index as f64 * step)
+            .collect()
+    };
+    let fine = re_step.min(im_step);
+    let common = if positions(x0, x1, fine)
+        .len()
+        .max(positions(y0, y1, fine).len())
+        <= plot::MAX_AXIS_TICKS
+    {
+        fine
+    } else {
+        re_step.max(im_step)
+    };
+    let ticked = |low: f64, high: f64, unit: &str| {
+        let mut axis = Axis::with_ticks(low, high, unit, &positions(low, high, common));
+        for (value, label) in &mut axis.ticks {
+            *label = plot::format::tick_label_with_step(*value, common);
+        }
+        axis
+    };
+    (ticked(x0, x1, "Re"), ticked(y0, y1, "Im"))
+}
+
 /// The sheet's own controls in its bar: frame the critical point, as the
 /// sheet opens, or the whole locus.
 pub fn domain_bar(ui: &mut Ui) -> Option<NyquistFrame> {
@@ -324,8 +363,7 @@ pub fn show(
     for _ in 0..2 {
         let plot = plot::plot_rect(&plot_ui, &spec).size();
         ranges = plot::equal_scale_ranges(plot, (x0, x1), (y0, y1));
-        spec.x = Axis::linear(ranges.0.0, ranges.0.1, "Re");
-        spec.y = Axis::linear(ranges.1.0, ranges.1.1, "Im");
+        (spec.x, spec.y) = plane_axes(ranges);
     }
 
     let stats_for_readout = stats;
