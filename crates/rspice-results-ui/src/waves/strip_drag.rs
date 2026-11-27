@@ -56,15 +56,17 @@ pub(crate) fn arrange(
     }
 }
 
-fn divider_id(model: &StripModel, index: usize) -> egui::Id {
-    egui::Id::new(("rspice.results.strip-divider", model.analysis_key, index))
+/// The divider's id under the stack's own `ui`: two panes of one page can
+/// draw the same analysis, and each pane's dividers are its own.
+fn divider_id(ui: &Ui, model: &StripModel, index: usize) -> egui::Id {
+    ui.make_persistent_id(("rspice.results.strip-divider", model.analysis_key, index))
 }
 
 /// How far the divider under strip `index` has been dragged and not yet
 /// let go, which the strips' heights take before the view keeps it.
-pub(crate) fn divider_offset(ctx: &egui::Context, model: &StripModel, index: usize) -> f32 {
-    ctx.data(|data| data.get_temp::<f32>(divider_id(model, index)))
-        .unwrap_or(0.0)
+pub(crate) fn divider_offset(ui: &Ui, model: &StripModel, index: usize) -> f32 {
+    let id = divider_id(ui, model, index);
+    ui.data(|data| data.get_temp::<f32>(id)).unwrap_or(0.0)
 }
 
 /// The divider between strip `index` and the one under it, `heights` the
@@ -87,7 +89,7 @@ pub(crate) fn divider(
         egui::pos2(ui.max_rect().right(), top),
     );
     let reach = Rect::from_center_size(seam.center(), egui::vec2(seam.width(), DIVIDER_REACH));
-    let id = divider_id(model, index);
+    let id = divider_id(ui, model, index);
     let response = ui.interact(reach, id, Sense::click_and_drag());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -112,7 +114,7 @@ pub(crate) fn divider(
         arrange(host, model, strip_layout::equalise(model));
         return;
     }
-    let mut offset = divider_offset(ui.ctx(), model, index);
+    let mut offset = divider_offset(ui, model, index);
     if response.dragged() {
         offset += response.drag_delta().y;
         // Each strip keeps a readable height.

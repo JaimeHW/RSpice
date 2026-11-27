@@ -1573,7 +1573,7 @@ fn show_strip_plot(
         shown[index] && shown[index + 1] && !collapsed[index] && !collapsed[index + 1]
     };
     for index in 0..count.saturating_sub(1) {
-        let offset = super::strip_drag::divider_offset(ui.ctx(), model, index);
+        let offset = super::strip_drag::divider_offset(ui, model, index);
         if offset != 0.0 && joined(index) {
             // A divider dragged stops where either strip would lose the
             // room its plot needs.

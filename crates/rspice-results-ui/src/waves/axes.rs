@@ -454,7 +454,10 @@ pub(crate) fn secondary_axes(
             paint_swatches(&painter, &column.swatches, from, y);
         }
 
-        let id = egui::Id::new(("rspice.results.strip-axis", model.analysis_key, axis.slot));
+        // Under the pane's own ui: two panes of one page can draw the same
+        // analysis on the same axes.
+        let id =
+            ui.make_persistent_id(("rspice.results.strip-axis", model.analysis_key, axis.slot));
         let response = ui
             .interact(rect, id, Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::ResizeVertical);

@@ -677,6 +677,25 @@ impl ResultsWindow {
         }
     }
 
+    /// One frame carrying `events`.
+    fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+        self.time += 0.1;
+        let (app, frame) = (&mut self.app, &mut self.frame);
+        self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::pos2(0.0, 0.0),
+                    egui::vec2(1440.0, 900.0),
+                )),
+                time: Some(self.time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(app, ui, frame),
+        )
+    }
+
     /// Three frames, the first carrying `events`; the last one's nodes.
     fn frames(
         &mut self,
@@ -684,28 +703,32 @@ impl ResultsWindow {
     ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
         let mut nodes = Vec::new();
         for _ in 0..3 {
-            self.time += 0.1;
-            let (app, frame) = (&mut self.app, &mut self.frame);
-            let output = self.ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::pos2(0.0, 0.0),
-                        egui::vec2(1440.0, 900.0),
-                    )),
-                    time: Some(self.time),
-                    focused: true,
-                    events: std::mem::take(&mut events),
-                    ..Default::default()
-                },
-                |ui| eframe::App::ui(app, ui, frame),
-            );
-            nodes = output
+            nodes = self
+                .frame(std::mem::take(&mut events))
                 .platform_output
                 .accesskit_update
                 .map(|update| update.nodes)
                 .unwrap_or_default();
         }
         nodes
+    }
+
+    /// What egui wrote, over the last of three frames, of a widget id two
+    /// widgets used.
+    fn id_clashes(&mut self) -> Vec<String> {
+        let mut clashes = Vec::new();
+        for _ in 0..3 {
+            let output = self.frame(Vec::new());
+            let mut texts = Vec::new();
+            for clipped in &output.shapes {
+                painted_texts(&clipped.shape, &mut texts);
+            }
+            clashes = texts
+                .into_iter()
+                .filter(|text| text.contains("use of widget ID"))
+                .collect();
+        }
+        clashes
     }
 
     /// Frames until no pane is still preparing what it derives from the
@@ -1414,6 +1437,85 @@ fn assert_drawn(
         shown >= filled,
         "{combination}: {shown} items drawn over {filled} of {panes} panes"
     );
+}
+
+/// The words `shape` paints, into `texts`.
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_texts(shape: &egui::Shape, texts: &mut Vec<String>) {
+    match shape {
+        egui::Shape::Text(text) => texts.push(text.galley.text().to_owned()),
+        egui::Shape::Vec(shapes) => {
+            for shape in shapes {
+                painted_texts(shape, texts);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Two panes of one page that each draw the same analysis in two strips
+/// keep their strips' widgets apart: egui finds no widget id used twice.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn two_panes_drawing_one_analysis_in_two_strips_each_use_no_widget_id_twice() {
+    use rspice_app_state::results::visualization_document::DocumentEdit;
+    let mut window = ResultsWindow::new();
+    let signals = ["V(in)", "I(R1)", "V(out)", "I(C1)"];
+    let mut run = SimulationRun::new(8);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.analyses.push(
+        AnalysisResult::new(11, AnalysisType::Transient, "Step response").with_waveforms(
+            signals
+                .iter()
+                .map(|name| {
+                    RetainedTrace::new(
+                        *name,
+                        vec![0.0, 0.5, 1.0],
+                        vec![0.0, 1.0, 0.0],
+                        String::new(),
+                    )
+                })
+                .collect(),
+        ),
+    );
+    window.dataset_id = run.dataset_id;
+    window.app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    assert!(window.app.state.model.simulation.select_run(0));
+    window.app.state.results.create_result_document = draft(
+        "Both units twice",
+        &run,
+        0,
+        "viewer-waveform",
+        ResultDocumentLayout::TwoLinkedPanes,
+        &signals,
+    );
+    let document_id = commit(&mut window.app.state.results_parts()).expect("the document commits");
+    // The spread gives each pane one unit; each pane takes the other's too.
+    let content = &mut window.app.state.model.workspace.content;
+    let document = content
+        .visualization_document(document_id)
+        .expect("the project owns it");
+    let mut panes = document.panes().iter().collect::<Vec<_>>();
+    panes.sort_by_key(|pane| pane.order);
+    let edits = vec![
+        DocumentEdit::SetSignalsPlotted {
+            pane_id: panes[0].id,
+            signals: vec!["I(R1)".to_owned(), "I(C1)".to_owned()],
+            plotted: true,
+        },
+        DocumentEdit::SetSignalsPlotted {
+            pane_id: panes[1].id,
+            signals: vec!["V(in)".to_owned(), "V(out)".to_owned()],
+            plotted: true,
+        },
+    ];
+    let revision = document.revision();
+    content
+        .transact_visualization_document(document_id, revision, edits)
+        .expect("each pane plots both units");
+
+    let clashes = window.id_clashes();
+    assert!(clashes.is_empty(), "{clashes:?}");
 }
 
 /// The traces each pane of `document_id` plots, by pane and label.
