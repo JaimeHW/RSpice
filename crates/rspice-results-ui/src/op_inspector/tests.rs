@@ -961,7 +961,9 @@ fn a_column_is_as_wide_as_what_it_holds_and_the_last_one_stands_whole() {
         .filter_map(|node| node.label())
         .collect();
     assert!(
-        heads.iter().any(|head| head.starts_with("MOSFET: gds (S);")),
+        heads
+            .iter()
+            .any(|head| head.starts_with("MOSFET: gds (S);")),
         "{heads:?}"
     );
 }
@@ -984,7 +986,11 @@ fn kept_device_power_is_a_section_after_the_branch_currents() {
     let plan = plan_of(Some(&dc), None);
     assert_eq!(
         &titles(&plan)[..3],
-        ["Node voltages", "Branch currents", "Device power dissipation"]
+        [
+            "Node voltages",
+            "Branch currents",
+            "Device power dissipation"
+        ]
     );
     assert_eq!(labels(&plan, "Device power dissipation"), ["Power"]);
     assert_eq!(

@@ -988,7 +988,12 @@ fn operating_point_state() -> ResultsTestHost {
 fn the_strip_and_the_folded_bar_centre_every_control_above_their_rule() {
     use egui::accesskit::Role;
     for (scene, mut state, bar, folded) in [
-        ("pole-zero", pole_zero_state(), "Result sheet controls", true),
+        (
+            "pole-zero",
+            pole_zero_state(),
+            "Result sheet controls",
+            true,
+        ),
         (
             "operating point",
             operating_point_state(),
@@ -999,7 +1004,11 @@ fn the_strip_and_the_folded_bar_centre_every_control_above_their_rule() {
     ] {
         let nodes = quick_view_nodes(&mut state);
         let tabs = nodes.iter().filter(|node| node.role() == Role::Tab).count();
-        assert_eq!(tabs == 0, folded, "{scene}: the strip folds only for one view");
+        assert_eq!(
+            tabs == 0,
+            folded,
+            "{scene}: the strip folds only for one view"
+        );
         let rows: Vec<_> = nodes
             .iter()
             .filter(|node| node.role() == Role::Toolbar && node.label() == Some(bar))

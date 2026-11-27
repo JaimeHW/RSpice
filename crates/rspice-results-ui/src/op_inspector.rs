@@ -957,7 +957,10 @@ impl OpPlan {
             .iter()
             .flat_map(|section| &section.columns)
             .map(|column| {
-                CELL_INSET + SORT_MARK_ROOM + measure(&column.head(), head_font.clone()) + MANTISSA_GAP
+                CELL_INSET
+                    + SORT_MARK_ROOM
+                    + measure(&column.head(), head_font.clone())
+                    + MANTISSA_GAP
             })
             .fold(0.0, f32::max);
         let region = if self.region_slot {
