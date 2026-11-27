@@ -352,3 +352,47 @@ fn a_log_time_overview_starts_at_the_first_positive_sample() {
         "the overview reaches off the window: {outside:?}"
     );
 }
+
+/// `yval` reads a trace where the cursor on it reads: on the decade axis an
+/// `.AC LIN 1k 4k` sweep opens on, straight in log f between two samples,
+/// and straight in f once the reader reads the axis linearly.
+#[test]
+fn yval_reads_a_linear_sweep_where_the_cursor_reads_it_on_either_axis() {
+    let x = vec![1.0e3, 2.0e3, 3.0e3, 4.0e3];
+    let mut state = strip_host(AnalysisType::Ac, x);
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Bode;
+    assert_eq!(model(&mut state)[0].x_scale, XScale::Log10);
+    let analysis = key(&state);
+    state
+        .results
+        .results
+        .add_expression_trace(
+            &state.model.simulation,
+            analysis,
+            "yval(V(out), 1500)".to_owned(),
+        )
+        .expect("the expression is added");
+    for scale in [XScale::Log10, XScale::Linear] {
+        state
+            .results
+            .results
+            .session
+            .x_scales
+            .insert(analysis, scale);
+        let models = model(&mut state);
+        let strip = &models[0];
+        assert_eq!(strip.x_scale, scale);
+        let trace = strip
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay)
+            .expect("V(out) is drawn");
+        let cursor = strip.trace_value(trace, 1500.0, SampleInterpolation::Linear);
+        let curves = resolve_strip_exprs(&mut state.results_parts(), strip, &Tokens::default());
+        let read = curves[0].y.sample(0).expect("yval is drawn");
+        assert!(
+            (read - cursor).abs() <= 1e-9 * cursor.abs(),
+            "on a {scale:?} axis yval reads {read} where the cursor reads {cursor}"
+        );
+    }
+}

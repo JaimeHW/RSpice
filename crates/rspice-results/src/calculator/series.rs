@@ -32,6 +32,9 @@ pub(super) struct Series<'a> {
     range: Range<usize>,
     /// The window `clip` cut, low end first.
     window: Option<(f64, f64)>,
+    /// What `x` a pass interpolates in between two samples when the axis the
+    /// trace is drawn on says, rather than its spacing.
+    drawn: Option<fn(f64) -> f64>,
 }
 
 impl<'a> Series<'a> {
@@ -40,6 +43,7 @@ impl<'a> Series<'a> {
             source: Source::Memory { x, y },
             range: 0..x.len().min(y.len()),
             window: None,
+            drawn: None,
         }
     }
 
@@ -48,6 +52,7 @@ impl<'a> Series<'a> {
             source: Source::Stored { x, y },
             range: 0..x.len().min(y.len()),
             window: None,
+            drawn: None,
         }
     }
 
@@ -58,10 +63,34 @@ impl<'a> Series<'a> {
         }
     }
 
-    /// What `x` a pass interpolates in between two samples: X itself, or
-    /// log X on a sweep spaced by a constant ratio, as the trace is drawn,
-    /// judged on the whole axis' ends as `yval` judges a wave's.
+    /// The trace as it is drawn on an X axis of `scale`, read between two
+    /// samples where the drawn line runs, as a cursor reads it: straight in
+    /// log X on a decade axis the trace rises along through positive values,
+    /// straight in X on any other.
+    pub(super) fn drawn(mut self, scale: crate::plot_axis::XScale) -> Self {
+        let n = self.len();
+        let rises_positive = n
+            .checked_sub(1)
+            .and_then(|last| Some((self.x_at(0)?, self.x_at(last)?)))
+            .is_some_and(|(first, last)| first > 0.0 && last > first);
+        self.drawn = Some(
+            if scale == crate::plot_axis::XScale::Log10 && rises_positive {
+                f64::ln
+            } else {
+                |x| x
+            },
+        );
+        self
+    }
+
+    /// What `x` a pass interpolates in between two samples: as the axis the
+    /// trace is drawn on reads when it is known, else X itself, or log X on
+    /// a sweep spaced by a constant ratio, judged on the whole axis' ends as
+    /// `yval` judges a wave's.
     fn along(&self) -> fn(f64) -> f64 {
+        if let Some(drawn) = self.drawn {
+            return drawn;
+        }
         let n = self.len();
         let ends = n.checked_sub(2).filter(|_| n >= 3).and_then(|penultimate| {
             Some((

@@ -51,6 +51,15 @@ pub trait EvaluationContext {
         None
     }
 
+    /// The scale of the X axis the expression's traces are drawn on, so
+    /// `yval` reads between two samples where the drawn line runs, as a
+    /// cursor on it reads: straight in X on a linear axis, straight in log X
+    /// on a decade one. `None` where nothing is drawn: `yval` then reads a
+    /// sweep spaced by a constant ratio in log X, and any other in X.
+    fn drawn_x_scale(&self) -> Option<crate::plot_axis::XScale> {
+        None
+    }
+
     /// The exact event history of a bus or logic net, `D(name)`, for
     /// `analog()`. A context without event histories names none.
     fn get_event_word(
@@ -189,6 +198,11 @@ pub fn evaluate(
                 } else {
                     ctx.get_magnitude(signal, dataset.as_deref())?.checked()
                 };
+            }
+            if lower == "yval"
+                && let Some(scale) = ctx.drawn_x_scale()
+            {
+                return drawn_yval(name, args, scale, ctx)?.checked();
             }
             if let Some(value) = stored_measure(name, &lower, args, ctx)? {
                 return value.checked();
@@ -599,6 +613,38 @@ fn stored_measure(
     match level {
         Some(level) => Ok(Some(CalcValue::Real(level(name, &trace, &rest)?))),
         None => Ok(None),
+    }
+}
+
+/// `yval(w, at)` read on the line drawn on an X axis of `scale`, as a cursor
+/// on it reads: a stored trace from the samples around `at`, a real one in
+/// memory from its samples, and anything else as `yval` reads it anywhere.
+fn drawn_yval(
+    name: &str,
+    args: &[CalculatorExpr],
+    scale: crate::plot_axis::XScale,
+    ctx: &impl EvaluationContext,
+) -> Result<CalcValue, EvaluationError> {
+    use super::series::Series;
+    let yval = super::levels::lookup("yval").expect("yval is a level measure");
+    let [trace, at] = args else {
+        return Err(EvaluationError::ArgCountMismatch {
+            func: name.to_owned(),
+            expected: 2,
+            actual: args.len(),
+        });
+    };
+    if let Some(series) = stored_series(trace, ctx)? {
+        let at = [Argument::Value(evaluate(at, ctx)?)];
+        return yval(name, &series.drawn(scale), &at).map(CalcValue::Real);
+    }
+    let value = evaluate(trace, ctx)?;
+    let at = Argument::Value(evaluate(at, ctx)?);
+    match value {
+        CalcValue::Real(RealValue::Waveform(x, y)) => {
+            yval(name, &Series::memory(&x, &y).drawn(scale), &[at]).map(CalcValue::Real)
+        }
+        value => super::measures::dispatch(name, vec![Argument::Value(value), at]),
     }
 }
 

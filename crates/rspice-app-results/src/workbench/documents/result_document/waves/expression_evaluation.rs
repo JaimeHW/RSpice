@@ -25,13 +25,17 @@ pub(super) fn evaluate_expression(
 }
 
 /// Where the reader's cursors and markers stand on the strip an expression
-/// is drawn on, for `xA`, `xB`, `m1.x` and `m1.y`.
+/// is drawn on, for `xA`, `xB`, `m1.x` and `m1.y`, and the scale its X axis
+/// is drawn in, for `yval`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct Places {
     /// A and B, when they stand on this strip.
     pub cursors: [Option<f64>; 2],
     /// Each marker on the strip: its number, X and Y.
     pub markers: Vec<(u64, f64, f64)>,
+    /// The scale of the strip's X axis, so `yval` reads where its cursor
+    /// reads; `None` off any strip.
+    pub x_scale: Option<XScale>,
 }
 
 impl Places {
@@ -80,7 +84,11 @@ impl Places {
                 })
                 .collect()
         });
-        Self { cursors, markers }
+        Self {
+            cursors,
+            markers,
+            x_scale: model.map(|model| model.x_scale),
+        }
     }
 
     /// What of these places `text` reads, folded into its version, so an
@@ -93,6 +101,7 @@ impl Places {
             match word {
                 "xA" => self.cursors[0].map(f64::to_bits).hash(&mut hasher),
                 "xB" => self.cursors[1].map(f64::to_bits).hash(&mut hasher),
+                "yval" => self.x_scale.hash(&mut hasher),
                 _ => {
                     if let Some(reading) =
                         rspice_results::calculator::ast::MarkerReading::parse(word)
@@ -323,6 +332,10 @@ impl<C: calculator::evaluator::EvaluationContext> calculator::evaluator::Evaluat
         dataset: Option<&str>,
     ) -> Result<calculator::evaluator::CalcValue, calculator::evaluator::EvaluationError> {
         self.values.get_magnitude(signal, dataset)
+    }
+
+    fn drawn_x_scale(&self) -> Option<XScale> {
+        self.places.x_scale
     }
 
     fn get_event_word(
