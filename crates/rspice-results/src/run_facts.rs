@@ -66,6 +66,11 @@ pub struct RunFacts {
     /// run no plan produced: a manual deck's.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub plan: String,
+    /// The file a deck's run read its netlist from, by its whole path, or
+    /// the name of a deck the project keeps as text. Empty for a plan's run,
+    /// which read no file.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub deck: String,
 }
 
 impl RunFacts {

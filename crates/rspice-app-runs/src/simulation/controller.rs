@@ -640,6 +640,13 @@ impl SimulationController {
         run.facts = dispatch.facts().cloned().map(|mut facts| {
             facts.simulator = run_lines::product_version();
             facts.plan = plan_name.unwrap_or_default();
+            facts.deck = manual_deck
+                .as_ref()
+                .map(|deck| match &deck.origin {
+                    crate::simulation::DeckOriginCopy::File(path) => path.display().to_string(),
+                    crate::simulation::DeckOriginCopy::Stored(_) => deck.name.clone(),
+                })
+                .unwrap_or_default();
             facts
         });
         let run_id = run.id;
