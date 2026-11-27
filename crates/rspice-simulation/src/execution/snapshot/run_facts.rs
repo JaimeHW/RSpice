@@ -98,8 +98,7 @@ fn assignments(body: &str) -> Vec<(String, String)> {
             words.push(std::mem::take(word));
         }
     };
-    let mut characters = body.chars().peekable();
-    while let Some(character) = characters.next() {
+    for character in body.chars() {
         if let Some(open) = quote {
             word.push(character);
             if character == open {
@@ -163,7 +162,11 @@ impl PreparedRunSnapshot {
     /// is the temperature its own deck sets, when it sets one, as the parse
     /// of it read it.
     #[must_use]
-    pub(crate) fn with_facts(mut self, mut stated: RunFacts, deck_temperature: Option<f64>) -> Self {
+    pub(crate) fn with_facts(
+        mut self,
+        mut stated: RunFacts,
+        deck_temperature: Option<f64>,
+    ) -> Self {
         // A declaration whose points were expanded assembles their family
         // and reaches no engine, so it solves at no temperature of its own.
         let declarations: HashSet<AnalysisInstanceId> = self
