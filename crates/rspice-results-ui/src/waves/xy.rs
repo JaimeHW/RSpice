@@ -755,6 +755,11 @@ pub(crate) fn show(ui: &mut Ui, host: &mut impl StackHost, input: XyInput<'_>) {
     };
     let resolved = match resolved {
         Ok(resolved) => resolved,
+        // One evaluated off the frame has no series until its job lands.
+        Err(_) if host.expression_pending(model.analysis_key, abscissa.text()) => {
+            well_hint(ui, &format!("Evaluating {}\u{2026}", abscissa.text()));
+            return;
+        }
         Err(reason) => {
             well_hint(ui, &format!("Cannot draw against it: {reason}"));
             return;

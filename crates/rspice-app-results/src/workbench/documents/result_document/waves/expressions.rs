@@ -563,28 +563,27 @@ pub(super) fn resolve_abscissa_expression(
         ^ pin
         ^ places.version_for(text).rotate_left(7);
     let key = (model.analysis_key, text.to_owned());
-    let fresh = state
-        .results
-        .analysis_expr_cache
-        .get(&key)
-        .is_some_and(|cached| cached.version == version);
-    if !fresh {
-        let series = evaluate_expression_reading(
-            &state.model.simulation,
-            (model.analysis_index, baseline),
-            text,
-            sample_selection.as_ref(),
+    refresh_expression(
+        state,
+        &key,
+        &ExpressionRead {
+            analysis_index: model.analysis_index,
+            baseline,
+            selection: sample_selection.as_ref(),
             complex_policy,
-            lanes.as_ref(),
-            &places,
-        );
-        state
-            .results
-            .analysis_expr_cache
-            .insert(key.clone(), ExprSeries { version, series });
-    }
-    let outputs = match state.results.analysis_expr_cache.get(&key) {
-        Some(cached) => cached.series.clone()?,
+            lanes: lanes.as_ref(),
+            places: &places,
+            version,
+            report: false,
+        },
+    );
+    // Until a job lands this version, the pane is drawn against the series
+    // it last landed, under that version's identity.
+    let (evaluated, outputs) = match state.results.analysis_expr_cache.get(&key) {
+        Some(cached) => (cached.version, cached.series.clone()?),
+        None if state.results.expression_jobs.contains_key(&key) => {
+            return Err(format!("{text} is being evaluated"));
+        }
         None => return Err(format!("{text} was not evaluated")),
     };
     let run = state
@@ -604,7 +603,7 @@ pub(super) fn resolve_abscissa_expression(
                 .and_then(|analysis| expression_unit(text, analysis, &model.x_unit).ok())
         })
         .unwrap_or_default();
-    let base_key = expr_cache_key(model.analysis_key, text) ^ version.rotate_left(7);
+    let base_key = expr_cache_key(model.analysis_key, text) ^ evaluated.rotate_left(7);
     let mut series = Vec::new();
     for output in outputs {
         if output.waveform.complex.is_some() {

@@ -746,3 +746,77 @@ fn dragging_a_cursor_an_expression_reads_keeps_its_curve_until_the_last_position
         "the curve drawn is not the one at the cursor's final position"
     );
 }
+
+/// A pane drawn against an expression over a stored run has it evaluated as
+/// a strip's expression is: on a Results job, a block at a time, the frame
+/// that asks reading no operand whole and saying it is being evaluated, and
+/// the abscissa the job lands holding what the samples read whole give.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_abscissa_expression_over_a_stored_run_is_evaluated_off_the_frame_a_block_at_a_time() {
+    use rspice_results::visualization_document::Abscissa;
+    const TEXT: &str = "V(out) * 2 - avg(V(out))";
+    let (time, out) = stored_rows();
+    let against = |state: &mut ResultsTestHost, key| {
+        state
+            .results
+            .results
+            .session
+            .xy_strips
+            .push(rspice_results_ui::session::XyStrip::new(
+                key,
+                "V",
+                Abscissa::Expression {
+                    text: TEXT.to_owned(),
+                },
+            ));
+    };
+    let abscissa = |state: &mut ResultsTestHost| {
+        let models = cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            &Tokens::default(),
+        );
+        super::super::expressions::resolve_abscissa_expression(
+            &mut state.results_parts(),
+            &models[0],
+            TEXT,
+        )
+    };
+    let (stored, columns) = stored_run(&time, &out);
+    let (mut state, key) = expression_host(stored, &[]);
+    against(&mut state, key);
+    let whole_reads = || {
+        columns
+            .iter()
+            .map(|column| column.whole_reads())
+            .sum::<u64>()
+    };
+
+    let painted = painted_frame(&new_context(), &mut state, true);
+    assert_eq!(whole_reads(), 0, "the frame read an operand whole");
+    assert!(
+        painted
+            .iter()
+            .any(|text| text.contains(&format!("Evaluating {TEXT}"))),
+        "the pane says its abscissa is being evaluated: {painted:?}"
+    );
+    let job = released_job(&state, key, TEXT).expect("a job evaluates the abscissa");
+    assert!(
+        job.wait(std::time::Duration::from_secs(120)),
+        "the job ends"
+    );
+
+    let landed = abscissa(&mut state).expect("the abscissa lands");
+    assert_eq!(whole_reads(), 0, "the job read an operand whole");
+    let (mut held, held_key) = expression_host(held_run(&time, &out), &[]);
+    against(&mut held, held_key);
+    let whole = abscissa(&mut held).expect("the abscissa read whole");
+    assert_eq!((landed.series.len(), whole.series.len()), (1, 1));
+    assert_eq!(landed.series[0].values.len(), time.len());
+    assert!(
+        same_samples(&landed.series[0].values, &whole.series[0].values),
+        "the abscissa read in blocks is not the abscissa read whole"
+    );
+}
