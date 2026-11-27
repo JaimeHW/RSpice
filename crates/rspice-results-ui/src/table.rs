@@ -1234,9 +1234,15 @@ fn search_fields(ui: &mut Ui) {
     ui.data_mut(|data| data.insert_temp(draft, text));
 }
 
-pub fn operating_point_controls(ui: &mut Ui) {
-    chip(ui, "Typed OP", true)
-        .on_hover_text("Virtualized exact operating-point values; right-click a row to copy");
+/// What the bar states over a table of operating-point values: a status in
+/// the bar's dim words, not a control, so nothing about it is lit.
+pub fn operating_point_status(ui: &mut Ui) {
+    ui.label(
+        egui::RichText::new("Typed OP")
+            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+            .color(Tokens::get(ui.ctx()).color.text_dim),
+    )
+    .on_hover_text("Virtualized exact operating-point values; right-click a row to copy");
 }
 
 fn status_line(shown: usize, retained: usize, view: &TableView, cursor: Option<f64>) -> String {

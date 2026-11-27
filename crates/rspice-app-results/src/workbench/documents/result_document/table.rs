@@ -307,7 +307,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut ResultsParts<'_>) {
                 && viewer::operating_point_row_count(&analysis.data) > 0
         })
     {
-        viewer::operating_point_controls(ui);
+        viewer::operating_point_status(ui);
         return;
     }
     let presentation = state.results_reads().presentation_policy();
