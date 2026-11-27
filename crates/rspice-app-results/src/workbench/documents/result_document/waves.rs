@@ -493,6 +493,17 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut ResultsParts<'_>, stack: Stack
 /// or in what the run was made from, a deck's output cards or the schematic's
 /// probes.
 fn nothing_plotted_hint(state: &ResultsParts<'_>) -> &'static str {
+    // A pane of a saved document plots the signals put on it: one dropped
+    // over it, or one ticked while it is the active pane, which a press in
+    // it makes it.
+    let session = &state.results.session;
+    if let Some(context) = session.persistent_pane_context {
+        return if session.persistent_document_pane(context.document_id) == Some(context.pane_id) {
+            "Tick signals in the Data browser, or drag them here."
+        } else {
+            "Drag signals here from the Data browser, or click this pane and tick them."
+        };
+    }
     let from_deck = state.model.simulation.active_run().is_some_and(|run| {
         run.analyses.iter().any(|analysis| {
             analysis.provenance().is_some_and(|provenance| {
