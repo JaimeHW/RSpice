@@ -88,6 +88,7 @@ pub(super) fn show_lanes(
             // The retained events do not yet carry where an HDL net was
             // declared or what drives it, so those probes have nowhere to go.
             source_probes: false,
+            expression_rows: &lanes::expression_rows(&specs),
             display_name: &|name| notations.display(name),
         },
     );
@@ -104,6 +105,9 @@ pub(super) fn show_lanes(
     }
     if let Some(text) = requests.add_expression {
         super::expressions::add_strip_expression(state, model.analysis_key, text);
+    }
+    if let Some(text) = requests.remove_expression {
+        super::expressions::remove_strip_expression(state, model, &text);
     }
 }
 

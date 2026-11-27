@@ -138,6 +138,10 @@ pub struct LaneStackInput<'a> {
     /// Whether the host can open a lane's HDL declaration and drivers. When
     /// it cannot, those probes are not offered at all.
     pub source_probes: bool,
+    /// The rows that are a `digital()` expression's lane. Such a row is
+    /// named nowhere else, so its menu removes the expression; it is no net,
+    /// so the menu offers no probe of one.
+    pub expression_rows: &'a [usize],
     /// A lane's net as the reader is shown it: the drawing's spelling of the
     /// name the result keys it by. The key itself is what every request
     /// carries.
@@ -170,6 +174,8 @@ pub struct LaneStackResponse {
     pub probe: Option<LaneProbe>,
     /// Draw this row's value as a staircase trace, `analog()`.
     pub analog: Option<usize>,
+    /// Remove the expression this row is the lane of.
+    pub remove_expression: Option<usize>,
     /// The name column's new width, while the reader drags its edge.
     pub resize_name: Option<f32>,
 }
@@ -773,8 +779,8 @@ fn value_names_menu(
     }
 }
 
-/// The row menu: the lane's cross-probes, a bus's radix and grouping, and
-/// grouping a logic selection.
+/// The row menu: the lane's cross-probes, a bus's radix and grouping,
+/// grouping a logic selection, and an expression's lane's Remove.
 fn lane_menu(
     ui: &mut Ui,
     input: &LaneStackInput<'_>,
@@ -786,7 +792,8 @@ fn lane_menu(
         ui.close();
         return;
     };
-    if let Some(signal) = lane_signal(row, member) {
+    let expression = input.expression_rows.contains(&index);
+    if let Some(signal) = lane_signal(row, member).filter(|_| !expression) {
         let source = [
             (
                 "Go to declaration",
@@ -876,6 +883,13 @@ fn lane_menu(
     ] {
         if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
             output.move_row = Some((index, down));
+            ui.close();
+        }
+    }
+    if expression {
+        ui.separator();
+        if ui.button("Remove expression").clicked() {
+            output.remove_expression = Some(index);
             ui.close();
         }
     }

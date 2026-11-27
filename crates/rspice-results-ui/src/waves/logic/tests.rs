@@ -478,6 +478,7 @@ fn lane_frame(
                 significant_digits: 4,
                 violations: &[],
                 source_probes: true,
+                expression_rows: &[],
                 display_name: &|name| Cow::Borrowed(name),
             },
         ));
@@ -516,6 +517,7 @@ fn a_lane_names_its_net_as_the_host_shows_it() {
                 significant_digits: 4,
                 violations: &[],
                 source_probes: true,
+                expression_rows: &[],
                 display_name: &|name| Cow::Owned(name.to_ascii_uppercase()),
             },
         );

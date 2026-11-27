@@ -534,6 +534,22 @@ pub struct LaneRequests {
     pub probe: Option<super::logic::LaneProbe>,
     /// Add this expression to the strip: a row drawn as a staircase.
     pub add_expression: Option<String>,
+    /// Remove this expression from the strip: the one a row is the lane of.
+    pub remove_expression: Option<String>,
+}
+
+/// The rows of `specs` that are a `digital()` expression's lane, whose
+/// signal is the expression as typed.
+pub fn expression_rows(specs: &[LaneSpec]) -> Vec<usize> {
+    specs
+        .iter()
+        .enumerate()
+        .filter(|(_, spec)| {
+            matches!(spec, LaneSpec::Logic { signal, .. }
+                if super::logic::convert::draws_as_logic(signal))
+        })
+        .map(|(index, _)| index)
+        .collect()
 }
 
 /// The `analog()` expression that draws a row as a staircase: a net by its
@@ -648,6 +664,15 @@ pub fn apply_response(
             .analog
             .and_then(|index| specs.get(index))
             .map(analog_expression),
+        remove_expression: response
+            .remove_expression
+            .and_then(|index| specs.get(index))
+            .and_then(|spec| match spec {
+                LaneSpec::Logic { signal, .. } if super::logic::convert::draws_as_logic(signal) => {
+                    Some(signal.clone())
+                }
+                _ => None,
+            }),
     }
 }
 

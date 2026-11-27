@@ -457,3 +457,38 @@ fn a_rows_analog_names_what_it_draws() {
     assert_eq!(asked(&mut layout, 0).as_deref(), Some("analog(D(clk))"));
     assert_eq!(asked(&mut layout, 1).as_deref(), Some("analog(D(q[1:0]))"));
 }
+
+/// A `digital()` expression's lane is the only row whose Remove takes
+/// something off the strip, and it names the expression as typed; a net's
+/// row removes nothing.
+#[test]
+fn only_an_expressions_lane_removes_its_expression() {
+    const CLOCK: &str = "digital(V(a), 0.5)";
+    let specs = [
+        LaneSpec::Logic {
+            signal: "D(clk)".to_owned(),
+            net: "clk".to_owned(),
+            color: egui::Color32::WHITE,
+        },
+        LaneSpec::Logic {
+            signal: CLOCK.to_owned(),
+            net: "V(a) \u{2265} 0.5".to_owned(),
+            color: egui::Color32::WHITE,
+        },
+    ];
+    assert_eq!(expression_rows(&specs), [1]);
+    let mut layout = EventLaneLayout::default();
+    let removed = |layout: &mut EventLaneLayout, index| {
+        apply_response(
+            layout,
+            &specs,
+            LaneStackResponse {
+                remove_expression: Some(index),
+                ..LaneStackResponse::default()
+            },
+        )
+        .remove_expression
+    };
+    assert_eq!(removed(&mut layout, 1).as_deref(), Some(CLOCK));
+    assert_eq!(removed(&mut layout, 0), None);
+}

@@ -821,6 +821,36 @@ pub(super) fn route_expressions(
     }
 }
 
+/// Take `text` off the strip's expressions, as its lane's menu asks: its
+/// declared unit, its evaluation and any job evaluating it go with it.
+pub(super) fn remove_strip_expression(
+    state: &mut ResultsParts<'_>,
+    model: &StripModel,
+    text: &str,
+) {
+    let analysis = model.analysis_key;
+    let session = &mut state.results.session;
+    let Some(list) = session.analysis_exprs.get_mut(&analysis) else {
+        return;
+    };
+    let before = list.len();
+    list.retain(|expr| expr.text != text);
+    if list.len() == before {
+        return;
+    }
+    if list.is_empty() {
+        session.analysis_exprs.remove(&analysis);
+    }
+    let key = (analysis, text.to_owned());
+    session.expression_units.remove(&key);
+    session.sync_expression_projection(analysis, model.analysis_index);
+    if let Some(evaluating) = state.results.expression_jobs.remove(&key) {
+        evaluating.job.cancel();
+    }
+    state.results.analysis_expr_cache.remove(&key);
+    state.model.workspace.content.visualization_documents_dirty = true;
+}
+
 /// Stable decimation-cache identity for an expression trace. The high bit
 /// keeps it out of the waveform trace_key space.
 pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u64 {
