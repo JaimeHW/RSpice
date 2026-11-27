@@ -618,21 +618,20 @@ impl Serialize for Samples<'_> {
                         index + offset
                     )));
                 }
-                if let Some(paired) = &paired {
-                    if paired
+                if let Some(paired) = &paired
+                    && paired
                         .get(offset)
                         .is_some_and(|real| real.is_nan() != value.is_nan())
-                    {
-                        return Err(S::Error::custom(format!(
-                            "native bundle signal '{}' has inconsistent complex sample availability",
-                            self.signal
-                        )));
-                    }
+                {
+                    return Err(S::Error::custom(format!(
+                        "native bundle signal '{}' has inconsistent complex sample availability",
+                        self.signal
+                    )));
                 }
-                if value.is_nan() {
-                    if let Some(unavailable) = self.unavailable {
-                        unavailable.set(true);
-                    }
+                if value.is_nan()
+                    && let Some(unavailable) = self.unavailable
+                {
+                    unavailable.set(true);
                 }
                 sequence.serialize_element(&(!value.is_nan()).then_some(value))?;
             }
