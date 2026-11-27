@@ -142,17 +142,14 @@ impl WorkspaceDocumentId {
         }
     }
 
-    /// Whether the document stays open while its workspace is, first on its
-    /// strip, and never closes: the generated netlist and the Added lines,
-    /// which every schematic design has, and Results' documents, which its
-    /// data browser lists rather than opens.
+    /// Whether the document's tab stays while its workspace is open, first
+    /// on its strip: the generated netlist and the Added lines, which every
+    /// schematic design has, and the run the data browser picked for
+    /// Results.
     pub const fn is_pinned(&self) -> bool {
         matches!(
             self,
-            Self::NetlistGenerated(_)
-                | Self::NetlistAddedLines
-                | Self::ResultDataset(_)
-                | Self::VisualizationDocument(_)
+            Self::NetlistGenerated(_) | Self::NetlistAddedLines | Self::ResultDataset(_)
         )
     }
 }

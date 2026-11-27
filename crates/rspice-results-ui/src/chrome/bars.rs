@@ -17,7 +17,6 @@ use rspice_ui_kit::{
 #[derive(Default)]
 pub struct DocumentBarActions {
     pub viewer: Option<ResultViewer>,
-    pub create_document: bool,
     pub add_pane: bool,
     pub open_properties: bool,
     /// The index of the page the reader picked.
@@ -80,23 +79,16 @@ pub fn document_bar(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             actions.open_properties =
                 viewer_picker(ui, WorkbenchIcon::Sliders, "Properties…", "Plot properties");
-            match source {
-                DocumentBarSource::QuickView => {
-                    actions.create_document = viewer_picker(
-                        ui,
-                        WorkbenchIcon::Add,
-                        "New result document…",
-                        "New result document…",
-                    );
-                }
-                DocumentBarSource::Document { .. } => {
-                    actions.add_pane = viewer_picker(
-                        ui,
-                        WorkbenchIcon::Add,
-                        "Add pane…",
-                        "Add a pane to this result document",
-                    );
-                }
+            // A quick view makes a new result document from the "+" at the
+            // end of Results' tabs, so the bar offers only what a document
+            // does.
+            if let DocumentBarSource::Document { .. } = source {
+                actions.add_pane = viewer_picker(
+                    ui,
+                    WorkbenchIcon::Add,
+                    "Add pane…",
+                    "Add a pane to this result document",
+                );
             }
             viewer_picker_separator(ui);
 

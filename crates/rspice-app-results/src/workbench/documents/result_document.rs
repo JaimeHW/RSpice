@@ -2901,9 +2901,7 @@ fn show_docbar_for(
     if let Some(viewer) = actions.viewer {
         state.results.session.viewer = viewer;
     }
-    if actions.create_document {
-        create_document::open(state);
-    } else if actions.add_pane {
+    if actions.add_pane {
         document_edit::open_add_pane(state);
     } else if actions.open_properties {
         document_edit::open_properties(state);

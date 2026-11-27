@@ -94,20 +94,49 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
             let chooser_width = chooser
                 .as_ref()
                 .map_or(0.0, |chooser| chooser.width(ui.painter()));
+            // Results' strip ends in a "+" that makes a new result document,
+            // right after its last tab.
+            let create = (app.workbench().workspace == Workspace::Results).then(|| {
+                let key = crate::state::command_catalog::CommandKey::new(CREATE_RESULT_DOCUMENT);
+                match app.availability(key) {
+                    crate::workbench::framework::command_registry::CommandAvailability::Disabled(
+                        reason,
+                    ) => Some(reason),
+                    _ => None,
+                }
+            });
+            let create_width = if create.is_some() {
+                hidden_button_width
+            } else {
+                0.0
+            };
             let fit = StripFit::resolve(
                 &natural,
-                (rect.width() - chooser_width).max(0.0),
+                (rect.width() - chooser_width - create_width).max(0.0),
                 hidden_button_width,
             );
+            // The tabs' track: the strip's width while tabs scroll in it, else
+            // just the tabs, so the "+" stands right after the last one.
+            let track = if create.is_some() && !fit.overflowing {
+                let cap = fit.cap.map_or(TAB_MAX_WIDTH, |cap| cap.min(TAB_MAX_WIDTH));
+                natural
+                    .iter()
+                    .map(|width| width.min(cap))
+                    .sum::<f32>()
+                    .min(fit.tabs_width)
+            } else {
+                fit.tabs_width
+            };
+            let mut request = StripRequest::default();
             ui.horizontal(|ui| {
                 let scroll = ui
                     .allocate_ui_with_layout(
-                        Vec2::new(fit.tabs_width, height),
+                        Vec2::new(track, height),
                         Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             // The track, not the content: the button after it
                             // must sit at the strip's right end.
-                            ui.set_min_width(fit.tabs_width);
+                            ui.set_min_width(track);
                             egui::ScrollArea::horizontal()
                                 .id_salt("workbench.document_tabs.scroll")
                                 .scroll_bar_visibility(
@@ -131,12 +160,21 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                                         node.set_role(egui::accesskit::Role::TabList);
                                         node.set_label("Open documents");
                                     });
-                                    tabs.inner
+                                    let (rects, menu) = tabs.inner;
+                                    request.menu = menu;
+                                    rects
                                 })
                         },
                     )
                     .inner;
                 paint_scroll_fades(ui, &scroll, t.color.bg_panel);
+                if let Some(refusal) = &create {
+                    request.create = create_document_button(
+                        ui,
+                        refusal.as_deref(),
+                        Vec2::new(create_width, height),
+                    );
+                }
                 if fit.overflowing {
                     let hidden = documents
                         .iter()
@@ -157,7 +195,118 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                     chooser.show(ui, app, Vec2::new(chooser_width, height));
                 }
             });
+            run_strip_request(app, request, &documents);
         });
+}
+
+/// Do what the strip was asked for. A tab's Rename and Delete act on the
+/// document shown, so the tab's document is shown first, as Close others
+/// keeps the one shown.
+fn run_strip_request(
+    app: &mut impl WorkbenchHost,
+    request: StripRequest,
+    documents: &[WorkspaceDocument],
+) {
+    use crate::state::command_catalog::CommandKey;
+    if request.create {
+        app.execute(CommandKey::new(CREATE_RESULT_DOCUMENT));
+    }
+    let Some((document, choice)) = request.menu else {
+        return;
+    };
+    match choice {
+        TabMenuChoice::Close => {
+            close_document(app.session_mut(), &document, documents);
+        }
+        TabMenuChoice::CloseOthers => {
+            if activate_document(app.session_mut(), &document) {
+                close_other_documents(app.session_mut());
+            }
+        }
+        TabMenuChoice::Rename => {
+            if activate_document(app.session_mut(), &document) {
+                app.execute(CommandKey::new(RENAME_RESULT_DOCUMENT));
+            }
+        }
+        TabMenuChoice::Delete => {
+            if activate_document(app.session_mut(), &document) {
+                app.execute(CommandKey::new(DELETE_RESULT_DOCUMENT));
+            }
+        }
+    }
+}
+
+/// The "+" at the end of Results' strip, which opens the New result
+/// document form; greyed, saying why, while no document can be made. True
+/// when it was pressed.
+fn create_document_button(ui: &mut Ui, refusal: Option<&str>, size: Vec2) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        size,
+        if refusal.is_none() {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            refusal.is_none(),
+            NEW_RESULT_DOCUMENT,
+        )
+    });
+    if response.hovered() && refusal.is_none() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    WorkbenchIcon::Add.paint(
+        ui.painter(),
+        Rect::from_center_size(rect.center(), Vec2::splat(TAB_ICON_SIZE)),
+        match (refusal, response.hovered()) {
+            (Some(_), _) => t.color.text_faint,
+            (None, true) => t.color.text,
+            (None, false) => t.color.text_dim,
+        },
+    );
+    theme::paint_focus_ring(ui, &response, rect);
+    let response = match refusal {
+        Some(refusal) => {
+            let mut reason = refusal.chars();
+            let reason = reason.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(reason).collect()
+            });
+            response.on_hover_text(format!("{NEW_RESULT_DOCUMENT}\n{reason}"))
+        }
+        None => response.on_hover_text(NEW_RESULT_DOCUMENT),
+    };
+    response.clicked()
+}
+
+/// The command that opens the New result document form, which Results'
+/// strip offers at its end.
+const CREATE_RESULT_DOCUMENT: &str = "create-result-document";
+/// The commands that rename and delete the saved result document shown,
+/// which a result document's tab offers in its menu.
+const RENAME_RESULT_DOCUMENT: &str = "rename-result-document";
+const DELETE_RESULT_DOCUMENT: &str = "delete-result-document";
+/// What Results' strip offers at its end.
+const NEW_RESULT_DOCUMENT: &str = "New result document\u{2026}";
+
+/// What a tab's menu asked for, of the tab it was opened on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TabMenuChoice {
+    Rename,
+    Close,
+    CloseOthers,
+    Delete,
+}
+
+/// What the reader asked of the strip that only its host can do: a tab's
+/// menu choice, or the strip's "+".
+#[derive(Default)]
+struct StripRequest {
+    menu: Option<(WorkspaceDocumentId, TabMenuChoice)>,
+    create: bool,
 }
 
 /// The command that opens Design management on its Variants tab.
@@ -916,12 +1065,11 @@ fn reconcile_document_registry(state: &mut impl DocumentSession) {
 }
 
 /// Whether `workspace`'s strip shows with `document_count` documents open.
-/// Results has none: its data browser lists the run shown and the saved
-/// result documents, and picks among them.
+/// Results' shows from its first tab, the run the data browser picked: its
+/// "+" is where a new result document is made.
 pub fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
     match workspace {
-        Workspace::Results => false,
-        Workspace::Design | Workspace::Models => document_count > 0,
+        Workspace::Design | Workspace::Models | Workspace::Results => document_count > 0,
         _ => document_count > 1,
     }
 }
@@ -948,13 +1096,19 @@ fn document_tabs(
     tabs: StripTabs<'_>,
     height: f32,
     cap: Option<f32>,
-) -> Vec<Rect> {
+) -> (Vec<Rect>, Option<(WorkspaceDocumentId, TabMenuChoice)>) {
     let StripTabs {
         documents,
         closable,
         natural,
     } = tabs;
     let active = authoritative_active_document(state, documents);
+    let read_only = state
+        .model()
+        .safe_mode
+        .project_read_only()
+        .then_some("The project is open read-only");
+    let mut menu = None;
     let max_width = cap.map_or(TAB_MAX_WIDTH, |cap| cap.min(TAB_MAX_WIDTH));
     let listened = ui.ctx().accesskit_node_builder(ui.id(), |_| ()).is_some();
     let view = ui.clip_rect().x_range();
@@ -1003,10 +1157,16 @@ fn document_tabs(
 
         // A pointer press activates a tab without taking keyboard focus, so
         // the focus ring appears only for a reader who is using the keys.
-        if tab.close_clicked {
+        // The middle button closes a tab, as its close does.
+        if tab.close_clicked || (tab.response.middle_clicked() && closable[index]) {
             close = Some((index, document.id.clone(), tab.response.has_focus()));
         } else if tab.response.clicked() && !selected {
             open = Some(document.id.clone());
+        }
+        if let WorkspaceDocumentId::VisualizationDocument(_) = document.id
+            && let Some(choice) = result_document_tab_menu(&tab.response, read_only)
+        {
+            menu = Some((document.id.clone(), choice));
         }
 
         if tab.response.has_focus() {
@@ -1057,7 +1217,43 @@ fn document_tabs(
             ui.memory_mut(|memory| memory.request_focus(tab_ids[focus_after_close]));
         }
     }
-    tab_rects
+    (tab_rects, menu)
+}
+
+/// A saved result document's tab menu: its name, closing it or the others,
+/// and deleting it. Closing never deletes; deleting asks nothing, since
+/// Undo puts the document back, and neither renaming nor deleting is
+/// offered on a project open read-only.
+fn result_document_tab_menu(
+    tab: &egui::Response,
+    read_only: Option<&'static str>,
+) -> Option<TabMenuChoice> {
+    let mut choice = None;
+    tab.context_menu(|ui| {
+        let mut item = |ui: &mut Ui, label: &str, enabled: bool, picked: TabMenuChoice| {
+            let response = ui.add_enabled(enabled, egui::Button::new(label));
+            let response = match read_only {
+                Some(refusal) if !enabled => response.on_disabled_hover_text(refusal),
+                _ => response,
+            };
+            if response.clicked() {
+                choice = Some(picked);
+                ui.close();
+            }
+        };
+        item(
+            ui,
+            "Rename\u{2026}",
+            read_only.is_none(),
+            TabMenuChoice::Rename,
+        );
+        ui.separator();
+        item(ui, "Close", true, TabMenuChoice::Close);
+        item(ui, "Close others", true, TabMenuChoice::CloseOthers);
+        ui.separator();
+        item(ui, "Delete", read_only.is_none(), TabMenuChoice::Delete);
+    });
+    choice
 }
 
 /// Scroll the active tab into view when it becomes active, whether by a

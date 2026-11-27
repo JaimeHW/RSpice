@@ -71,11 +71,8 @@ impl ShellCommand {
                 .window_session
                 .secondary_window_ids()
                 .is_empty(),
-            // Results' data browser is the one place that picks what it
-            // shows, so nothing steps through its documents unseen.
             Self::PreviousDocument | Self::NextDocument => {
-                state.workbench.workspace != Workspace::Results
-                    && rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(state)
+                rspice_app_workbench::workbench::chrome::document_bar::document_descriptors(state)
                     .iter()
                     .filter(|document| document.open)
                     .count()

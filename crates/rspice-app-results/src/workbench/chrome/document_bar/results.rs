@@ -1,11 +1,12 @@
-//! Results' documents: the browser's view of the run it picked, then one
-//! per saved result document, and the activation of either.
+//! The document bar's Results tabs: the browser's view, then one per open
+//! saved result document, and the activation of either.
 //!
-//! The data browser is the one place that picks what Results shows: a run,
-//! drawn through its plan's view or the imported run's, or a saved
-//! document, which it lists above the runs. Results draws no strip of tabs;
-//! these documents are what the window records as shown, what a secondary
-//! window holds, and what the hardcopy and export paths read.
+//! The data browser picks the run Results shows, and the run is drawn
+//! through its plan's view, or the imported run's. The first tab is that
+//! view's, named for the run: it is never closed, and it is the way back to
+//! the browser's pick from a saved document. Runs and plans take no tab of
+//! their own, and the data browser lists data only: a saved document is
+//! opened from its tab, New result document, or Open result document.
 
 use crate::product::DatasetId;
 use crate::results::visualization_document::{ResultDocumentTrackingMode, WorkingViewSource};
@@ -134,14 +135,14 @@ fn browser_view_tab(run: &SimulationRun) -> WorkspaceDocument {
     }
 }
 
-/// A saved result document as the data browser lists it.
+/// A saved result document as Results lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListedDocument {
     pub id: crate::product::ResultDocumentId,
     pub title: String,
     /// Whether it holds edits the project has not saved. Only its own edits
-    /// count: what the reader does to a run's view edits that view, which
-    /// the browser does not list; the project's unsaved state shows it.
+    /// count: what the reader does in the quick view edits its run's working
+    /// view, which has no tab to mark; the project's unsaved state shows it.
     pub dirty: bool,
 }
 
@@ -513,10 +514,27 @@ pub(in crate::workbench) fn delete_shown_document(
         .visualization_document(document)
         .map(|document| document.title().to_owned())
         .ok_or("the document is no longer in the project")?;
-    let run = browser_run(reads).map(|run| run.dataset_id);
+    let shown = WorkspaceDocumentId::VisualizationDocument(document);
+    let tabs = result_documents(reads)
+        .into_iter()
+        .filter(|tab| tab.id == shown || !reads.workbench.documents.is_closed(&tab.id))
+        .collect::<Vec<_>>();
+    let at = tabs.iter().position(|tab| tab.id == shown);
+    let beside = at
+        .and_then(|at| {
+            tabs.get(at + 1)
+                .or_else(|| at.checked_sub(1).and_then(|at| tabs.get(at)))
+        })
+        .map(|tab| tab.id.clone());
     view_edits::delete_document(state, document)?;
-    if let Some(run) = run {
-        show_result_dataset(state, &run);
+    match beside {
+        Some(WorkspaceDocumentId::VisualizationDocument(next)) => {
+            show_visualization_document(state, &next);
+        }
+        Some(WorkspaceDocumentId::ResultDataset(dataset)) => {
+            show_result_dataset(state, &dataset);
+        }
+        _ => {}
     }
     Ok(format!("Deleted {title}. Undo puts it back."))
 }
