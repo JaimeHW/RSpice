@@ -461,11 +461,26 @@ pub fn measured_unit(symbol: &str) -> String {
 /// reading, so its digits end where a prefixed neighbour's do. A unit that
 /// never takes a prefix (`−3.00 dB`, `45.00°`, `12.5 %`) and a bare number
 /// have no slot.
+///
+/// Only a number's unit has a slot: the word ending a sentence of counts
+/// (`12 display bins`, `38 beyond`) is no unit, so it keeps its one space.
 #[must_use]
 pub fn leaves_prefix_slot_blank(reading: &str) -> bool {
-    let Some((_, unit)) = reading.trim_end().rsplit_once(' ') else {
+    let Some((value, unit)) = reading.trim_end().rsplit_once(' ') else {
         return false;
     };
+    // A unit stands right after a number, a complex one's `j` included.
+    if !value
+        .chars()
+        .next_back()
+        .is_some_and(|last| last.is_ascii_digit() || last == 'j')
+    {
+        return false;
+    }
+    // A run of four or more lower-case letters is a word, not a unit symbol.
+    if unit.chars().count() >= 4 && unit.chars().all(|letter| letter.is_ascii_lowercase()) {
+        return false;
+    }
     // A number after the last space is a part of the value, not its unit:
     // the imaginary part of `0.540 − 0.452j`.
     if unit
@@ -486,6 +501,23 @@ pub fn leaves_prefix_slot_blank(reading: &str) -> bool {
     });
     !prefixed && unit_takes_prefix(unit)
 }
+
+/// A statistic of samples spread over `spread`, as it reads: a value far
+/// below the rounding of sums at that spread is that rounding, and reads as
+/// zero. The mean of samples centred on zero is 0, not −26.38e−18.
+#[must_use]
+pub fn snapped_to_spread(value: f64, spread: f64) -> f64 {
+    if spread.is_finite() && spread > 0.0 && value.abs() <= spread * SPREAD_ROUNDING {
+        0.0
+    } else {
+        value
+    }
+}
+
+/// How far below the samples' spread a statistic is rounding alone: far
+/// above what summing even millions of samples leaves, far below any
+/// difference a reading at the reader's digits shows.
+const SPREAD_ROUNDING: f64 = 1.0e-12;
 
 /// Whether `unit` names a plane angle, which stands against its number.
 pub(crate) fn is_plane_angle(unit: &str) -> bool {
@@ -1436,5 +1468,21 @@ mod tests {
         assert!(!leaves_prefix_slot_blank("12.50 %"));
         assert!(!leaves_prefix_slot_blank("0.5000"));
         assert!(!leaves_prefix_slot_blank("6.917n"));
+        // A count's word is not a unit.
+        assert!(!leaves_prefix_slot_blank("2 bins"));
+        assert!(!leaves_prefix_slot_blank("12 display bins"));
+        assert!(!leaves_prefix_slot_blank(
+            "\u{2265} 39.5 dB \u{b7} 38 beyond"
+        ));
+        assert!(!leaves_prefix_slot_blank("101 measured \u{b7} 38 failing"));
+    }
+
+    /// A statistic far below its samples' spread is their rounding, read as
+    /// zero; one the readings can show is kept.
+    #[test]
+    fn rounding_below_the_spread_reads_as_zero() {
+        assert_eq!(snapped_to_spread(-26.38e-18, 2.0), 0.0);
+        assert_eq!(snapped_to_spread(1.0e-6, 2.0), 1.0e-6);
+        assert_eq!(snapped_to_spread(3.0, 0.0), 3.0);
     }
 }

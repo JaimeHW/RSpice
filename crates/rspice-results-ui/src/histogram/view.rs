@@ -1033,7 +1033,14 @@ pub fn right_panel(
     if let Some(moments) = model.moments {
         let mut rows = vec![
             ("N", moments.count.to_string(), false),
-            ("Mean", value(moments.mean), true),
+            (
+                "Mean",
+                value(rspice_results::number_format::snapped_to_spread(
+                    moments.mean,
+                    moments.max - moments.min,
+                )),
+                true,
+            ),
         ];
         if let Some(shape) = model.shape {
             rows.push(("Median", value(shape.median), false));

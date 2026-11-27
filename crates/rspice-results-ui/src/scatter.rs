@@ -1073,7 +1073,7 @@ fn register_rows(
         ),
         (
             "Mean X",
-            population::mean(&xs).map_or_else(
+            register_mean(&xs).map_or_else(
                 || "\u{2014}".to_owned(),
                 |mean| fmt_column_reading(mean, &x_column.unit, significant_digits),
             ),
@@ -1081,7 +1081,7 @@ fn register_rows(
         ),
         (
             "Mean Y",
-            population::mean(&ys).map_or_else(
+            register_mean(&ys).map_or_else(
                 || "\u{2014}".to_owned(),
                 |mean| fmt_column_reading(mean, &y_column.unit, significant_digits),
             ),
@@ -1099,6 +1099,22 @@ fn register_rows(
         false,
     ));
     rows
+}
+
+/// The mean of `values` as the register reads it: rounding far below their
+/// spread reads as zero, so a population centred on zero has a mean of 0.
+fn register_mean(values: &[f64]) -> Option<f64> {
+    let mean = population::mean(values)?;
+    let (low, high) = values
+        .iter()
+        .filter(|value| value.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| {
+            (low.min(*value), high.max(*value))
+        });
+    Some(rspice_results::number_format::snapped_to_spread(
+        mean,
+        high - low,
+    ))
 }
 
 /// The unit of a slope, as the two columns state theirs.
@@ -1279,6 +1295,19 @@ mod tests {
             "{}",
             by_name("X requirement")
         );
+    }
+
+    /// A population centred on zero has a mean of zero, not the rounding its
+    /// sum leaves, and a mean that is really there is kept.
+    #[test]
+    fn a_centred_population_reads_a_mean_of_zero() {
+        let centred: Vec<f64> = (0..=100)
+            .map(|index| (f64::from(index) - 50.0) / 50.0)
+            .collect();
+        assert_eq!(register_mean(&centred), Some(0.0));
+        let shifted: Vec<f64> = centred.iter().map(|value| value + 1.0e-3).collect();
+        let mean = register_mean(&shifted).expect("a mean");
+        assert!((mean - 1.0e-3).abs() < 1.0e-12, "{mean}");
     }
     #[test]
     fn a_column_without_spread_reports_no_correlation_rather_than_zero() {
