@@ -311,15 +311,22 @@ pub fn show(
         painter.circle_stroke(center, radius, egui::Stroke::new(1.0, grid));
     }));
 
-    // Region sized so the INNER plot area is square: stability reading
-    // needs the unit circle and the locus on one scale.
-    let avail = ui.available_rect_before_wrap();
-    let rect = plot::square_outer_rect(avail, &spec);
+    // The plane fills its region with Re and Im on one scale, as stability
+    // reading needs the unit circle round and the locus true to it: the
+    // long side's range widens, the plot never shrinks to a square. Twice:
+    // the Y gutter is as wide as the labels of the range it shows.
     let mut plot_ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect)
+            .max_rect(ui.available_rect_before_wrap())
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
+    let mut ranges = ((x0, x1), (y0, y1));
+    for _ in 0..2 {
+        let plot = plot::plot_rect(&plot_ui, &spec).size();
+        ranges = plot::equal_scale_ranges(plot, (x0, x1), (y0, y1));
+        spec.x = Axis::linear(ranges.0.0, ranges.0.1, "Re");
+        spec.y = Axis::linear(ranges.1.0, ranges.1.1, "Im");
+    }
 
     let stats_for_readout = stats;
     let readout = move |_x: f64| -> Vec<(String, String)> {
@@ -338,13 +345,17 @@ pub fn show(
 
     let response = plot::show(&mut plot_ui, &spec, cache, None, Some(&readout));
     if response.view.any() {
-        let change = crate::presentation::square_xy_view_change((x0, x1), (y0, y1), response.view);
+        let change = crate::presentation::equal_scale_view_change(
+            ranges.0,
+            ranges.1,
+            response.view,
+            response.plot_rect.size(),
+        );
         view.apply(&change);
     }
 
     // Nearest locus point on hover, click to pin — gain/phase/frequency at
     // a spot on the locus is the question a Nyquist plot exists to answer.
-    let ranges = ((x0, x1), (y0, y1));
     let mut hovered: Option<(usize, usize)> = None;
     if let Some(pointer) = response.response.hover_pos()
         && response.plot_rect.contains(pointer)
