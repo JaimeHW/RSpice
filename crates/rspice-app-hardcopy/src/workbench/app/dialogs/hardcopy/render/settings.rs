@@ -17,7 +17,10 @@ pub(super) const SETTINGS_WIDTH: f32 = 420.0;
 const LABEL_WIDTH: f32 = 88.0;
 const LABEL_GAP: f32 = 8.0;
 const ROW_GAP: f32 = 4.0;
+/// The space above a group's caption: at least this, and up to
+/// [`GROUP_GAP_MOST`] where the document's rows leave room for it.
 const GROUP_GAP: f32 = 8.0;
+const GROUP_GAP_MOST: f32 = 20.0;
 const GROUP_CAPTION_HEIGHT: f32 = 18.0;
 const INSET_X: i8 = 16;
 const INSET_Y: i8 = 10;
@@ -50,6 +53,21 @@ pub(super) fn settings_column(
             .layout(Layout::top_down(Align::Min)),
     );
     column.set_clip_rect(rect.intersect(ui.clip_rect()));
+    // The groups share out the height the rows leave. The rows a document
+    // has are the same whatever is chosen (a row that hides keeps its
+    // place), so the share changes only when the document does.
+    let natural_id = egui::Id::new((
+        "hardcopy-settings-natural",
+        draft.workflow == HardcopyWorkflow::Export,
+    ));
+    let room = height - 2.0 * f32::from(INSET_Y);
+    let gap = ui
+        .data(|data| data.get_temp::<(f32, usize)>(natural_id))
+        .filter(|(_, gaps)| *gaps > 0)
+        .map_or(GROUP_GAP, |(natural, gaps)| {
+            let share = (room - natural) / gaps as f32;
+            share.clamp(GROUP_GAP, GROUP_GAP_MOST).floor()
+        });
     // The rows are authored to fit the column. The scroll area is the
     // fallback for a hostile font scale, not the layout.
     egui::ScrollArea::vertical()
@@ -62,8 +80,12 @@ pub(super) fn settings_column(
                 .show(ui, |ui| {
                     ui.set_width(SETTINGS_WIDTH - 2.0 * f32::from(INSET_X));
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                    let mut rows = Rows::new(ui);
+                    let top = ui.cursor().top();
+                    let mut rows = Rows::new(ui, gap);
                     action = settings_rows(&mut rows, draft);
+                    let gaps = rows.gaps;
+                    let natural = ui.cursor().top() - top - gaps as f32 * gap;
+                    ui.data_mut(|data| data.insert_temp(natural_id, (natural, gaps)));
                 });
         });
     (rect, action)
@@ -109,18 +131,28 @@ fn settings_rows(rows: &mut Rows<'_>, draft: &mut HardcopyDialogState) -> BodyAc
 /// Label-left rows on one label column, grouped under captions.
 struct Rows<'u> {
     ui: &'u mut Ui,
+    /// The space above every caption but the first.
+    gap: f32,
+    /// How many of those spaces have been laid out.
+    gaps: usize,
     started: bool,
 }
 
 impl<'u> Rows<'u> {
-    fn new(ui: &'u mut Ui) -> Self {
-        Self { ui, started: false }
+    fn new(ui: &'u mut Ui, gap: f32) -> Self {
+        Self {
+            ui,
+            gap,
+            gaps: 0,
+            started: false,
+        }
     }
 
     /// A caption over a hairline, opening the group of rows after it.
     fn group(&mut self, title: &str) {
         if self.started {
-            self.ui.add_space(GROUP_GAP);
+            self.ui.add_space(self.gap);
+            self.gaps += 1;
         }
         self.started = true;
         let t = Tokens::get(self.ui.ctx());
