@@ -263,8 +263,10 @@ mod tests {
 
     #[test]
     fn the_options_the_product_states_on_every_deck_are_no_difference() {
-        let mut options = rspice_simulation_contract::options::SimulationOptions::default();
-        options.reltol = 1e-4;
+        let options = rspice_simulation_contract::options::SimulationOptions {
+            reltol: 1e-4,
+            ..Default::default()
+        };
         let facts = stated_facts(&[&options.to_spice_options()]);
         assert_eq!(facts.options.len(), 1, "{:?}", facts.options);
         assert_eq!(facts.options[0].name, "RELTOL");
