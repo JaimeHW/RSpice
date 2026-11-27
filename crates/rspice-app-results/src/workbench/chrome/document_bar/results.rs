@@ -130,7 +130,9 @@ fn browser_view_tab(run: &SimulationRun) -> WorkspaceDocument {
     WorkspaceDocument {
         id: WorkspaceDocumentId::ResultDataset(run.dataset_id),
         label: run.name().to_owned(),
-        icon: WorkbenchIcon::Results,
+        // The run's waveform, so the run's tab reads apart from the
+        // documents' at a glance.
+        icon: WorkbenchIcon::Simulate,
         dirty: false,
     }
 }
