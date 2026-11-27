@@ -710,22 +710,23 @@ pub fn poll_segment_checks(
         false
     });
     if ended {
+        // What stood in for a segment whose own file was checked is read again from the folders
+        // it was read from, so nothing it showed meanwhile is kept and no other file's segment
+        // of the same rows stands in for it. One still waiting is left as it is: reading it
+        // would wait for its check here.
         let runs = (0..simulation.retained.runs.len()).collect();
-        // A waveform whose segment is still being checked is left as it is: reading it would
-        // wait for that check here. One that stood in for its segment while it was checked is
-        // read again, so nothing it showed meanwhile is kept.
-        read_runs_again(simulation, runs, &|values| {
-            let source = values.stored_window()?.0;
-            let digest = source.identity()?.0;
-            if rspice_results::store_reader::checking(digest)
-                || (!source.stands_in() && rspice_formats::project_results::readable(values))
-            {
-                return None;
-            }
-            rspice_formats::project_results::read_checked(values)
-        });
+        read_runs_again(simulation, runs, ReadAgain::Checked);
     }
     !checks.is_empty()
+}
+
+/// What runs are read again for.
+#[derive(Clone, Copy)]
+enum ReadAgain {
+    /// Checks of kept files ended: what stood in for each reads its own file now.
+    Checked,
+    /// More folders may hold what could not be read.
+    Located,
 }
 
 /// Locate results: look for kept segments in `folder` too, and read again every run of the
@@ -737,26 +738,38 @@ pub fn locate_results(simulation: &mut crate::state::SimulationState, folder: &P
     let unread: Vec<usize> = (0..simulation.retained.runs.len())
         .filter(|&index| simulation.retained.runs[index].unread_results().is_some())
         .collect();
-    let read = &rspice_formats::project_results::read_again;
-    read_runs_again(simulation, unread.clone(), read);
+    read_runs_again(simulation, unread.clone(), ReadAgain::Located);
     unread
         .into_iter()
         .filter(|&index| simulation.retained.runs[index].unread_results().is_none())
         .count()
 }
 
-/// Read again each of `runs` through `read`, which says what a waveform reads now (`None`: as
-/// it was), its signals sharing one axis as on a fresh run. An event history reads again where it
-/// reads now.
+/// Read again each of `runs` for `why`: each waveform and event history that reads otherwise
+/// now, its signals sharing one axis as on a fresh run.
 fn read_runs_again(
     simulation: &mut crate::state::SimulationState,
     runs: Vec<usize>,
-    read: &dyn Fn(
-        &rspice_results::waveform::WaveformValues,
-    ) -> Option<rspice_results::waveform::WaveformValues>,
+    why: ReadAgain,
 ) {
-    use rspice_formats::project_results::read_events_again;
+    use rspice_formats::project_results::{
+        read_again, read_checked, read_events_again, read_events_checked,
+    };
+    use rspice_results::events::points::{EventPoint, EventPoints};
     use rspice_results::store_reader::ColumnReference;
+    let read = |values: &rspice_results::waveform::WaveformValues| match why {
+        ReadAgain::Checked => read_checked(values),
+        ReadAgain::Located => read_again(values),
+    };
+    fn read_events<P: EventPoint>(
+        points: &EventPoints<P>,
+        why: ReadAgain,
+    ) -> Option<EventPoints<P>> {
+        match why {
+            ReadAgain::Checked => read_events_checked(points),
+            ReadAgain::Located => read_events_again(points),
+        }
+    }
     for index in runs {
         let run = &mut simulation.retained.runs[index];
         let mut axes: Vec<(ColumnReference, rspice_results::waveform::WaveformValues)> = Vec::new();
@@ -794,12 +807,12 @@ fn read_runs_again(
             ) = analysis.data.result_payload.as_mut()
             {
                 for trace in digital_traces {
-                    if let Some(again) = read_events_again(&trace.points) {
+                    if let Some(again) = read_events(&trace.points, why) {
                         trace.points = again;
                     }
                 }
                 for trace in real_traces {
-                    if let Some(again) = read_events_again(&trace.points) {
+                    if let Some(again) = read_events(&trace.points, why) {
                         trace.points = again;
                     }
                 }

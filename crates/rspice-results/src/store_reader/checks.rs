@@ -53,6 +53,16 @@ struct Awaiting {
     started: bool,
 }
 
+impl Awaiting {
+    /// How far its check got, as work done of work known.
+    fn progress(&self) -> (u64, u64) {
+        (
+            self.progress.done.load(Ordering::Relaxed),
+            self.progress.total.load(Ordering::Relaxed),
+        )
+    }
+}
+
 /// Every file waiting for or under its check, by path.
 static AWAITING: Mutex<BTreeMap<PathBuf, Awaiting>> = Mutex::new(BTreeMap::new());
 
@@ -166,16 +176,22 @@ pub fn checking(digest: [u8; 32]) -> bool {
 /// for a reader of no file in particular, any. The check of another project's file of the same
 /// rows says nothing of whether this one's is there.
 pub(super) fn checking_in(scope: Option<&[PathBuf]>, digest: Digest) -> bool {
+    check_progress_in(scope, digest).is_some()
+}
+
+/// How far the check of the file [`checking_in`] finds got, as work done of work known, while
+/// that file is waiting for or under its check.
+pub(super) fn check_progress_in(scope: Option<&[PathBuf]>, digest: Digest) -> Option<(u64, u64)> {
     let Some(scope) = scope else {
-        return checking(digest.0);
+        return check_progress(digest.0);
     };
     let name = rspice_results_store::kept_segment_name(&digest);
     let awaiting = awaiting();
-    scope.iter().any(|folder| {
-        awaiting
-            .get(&folder.join(&name))
-            .is_some_and(|held| held.segment.digest.0 == digest.0)
-    })
+    scope
+        .iter()
+        .filter_map(|folder| awaiting.get(&folder.join(&name)))
+        .find(|held| held.segment.digest.0 == digest.0)
+        .map(Awaiting::progress)
 }
 
 /// The file of digest `digest` waiting for or under its check, if one is: where a save copies
@@ -193,12 +209,13 @@ pub fn check_progress(digest: [u8; 32]) -> Option<(u64, u64)> {
     awaiting()
         .values()
         .find(|held| held.segment.digest.0 == digest)
-        .map(|held| {
-            (
-                held.progress.done.load(Ordering::Relaxed),
-                held.progress.total.load(Ordering::Relaxed),
-            )
-        })
+        .map(Awaiting::progress)
+}
+
+/// How far the check of the file at `path` got, as work done of work known, while it is waiting
+/// for or under its check: what an open segment read from that very file says.
+pub(super) fn check_progress_of(path: &Path) -> Option<(u64, u64)> {
+    awaiting().get(path).map(Awaiting::progress)
 }
 
 /// What a caller of [`claim`] does about a file's check.

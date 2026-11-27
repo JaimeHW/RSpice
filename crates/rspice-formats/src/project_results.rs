@@ -65,7 +65,7 @@ pub use snapshot::{ProjectSimulationResults, RestoredProjectSimulationResults};
 pub use stored_values::{SAMPLES_IN_MEMORY, StoredSegment, saving_file, segment_folder};
 mod unread_segments;
 pub use unread_segments::{
-    keep_segments_in, read_again, read_checked, read_events_again, readable,
+    keep_segments_in, read_again, read_checked, read_events_again, read_events_checked, readable,
 };
 #[cfg(any(unix, windows))]
 mod pack;

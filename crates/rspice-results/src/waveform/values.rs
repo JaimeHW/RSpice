@@ -41,6 +41,19 @@ pub trait ColumnSource: Send + Sync {
         false
     }
 
+    /// While the column's own kept file is waiting for or under its first check (the file it
+    /// reads, or, for a stand-in, the one the folders of the file that named it hold): how far
+    /// that check got, as work done of work known. Another file of the same rows is not its own.
+    fn awaiting_check(&self) -> Option<(u64, u64)> {
+        None
+    }
+
+    /// The folders of the file that named the column's kept store, when one did: the column is
+    /// read again from them, never from another file's store of the same rows.
+    fn folders(&self) -> Option<Arc<[std::path::PathBuf]>> {
+        None
+    }
+
     /// The logical digest of the store that holds the column and the column's index in it (its
     /// run's x axis being 0): a column with the same identity holds the same rows. `None` when
     /// the store states no digest, as a run recovered without its end does not.

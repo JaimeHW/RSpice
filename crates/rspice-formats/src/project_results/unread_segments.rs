@@ -183,12 +183,6 @@ impl ColumnSource for DamagedSegment {
     }
 }
 
-/// Whether a source of `identity` is a segment still waiting for its first check: reading it
-/// would wait for that check.
-fn being_checked(identity: Option<([u8; 32], u64)>) -> bool {
-    identity.is_some_and(|(digest, _)| rspice_results::store_reader::checking(digest))
-}
-
 /// The waveform `values` reads now that more folders may hold its segment: `None` when it reads
 /// already, or still cannot, or its segment is still being checked. A segment found that a check
 /// of its own still has to read is read as being checked: its run waits for that check.
@@ -196,7 +190,7 @@ pub fn read_again(values: &WaveformValues) -> Option<WaveformValues> {
     let checked = |values: &WaveformValues| {
         values
             .stored_window()
-            .is_some_and(|(source, _)| being_checked(source.identity()))
+            .is_some_and(|(source, _)| source.awaiting_check().is_some())
     };
     if checked(values) || readable(values) {
         return None;
@@ -205,10 +199,38 @@ pub fn read_again(values: &WaveformValues) -> Option<WaveformValues> {
     (checked(&again) || readable(&again)).then_some(again)
 }
 
-/// The waveform `values` reads now that the check of its segment ended: the segment, or what is
-/// wrong with it. `None` when `values` is not a window of a kept segment.
+/// Run `read` in `folders`, the folders of the file that named a segment, when one did: a
+/// segment read again is read from them, as it was first, and never from another file's.
+fn reading_from<T>(folders: Option<Arc<[PathBuf]>>, read: impl FnOnce() -> T) -> T {
+    match folders {
+        Some(folders) => {
+            rspice_results::store_reader::reading_segments_from(folders.to_vec(), read)
+        }
+        None => read(),
+    }
+}
+
+/// The waveform `values` reads now that the check of its segment's own file ended: the segment,
+/// or what is wrong with it. `None` when `values` stood in for no segment, or the check has not
+/// ended: a check ending changes only the runs that waited for it.
 pub fn read_checked(values: &WaveformValues) -> Option<WaveformValues> {
-    self::values(&ColumnReference::of(values)?).ok()
+    let source = values.stored_window()?.0;
+    if !source.stands_in() || source.awaiting_check().is_some() {
+        return None;
+    }
+    let reference = ColumnReference::of(values)?;
+    reading_from(source.folders(), || self::values(&reference).ok())
+}
+
+/// The event history `points` reads now that the check of its segment's own file ended, as
+/// [`read_checked`] reads a waveform.
+pub fn read_events_checked<P: EventPoint>(points: &EventPoints<P>) -> Option<EventPoints<P>> {
+    let source = points.stored_source()?;
+    if !source.stands_in() || source.awaiting_check().is_some() {
+        return None;
+    }
+    let reference = EventsReference::of(points)?;
+    reading_from(source.folders(), || reference.points().ok())
 }
 
 /// The event history `points` reads now that more folders may hold its segment: `None` when it
@@ -217,13 +239,13 @@ pub fn read_checked(values: &WaveformValues) -> Option<WaveformValues> {
 pub fn read_events_again<P: EventPoint>(points: &EventPoints<P>) -> Option<EventPoints<P>> {
     if let Some(source) = points.stored_source()
         && source.stands_in()
-        && !being_checked(source.identity())
+        && source.awaiting_check().is_none()
     {
         return EventsReference::of(points)?.points().ok();
     }
     let unread = |points: &EventPoints<P>| {
         points.stored_source().is_some_and(|source| {
-            !being_checked(source.identity()) && source.before(f64::NEG_INFINITY).is_err()
+            source.awaiting_check().is_none() && source.before(f64::NEG_INFINITY).is_err()
         })
     };
     if !unread(points) {

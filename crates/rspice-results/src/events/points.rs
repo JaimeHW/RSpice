@@ -57,6 +57,19 @@ pub trait EventHistorySource: Send + Sync {
     fn stands_in(&self) -> bool {
         false
     }
+
+    /// While the signal's own kept file is waiting for or under its first check (the file it
+    /// reads, or, for a stand-in, the one the folders of the file that named it hold): how far
+    /// that check got, as work done of work known. Another file of the same rows is not its own.
+    fn awaiting_check(&self) -> Option<(u64, u64)> {
+        None
+    }
+
+    /// The folders of the file that named the signal's kept store, when one did: the signal is
+    /// read again from them, never from another file's store of the same rows.
+    fn folders(&self) -> Option<Arc<[std::path::PathBuf]>> {
+        None
+    }
 }
 
 /// An event history's points.

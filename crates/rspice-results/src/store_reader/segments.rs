@@ -202,6 +202,10 @@ impl ColumnSource for SegmentColumn {
         identity(&self.segment, self.slot)
     }
 
+    fn awaiting_check(&self) -> Option<(u64, u64)> {
+        super::checks::check_progress_of(self.segment.path())
+    }
+
     fn column_digest(&self) -> Option<[u8; 32]> {
         let column = self.slot.map_or(Some(0), |slot| slot.checked_add(1))?;
         Some(self.segment.reader().column_digest(column)?.0)
@@ -287,6 +291,10 @@ impl EventHistorySource for SegmentEvents {
             self.segment.reader().digest()?.0,
             u64::try_from(self.signal).ok()?,
         ))
+    }
+
+    fn awaiting_check(&self) -> Option<(u64, u64)> {
+        super::checks::check_progress_of(self.segment.path())
     }
 }
 

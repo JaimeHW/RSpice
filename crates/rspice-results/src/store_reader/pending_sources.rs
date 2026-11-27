@@ -41,6 +41,15 @@ impl<S: ?Sized> Opened<S> {
         }
     }
 
+    /// How far the check of the segment's own file got, while it is waiting for or under that
+    /// check and the source has not been opened.
+    fn awaiting_check(&self) -> Option<(u64, u64)> {
+        if self.opened.get().is_some() {
+            return None;
+        }
+        checks::check_progress_in(self.scope.as_deref(), self.digest)
+    }
+
     /// The source, opened through `open` once the check of its segment ended. Inside a project
     /// open nothing waits, and nothing is remembered. On the window's thread nothing waits
     /// either: until the check ends the source reads as still being checked, remembering
@@ -139,6 +148,14 @@ impl ColumnSource for CheckingColumn {
         Some((self.opened.digest.0, self.column))
     }
 
+    fn awaiting_check(&self) -> Option<(u64, u64)> {
+        self.opened.awaiting_check()
+    }
+
+    fn folders(&self) -> Option<Arc<[PathBuf]>> {
+        self.opened.scope.clone()
+    }
+
     /// What the saved result stated, so the result digests the same before the check ends.
     fn column_digest(&self) -> Option<[u8; 32]> {
         self.column_digest
@@ -218,5 +235,13 @@ impl EventHistorySource for CheckingEvents {
 
     fn stands_in(&self) -> bool {
         true
+    }
+
+    fn awaiting_check(&self) -> Option<(u64, u64)> {
+        self.opened.awaiting_check()
+    }
+
+    fn folders(&self) -> Option<Arc<[PathBuf]>> {
+        self.opened.scope.clone()
     }
 }

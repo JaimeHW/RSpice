@@ -15,6 +15,9 @@ use rspice_app_services::workbench::lifecycle::project_lifecycle::{
 };
 use rspice_formats::project_results::segment_folder;
 use rspice_project::lifecycle::SaveContinuationEvent;
+use rspice_results::store_reader::{
+    UncheckedSegment, check, defer_check, parse_digest, take_unchecked_segments,
+};
 
 const DECK: &str = "results kept beside the project
 V1 in 0 PULSE(0 1 0 1u 1u 50u 100u)
@@ -210,6 +213,25 @@ C1 out 0 33n
     );
     let deleted = files_in(&segment_folder(&second_file));
     std::fs::remove_dir_all(segment_folder(&second_file)).unwrap();
+
+    // The first project's file of the same rows still waits for its check as the second opens:
+    // that check says nothing of the second's own file.
+    let [name] = deleted.as_slice() else {
+        panic!("the second project kept one results store: {deleted:?}");
+    };
+    let first_kept = UncheckedSegment {
+        digest: parse_digest(name.trim_end_matches(".rsr")).unwrap(),
+        path: segment_folder(&first_file).join(name),
+        replace_from: None,
+    };
+    assert!(
+        first_kept.path.is_file(),
+        "the first project keeps the same rows under the same name"
+    );
+    let _ = check(&first_kept, &mut |_, _| true);
+    defer_check(first_kept.clone());
+    assert!(take_unchecked_segments().contains(&first_kept));
+
     let mut reopened = AppState::default();
     assert!(reopened.load_project_from_path(&second_file));
     let reason = reopened.model.simulation.retained.runs[0]
@@ -225,6 +247,16 @@ C1 out 0 33n
             )
         });
     assert!(reason.contains(" is missing"), "{reason}");
+    assert_eq!(
+        check(&first_kept, &mut |_, _| true),
+        Some(Ok(())),
+        "the first project's file is its rows"
+    );
+    assert_eq!(
+        first.model.simulation.retained.runs[0].unread_results(),
+        None,
+        "the first project still reads its run"
+    );
 
     drop((reopened, second, first));
     let _ = std::fs::remove_dir_all(&root);
