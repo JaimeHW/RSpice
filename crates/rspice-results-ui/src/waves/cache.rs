@@ -65,6 +65,10 @@ struct CachedModels {
     /// reading them off the frame: once one has arrived, a build gives the
     /// curves on it their shape and the strip its X extent.
     awaiting: Vec<SharedWaveformValues>,
+    /// The axes held in memory being classified away from the frame as the
+    /// models were built: once one has arrived, a build gives its curves
+    /// their shape.
+    classifying: Vec<crate::derived::Classification>,
 }
 
 impl CachedModels {
@@ -74,6 +78,10 @@ impl CachedModels {
         self.awaiting
             .iter()
             .any(|x| !matches!(x.fetch_whole(), Fetched::Pending))
+            || self
+                .classifying
+                .iter()
+                .any(crate::derived::Classification::arrived)
     }
 }
 
@@ -270,6 +278,7 @@ impl ModelsCache {
             _ => true,
         });
         let awaiting = awaiting_axes(&built);
+        let classifying = input.derived.classifications_under_way();
         let models = Arc::new(built);
         self.next_generation(envelopes);
         self.cached = Some(CachedModels {
@@ -278,6 +287,7 @@ impl ModelsCache {
             decks: executed_decks.clone(),
             models: Arc::clone(&models),
             awaiting,
+            classifying,
         });
         models
     }
@@ -326,6 +336,7 @@ impl ModelsCache {
             decks: cached.decks,
             models: Arc::clone(&models),
             awaiting,
+            classifying: input.derived.classifications_under_way(),
         });
         Some(models)
     }

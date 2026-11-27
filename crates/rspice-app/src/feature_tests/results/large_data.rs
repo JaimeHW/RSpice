@@ -63,6 +63,7 @@ fn settle(ctx: &egui::Context, app: &mut RSpiceApp) -> Duration {
         let busy = rspice_ui_kit::plot::drawing_off_frame(ctx)
             || rspice_results_ui::waves::readout::measuring_off_frame(ctx)
             || app.state.results.results.validating_off_frame()
+            || rspice_results_ui::derived::classifying_off_frame()
             || app.state.platform.results_save.is_some();
         if !busy {
             return started.elapsed();

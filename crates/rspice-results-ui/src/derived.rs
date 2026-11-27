@@ -3,9 +3,11 @@
 
 use rspice_results::waveform::{SharedWaveformValues, ValueExtent};
 
+mod classifying;
 mod extrema;
 mod measuring;
 
+pub use classifying::{Classification, FRAME_AXIS_SAMPLES, classifying_off_frame};
 pub use extrema::{ExtremaIndex, Extremes};
 
 /// Source key, interval endpoint bits and branch ordinal.
@@ -44,6 +46,15 @@ pub struct DerivedSeries {
     /// every frame. It is held here rather than on the trace because only the
     /// cache knows when the data behind it changed.
     shapes: std::collections::HashMap<u64, std::sync::Arc<rspice_results::sampling::SweepShape>>,
+    /// The curves' shapes before the data last changed, per series key: while an axis held in
+    /// memory is classified away from the frame, its curve keeps the shape it had, when that
+    /// shape still lies within the axis.
+    shapes_before:
+        std::collections::HashMap<u64, std::sync::Arc<rspice_results::sampling::SweepShape>>,
+    /// The axes held in memory that builds handed away from the frame to classify.
+    classifying: classifying::Classifying,
+    /// How many samples of axes held in memory the build under way classified itself.
+    classified_here: usize,
     /// The structure of each distinct X axis one build of the strips classified, with the axis,
     /// held so that its key names it while the build lasts: the curves of a run share its axis,
     /// which is classified once rather than once a curve.
@@ -188,7 +199,8 @@ impl DerivedSeries {
             self.overview_indices.clear();
             self.overviews.clear();
             self.stats.clear();
-            self.shapes.clear();
+            self.shapes_before = std::mem::take(&mut self.shapes);
+            self.classifying.keep_under_way();
             self.axis_shapes.clear();
             self.event_lanes.clear();
             self.bus_lanes.clear();
@@ -233,7 +245,10 @@ impl DerivedSeries {
     /// run checked ascends is not read. Any other is classified once for all the curves of a
     /// build that share it: from its samples in memory, or once the reader service holds it
     /// whole, as it reads a stored axis off the frame. `None` while that read is on its way, or
-    /// was refused, keeping nothing: a build after it has arrived asks again.
+    /// was refused, keeping nothing: a build after it has arrived asks again. While an axis held
+    /// in memory is classified away from the frame, the curve keeps the shape it had before the
+    /// data changed, when that shape lies within the axis, and has none otherwise: a running
+    /// transient's axis grown by a tick draws what it drew until its new shape arrives.
     pub fn axis_shape_or(
         &mut self,
         key: u64,
@@ -242,14 +257,26 @@ impl DerivedSeries {
         if let Some(hit) = self.shapes.get(&key) {
             return Some(std::sync::Arc::clone(hit));
         }
-        let shape = self.axis_shape(x)?;
+        let Some(shape) = self.axis_shape(x) else {
+            if x.is_stored() {
+                return None;
+            }
+            return self
+                .shapes_before
+                .get(&key)
+                .filter(|shape| shape.runs().iter().all(|run| run.end <= x.len()))
+                .cloned();
+        };
         self.shapes.insert(key, std::sync::Arc::clone(&shape));
         Some(shape)
     }
 
     /// The monotone structure of `x`, a curve's X axis, as
     /// [`Self::axis_shape_or`] finds it, kept for the build alone: every
-    /// curve of the build that shares the axis shares its structure.
+    /// curve of the build that shares the axis shares its structure. An axis
+    /// held in memory is classified here while the build has classified fewer
+    /// than [`FRAME_AXIS_SAMPLES`], and on a thread past them: `None` until it
+    /// has arrived.
     pub fn axis_shape(
         &mut self,
         x: &SharedWaveformValues,
@@ -259,14 +286,22 @@ impl DerivedSeries {
         if let Some((_, shape)) = self.axis_shapes.get(&sharing) {
             return Some(std::sync::Arc::clone(shape));
         }
-        let shape = std::sync::Arc::new(if x.is_ascending_axis() {
-            SweepShape::ascending(x.len())
-        } else {
-            match x.in_memory() {
-                Some(samples) => SweepShape::of(samples),
-                None => SweepShape::of(&x.fetch_whole().ready()?),
+        let shape = if x.is_ascending_axis() {
+            std::sync::Arc::new(SweepShape::ascending(x.len()))
+        } else if let Some(samples) = x.in_memory() {
+            if let Some(shape) = self.classifying.arrived(x) {
+                shape
+            } else if self.classified_here + samples.len() <= FRAME_AXIS_SAMPLES
+                || !self.classifying.ask(x)
+            {
+                self.classified_here += samples.len();
+                std::sync::Arc::new(SweepShape::of(samples))
+            } else {
+                return None;
             }
-        });
+        } else {
+            std::sync::Arc::new(SweepShape::of(&x.fetch_whole().ready()?))
+        };
         self.axis_shapes
             .insert(sharing, (x.clone(), std::sync::Arc::clone(&shape)));
         Some(shape)
@@ -275,6 +310,13 @@ impl DerivedSeries {
     /// Let go of the axes a build of the strips classified.
     pub fn forget_build_axes(&mut self) {
         self.axis_shapes.clear();
+        self.classified_here = 0;
+    }
+
+    /// The axes held in memory still being classified away from the frame: a build after one
+    /// has arrived gives the curves on it their shape.
+    pub fn classifications_under_way(&self) -> Vec<Classification> {
+        self.classifying.under_way()
     }
 
     /// Fetch or classify the monotone structure of a series' X column.
@@ -488,9 +530,11 @@ impl DerivedSeries {
         self.measuring.send();
     }
 
-    /// Wake `ctx` when stored extents measured away from the frame arrive.
+    /// Wake `ctx` when stored extents measured, or axes classified, away from
+    /// the frame arrive.
     pub fn wake_on_measured_extents(&mut self, ctx: &egui::Context) {
         self.measuring.wake(ctx);
+        self.classifying.wake(ctx);
     }
 
     pub fn range_or(

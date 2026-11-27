@@ -1264,10 +1264,12 @@ pub fn log_x_refusal(model: &StripModel) -> Option<String> {
 
 /// The least and greatest finite X the strip's visible traces hold; `None`
 /// when they hold none. Each axis the traces share is read once. A stored
-/// run's time axis ascends, so its ends bound it and only they are read;
-/// any other axis is held in memory, or read off the frame by the reader
-/// service and taken once it has arrived.
+/// run's time axis ascends, so its ends bound it and only they are read, as
+/// are the ends of any axis its curves' shape finds monotone; any other axis
+/// is held in memory, or read off the frame by the reader service and taken
+/// once it has arrived.
 pub(crate) fn visible_x_bounds(model: &StripModel) -> Option<(f64, f64)> {
+    use rspice_results::sampling::SweepClass;
     let (mut minimum, mut maximum) = (f64::INFINITY, f64::NEG_INFINITY);
     let mut take = |x: f64| {
         if x.is_finite() {
@@ -1275,18 +1277,32 @@ pub(crate) fn visible_x_bounds(model: &StripModel) -> Option<(f64, f64)> {
             maximum = maximum.max(x);
         }
     };
-    let axes = model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible)
-        .map(|trace| &trace.x);
-    for x in super::extent::each_axis_once(axes) {
+    let mut seen = std::collections::HashSet::new();
+    for trace in model.traces.iter().filter(|trace| trace.visible) {
+        let x = &trace.x;
+        if !seen.insert(x.sharing_key()) {
+            continue;
+        }
         if x.is_ascending_axis()
             && let Some((first, last)) = x.ends()
         {
             take(first);
             take(last);
             continue;
+        }
+        // A curve's shape already holds where its axis runs: a monotone axis
+        // spans its one run's ends, and an axis with no position, or one
+        // whose shape is still on its way, spans nothing yet.
+        let shape = &trace.shape;
+        match (shape.class(), shape.runs()) {
+            (SweepClass::Empty, _) => continue,
+            (SweepClass::Ascending | SweepClass::Descending, [run]) => {
+                for end in [run.start, run.end.saturating_sub(1)] {
+                    x.sample(end).into_iter().for_each(&mut take);
+                }
+                continue;
+            }
+            _ => {}
         }
         if let Some(x) = x.fetch_whole().ready() {
             x.iter().copied().for_each(&mut take);

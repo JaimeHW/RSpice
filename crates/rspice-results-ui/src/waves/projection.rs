@@ -1382,8 +1382,9 @@ fn displayed_phase_series(
 }
 
 /// The structure of `x`, the axis of the curve `key` names. A stored axis still being read off
-/// the frame has none yet, and the curve stands as empty until a build after the read has
-/// arrived ([`crate::derived::DerivedSeries::axis_shape_or`]).
+/// the frame has none yet, nor has a long axis held in memory while it is classified away from
+/// it, and the curve stands as empty, or as it stood before the data changed, until a build
+/// after it has arrived ([`crate::derived::DerivedSeries::axis_shape_or`]).
 fn curve_shape(derived: &mut DerivedSeries, key: u64, x: &SharedWaveformValues) -> Arc<SweepShape> {
     derived
         .axis_shape_or(key, x)

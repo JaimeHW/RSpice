@@ -823,8 +823,9 @@ impl ReadService for Waiting {
     }
 }
 
-/// An axis that does not ascend is asked of the reader service, which reads it off the frame:
-/// the strip's X bounds read none of it themselves, and take it once it has arrived.
+/// An axis that does not ascend is asked of the reader service, which reads it off the frame,
+/// as the build classifies each curve's axis: the strip's X bounds read none of it themselves,
+/// and take it once it has arrived.
 #[test]
 fn the_bounds_never_read_a_stored_axis_whole_themselves() {
     let sweep = counted("sweep", vec![3.0, 1.0, 2.0]);
@@ -836,20 +837,20 @@ fn the_bounds_never_read_a_stored_axis_whole_themselves() {
             rspice_results::waveform::never_wait_for_reads_here();
             rspice_results::waveform::read_through(waiting, || {
                 let mut models = models(&run);
-                // The build has classified each curve's axis; the bounds are counted alone.
+                assert!(
+                    waiting.asked.load(Ordering::SeqCst) > 0,
+                    "the build asked the service for the axis"
+                );
+                // The bounds are counted alone.
                 sweep.reads.store(0, Ordering::SeqCst);
-                let asked = waiting.asked.load(Ordering::SeqCst);
-                models[0].x_bounds = None;
+                models[0].x_bounds = super::stack::visible_x_bounds(&models[0]);
                 extent::resolve_x_ranges(&mut models);
                 assert_eq!(models[0].x_bounds, None, "the axis is still on its way");
+                assert_eq!(models[0].x_range, None, "the axis is still on its way");
                 assert_eq!(
                     sweep.reads.load(Ordering::SeqCst),
                     0,
                     "the bounds read none of it"
-                );
-                assert!(
-                    waiting.asked.load(Ordering::SeqCst) > asked,
-                    "the bounds asked the service for it"
                 );
             });
         });
