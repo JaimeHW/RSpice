@@ -888,6 +888,9 @@ pub struct Dialog<'a> {
     description: Option<String>,
     size: DialogSize,
     primary: String,
+    /// Every word the primary takes from step to step, which it is held as
+    /// wide as: see [`Self::primary_width_of`].
+    primary_steps: Vec<String>,
     primary_enabled: bool,
     interaction_enabled: bool,
     primary_on_enter: bool,
@@ -922,6 +925,7 @@ impl<'a> Dialog<'a> {
             description: None,
             size: DialogSize::Transaction,
             primary: primary.into(),
+            primary_steps: Vec::new(),
             primary_enabled: true,
             interaction_enabled: true,
             primary_on_enter: true,
@@ -1030,6 +1034,15 @@ impl<'a> Dialog<'a> {
     /// Render the primary in the destructive (`err`) treatment.
     pub fn destructive(mut self) -> Self {
         self.destructive = true;
+        self
+    }
+
+    /// Hold the primary as wide as the widest of `labels`: every word it
+    /// takes in a dialog that walks through steps (Next on one, Import on
+    /// the last). Sized to each step's own word, the primary changed width
+    /// from step to step, and every button left of it moved with it.
+    pub fn primary_width_of(mut self, labels: &[&str]) -> Self {
+        self.primary_steps = labels.iter().map(|label| (*label).to_owned()).collect();
         self
     }
 
@@ -2111,7 +2124,16 @@ impl<'a> Dialog<'a> {
                         );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let primary = self.primary_button().enabled(self.primary_enabled).show(ui);
+                        let held = self
+                            .primary_steps
+                            .iter()
+                            .map(|label| self.step_button(label).measured_width(ui))
+                            .fold(0.0, f32::max);
+                        let primary = self
+                            .primary_button()
+                            .enabled(self.primary_enabled)
+                            .min_width(held)
+                            .show(ui);
                         primary_id = self.primary_enabled.then_some(primary.id);
                         if primary.clicked() {
                             choice = DialogChoice::Primary;
@@ -2182,7 +2204,12 @@ impl<'a> Dialog<'a> {
     /// destructive), except a lone Close, which is the neutral button. An
     /// accent slab says "this commits", and a Close commits nothing.
     fn primary_button(&self) -> crate::widgets::Button<'_> {
-        let button = crate::widgets::Button::new(&self.primary);
+        self.step_button(&self.primary)
+    }
+
+    /// The primary as it reads when it says `label`.
+    fn step_button<'l>(&self, label: &'l str) -> crate::widgets::Button<'l> {
+        let button = crate::widgets::Button::new(label);
         if self.only_closes() {
             button
         } else {
