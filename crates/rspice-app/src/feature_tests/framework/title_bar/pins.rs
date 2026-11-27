@@ -597,6 +597,8 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "  The previous 2 runs | overlay-previous-2-runs |  | off: open a result in Results | unselected",
             "  The previous 3 runs | overlay-previous-3-runs |  | off: open a result in Results | unselected",
             "Fit Y to visible X | fit-y-to-visible-x |  | off: open a waveform sheet in Results",
+            "Zoom X only | zoom-x-only | X | off: open a result in Results",
+            "Zoom Y only | zoom-y-only | Y | off: open a result in Results",
             "Plot against… | plot-against |  | off: click a waveform strip in Results",
             "Minor grid | toggle-minor-grid | Shift+G | off: open a result in Results | unchecked",
             "Plot properties… | plot-properties |  | off: open a result in Results",

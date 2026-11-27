@@ -48,9 +48,10 @@ pub use format::{
 #[cfg(any(test, feature = "test-support"))]
 pub use picture::drawing_off_frame;
 pub use render::{
-    InteractionMode, LOG_CAPTION_NOTE, PlotResponse, ReadoutRow, ViewChange, Y_LABEL_GAP,
-    caption_with_note, equal_scale_ranges, floored_span, hairline, plot_rect, set_interaction_mode,
-    show, square_outer_rect, y_label_column, y_tick_font,
+    InteractionMode, LOG_CAPTION_NOTE, OneAxisZoom, PlotResponse, ReadoutRow, ViewChange,
+    Y_LABEL_GAP, caption_with_note, equal_scale_ranges, floored_span, hairline, plot_rect,
+    request_one_axis_zoom, set_interaction_mode, show, square_outer_rect, y_label_column,
+    y_tick_font,
 };
 pub use render::{TraceLook, TraceMarkerShape, paint_min_max_band, paint_trace_swatch};
 pub use scale::{LabelColumn, MAX_AXIS_TICKS, XScale, anchor_label, even_labels, linear_ticks};

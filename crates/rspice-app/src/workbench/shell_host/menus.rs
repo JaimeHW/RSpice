@@ -14,7 +14,7 @@ use rspice_app_models::workbench::models::commands::ModelsCommand;
 use rspice_app_project::workbench::project::commands::ProjectCommand;
 use rspice_app_project::workbench::project::workspace_state::ProjectPage;
 use rspice_app_results::workbench::documents::result_document::ResultViewer;
-use rspice_app_results::workbench::results::commands::{AtPointer, ResultsCommand};
+use rspice_app_results::workbench::results::commands::{AtPointer, OneAxisZoom, ResultsCommand};
 use rspice_app_settings::workbench::settings::commands::SettingsCommand;
 use rspice_app_sheets::workbench::sheets::commands::SheetsCommand;
 use rspice_app_simulate::workbench::simulate::commands::SimulateCommand;
@@ -698,6 +698,8 @@ const RESULTS_MENU: &[MenuEntry] = &[
     MenuEntry::submenu("Markers and notes", MARKERS_MENU).access('K'),
     MenuEntry::submenu("Overlay previous runs", OVERLAY_MENU).access('O'),
     results(ResultsCommand::FitYToVisibleX).access('Y'),
+    results(ResultsCommand::OneAxisZoom(OneAxisZoom::X)).access('X'),
+    results(ResultsCommand::OneAxisZoom(OneAxisZoom::Y)).access('Z'),
     results(ResultsCommand::PlotAgainst).access('G'),
     results(ResultsCommand::ToggleMinorGrid).access('I'),
     results(ResultsCommand::VisualizationDocumentProperties).access('P'),

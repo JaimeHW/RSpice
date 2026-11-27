@@ -2836,6 +2836,9 @@ fn show_viewer_well(
 /// there are no results at all, when the well says so instead.
 fn viewer_well_is_open(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     apply_pending_view_gesture(ui, state);
+    if let Some(axis) = state.results.session.pending_one_axis_zoom.take() {
+        rspice_ui_kit::plot::request_one_axis_zoom(ui.ctx(), axis);
+    }
     let t = Tokens::get(ui.ctx());
     // The document well backdrop; viewers paint on top.
     let well = ui.available_rect_before_wrap();

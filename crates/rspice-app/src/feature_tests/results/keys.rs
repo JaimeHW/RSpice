@@ -6,10 +6,13 @@
 use egui::{Context, Event, Key, Modifiers, RawInput, Rect};
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::CommandRegistry;
-use rspice_app_results::workbench::results::commands::ResultsCommand;
+use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
+use rspice_app_results::workbench::results::commands::{OneAxisZoom, ResultsCommand};
 use rspice_app_state::state::command_catalog::{CommandKey, CommandPlatform};
-use rspice_app_state::state::shortcuts::{ShortcutPreferences, ShortcutProfileIssueCode};
+use rspice_app_state::state::shortcuts::{
+    ShortcutBindingSlot, ShortcutPreferences, ShortcutProfileIssueCode, ShortcutSequence,
+    ShortcutStroke,
+};
 use rspice_app_state::state::{
     AnalysisResult, AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle,
 };
@@ -17,7 +20,7 @@ use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::chrome::title_bar::application_menus::ALL_MENUS;
 use rspice_app_workbench::workbench::chrome::title_bar::menu_entries::{self, MenuRow, menu_keys};
 use rspice_app_workbench::workbench::framework::command_registry::{
-    CommandAvailability, WorkbenchCommand,
+    CommandAvailability, CommandFlags, WorkbenchCommand,
 };
 use rspice_app_workbench::workbench::framework::host::Host;
 use rspice_app_workbench::workbench::state::pane_focus::Pane;
@@ -135,6 +138,8 @@ struct Desk {
     time: f64,
     /// Whether a navigator stands beside the document, a pane F6 goes to.
     navigator: bool,
+    /// The texts the last frame painted.
+    texts: Vec<String>,
 }
 
 /// The one control of the navigator a [`Desk`] may draw.
@@ -158,6 +163,7 @@ impl Desk {
             app,
             time: 0.0,
             navigator,
+            texts: Vec::new(),
         };
         desk.frame(Vec::new());
         desk.frame(Vec::new());
@@ -207,6 +213,14 @@ impl Desk {
                 app.state.take_pane_focus_step(ui.ctx());
             },
         );
+        self.texts = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
         let update = output.platform_output.accesskit_update?;
         update
             .nodes
@@ -230,6 +244,24 @@ impl Desk {
 
     fn cursor_a(&self) -> Option<f64> {
         self.app.state.results.results.session.cursors.a
+    }
+
+    /// Tab until the plot has the keyboard.
+    fn focus_plot(&mut self) {
+        for _ in 0..80 {
+            if self
+                .press(Key::Tab, Modifiers::NONE)
+                .is_some_and(|label| label.contains("Drag to pan"))
+            {
+                return;
+            }
+        }
+        panic!("Tab reaches no plot");
+    }
+
+    /// Whether the plot states a zoom armed on X alone.
+    fn zoom_x_armed(&self) -> bool {
+        self.texts.iter().any(|text| text == "zoom X")
     }
 }
 
@@ -422,5 +454,87 @@ fn f6_steps_through_the_panes_then_on_to_the_navigator() {
         desk.press(Key::F6, Modifiers::SHIFT),
         second,
         "Shift+F6 comes back into the document at its last pane"
+    );
+}
+
+/// Tab onto the plot and the Menu key opens its menu, as Shift+F10 and a
+/// right click do: the Menu key did nothing on a plot before.
+#[test]
+fn the_menu_key_opens_the_focused_plots_menu() {
+    let mut desk = Desk::new();
+    desk.focus_plot();
+    assert!(!egui::Popup::is_any_open(&desk.ctx));
+    rspice_ui_kit::input::press_menu_key(&desk.ctx);
+    desk.frame(Vec::new());
+    desk.frame(Vec::new());
+    assert!(
+        egui::Popup::is_any_open(&desk.ctx),
+        "the Menu key opened no menu on the focused plot"
+    );
+}
+
+/// X and Y, which arm the next box zoom to change one axis alone, are
+/// Results commands, listed with their keys, so a rebinding moves them: with
+/// the plot focused, X arms it, as the plot states, and X again disarms it;
+/// bound to Shift+X instead, X arms nothing and Shift+X arms it. The plot
+/// answered X and Y itself before, where no list or rebinding reached them.
+#[test]
+fn the_one_axis_zoom_keys_are_listed_commands_a_rebinding_moves() {
+    let registry = command_registry();
+    let defaults = ShortcutPreferences::default();
+    for (axis, key) in [(OneAxisZoom::X, Key::X), (OneAxisZoom::Y, Key::Y)] {
+        let command = ResultsCommand::OneAxisZoom(axis).key();
+        assert!(
+            registry
+                .ordered()
+                .any(|spec| spec.key == command
+                    && spec.flags.contains(CommandFlags::PALETTE_VISIBLE)),
+            "{axis:?} is not listed"
+        );
+        assert!(
+            defaults
+                .effective_bindings(&CommandRegistry, command)
+                .iter()
+                .any(|binding| binding.supports(CommandPlatform::Desktop)
+                    && binding.sequence().strokes()
+                        == [ShortcutStroke::new(key, false, false, false)]),
+            "{axis:?} is not on {key:?}"
+        );
+    }
+
+    let mut desk = Desk::new();
+    desk.focus_plot();
+    assert!(!desk.zoom_x_armed());
+    desk.press(Key::X, Modifiers::NONE);
+    assert!(desk.zoom_x_armed(), "X armed no zoom on the focused plot");
+    desk.press(Key::X, Modifiers::NONE);
+    assert!(!desk.zoom_x_armed(), "X again left the zoom armed");
+
+    desk.app
+        .state
+        .model
+        .preferences
+        .shortcuts_mut()
+        .expect("the shortcut profile is editable")
+        .set_binding(
+            &CommandRegistry,
+            ResultsCommand::OneAxisZoom(OneAxisZoom::X).key(),
+            ShortcutBindingSlot::Primary,
+            vec![CommandPlatform::Desktop],
+            Some(
+                ShortcutSequence::new(vec![ShortcutStroke::new(Key::X, false, false, true)])
+                    .expect("one stroke"),
+            ),
+        )
+        .expect("Shift+X is free in Results");
+    desk.press(Key::X, Modifiers::NONE);
+    assert!(
+        !desk.zoom_x_armed(),
+        "X still arms the zoom it was moved off"
+    );
+    desk.press(Key::X, Modifiers::SHIFT);
+    assert!(
+        desk.zoom_x_armed(),
+        "Shift+X, the zoom's new key, armed nothing"
     );
 }

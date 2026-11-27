@@ -823,7 +823,7 @@ impl CommandSet for ResultsCommand {
                 workbench.workspace == Workspace::Results && zoom_gesture_available(state),
                 "open a waveform sheet in Results",
             ),
-            Self::AtPointer(_) | Self::ToggleMinorGrid
+            Self::AtPointer(_) | Self::ToggleMinorGrid | Self::OneAxisZoom(_)
                 if workbench.workspace != Workspace::Results =>
             {
                 CommandAvailability::Disabled("open a result in Results")
@@ -840,6 +840,10 @@ impl CommandSet for ResultsCommand {
                 zoom_gesture_available(state),
                 "open a waveform sheet in Results",
             ),
+            // Every plot of every sheet zooms by a box.
+            Self::OneAxisZoom(_) => {
+                available_or(retained.has_results(), "no result dataset is available")
+            }
             Self::ZoomNext if workbench.workspace != Workspace::Results => {
                 CommandAvailability::Hidden
             }
@@ -1044,6 +1048,9 @@ impl CommandSet for ResultsCommand {
             Self::ToggleMinorGrid => {
                 let session = &mut cx.state.results.session;
                 session.show_minor_grid = !session.show_minor_grid;
+            }
+            Self::OneAxisZoom(axis) => {
+                cx.state.results.session.pending_one_axis_zoom = Some(axis);
             }
             Self::PlotAgainst => {
                 let session = &mut cx.state.results.session;

@@ -1178,6 +1178,9 @@ pub struct ResultViewerState {
     /// applying inside the viewer well keeps one owner for the gesture
     /// instead of a second, token-free approximation of pane resolution.
     pub pending_view_gesture: Option<ViewGesture>,
+    /// A one-axis box zoom asked for by a command, handed to the plots when
+    /// the viewer well next draws, for the same reason.
+    pub pending_one_axis_zoom: Option<rspice_ui_kit::plot::OneAxisZoom>,
     /// User expression traces per dataset-bound waves strip, evaluated by
     /// the calculator against that analysis' waveforms.
     /// Compatibility projection for integrations that still address the

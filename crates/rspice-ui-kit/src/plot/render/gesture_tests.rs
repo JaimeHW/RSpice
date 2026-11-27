@@ -322,16 +322,18 @@ fn the_y_gutter_zooms_and_pans_its_axis() {
 }
 
 /// A box zoom reads its band's shape: flat zooms X, tall zooms Y, anything
-/// else both. X pressed first makes the next band zoom X alone.
+/// else both. A one-axis zoom asked for first, as the X key's command asks
+/// for it, makes the next band zoom that axis alone.
 #[test]
-fn a_zoom_band_picks_its_axes_by_shape_or_by_the_armed_key() {
-    let band = |size: egui::Vec2, arm: Option<egui::Key>| {
+fn a_zoom_band_picks_its_axes_by_shape_or_by_the_armed_axis() {
+    let band = |size: egui::Vec2, arm: Option<OneAxisZoom>| {
         let mut host = Host::new();
         let plot = host.plot_rect();
         let from = plot.left_top() + egui::vec2(40.0, 40.0);
         host.frame(vec![egui::Event::PointerMoved(from)]);
         if let Some(arm) = arm {
-            host.frame(vec![key(arm, egui::Modifiers::NONE)]);
+            request_one_axis_zoom(&host.ctx, arm);
+            host.frame(Vec::new());
         }
         drag(&mut host, from, from + size, egui::Modifiers::SHIFT);
         (host.x != X0, host.y != Y0)
@@ -348,14 +350,43 @@ fn a_zoom_band_picks_its_axes_by_shape_or_by_the_armed_key() {
     );
     assert_eq!(band(egui::vec2(160.0, 120.0), None), (true, true), "a box");
     assert_eq!(
-        band(egui::vec2(160.0, 120.0), Some(egui::Key::X)),
+        band(egui::vec2(160.0, 120.0), Some(OneAxisZoom::X)),
         (true, false),
         "a box after X"
     );
     assert_eq!(
-        band(egui::vec2(160.0, 120.0), Some(egui::Key::Y)),
+        band(egui::vec2(160.0, 120.0), Some(OneAxisZoom::Y)),
         (false, true),
         "a box after Y"
+    );
+}
+
+/// The plot answers no letter for a one-axis zoom: the workspace binds the
+/// keys to its commands, which ask for it. Asked for after the pointer has
+/// left for a menu, the zoom is armed on the plot the pointer last stood
+/// over, and the plot says so; asked for again, it is disarmed.
+#[test]
+fn a_one_axis_zoom_is_asked_for_not_keyed_and_lands_on_the_last_plot_pointed_at() {
+    let mut host = Host::new();
+    let plot = host.plot_rect();
+    host.frame(vec![egui::Event::PointerMoved(plot.center())]);
+    let frame = host.frame(vec![key(egui::Key::X, egui::Modifiers::NONE)]);
+    assert!(
+        !texts(&frame.shapes).iter().any(|text| text == "zoom X"),
+        "the bare X key armed the plot"
+    );
+    host.frame(vec![egui::Event::PointerGone]);
+    request_one_axis_zoom(&host.ctx, OneAxisZoom::X);
+    let frame = host.frame(Vec::new());
+    assert!(
+        texts(&frame.shapes).iter().any(|text| text == "zoom X"),
+        "the zoom asked for did not arm the plot last pointed at"
+    );
+    request_one_axis_zoom(&host.ctx, OneAxisZoom::X);
+    let frame = host.frame(Vec::new());
+    assert!(
+        !texts(&frame.shapes).iter().any(|text| text == "zoom X"),
+        "asked for again, the zoom stayed armed"
     );
 }
 
@@ -417,7 +448,8 @@ fn the_keys_of_a_focused_plot_pan_and_zoom_as_the_pointer_does() {
         a: Some(0.6),
         b: Some(0.2),
     });
-    keys.frame(vec![key(egui::Key::X, egui::Modifiers::NONE)]);
+    request_one_axis_zoom(&keys.ctx, OneAxisZoom::X);
+    keys.frame(Vec::new());
     keys.frame(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     assert_eq!(keys.x, (0.2, 0.6), "X then Enter zoomed to {:?}", keys.x);
     assert_eq!(keys.y, Y0);

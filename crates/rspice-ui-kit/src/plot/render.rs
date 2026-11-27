@@ -2135,6 +2135,42 @@ fn keep_armed(ui: &Ui, id: egui::Id, armed: Option<ZoomAxes>) {
     });
 }
 
+/// The one axis a box zoom can be armed to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OneAxisZoom {
+    X,
+    Y,
+}
+
+/// Where the pending one-axis zoom is kept, with the pass that asked for it.
+const ONE_AXIS_ZOOM_ID: &str = "rspice.plot.one-axis-zoom";
+/// The plot the keys reach: the last one the pointer stood over, or that
+/// held the keyboard, while no other widget took the keys.
+const KEY_PLOT_ID: &str = "rspice.plot.key-plot";
+
+/// Arm the next box zoom of the plot the keys reach to change `axis` alone,
+/// or disarm it if that axis is armed already: the plot under the pointer
+/// or holding the keyboard, else the last one that was. The owning
+/// workspace binds this to its commands, so the keys are its to list and
+/// rebind; the plot answers no key for it itself.
+pub fn request_one_axis_zoom(ctx: &egui::Context, axis: OneAxisZoom) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(ONE_AXIS_ZOOM_ID), (pass, axis)));
+}
+
+/// Take the pending one-axis zoom, if one was asked for this pass or the
+/// last: a command run from a menu drawn after the plots lands on the next
+/// pass, and one no plot took by then is dropped.
+fn take_one_axis_zoom(ctx: &egui::Context) -> Option<OneAxisZoom> {
+    let id = egui::Id::new(ONE_AXIS_ZOOM_ID);
+    let (asked, axis) = ctx.data_mut(|data| {
+        let pending = data.get_temp::<(u64, OneAxisZoom)>(id);
+        data.remove::<(u64, OneAxisZoom)>(id);
+        pending
+    })?;
+    (ctx.cumulative_pass_nr() <= asked.saturating_add(1)).then_some(axis)
+}
+
 /// What the plot needs besides its spec to read a gesture.
 struct Navigation {
     cursors: Option<CursorPair>,
@@ -2287,28 +2323,35 @@ fn handle_navigation(
     let armed_id = id.with("plot.armed-axis");
     let mut armed = ui.data(|data| data.get_temp::<ZoomAxes>(armed_id));
     let focused = out.response.has_focus();
-    // The plot's keys are its own while it holds the focus. X and Y, which
-    // arm a one-axis zoom, and Enter, which zooms the band between the
-    // cursors on the armed axis, are also taken while the pointer is over
-    // it, so long as no other widget is taking keys.
+    // The plot's keys are its own while it holds the focus. Enter, which
+    // zooms the band between the cursors on the armed axis, is also taken
+    // while the pointer is over it, so long as no other widget is taking
+    // keys; a one-axis zoom asked for then is this plot's, and stays the
+    // plot's once the pointer leaves for a menu or the palette.
     let keys_free = ui.memory(|memory| memory.focused().is_none_or(|focus| focus == id));
-    if keys_free && (focused || out.response.contains_pointer()) {
+    let reached = keys_free && (focused || out.response.contains_pointer());
+    if reached {
+        ui.data_mut(|data| data.insert_temp(egui::Id::new(KEY_PLOT_ID), id));
+    }
+    if ui.data(|data| data.get_temp::<egui::Id>(egui::Id::new(KEY_PLOT_ID))) == Some(id)
+        && let Some(axis) = take_one_axis_zoom(ui.ctx())
+    {
+        let axis = match axis {
+            OneAxisZoom::X => ZoomAxes::X,
+            OneAxisZoom::Y => ZoomAxes::Y,
+        };
+        armed = (armed != Some(axis)).then_some(axis);
+    }
+    if reached {
         let plain = ui.input(|input| input.modifiers.is_none());
-        let (x, y, enter, escape) = ui.input_mut(|input| {
+        let (enter, escape) = ui.input_mut(|input| {
             (
-                plain && input.consume_key(egui::Modifiers::NONE, egui::Key::X),
-                plain && input.consume_key(egui::Modifiers::NONE, egui::Key::Y),
                 armed.is_some()
                     && plain
                     && input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
                 armed.is_some() && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
             )
         });
-        for (pressed, axis) in [(x, ZoomAxes::X), (y, ZoomAxes::Y)] {
-            if pressed {
-                armed = (armed != Some(axis)).then_some(axis);
-            }
-        }
         if escape {
             armed = None;
         }

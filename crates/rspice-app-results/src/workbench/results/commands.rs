@@ -8,6 +8,7 @@
 use egui::Key;
 use rspice_results::result_presentation::ResultViewer;
 pub use rspice_results_ui::waves::pointer::AtPointer;
+pub use rspice_ui_kit::plot::OneAxisZoom;
 
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
@@ -119,6 +120,9 @@ pub enum ResultsCommand {
     AtPointer(AtPointer),
     /// Draw or leave out the minor grid between the labelled ticks.
     ToggleMinorGrid,
+    /// Arm the next box zoom of the plot the keys reach to change one axis
+    /// alone, or disarm it; Enter then zooms that axis to the cursors.
+    OneAxisZoom(OneAxisZoom),
 }
 
 const NONE: &[ShortcutBinding] = &[];
@@ -175,6 +179,9 @@ const PROPERTIES: &[ShortcutBinding] = &[primary(Key::Q, false, false, true, "Sh
 const MINOR_GRID: &[ShortcutBinding] = &[primary(Key::G, false, false, true, "Shift+G")];
 /// Forward again through the views Zoom previous stepped back from.
 const ZOOM_NEXT: &[ShortcutBinding] = &[primary(Key::Z, false, false, true, "Shift+Z")];
+// EZwave's keys for a box zoom on one axis.
+const ZOOM_X_ONLY: &[ShortcutBinding] = &[primary(Key::X, false, false, false, "X")];
+const ZOOM_Y_ONLY: &[ShortcutBinding] = &[primary(Key::Y, false, false, false, "Y")];
 // Up and down the data browser's run list, as Page Up and Page Down step a
 // drawing's sheets.
 const NEWER_RUN: &[ShortcutBinding] = &[primary(Key::PageUp, false, false, false, "Page Up")];
@@ -192,7 +199,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 83] = [
+    pub const ALL: [Self; 85] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -276,6 +283,8 @@ impl ResultsCommand {
         Self::AtPointer(AtPointer::Note),
         Self::AtPointer(AtPointer::Properties),
         Self::ToggleMinorGrid,
+        Self::OneAxisZoom(OneAxisZoom::X),
+        Self::OneAxisZoom(OneAxisZoom::Y),
     ];
 
     /// The command `key` names, if the feature declares one.
@@ -348,6 +357,8 @@ impl ResultsCommand {
             Self::AtPointer(AtPointer::Note) => CommandKey::new("note-at-pointer"),
             Self::AtPointer(AtPointer::Properties) => CommandKey::new("marker-properties"),
             Self::ToggleMinorGrid => CommandKey::new("toggle-minor-grid"),
+            Self::OneAxisZoom(OneAxisZoom::X) => CommandKey::new("zoom-x-only"),
+            Self::OneAxisZoom(OneAxisZoom::Y) => CommandKey::new("zoom-y-only"),
         }
     }
 
@@ -536,6 +547,8 @@ impl ResultsCommand {
                 cursor_command("Marker properties\u{2026}", PROPERTIES)
             }
             Self::ToggleMinorGrid => cursor_command("Minor grid", MINOR_GRID),
+            Self::OneAxisZoom(OneAxisZoom::X) => cursor_command("Zoom X only", ZOOM_X_ONLY),
+            Self::OneAxisZoom(OneAxisZoom::Y) => cursor_command("Zoom Y only", ZOOM_Y_ONLY),
             Self::FitYToVisibleX => (
                 "Fit Y to visible X",
                 "Results",
