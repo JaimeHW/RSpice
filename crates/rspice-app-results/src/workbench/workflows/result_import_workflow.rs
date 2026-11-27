@@ -12,17 +12,26 @@ use crate::state::{
 };
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::{Model, PlatformState};
-use crate::workbench::documents::result_document::ResultsParts;
 use crate::workbench::documents::result_document::import::{
     RESULT_IMPORT_PREVIEW_ROWS, ResultImportDialogState, ResultImportJob, ResultImportPlots,
     ResultImportSampleFacts, ResultImportStage,
+};
+use crate::workbench::documents::result_document::{
+    ResultsParts, analysis_default_unit, browser_signal_unit,
 };
 use crate::workbench::results_job::{JobContext, JobOutcome, JobState, JobStop, ResultsJob};
 use rspice_formats::result_import::identify_result_import_format;
 use rspice_formats::spice_raw::streamed_import::{
     RawImportPolicy, RawImported, imported_analysis_type,
 };
+use rspice_results::number_format::fmt_column_reading;
 use rspice_results::provenance::AnalysisResultFamilyMember;
+use rspice_ui_kit::panels::{Fact, PANEL_INSET, fact_rows};
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, LineHeights};
+use rspice_ui_kit::widgets::{
+    Button, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogHintTone, DialogSize, FormRows,
+    band_header,
+};
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{io::Read as _, path::Path};
@@ -227,6 +236,23 @@ pub(crate) const RESULT_COORDINATE_NAMES: [&str; 5] = ["time", "frequency", "fre
 /// do need a span (Bode, phase noise, the raw frequency curve) already ask for
 /// one themselves and decline to render rather than refusing the dataset.
 const MIN_RESULT_ROWS: usize = 1;
+/// The review's title, which the kit's dialog is known by.
+const RESULT_IMPORT_TITLE: &str = "Import result dataset";
+/// What the review is for, said under its title and to assistive technology.
+const RESULT_IMPORT_PURPOSE: &str = "Review the detected structure and mapping before RSpice adds these results to the project history.";
+/// Every word the review's primary takes, one per step, which it is held as
+/// wide as, so the footer's buttons stand where they stood on the step before.
+const RESULT_IMPORT_PRIMARIES: [&str; 3] = ["Map signals", "Validate import", "Import"];
+/// The review's height on every step: its tallest page, Map's, whole, under
+/// the kit's header and over its footer. Map holds the mapping's two rows,
+/// [`RESULT_IMPORT_SIGNAL_ROWS`] signals and the preview's
+/// [`RESULT_IMPORT_PREVIEW_ROWS`] rows. One height, so no step on a screen
+/// that holds it scrolls, and the footer never moves from step to step.
+const RESULT_IMPORT_HEIGHT: f32 = 700.0;
+/// How many signals the Map step lists before its list scrolls.
+const RESULT_IMPORT_SIGNAL_ROWS: f32 = 5.0;
+/// The kit's margin round a transaction dialog, which a screen too short for
+/// the review keeps clear of it.
 const RESULT_IMPORT_WINDOW_MARGIN: f32 = 24.0;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1108,8 +1134,15 @@ impl ImportedAnalysis {
 
 /// Render the staged external-result import transaction.
 ///
-/// Closing or cancelling this window only discards the runtime draft. The
+/// Closing or cancelling this dialog only discards the runtime draft. The
 /// retained simulation model is touched exclusively by the final commit.
+///
+/// The review is the kit's transaction dialog at one height on every step,
+/// resolved from that height and the screen before anything is laid out, so
+/// its first visible frame is its last and a click aimed at a footer button
+/// lands on it whichever frame the pointer saw. It was a window whose body
+/// filled the window as the last frame sized it, with the footer below: the
+/// window grew by the footer every frame until the screen stopped it.
 pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut ResultsParts<'_>) {
     if !state.result_import.open {
         return;
@@ -1120,110 +1153,94 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
     }
 
     let mut draft = state.result_import.clone();
-    let mut window_open = true;
-    let mut cancel = false;
-    let mut go_back = false;
-    let mut advance = false;
-    let mut commit = false;
     let mut choose_log = false;
     #[cfg(target_arch = "wasm32")]
     apply_browser_result_import_log(&mut draft);
-    let tokens = Tokens::get(ctx);
-    let window_size = result_import_window_size(ctx.content_rect().size());
-
-    // Every frame lays the review out at its final size and place, its first
-    // visible one included. Its height is the screen's, fixed; the footer is
-    // laid out first, from the bottom; the body fills what is left above it.
-    // The body was a scroll area of fixed height that filled the window as
-    // the last frame sized it, with the footer below it: the window grew by
-    // the footer's height every frame until the screen stopped it, and past
-    // the screen's edge once, so for its first several frames a click aimed
-    // at a footer button landed where the button had been a frame before.
-    egui::Window::new("Import result dataset")
-        .id(egui::Id::new("rspice.result-import"))
-        .open(&mut window_open)
-        .collapsible(false)
-        .resizable([true, false])
-        .default_width(860.0_f32.min(window_size.x))
-        .min_width(680.0_f32.min(window_size.x))
-        .max_width(window_size.x)
-        .min_height(window_size.y)
-        .max_height(window_size.y)
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .show(ctx, |ui| {
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
-                ui.allocate_ui_with_layout(
-                    row,
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        match draft.stage {
-                            ResultImportStage::Detect => {
-                                advance = ui.button("Map signals").clicked();
-                            }
-                            ResultImportStage::Map => {
-                                let valid = parsed_result_from_draft(&draft).is_ok();
-                                advance = ui
-                                    .add_enabled(valid, egui::Button::new("Validate import"))
-                                    .clicked();
-                                go_back = ui.button("Back").clicked();
-                            }
-                            ResultImportStage::Validate => {
-                                let valid = parsed_result_from_draft(&draft).is_ok()
-                                    && result_import_block_reason(state.model, state.platform)
-                                        .is_none();
-                                commit = ui
-                                    .add_enabled(valid, egui::Button::new("Import"))
-                                    .clicked();
-                                go_back = ui.button("Back").clicked();
-                            }
-                        }
-                        cancel = ui.button("Cancel").clicked();
-                    },
-                );
-                ui.separator();
-                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("rspice.result-import.body")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.label(
-                                egui::RichText::new("RESULTS · EXTERNAL DATASET")
-                                    .monospace()
-                                    .color(tokens.color.text_dim),
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                "Review the detected structure and mapping before RSpice adds these results to the project history.",
-                            );
-                            ui.add_space(10.0);
-                            result_import_stage_header(ui, draft.stage);
-                            ui.separator();
-
-                            match draft.stage {
-                                ResultImportStage::Detect => {
-                                    choose_log = result_import_detect_page(ui, &draft);
-                                }
-                                ResultImportStage::Map => {
-                                    result_import_map_page(ui, &mut draft);
-                                }
-                                ResultImportStage::Validate => {
-                                    choose_log = result_import_validate_page(ui, &draft);
-                                }
-                            }
-
-                            ui.add_space(8.0);
-                            if let Some(error) = draft.validation_error.as_deref() {
-                                ui.colored_label(tokens.color.err, error);
-                            }
-                        });
-                });
-            });
+    let digits = usize::from(
+        state
+            .results_reads()
+            .presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    );
+    let refused = parsed_result_from_draft(&draft).err();
+    let blocked = result_import_block_reason(state.model, state.platform);
+    let primary_enabled = match draft.stage {
+        ResultImportStage::Detect => true,
+        ResultImportStage::Map => refused.is_none(),
+        ResultImportStage::Validate => refused.is_none() && blocked.is_none(),
+    };
+    // Why the primary refuses, or why the last attempt did, beside it.
+    let refusal = match draft.stage {
+        ResultImportStage::Detect => draft.validation_error.clone(),
+        ResultImportStage::Map => draft.validation_error.clone().or(refused),
+        ResultImportStage::Validate => draft.validation_error.clone().or(refused).or(blocked),
+    };
+    let primary = match draft.stage {
+        ResultImportStage::Detect => RESULT_IMPORT_PRIMARIES[0],
+        ResultImportStage::Map => RESULT_IMPORT_PRIMARIES[1],
+        ResultImportStage::Validate => RESULT_IMPORT_PRIMARIES[2],
+    };
+    let mut dialog = Dialog::new(RESULT_IMPORT_TITLE, primary)
+        .description(RESULT_IMPORT_PURPOSE)
+        .size(DialogSize::Transaction)
+        .fixed_height(result_import_height(ctx.content_rect().height()))
+        .flush_body()
+        .overlay_scrollbar()
+        .primary_width_of(&RESULT_IMPORT_PRIMARIES)
+        .primary_enabled(primary_enabled)
+        .secondary("Back")
+        .secondary_enabled(draft.stage != ResultImportStage::Detect)
+        .ghost("Cancel");
+    if let Some(refusal) = refusal {
+        dialog = dialog.hint(refusal).hint_tone(DialogHintTone::Error);
+    }
+    let mapped = (
+        draft.analysis_type,
+        draft.coordinate_name.clone(),
+        draft.selected_signals.clone(),
+    );
+    let choice = dialog.show(ctx, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        result_import_inset(ui, |ui| {
+            ui.label(
+                egui::RichText::new(RESULT_IMPORT_PURPOSE)
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
+            );
+            ui.add_space(8.0);
+            result_import_stage_header(ui, draft.stage);
         });
+        match draft.stage {
+            ResultImportStage::Detect => choose_log = result_import_detect_page(ui, &draft),
+            ResultImportStage::Map => result_import_map_page(ui, &mut draft, digits),
+            ResultImportStage::Validate => {
+                choose_log = result_import_validate_page(ui, &draft, digits);
+            }
+        }
+    });
+    if (
+        draft.analysis_type,
+        &draft.coordinate_name,
+        &draft.selected_signals,
+    ) != (mapped.0, &mapped.1, &mapped.2)
+    {
+        // The footer was laid out before the edit; the next frame shows what
+        // the mapping now allows.
+        ctx.request_repaint();
+    }
 
-    if !window_open || cancel {
-        discard_result_import_draft(state);
-        return;
+    let (mut go_back, mut advance, mut commit) = (false, false, false);
+    match choice {
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            discard_result_import_draft(state);
+            return;
+        }
+        DialogChoice::Secondary => go_back = true,
+        DialogChoice::Primary if primary_enabled => match draft.stage {
+            ResultImportStage::Validate => commit = true,
+            ResultImportStage::Detect | ResultImportStage::Map => advance = true,
+        },
+        DialogChoice::Primary | DialogChoice::None => {}
     }
     if go_back {
         draft.stage = match draft.stage {
@@ -1311,10 +1328,11 @@ fn show_result_import_job(
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
 }
 
-/// The review's widest width and its height: the screen's, less a margin on
-/// every side.
-fn result_import_window_size(available: egui::Vec2) -> egui::Vec2 {
-    (available - egui::Vec2::splat(RESULT_IMPORT_WINDOW_MARGIN)).max(egui::Vec2::splat(1.0))
+/// The review's height in a screen `screen_height` tall: its own, or, on a
+/// screen too short for it, the screen's less the kit's margin, the body
+/// scrolling between the header and the footer.
+fn result_import_height(screen_height: f32) -> f32 {
+    RESULT_IMPORT_HEIGHT.min((screen_height - RESULT_IMPORT_WINDOW_MARGIN).max(1.0))
 }
 
 /// Act on how the draft's job ended, once it has: review the staged source,
@@ -1373,6 +1391,34 @@ pub fn discard_result_import_draft(state: &mut ResultsParts<'_>) {
     *state.result_import = ResultImportDialogState::default();
 }
 
+/// `add` on the dialog's inset, where its title and its footer start.
+fn result_import_inset<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::same(DIALOG_BODY_INSET as i8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 0.0;
+            add(ui)
+        })
+        .inner
+}
+
+/// Facts on the kit's one band of rows, across the body, their labels on
+/// one column where the dialog's inset starts.
+fn result_import_facts(ui: &mut egui::Ui, facts: &[(&str, String)]) {
+    let facts = facts
+        .iter()
+        .map(|(label, value)| Fact::new(label, value))
+        .collect::<Vec<_>>();
+    let side = (DIALOG_BODY_INSET - PANEL_INSET).max(0.0);
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(side as i8, 6))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            fact_rows(ui, &facts);
+        });
+}
+
 fn result_import_stage_header(ui: &mut egui::Ui, active: ResultImportStage) {
     ui.horizontal(|ui| {
         for (index, (stage, label)) in [
@@ -1400,45 +1446,47 @@ fn result_import_stage_header(ui: &mut egui::Ui, active: ResultImportStage) {
 }
 
 fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
-    ui.heading("Detected source");
-    egui::Grid::new("rspice.result-import.detected")
-        .num_columns(2)
-        .striped(true)
-        .show(ui, |ui| {
-            result_import_summary_row(ui, "File", &draft.source_name);
-            result_import_summary_row(ui, "Format", &draft.source_format_id);
-            if matches!(draft.source_format_id.as_str(), "csv-rfc4180" | "tsv") {
-                result_import_summary_row(
-                    ui,
-                    "Delimiter",
-                    match draft.delimiter {
-                        b'\t' => "Tab",
-                        b';' => "Semicolon",
-                        _ => "Comma",
-                    },
-                );
-            }
-            result_import_summary_row(
-                ui,
-                "Inferred domain",
-                analysis_domain_label(draft.analysis_type),
-            );
-            result_import_summary_row(ui, "Coordinate", &draft.coordinate_name);
-            result_import_summary_row(
-                ui,
-                "Coordinate unit",
-                draft.coordinate_unit.as_deref().unwrap_or("Unstated"),
-            );
-            result_import_summary_row(ui, "Signals", &draft.waveforms.len().to_string());
-            result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
-            result_import_plot_rows(ui, draft);
-        });
-    ui.add_space(12.0);
-    let choose_log = result_import_notes(ui, draft);
-    ui.label(
-        "No run or analysis has been created. Continue to confirm the engineering domain, coordinate, and included signals.",
-    );
-    choose_log
+    band_header(ui, "Detected source", None);
+    let mut facts = vec![
+        ("File", draft.source_name.clone()),
+        ("Format", draft.source_format_id.clone()),
+    ];
+    if matches!(draft.source_format_id.as_str(), "csv-rfc4180" | "tsv") {
+        let delimiter = match draft.delimiter {
+            b'\t' => "Tab",
+            b';' => "Semicolon",
+            _ => "Comma",
+        };
+        facts.push(("Delimiter", delimiter.to_owned()));
+    }
+    facts.extend([
+        (
+            "Inferred domain",
+            analysis_domain_label(draft.analysis_type).to_owned(),
+        ),
+        ("Coordinate", draft.coordinate_name.clone()),
+        (
+            "Coordinate unit",
+            draft
+                .coordinate_unit
+                .clone()
+                .unwrap_or_else(|| "Unstated".to_owned()),
+        ),
+        ("Signals", draft.waveforms.len().to_string()),
+        ("Samples per signal", draft.sample_count.to_string()),
+    ]);
+    result_import_plot_facts(&mut facts, draft);
+    result_import_facts(ui, &facts);
+    result_import_inset(ui, |ui| {
+        let choose_log = result_import_notes(ui, draft);
+        ui.label(
+            egui::RichText::new(
+                "No run or analysis has been created. Continue to confirm the engineering domain, coordinate, and included signals.",
+            )
+            .color(Tokens::get(ui.ctx()).color.text_dim),
+        );
+        choose_log
+    })
 }
 
 /// What the reader should know of how the source was read, and, when a stepped rawfile's runs
@@ -1446,139 +1494,168 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
 fn result_import_notes(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
     for note in &draft.notes {
         ui.colored_label(Tokens::get(ui.ctx()).color.warn, note);
+        ui.add_space(4.0);
     }
-    let choose_log =
-        unnamed_result_import_runs(draft) > 0 && ui.button("Choose log\u{2026}").clicked();
-    if !draft.notes.is_empty() {
+    let unnamed = unnamed_result_import_runs(draft) > 0;
+    let choose_log = unnamed && Button::new("Choose log\u{2026}").show(ui).clicked();
+    if unnamed || !draft.notes.is_empty() {
         ui.add_space(8.0);
     }
     choose_log
 }
 
-fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState) {
-    ui.heading("Map engineering data");
-    if let Some(plots) = draft
-        .plots
-        .as_deref()
-        .filter(|plots| !plots.further.is_empty())
-    {
-        ui.label(
-            egui::RichText::new(format!(
-                "Mapping {}. The source's other analyses import as written.",
-                plots.reviewed
-            ))
-            .small()
-            .color(Tokens::get(ui.ctx()).color.text_dim),
-        );
-    }
-    egui::Grid::new("rspice.result-import.mapping")
-        .num_columns(2)
-        .spacing([18.0, 8.0])
-        .show(ui, |ui| {
-            ui.label("Analysis domain");
-            let domain_locked = matches!(
-                draft.source_format_id.as_str(),
-                "touchstone-v1" | "touchstone-v2"
-            );
-            ui.add_enabled_ui(!domain_locked, |ui| {
-                crate::ui::widgets::Combo::from_id_salt("rspice.result-import.domain")
-                    .selected_text(analysis_domain_label(draft.analysis_type))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut draft.analysis_type,
-                            AnalysisType::Transient,
-                            "Transient",
-                        );
-                        ui.selectable_value(&mut draft.analysis_type, AnalysisType::Ac, "AC");
-                        ui.selectable_value(
-                            &mut draft.analysis_type,
-                            AnalysisType::DcSweep,
-                            "DC sweep",
-                        );
-                    });
-            });
-            ui.end_row();
-            ui.label("Coordinate name");
-            ui.add(
-                egui::TextEdit::singleline(&mut draft.coordinate_name)
-                    .id_salt("rspice.result-import.coordinate")
-                    .desired_width(320.0),
-            );
-            ui.end_row();
-        });
+/// The domains a source that states none can be read in, as the Map step
+/// offers them.
+const RESULT_IMPORT_DOMAINS: [(AnalysisType, &str); 3] = [
+    (AnalysisType::Transient, "Transient"),
+    (AnalysisType::Ac, "AC"),
+    (AnalysisType::DcSweep, "DC sweep"),
+];
 
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.strong("Signals");
-        if ui.small_button("Select all").clicked() {
-            draft.selected_signals.fill(true);
+fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState, digits: usize) {
+    band_header(ui, "Map engineering data", None);
+    result_import_inset(ui, |ui| {
+        if let Some(plots) = draft
+            .plots
+            .as_deref()
+            .filter(|plots| !plots.further.is_empty())
+        {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Mapping {}. The source's other analyses import as written.",
+                    plots.reviewed
+                ))
+                .color(Tokens::get(ui.ctx()).color.text_dim),
+            );
+            ui.add_space(8.0);
         }
-        if ui.small_button("Select none").clicked() {
-            draft.selected_signals.fill(false);
+        let mut rows = FormRows::in_ui(ui);
+        if matches!(
+            draft.source_format_id.as_str(),
+            "touchstone-v1" | "touchstone-v2"
+        ) {
+            // A Touchstone file is a network's parameters over frequency,
+            // and is read as nothing else.
+            rows.value(
+                "Analysis domain",
+                analysis_domain_label(draft.analysis_type),
+            );
+        } else {
+            let options = RESULT_IMPORT_DOMAINS
+                .iter()
+                .map(|(_, label)| (*label).to_owned())
+                .collect::<Vec<_>>();
+            let shown = RESULT_IMPORT_DOMAINS
+                .iter()
+                .find(|(domain, _)| *domain == draft.analysis_type)
+                .map_or_else(
+                    || analysis_domain_label(draft.analysis_type),
+                    |(_, label)| label,
+                );
+            if let Some(index) = rows.select(
+                "Analysis domain",
+                "rspice.result-import.domain",
+                shown,
+                &options,
+            ) {
+                draft.analysis_type = RESULT_IMPORT_DOMAINS[index].0;
+            }
         }
-        ui.label(
-            egui::RichText::new(format!(
-                "{} of {} selected",
-                draft
-                    .selected_signals
-                    .iter()
-                    .filter(|selected| **selected)
-                    .count(),
-                draft.selected_signals.len()
-            ))
-            .small()
-            .color(Tokens::get(ui.ctx()).color.text_dim),
+        rows.text_sans(
+            "Coordinate name",
+            egui::Id::new("rspice.result-import.coordinate"),
+            &mut draft.coordinate_name,
+            "",
         );
     });
-    egui::ScrollArea::vertical()
-        .id_salt("rspice.result-import.signals")
-        .max_height(132.0)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            for (waveform, selected) in draft
-                .waveforms
-                .iter()
-                .zip(draft.selected_signals.iter_mut())
-            {
-                ui.checkbox(selected, result_import_signal_label(waveform));
-            }
-        });
 
-    ui.add_space(10.0);
-    ui.strong("Source preview");
-    result_import_preview(ui, draft);
-    draft.validation_error = parsed_result_from_draft(draft).err();
-}
-
-fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
-    ui.heading("Validate import");
     let selected = draft
         .selected_signals
         .iter()
         .filter(|selected| **selected)
         .count();
-    egui::Grid::new("rspice.result-import.validation")
-        .num_columns(2)
-        .striped(true)
+    band_header(
+        ui,
+        "Signals",
+        Some(&format!(
+            "{selected} of {} selected",
+            draft.selected_signals.len()
+        )),
+    );
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(DIALOG_BODY_INSET as i8, 8))
         .show(ui, |ui| {
-            result_import_summary_row(ui, "Source", &draft.source_name);
-            result_import_summary_row(ui, "Format", &draft.source_format_id);
-            result_import_summary_row(ui, "Domain", analysis_domain_label(draft.analysis_type));
-            result_import_summary_row(ui, "Coordinate", &draft.coordinate_name);
-            result_import_summary_row(
-                ui,
-                "Coordinate unit",
-                draft.coordinate_unit.as_deref().unwrap_or("Unstated"),
-            );
-            result_import_summary_row(ui, "Included signals", &selected.to_string());
-            result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
-            result_import_plot_rows(ui, draft);
-            result_import_summary_row(ui, "Saved as", "Read-only · imported, not from a run");
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if Button::new("Select all").show(ui).clicked() {
+                    draft.selected_signals.fill(true);
+                }
+                if Button::new("Select none").show(ui).clicked() {
+                    draft.selected_signals.fill(false);
+                }
+            });
         });
-    ui.add_space(12.0);
-    let choose_log = result_import_notes(ui, draft);
-    match parsed_result_from_draft(draft) {
-        Ok(_) => {
+    let labels = draft
+        .waveforms
+        .iter()
+        .map(result_import_signal_label)
+        .collect::<Vec<_>>();
+    let columns = [Column::name("Signal", 120.0).unsortable()];
+    let row_h = LineHeights::list(&Tokens::get(ui.ctx())).row;
+    let response = DataTable::new("rspice.result-import.signals", &columns, labels.len())
+        .list()
+        .max_height(row_h * RESULT_IMPORT_SIGNAL_ROWS)
+        .show(ui, |row| {
+            vec![Cell::text(labels[row].as_str()).check(draft.selected_signals[row])]
+        });
+    if let Some((row, on)) = response.checked {
+        draft.selected_signals[row] = on;
+    }
+
+    band_header(ui, "Source preview", None);
+    result_import_preview(ui, draft, digits);
+    draft.validation_error = parsed_result_from_draft(draft).err();
+}
+
+fn result_import_validate_page(
+    ui: &mut egui::Ui,
+    draft: &ResultImportDialogState,
+    digits: usize,
+) -> bool {
+    band_header(ui, "Validate import", None);
+    let selected = draft
+        .selected_signals
+        .iter()
+        .filter(|selected| **selected)
+        .count();
+    let mut facts = vec![
+        ("Source", draft.source_name.clone()),
+        ("Format", draft.source_format_id.clone()),
+        (
+            "Domain",
+            analysis_domain_label(draft.analysis_type).to_owned(),
+        ),
+        ("Coordinate", draft.coordinate_name.clone()),
+        (
+            "Coordinate unit",
+            draft
+                .coordinate_unit
+                .clone()
+                .unwrap_or_else(|| "Unstated".to_owned()),
+        ),
+        ("Included signals", selected.to_string()),
+        ("Samples per signal", draft.sample_count.to_string()),
+    ];
+    result_import_plot_facts(&mut facts, draft);
+    facts.push((
+        "Saved as",
+        "Read-only · imported, not from a run".to_owned(),
+    ));
+    result_import_facts(ui, &facts);
+    let choose_log = result_import_inset(ui, |ui| {
+        let choose_log = result_import_notes(ui, draft);
+        // A refusal is the footer's, beside the Import it holds back.
+        if parsed_result_from_draft(draft).is_ok() {
             let message = match draft.plots.as_deref().filter(|plots| !plots.further.is_empty()) {
                 Some(plots) => format!(
                     "Validation passed. Import will add one completed retained run of {} analyses and open it in Results.",
@@ -1589,38 +1666,29 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
             };
             ui.colored_label(Tokens::get(ui.ctx()).color.ok, message);
         }
-        Err(error) => {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-    }
-    ui.add_space(10.0);
-    result_import_preview(ui, draft);
+        choose_log
+    });
+    band_header(ui, "Source preview", None);
+    result_import_preview(ui, draft, digits);
     choose_log
 }
 
-fn result_import_plot_rows(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
+fn result_import_plot_facts(facts: &mut Vec<(&str, String)>, draft: &ResultImportDialogState) {
     let Some(plots) = draft.plots.as_deref() else {
         return;
     };
-    result_import_summary_row(ui, "Reviewed analysis", &plots.reviewed);
+    facts.push(("Reviewed analysis", plots.reviewed.clone()));
     for plot in &plots.further {
-        result_import_summary_row(
-            ui,
+        facts.push((
             "Also imported",
-            &format!(
+            format!(
                 "{} · {} signals \u{00d7} {} samples, as written",
                 plot.name,
                 plot.waveforms.len(),
                 plot.sample_count
             ),
-        );
+        ));
     }
-}
-
-fn result_import_summary_row(ui: &mut egui::Ui, label: &str, value: &str) {
-    ui.label(egui::RichText::new(label).strong());
-    ui.label(value);
-    ui.end_row();
 }
 
 fn result_import_signal_label(waveform: &RetainedTrace) -> String {
@@ -1630,7 +1698,10 @@ fn result_import_signal_label(waveform: &RetainedTrace) -> String {
     )
 }
 
-fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
+/// The first rows of the coordinate and the included signals, each value a
+/// reading at the reader's significant digits with its unit's prefix, as
+/// every other results table reads them.
+fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState, digits: usize) {
     const MAX_PREVIEW_ROWS: usize = RESULT_IMPORT_PREVIEW_ROWS;
     const MAX_PREVIEW_SIGNALS: usize = 8;
 
@@ -1644,50 +1715,72 @@ fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
         .take(MAX_PREVIEW_SIGNALS)
         .collect::<Vec<_>>();
     if included.is_empty() {
-        ui.label(
-            egui::RichText::new("Select at least one signal to preview.")
-                .color(Tokens::get(ui.ctx()).color.warn),
-        );
+        result_import_inset(ui, |ui| {
+            ui.label(
+                egui::RichText::new("Select at least one signal to preview.")
+                    .color(Tokens::get(ui.ctx()).color.warn),
+            );
+        });
         return;
     }
 
-    egui::ScrollArea::horizontal()
-        .id_salt("rspice.result-import.preview-scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            egui::Grid::new("rspice.result-import.preview")
-                .striped(true)
-                .min_col_width(100.0)
-                .show(ui, |ui| {
-                    ui.strong(&draft.coordinate_name);
-                    for (waveform, _) in &included {
-                        ui.strong(result_import_signal_label(waveform));
-                    }
-                    ui.end_row();
-                    let rows = included[0].1.len().min(draft.sample_count.max(1));
-                    for row in 0..rows.min(MAX_PREVIEW_ROWS) {
-                        ui.monospace(format!("{:.6e}", included[0].1[row].0));
-                        for (_, first_rows) in &included {
-                            ui.monospace(
-                                first_rows
-                                    .get(row)
-                                    .and_then(|(_, sample)| *sample)
-                                    .map(|value| format!("{value:.6e}"))
-                                    .unwrap_or_else(|| "Unavailable".into()),
-                            );
-                        }
-                        ui.end_row();
-                    }
-                });
+    let coordinate_unit = draft
+        .coordinate_unit
+        .as_deref()
+        .unwrap_or(match draft.analysis_type {
+            AnalysisType::Transient => "s",
+            AnalysisType::Ac | AnalysisType::SParameter => "Hz",
+            _ => "",
         });
+    let units = included
+        .iter()
+        .map(|(waveform, _)| {
+            browser_signal_unit(
+                &waveform.name,
+                waveform.unit.as_deref(),
+                analysis_default_unit(draft.analysis_type),
+            )
+        })
+        .collect::<Vec<_>>();
+    let reading = |head: &str| {
+        Column::name(head, 96.0)
+            .align(rspice_ui_kit::widgets::table::Align::Right)
+            .unsortable()
+    };
+    let columns = std::iter::once(reading(&draft.coordinate_name))
+        .chain(included.iter().map(|(waveform, _)| reading(&waveform.name)))
+        .collect::<Vec<_>>();
+    let rows = included[0]
+        .1
+        .len()
+        .min(draft.sample_count.max(1))
+        .min(MAX_PREVIEW_ROWS);
+    DataTable::new("rspice.result-import.preview", &columns, rows).show(ui, |row| {
+        std::iter::once(Cell::quantity(fmt_column_reading(
+            included[0].1[row].0,
+            coordinate_unit,
+            digits,
+        )))
+        .chain(included.iter().zip(&units).map(|((_, first_rows), unit)| {
+            first_rows
+                .get(row)
+                .and_then(|(_, sample)| *sample)
+                .map_or_else(Cell::absent, |value| {
+                    Cell::quantity(fmt_column_reading(value, unit, digits))
+                })
+        }))
+        .collect()
+    });
     if draft.sample_count > MAX_PREVIEW_ROWS || included.len() < draft.waveforms.len() {
-        ui.label(
-            egui::RichText::new(format!(
-                "Preview is limited to {MAX_PREVIEW_ROWS} rows and {MAX_PREVIEW_SIGNALS} included signals."
-            ))
-            .small()
-            .color(Tokens::get(ui.ctx()).color.text_dim),
-        );
+        result_import_inset(ui, |ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Preview is limited to {MAX_PREVIEW_ROWS} rows and {MAX_PREVIEW_SIGNALS} included signals."
+                ))
+                .small()
+                .color(Tokens::get(ui.ctx()).color.text_dim),
+            );
+        });
     }
 }
 
@@ -2061,7 +2154,7 @@ mod tests {
     const BROWSER_SCREEN: egui::Vec2 = egui::vec2(1_440.0, 857.1875);
 
     /// A review open on a staged CSV, as the browser opens it: on the frame its
-    /// file is read, with no window drawn before it.
+    /// file is read, with no dialog drawn before it.
     fn staged_review() -> ResultsTestHost {
         let mut state = ResultsTestHost::default();
         state.platform.project_lifecycle.authority.open_session();
@@ -2097,15 +2190,45 @@ mod tests {
         let update = output.platform_output.accesskit_update?;
         update.nodes.iter().find_map(|(_, node)| {
             (node.label() == Some(label) && !node.is_disabled())
-                .then(|| node.bounds())
+                .then(|| node_rect(node))
                 .flatten()
-                .map(|bounds| {
-                    egui::Rect::from_min_max(
-                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
-                    )
-                })
         })
+    }
+
+    fn node_rect(node: &egui::accesskit::Node) -> Option<egui::Rect> {
+        node.bounds().map(|bounds| {
+            egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            )
+        })
+    }
+
+    /// Draw the import dialog once; where the frame drew each of `labels`,
+    /// enabled or not.
+    fn drawn(
+        ctx: &egui::Context,
+        state: &mut ResultsTestHost,
+        labels: &[&str],
+    ) -> Vec<Option<egui::Rect>> {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, BROWSER_SCREEN)),
+                ..Default::default()
+            },
+            |ctx| show_result_import_dialog(ctx, &mut state.results_parts()),
+        );
+        let update = output.platform_output.accesskit_update;
+        labels
+            .iter()
+            .map(|label| {
+                update.as_ref()?.nodes.iter().find_map(|(_, node)| {
+                    (node.label() == Some(*label))
+                        .then(|| node_rect(node))
+                        .flatten()
+                })
+            })
+            .collect()
     }
 
     /// A press and a release at `point`, as two frames.
@@ -2128,9 +2251,10 @@ mod tests {
     /// The review is laid out at its final size and place on its first visible
     /// frame, with its footer on the screen: a click aimed at Map signals as any
     /// frame drew it lands on it, however many frames pass before the press. The
-    /// window grew by its footer's height for its first eight frames, the button
-    /// moving 21 points a frame, so CI's click, aimed at the button as one frame
-    /// drew it and pressed a frame later, landed above it and was lost.
+    /// review was a window that grew by its footer's height for its first eight
+    /// frames, the button moving 21 points a frame, so CI's click, aimed at the
+    /// button as one frame drew it and pressed a frame later, landed above it
+    /// and was lost.
     #[test]
     fn a_click_aimed_at_the_review_as_any_frame_drew_it_lands() {
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, BROWSER_SCREEN);
@@ -2144,7 +2268,7 @@ mod tests {
             for _ in 0..=seen {
                 aimed = frame_with(&ctx, &mut state, Vec::new(), "Map signals");
             }
-            // The first frame lays the window out unseen, and its button is disabled.
+            // The first frame lays the dialog out unseen, and its button is disabled.
             let Some(aimed) = aimed else {
                 assert_eq!(seen, 0, "every frame after the first draws Map signals");
                 continue;
@@ -2162,6 +2286,47 @@ mod tests {
                 state.results_parts().result_import.stage,
                 ResultImportStage::Map,
                 "a click aimed at Map signals as frame {seen} drew it"
+            );
+        }
+    }
+
+    /// The review stands still from step to step: the dialog at one place and
+    /// size, and Cancel, Back and the primary (Map signals, Validate import,
+    /// Import) each at one place on Detect, Map and Validate, so a reader
+    /// walking it presses one spot, and nothing moves under the pointer.
+    #[test]
+    fn the_review_and_its_footer_stand_still_from_step_to_step() {
+        let mut state = staged_review();
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut steps = Vec::new();
+        for (stage, primary) in [
+            (ResultImportStage::Detect, "Map signals"),
+            (ResultImportStage::Map, "Validate import"),
+            (ResultImportStage::Validate, "Import"),
+        ] {
+            state.results_parts().result_import.stage = stage;
+            let labels = [RESULT_IMPORT_TITLE, "Cancel", "Back", primary];
+            let mut seen = Vec::new();
+            for _ in 0..3 {
+                seen = drawn(&ctx, &mut state, &labels);
+            }
+            assert_eq!(
+                state.results_parts().result_import.stage,
+                stage,
+                "drawing the review left {stage:?}"
+            );
+            for (label, rect) in labels.iter().zip(&seen) {
+                assert!(rect.is_some(), "{stage:?} drew no {label}");
+            }
+            steps.push((stage, seen));
+        }
+        let (_, detect) = &steps[0];
+        for (stage, seen) in &steps[1..] {
+            assert_eq!(
+                seen, detect,
+                "the dialog, Cancel, Back and the primary on {stage:?} against Detect"
             );
         }
     }
