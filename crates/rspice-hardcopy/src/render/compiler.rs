@@ -1532,6 +1532,20 @@ impl<'a> SemanticSceneCompiler<'a> {
                 to: label,
                 stroke,
             });
+            // The point itself, marked as the screen marks it: a dot of the
+            // screen's 2.5 px radius, where the leader starts.
+            self.primitives.push(ScenePrimitive::Circle {
+                center: origin,
+                radius: Length::from_micrometres(
+                    5 * crate::sources::AXIS_PIXEL_UM.unsigned_abs() / 2,
+                ),
+                stroke: None,
+                fill: self.mapped_fill(
+                    PrintObjectKind::ReviewAnnotation,
+                    &stable_id,
+                    Some(SceneFill::solid(stroke.color)),
+                ),
+            });
             self.add_text(
                 label,
                 &annotation.text,

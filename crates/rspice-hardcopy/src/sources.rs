@@ -121,7 +121,7 @@ pub const PLOT_INSET_UM: i64 = 12_700;
 /// The screen's axis grammar in page measure: the screen letters a plot's
 /// values 11 px high and the page letters them 2.3 mm, so a pixel of the
 /// screen's axis row is this much of the page.
-const AXIS_PIXEL_UM: i64 = 2_300 / 11;
+pub const AXIS_PIXEL_UM: i64 = 2_300 / 11;
 /// The gutter's values end this far left of the frame: the screen's 7 px.
 pub const Y_VALUE_GAP_UM: i64 = 7 * AXIS_PIXEL_UM;
 /// The abscissa's caption ends this far left of the frame, in the gutter

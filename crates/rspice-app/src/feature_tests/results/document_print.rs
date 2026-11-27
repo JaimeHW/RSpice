@@ -19,7 +19,7 @@ use rspice_app_state::state::{
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_hardcopy::render::{
-    HardcopyRenderer, HardcopySceneMetadata, ScenePrimitive, scene_from_resolved,
+    HardcopyRenderer, HardcopyScene, HardcopySceneMetadata, ScenePrimitive, scene_from_resolved,
 };
 use rspice_hardcopy::sources::{
     HardcopySemanticDocument, ResolvedHardcopyDocument, SemanticAxisKind, SemanticPlot,
@@ -150,16 +150,20 @@ fn plot_of(resolved: &ResolvedHardcopyDocument) -> &SemanticPlot {
     plot
 }
 
-/// Every word the compiled page letters.
-fn page_text(resolved: &ResolvedHardcopyDocument) -> Vec<String> {
-    let scene = scene_from_resolved(
+/// The page compiled.
+fn page_scene(resolved: &ResolvedHardcopyDocument) -> HardcopyScene {
+    scene_from_resolved(
         resolved,
         resolved.default_print_mapping(),
         SchematicHardcopySetup::default(),
         HardcopySceneMetadata::try_new(resolved.authority().display_name(), "RSpice").unwrap(),
     )
-    .expect("the page compiles");
-    scene
+    .expect("the page compiles")
+}
+
+/// Every word the compiled page letters.
+fn page_text(resolved: &ResolvedHardcopyDocument) -> Vec<String> {
+    page_scene(resolved)
         .primitives()
         .iter()
         .filter_map(|primitive| match primitive {
@@ -418,6 +422,32 @@ fn notes_pinned_to_a_place_or_a_point_print_where_the_screen_stands_them() {
     for words in ["Settled", "Mid-rail"] {
         assert!(text.iter().any(|text| text == words), "{words}: {text:?}");
     }
+
+    // The point is marked with a dot, as the screen marks it, where the
+    // leader to its words starts.
+    let scene = page_scene(&page);
+    let primitives = scene.primitives();
+    let words = primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            ScenePrimitive::Text { origin, text, .. } if text == "Mid-rail" => Some(*origin),
+            _ => None,
+        })
+        .expect("the point's note is lettered");
+    let point = primitives
+        .iter()
+        .find_map(|primitive| match primitive {
+            ScenePrimitive::Line { from, to, .. } if *to == words => Some(*from),
+            _ => None,
+        })
+        .expect("a leader runs to its words");
+    assert!(
+        primitives.iter().any(|primitive| matches!(
+            primitive,
+            ScenePrimitive::Circle { center, fill: Some(_), .. } if *center == point
+        )),
+        "a dot marks the point"
+    );
 }
 
 /// A pane that reads its current against a second, right-hand axis prints,
