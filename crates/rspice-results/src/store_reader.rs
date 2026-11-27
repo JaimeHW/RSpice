@@ -42,6 +42,7 @@ pub use segments::open_segments;
 pub use segments::pin_segment;
 pub use segments::{
     MissingSegment, Segment, SegmentColumn, SegmentEvents, keep_segments_in, kept_segment,
+    reading_scope, reading_segments_from,
 };
 
 /// The bytes of decoded blocks the views of every open segment keep between frames: a working

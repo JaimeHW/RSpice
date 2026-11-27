@@ -82,7 +82,7 @@ impl ProjectRead {
     /// has one. A file that does not parse is still read to its end, so its
     /// digest is known, and says what is wrong with it once it is decoded.
     pub fn read(reader: impl Read, source_path: Option<&Path>) -> Result<Self, ProjectIoError> {
-        keep_segments_beside(source_path);
+        let folders = keep_segments_beside(source_path);
         let mut stream = BufReader::with_capacity(
             64 * 1024,
             HashingReader {
@@ -90,10 +90,14 @@ impl ProjectRead {
                 hasher: Sha256::new(),
             },
         );
-        let parsed = {
+        let mut parse = || {
             let mut deserializer = serde_json::Deserializer::from_reader(&mut stream);
             ProjectFile::deserialize(&mut deserializer)
                 .and_then(|project| deserializer.end().map(|()| project))
+        };
+        let parsed = match folders {
+            Some(folders) => rspice_results::store_reader::reading_segments_from(folders, parse),
+            None => parse(),
         };
         let parsed = match parsed {
             Ok(project) => Ok(project),

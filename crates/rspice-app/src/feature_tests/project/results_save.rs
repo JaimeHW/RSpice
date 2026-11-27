@@ -157,3 +157,65 @@ fn a_cancelled_save_copying_its_results_leaves_the_project_file_and_its_unsaved_
     drop(reopened);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Two projects of one deck in one session of RSpice: the second's results, deleted outside
+/// RSpice, reopen missing, though the first project's folder holds the same rows, the first,
+/// open again, reads them, and the second's own run still reads its segment. A project reads its
+/// results from the folders beside its file, never from another project's folder or another
+/// run's segment that happens to hold the same rows.
+#[test]
+fn results_deleted_outside_rspice_reopen_missing_beside_another_project_of_the_same_deck() {
+    const SAME: &str = "one deck saved in two projects
+V1 in 0 PULSE(0 1 0 1u 1u 50u 100u)
+R1 in out 1k
+C1 out 0 33n
+.tran 0.1u 300u
+.end
+";
+    let root = std::env::temp_dir().join(format!(
+        "rspice-results-own-folder-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let first_file = root.join("first").join("first.rspiceproj");
+    let second_file = root.join("second").join("second.rspiceproj");
+    for file in [&first_file, &second_file] {
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    }
+
+    // The first project, saved and open again: its folder named, its run read from it.
+    let mut first: AppState =
+        rspice_app_runs::simulation::controller::test_execution::run_manual_batch_session(SAME);
+    first.open_project_session();
+    assert!(
+        first.save_project_to_path(&first_file),
+        "the first project saves"
+    );
+    drop(first);
+    let mut first = AppState::default();
+    assert!(first.load_project_from_path(&first_file));
+    assert_eq!(
+        first.model.simulation.retained.runs[0].unread_results(),
+        None,
+        "the first project reads its run"
+    );
+
+    // The second, saved, and its results deleted outside RSpice while its run still reads the
+    // segment it wrote.
+    let mut second: AppState =
+        rspice_app_runs::simulation::controller::test_execution::run_manual_batch_session(SAME);
+    second.open_project_session();
+    assert!(
+        second.save_project_to_path(&second_file),
+        "the second project saves"
+    );
+    std::fs::remove_dir_all(segment_folder(&second_file)).unwrap();
+    let mut reopened = AppState::default();
+    assert!(reopened.load_project_from_path(&second_file));
+    let reason = reopened.model.simulation.retained.runs[0]
+        .unread_results()
+        .expect("the second project's results are missing, not read from the first's");
+    assert!(reason.contains(" is missing"), "{reason}");
+
+    drop((reopened, second, first));
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -11,13 +11,14 @@
 //! and says the store is still being checked.
 
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use rspice_results_store::{Digest, EventSpan};
 
+use super::checks;
 use super::references::{segment_column, segment_events};
-use super::segments::unread;
-use super::{checks, kept_segment};
+use super::segments::{kept_segment_in, reading_scope, unread};
 use crate::events::points::EventHistorySource;
 use crate::waveform::{ColumnSource, ColumnTile, RowsAround};
 
@@ -25,6 +26,9 @@ use crate::waveform::{ColumnSource, ColumnTile, RowsAround};
 /// is asked for: the segment's own column or signal, or why there is none.
 struct Opened<S: ?Sized> {
     digest: Digest,
+    /// The folders of the file that named the segment, when one did ([`reading_scope`]): the
+    /// segment is opened from them, as it would have been had it been checked then.
+    scope: Option<Arc<[PathBuf]>>,
     opened: OnceLock<Result<Arc<S>, String>>,
 }
 
@@ -32,6 +36,7 @@ impl<S: ?Sized> Opened<S> {
     fn new(digest: Digest) -> Self {
         Self {
             digest,
+            scope: reading_scope(),
             opened: OnceLock::new(),
         }
     }
@@ -50,7 +55,7 @@ impl<S: ?Sized> Opened<S> {
         if checks::deferring() {
             return Err(crate::waveform::CHECKING_READ.to_owned());
         }
-        let opened = match kept_segment(self.digest) {
+        let opened = match kept_segment_in(self.scope.as_deref(), self.digest) {
             Some(segment) => open(segment),
             None if checks::checking(self.digest.0) => {
                 return Err(crate::waveform::CHECKING_READ.to_owned());

@@ -61,7 +61,10 @@ const NOT_HELD_HERE: &str =
 /// one: the file a reader of that segment opens, checked or not.
 #[cfg(any(unix, windows))]
 pub fn kept_file(name: &str) -> Option<PathBuf> {
-    let folders = FOLDERS.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    let folders = rspice_results::store_reader::reading_scope().map_or_else(
+        || FOLDERS.lock().unwrap_or_else(|p| p.into_inner()).clone(),
+        |scope| scope.to_vec(),
+    );
     folders
         .iter()
         .map(|folder| folder.join(name))

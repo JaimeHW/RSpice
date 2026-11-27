@@ -5,8 +5,12 @@
 //! store folder of its own, named by its logical digest
 //! ([`rspice_results_store::kept_segment_name`]). A saved result names the segments it reads by
 //! digest alone, so reading it back needs no paths: [`kept_segment`] looks in every folder
-//! [`keep_segments_in`] has named, and a segment no folder holds reads as missing, by name.
+//! [`keep_segments_in`] has named, and a segment no folder holds reads as missing, by name. A file
+//! being read ([`reading_segments_from`]) reads only the folders beside it: a digest names the
+//! rows, not whose they are, so another project's folder or another run's segment of the same
+//! rows never stands in for a segment the file's own folder does not hold.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -446,6 +450,26 @@ impl KeptSegments {
         self.open.get(&digest.0)?.iter().find_map(Weak::upgrade)
     }
 
+    /// The open segment of `digest` that a reader of a file keeping its segments in `scope`
+    /// reads: one of the files those folders hold under the digest's name, with no other
+    /// segment of the same rows standing in for it.
+    #[cfg(any(unix, windows))]
+    fn open_in(&self, digest: Digest, scope: Option<&[PathBuf]>) -> Option<Arc<Segment>> {
+        let Some(scope) = scope else {
+            return self.open(digest);
+        };
+        let name = rspice_results_store::kept_segment_name(&digest);
+        self.open
+            .get(&digest.0)?
+            .iter()
+            .filter_map(Weak::upgrade)
+            .find(|segment| {
+                scope
+                    .iter()
+                    .any(|folder| segment.path == folder.join(&name))
+            })
+    }
+
     /// List `segment` as open under `digest`, dropping every listing that has closed.
     fn register(&mut self, digest: Digest, segment: &Arc<Segment>) {
         self.open.retain(|_, open| {
@@ -482,6 +506,33 @@ pub fn pin_segment(digest: Digest) -> Option<PathBuf> {
     Some(path)
 }
 
+thread_local! {
+    /// The folders the file being read on this thread keeps its segments in, in order.
+    static READING_FROM: RefCell<Option<Arc<[PathBuf]>>> = const { RefCell::new(None) };
+}
+
+/// Run `read`, which reads a file whose kept segments are beside it in `folders`, first to last:
+/// a segment it names is read from the first of them that holds it, or reads as missing, by name.
+/// Neither a folder another file named nor a segment open for another run of the same rows stands
+/// in for it, since a digest says what the rows are and not whose they are.
+pub fn reading_segments_from<T>(folders: Vec<PathBuf>, read: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<[PathBuf]>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let scope = self.0.take();
+            READING_FROM.with(|reading| *reading.borrow_mut() = scope);
+        }
+    }
+    let _restore = Restore(READING_FROM.with(|reading| reading.replace(Some(folders.into()))));
+    read()
+}
+
+/// The folders the file being read keeps its segments in, while one is
+/// ([`reading_segments_from`]).
+pub fn reading_scope() -> Option<Arc<[PathBuf]>> {
+    READING_FROM.with(|reading| reading.borrow().clone())
+}
+
 /// Look for kept segments in `folder` too, before every folder named earlier.
 pub fn keep_segments_in(folder: &Path) {
     let mut kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
@@ -503,13 +554,20 @@ pub fn keep_segments_in(folder: &Path) {
 /// opens the file the check found to be the segment.
 #[cfg(any(unix, windows))]
 pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
+    kept_segment_in(reading_scope().as_deref(), digest)
+}
+
+/// [`kept_segment`] for a reader of a file that keeps its segments in `scope`, in order; `None`
+/// for a reader of no file in particular, which may read any folder named and any segment open.
+#[cfg(any(unix, windows))]
+pub(super) fn kept_segment_in(scope: Option<&[PathBuf]>, digest: Digest) -> Option<Arc<Segment>> {
     let lock = || KEPT.lock().unwrap_or_else(|p| p.into_inner());
     let folders = {
         let kept = lock();
-        if let Some(open) = kept.open(digest) {
+        if let Some(open) = kept.open_in(digest, scope) {
             return Some(open);
         }
-        kept.folders.clone()
+        scope.map_or_else(|| kept.folders.clone(), <[PathBuf]>::to_vec)
     };
     let name = rspice_results_store::kept_segment_name(&digest);
     let leaving = super::checks::leaving_checks();
@@ -563,7 +621,7 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
         return None;
     };
     let mut kept = lock();
-    if let Some(open) = kept.open(digest) {
+    if let Some(open) = kept.open_in(digest, scope) {
         return Some(open);
     }
     kept.register(digest, &segment);
@@ -576,6 +634,11 @@ pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
 pub fn kept_segment(digest: Digest) -> Option<Arc<Segment>> {
     let kept = KEPT.lock().unwrap_or_else(|p| p.into_inner());
     kept.open.get(&digest.0)?.iter().find_map(Weak::upgrade)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(super) fn kept_segment_in(_scope: Option<&[PathBuf]>, digest: Digest) -> Option<Arc<Segment>> {
+    kept_segment(digest)
 }
 
 /// Every kept segment some reader has open now, one for each digest.

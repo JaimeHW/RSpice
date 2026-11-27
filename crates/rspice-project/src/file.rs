@@ -1652,9 +1652,12 @@ pub fn decode_project_text(
     source_path: Option<&Path>,
     source_files: impl rspice_design::hierarchy::HierarchySourceFiles,
 ) -> Result<DecodedProject, ProjectIoError> {
-    keep_segments_beside(source_path);
-    let project: ProjectFile =
-        serde_json::from_str(contents).map_err(|error| ProjectIoError::unreadable_json(&error))?;
+    let parse = || serde_json::from_str::<ProjectFile>(contents);
+    let project = match keep_segments_beside(source_path) {
+        Some(folders) => rspice_results::store_reader::reading_segments_from(folders, parse),
+        None => parse(),
+    }
+    .map_err(|error| ProjectIoError::unreadable_json(&error))?;
     finish_decoding(project, source_path, source_files)
 }
 
@@ -1663,12 +1666,13 @@ pub fn decode_project_text(
 /// own, `results/<file stem>`, first, then every other folder of `results`
 /// beside it, where a project renamed or copied outside RSpice left them. A
 /// segment is read from a folder only when its rows are the digest its run
-/// names, so another project's folder never stands in for this one's.
-pub(crate) fn keep_segments_beside(source_path: Option<&Path>) {
+/// names. Returns those folders, first to last, for the file to be read
+/// from ([`rspice_results::store_reader::reading_segments_from`]): read from
+/// them alone, a folder another project named, or a segment another run of
+/// the same rows has open, never stands in for one of this project's.
+pub(crate) fn keep_segments_beside(source_path: Option<&Path>) -> Option<Vec<PathBuf>> {
     use rspice_formats::project_results::keep_segments_in;
-    let Some(path) = source_path else {
-        return;
-    };
+    let path = source_path?;
     let own = crate::results::segment_folder(path);
     if let Some(results) = own.parent()
         && let Ok(entries) = std::fs::read_dir(results)
@@ -1684,8 +1688,11 @@ pub(crate) fn keep_segments_beside(source_path: Option<&Path>) {
             .iter()
             .rev()
             .for_each(|folder| keep_segments_in(folder));
+        keep_segments_in(&own);
+        return Some(std::iter::once(own).chain(others).collect());
     }
     keep_segments_in(&own);
+    Some(vec![own])
 }
 
 /// Restore, repair and check a project just parsed from its file.
