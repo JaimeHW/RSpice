@@ -1052,18 +1052,27 @@ pub fn right_panel(
         }
         rows.push(("Std dev", value(moments.std_dev), true));
         if let Some(shape) = model.shape {
+            // A standardized moment is a ratio to the spread, so one far
+            // below 1 is the rounding of its sums: a symmetric population's
+            // skewness reads 0.
+            let moment = |moment: f64| {
+                plain(
+                    rspice_results::number_format::snapped_to_spread(moment, 1.0),
+                    digits,
+                )
+            };
             rows.push((
                 "Skewness",
                 shape
                     .skewness
-                    .map_or_else(|| absent("needs 3 samples"), |g1| plain(g1, digits)),
+                    .map_or_else(|| absent("needs 3 samples"), moment),
                 false,
             ));
             rows.push((
                 "Excess kurtosis",
                 shape
                     .kurtosis
-                    .map_or_else(|| absent("needs 4 samples"), |g2| plain(g2, digits)),
+                    .map_or_else(|| absent("needs 4 samples"), moment),
                 false,
             ));
         }
