@@ -153,7 +153,7 @@ impl FamilyManifest {
                 for variable in variables {
                     if variable.samples.len() != *runs_completed {
                         return Err(format!(
-                            "Monte Carlo variable '{}' has {} samples for {runs_completed} completed runs",
+                            "Monte Carlo variable '{}' has {} retained samples for {runs_completed} completed runs",
                             variable.name,
                             variable.samples.len()
                         ));
