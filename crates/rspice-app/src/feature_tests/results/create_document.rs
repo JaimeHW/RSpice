@@ -649,8 +649,8 @@ fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
         .map(|(_, node)| node.label().unwrap_or_default())
         .collect::<Vec<_>>();
     let dataset_label = window.app.state.model.simulation.retained.runs[0]
-        .label
-        .clone();
+        .name()
+        .to_owned();
     assert_eq!(labels, [dataset_label.as_str(), "Transient review"]);
     let (document_tab, tab) = &strip[1];
     assert_eq!(
@@ -710,8 +710,8 @@ fn an_edit_marks_only_its_own_document_tab_until_the_project_is_saved() {
     window.create("Review B").expect("B commits");
     window.save();
     let dataset = window.app.state.model.simulation.retained.runs[0]
-        .label
-        .clone();
+        .name()
+        .to_owned();
     assert_eq!(
         tab_marks(&window.frames(Vec::new())),
         [
@@ -787,8 +787,8 @@ fn a_plotted_expression_is_kept_by_the_view_in_front() {
     let mut window = ResultsWindow::new();
     let document_id = window.create("Review A").expect("A commits");
     let dataset = window.app.state.model.simulation.retained.runs[0]
-        .label
-        .clone();
+        .name()
+        .to_owned();
     let choose_tab = |window: &mut ResultsWindow, index: usize| {
         let (tab, _) = document_tabs(&window.frames(Vec::new()))[index].clone();
         window.frames(vec![Event::AccessKitActionRequest(ActionRequest {
@@ -876,8 +876,8 @@ fn a_rolled_back_create_leaves_no_mark() {
 
     window.app.state.workbench.activate(Workspace::Results);
     let dataset = window.app.state.model.simulation.retained.runs[0]
-        .label
-        .clone();
+        .name()
+        .to_owned();
     assert_eq!(
         tab_marks(&window.frames(Vec::new())),
         [(dataset, false), ("Review A".to_owned(), false)]
