@@ -1155,7 +1155,7 @@ fn a_stale_schematic_greys_the_one_cross_probe_button_and_says_why_once() {
         let input = rspice_ui_kit::raster::display_input(SIZE, 1.0);
         let output = ctx.run_ui(input, |ui| {
             assert_eq!(
-                right_panel(ui, &evidence(), false, None, Some(&detail)),
+                right_panel(ui, &evidence(), true, None, Some(&detail)),
                 None
             );
         });

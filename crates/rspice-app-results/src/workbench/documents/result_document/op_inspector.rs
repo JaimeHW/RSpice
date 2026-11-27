@@ -143,6 +143,24 @@ fn result_mapping_is_current(state: ResultsReads<'_>) -> bool {
         receipt.project_revision() == state.model.workspace.content.project.revision()
     }) && state.model.result_mapping_is_current()
 }
+/// Whether the run shown was drawn from a schematic that has changed since,
+/// so its rows no longer cross-probe. A deck's run was drawn from no
+/// schematic, and a run kept without its receipt does not say what it was
+/// drawn from: neither has a schematic to have changed.
+fn schematic_changed_since_run(state: ResultsReads<'_>) -> bool {
+    let drawn = state
+        .model
+        .simulation
+        .active_run()
+        .and_then(|run| run.prepared_receipt())
+        .is_some_and(|receipt| {
+            receipt.source_domain()
+                == rspice_results::provenance::AnalysisResultSourceDomain::SimulationPlan
+        });
+    drawn
+        && state.model.simulation.source.cross_probe.is_populated()
+        && !result_mapping_is_current(state)
+}
 fn node_target_available(state: ResultsReads<'_>, name: &str) -> bool {
     if !result_mapping_is_current(state) {
         return false;
@@ -512,7 +530,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
     let action = viewer::right_panel(
         ui,
         &evidence,
-        result_mapping_is_current(state.results_reads()),
+        schematic_changed_since_run(state.results_reads()),
         plan.as_ref().and_then(|plan| plan.display.scope_note()),
         detail.as_ref(),
     );

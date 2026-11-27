@@ -82,3 +82,52 @@ fn locating_a_device_on_another_sheet_brings_its_sheet_forward() {
         rspice_app_state::workbench::workspace::Workspace::Design
     );
 }
+
+/// A deck's run was drawn from no schematic, so its operating point never
+/// says the schematic changed since it ran, whatever the schematic in front.
+#[test]
+fn a_decks_operating_point_says_nothing_of_a_changed_schematic() {
+    let run = rspice_app_runs::simulation::controller::test_execution::run_manual_batch(
+        "* divider
+V1 in 0 1
+R1 in out 1k
+R2 out 0 1k
+.op
+.end
+",
+    );
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.model.simulation.retained.runs.push(run);
+    let index = app.state.model.simulation.retained.runs.len() - 1;
+    assert!(app.state.model.simulation.select_run(index));
+
+    let ctx = egui::Context::default();
+    rspice_app_workbench::ui::Theme::default().apply(&ctx);
+    let mut words = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::Panel::right("inspector").show(ctx, |ui| {
+                rspice_app_results::workbench::documents::result_document::op_inspector::right_panel(
+                    ui,
+                    &mut app.state.results_parts(),
+                );
+            });
+        });
+        words = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+    }
+    assert!(
+        words.iter().any(|words| words == "Conditions"),
+        "the pane shows the run's operating point: {words:?}"
+    );
+    assert!(
+        !words.iter().any(|words| words.contains("cross-probing")),
+        "a deck's run says the schematic changed: {words:?}"
+    );
+}

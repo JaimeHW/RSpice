@@ -2336,10 +2336,13 @@ pub fn selection_detail(
     })
 }
 
+/// `schematic_changed` is whether the run was drawn from a schematic that
+/// has changed since: a run read from a deck, or kept without the record of
+/// what it was drawn from, has no schematic to have changed.
 pub fn right_panel(
     ui: &mut Ui,
     evidence: &OpEvidence,
-    current: bool,
+    schematic_changed: bool,
     scope_note: Option<&str>,
     detail: Option<&OpDetail>,
 ) -> Option<OpAction> {
@@ -2367,7 +2370,7 @@ pub fn right_panel(
         } else if button.clicked() {
             action = Some(detail.action.clone());
         }
-        if !current {
+        if schematic_changed {
             crate::presentation::panel_note(ui, SCHEMATIC_CHANGED);
         }
     }
@@ -2408,7 +2411,7 @@ pub fn right_panel(
     if let Some(note) = scope_note {
         crate::presentation::panel_note(ui, note);
     }
-    if !current && detail.is_none() {
+    if schematic_changed && detail.is_none() {
         crate::presentation::panel_note(ui, SCHEMATIC_CHANGED);
     }
     action
