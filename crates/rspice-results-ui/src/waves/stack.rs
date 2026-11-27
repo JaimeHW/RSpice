@@ -1325,9 +1325,17 @@ fn show_strip_plot(
     edits: &mut ExpressionEdits,
 ) {
     let t = Tokens::get(ui.ctx());
+    // A strip with no pane to draw has no legend row to start with its
+    // analysis tag: it stands on a row of its own.
+    let tag_row = |ui: &mut Ui| {
+        if options.pane_chrome {
+            pane_header::tag_row(ui, model);
+        }
+    };
     // A strip with signals and nothing of them plotted has no pane, and so
     // no legend to enable one in: they wait in the Data browser.
     let Some(x_domain) = model.x_range else {
+        tag_row(ui);
         if model.signal_columns > 0 || !model.traces.is_empty() || !model.lane_traces.is_empty() {
             nothing_plotted(ui, host);
         } else {
@@ -1338,6 +1346,7 @@ fn show_strip_plot(
     let panes = model.unit_panes();
     let wanted_lanes = host.event_lane_height(model).max(0.0);
     if panes.is_empty() && wanted_lanes == 0.0 {
+        tag_row(ui);
         nothing_plotted(ui, host);
         return;
     }

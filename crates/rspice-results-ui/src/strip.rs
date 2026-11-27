@@ -345,7 +345,7 @@ struct HeaderRows {
 /// The memory key the rows of a pass are kept under.
 const HEADER_ROWS: &str = "rspice.results.strip-header-rows";
 
-fn note_header_row(ctx: &egui::Context, id: egui::Id, rect: Rect) {
+pub(crate) fn note_header_row(ctx: &egui::Context, id: egui::Id, rect: Rect) {
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|data| {
         let noted = data.get_temp_mut_or_default::<HeaderRows>(egui::Id::new(HEADER_ROWS));

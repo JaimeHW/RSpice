@@ -22,6 +22,50 @@ const TRACE_LIST_HEIGHT: f32 = 320.0;
 /// The air between the strip's analysis tag and the legend after it.
 const TAG_GAP: f32 = 8.0;
 
+/// Write `model`'s analysis tag at the start of `within`, on the row that
+/// spans `row`; the width it takes. On a page of panes the tag of the pane a
+/// reader works in reads in full ink and reports itself selected, the
+/// others' dim; its hover follows it with what the strip shows of the run.
+fn strip_tag(ui: &mut Ui, model: &StripModel, row: egui::Rect, within: egui::Rect) -> f32 {
+    let mark = strip::header_row_mark(ui.ctx(), row);
+    let kind = strip::KindTag::new(ui, &model.kind_tag, model.incomplete, mark)
+        .described(super::stack::strip_subtitle(model));
+    let width = kind.width().min(within.width());
+    if let Some(written) = kind.show(ui, within.with_max_x(within.left() + width))
+        && mark == Some(true)
+    {
+        ui.ctx()
+            .accesskit_node_builder(written.id, |node| node.set_selected(true));
+    }
+    width
+}
+
+/// The row a strip with no pane to draw stands its analysis tag on, where a
+/// pane's legend row would start with it: nothing would name the analysis
+/// otherwise. It is a strip header row, so whatever holds the strip, a
+/// document's pane, gives it its menu.
+pub(crate) fn tag_row(ui: &mut Ui, model: &StripModel) {
+    let c = Tokens::get(ui.ctx()).color;
+    let height = WAVE_PANE_HEADER_HEIGHT.min(ui.available_height());
+    let (rect, row) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        egui::Sense::click(),
+    );
+    strip::note_header_row(ui.ctx(), row.id, rect);
+    ui.painter().rect_filled(rect, 0.0, c.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
+    strip_tag(
+        ui,
+        model,
+        rect,
+        legend_region(strip::header_band(rect), 0.0),
+    );
+}
+
 /// Source-qualified actions applied immediately in legend order.
 ///
 /// Selection is queried for each chip, including after an earlier chip changes it.
@@ -413,18 +457,7 @@ pub fn show_header(
     // its hover follows with what the strip shows of the run.
     let legend_rect = legend_region(strip::header_band(rect), action_width);
     let legend_rect = if tag {
-        // On a page of panes, the tag of the pane a reader works in reads
-        // in full ink, and reports itself selected.
-        let mark = strip::header_row_mark(ui.ctx(), rect);
-        let kind = strip::KindTag::new(ui, &model.kind_tag, model.incomplete, mark)
-            .described(super::stack::strip_subtitle(model));
-        let width = kind.width().min(legend_rect.width());
-        if let Some(written) = kind.show(ui, legend_rect.with_max_x(legend_rect.left() + width))
-            && mark == Some(true)
-        {
-            ui.ctx()
-                .accesskit_node_builder(written.id, |node| node.set_selected(true));
-        }
+        let width = strip_tag(ui, model, rect, legend_rect);
         legend_rect.with_min_x((legend_rect.left() + width + TAG_GAP).min(legend_rect.right()))
     } else {
         legend_rect

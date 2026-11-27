@@ -985,27 +985,14 @@ fn a_created_document_is_drawn_under_a_tab_of_its_own() {
     );
 }
 
-//// The legend rows the frame draws: each pane's band over its plot.
-#[cfg(not(target_arch = "wasm32"))]
-fn legend_rows(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<egui::Rect> {
-    nodes
-        .iter()
-        .filter(|(_, node)| {
-            node.role() == egui::accesskit::Role::Button
-                && node.label().is_some_and(|label| label.ends_with(" pane"))
-        })
-        .filter_map(|(_, node)| node_rect(node))
-        .collect()
-}
-
-/// The analysis tags the frame writes on legend rows, top to bottom and
-/// left to right, each with whether it reports itself selected: one on the
-/// top legend row of each strip a waveform document's panes draw.
+//// The analysis tags the frame writes, top to bottom and left to right, each
+/// with whether it reports itself selected: one for each strip a waveform
+/// document's panes draw, at the start of its top pane's legend row, or of
+/// a row of its own where it has no pane.
 #[cfg(not(target_arch = "wasm32"))]
 fn analysis_tags(
     nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
 ) -> Vec<(egui::Rect, bool)> {
-    let rows = legend_rows(nodes);
     let mut tags = nodes
         .iter()
         .filter(|(_, node)| {
@@ -1013,7 +1000,6 @@ fn analysis_tags(
                 && (node.value() == Some("TR") || node.label() == Some("TR"))
         })
         .filter_map(|(_, node)| Some((node_rect(node)?, node.is_selected() == Some(true))))
-        .filter(|(tag, _)| rows.iter().any(|row| row.contains_rect(*tag)))
         .collect::<Vec<_>>();
     tags.sort_by(|a, b| {
         a.0.top()
@@ -1025,8 +1011,8 @@ fn analysis_tags(
 
 /// Where each analysis tag of [`analysis_tags`] stands.
 #[cfg(not(target_arch = "wasm32"))]
-fn analysis_rows(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> Vec<egui::Pos2> {
-    analysis_tags(nodes)
+fn analysis_rows(window: &mut ResultsWindow) -> Vec<egui::Pos2> {
+    analysis_tags(&window.frames(Vec::new()))
         .into_iter()
         .map(|(tag, _)| tag.center())
         .collect()
@@ -1062,7 +1048,7 @@ fn a_press_activates_a_pane_and_its_analysis_row_moves_and_removes_it() {
     };
     assert_eq!(active(&window), Some(first));
 
-    let rows = analysis_rows(&window.frames(Vec::new()));
+    let rows = analysis_rows(&mut window);
     assert_eq!(rows.len(), 2, "each pane writes its analysis tag");
     window.press(rows[1], PointerButton::Primary);
     assert_eq!(
@@ -1071,12 +1057,12 @@ fn a_press_activates_a_pane_and_its_analysis_row_moves_and_removes_it() {
         "a press in the second pane did not make it active"
     );
 
-    let rows = analysis_rows(&window.frames(Vec::new()));
+    let rows = analysis_rows(&mut window);
     window.press(rows[1], PointerButton::Secondary);
     window.choose("Move pane earlier");
     assert_eq!(panes(&window), [second, first]);
 
-    let rows = analysis_rows(&window.frames(Vec::new()));
+    let rows = analysis_rows(&mut window);
     window.press(rows[0], PointerButton::Secondary);
     window.choose("Remove pane");
     assert_eq!(panes(&window), [first]);
@@ -1260,7 +1246,7 @@ fn the_strips_tools_stand_on_the_bar_and_no_control_row_is_drawn() {
         "no control row names the analysis"
     );
     assert_eq!(
-        analysis_tags(&nodes).len(),
+        analysis_rows(&mut window).len(),
         2,
         "each pane's legend row starts with its analysis tag"
     );
