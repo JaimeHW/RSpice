@@ -1,7 +1,8 @@
 //! Waveform instrument presentation over active-pane host operations.
 
 use super::{
-    ExportRequests, ResultBarMetrics, export_menu, instrument_control, instrument_separator,
+    ExportRequests, ResultBarMetrics, export_menu, instrument_control, instrument_segment,
+    instrument_separator,
 };
 use egui::Ui;
 use rspice_ui_kit::{
@@ -9,7 +10,7 @@ use rspice_ui_kit::{
     plot::InteractionMode,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::IconButton,
+    widgets::{Button, IconButton},
 };
 
 /// Mutually exclusive primary pointer tool for instrument-style result plots.
@@ -128,12 +129,10 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
                 }
                 if folded {
                     instrument_separator(ui);
-                    let more = instrument_control(
-                        ui,
-                        MORE,
-                        false,
-                        "The instrument controls the bar has no room for",
-                    );
+                    let more = Button::new(MORE)
+                        .menu()
+                        .show(ui)
+                        .on_hover_text("The instrument controls the bar has no room for");
                     egui::Popup::menu(&more).show(|ui| {
                         let mut group = None;
                         for control in &controls[shown..] {
@@ -158,7 +157,9 @@ pub fn show(ui: &mut Ui, availability: InstrumentAvailability, host: &mut impl W
 /// The plot tools a page beside a document offers on its toolbar band, at
 /// the band's control height: the A/B and horizontal cursors, then zoom and
 /// fit on the active strip. Box zoom and pan stay gestures (a right drag, a
-/// Shift drag), and the display toggles stay on the Results sheet.
+/// Shift drag), and the display toggles stay on the Results sheet. The
+/// cursor tools are the bar's segments, lit by the neutral fill, and the
+/// glyphs its flat tools, so the band reads as the bar does.
 pub fn show_plot_tools(ui: &mut Ui, host: &mut impl WaveInstrumentHost) {
     let availability = InstrumentAvailability {
         limits_available: false,
@@ -170,14 +171,6 @@ pub fn show_plot_tools(ui: &mut Ui, host: &mut impl WaveInstrumentHost) {
         .filter(|control| matches!(control.group, CURSOR_GROUP | ZOOM_GROUP))
         .collect();
     let height = ui.spacing().interact_size.y;
-    // The lettered tools stand at one width, the wider one's.
-    let lettered = controls
-        .iter()
-        .filter_map(|control| match &control.kind {
-            ControlKind::Text(label) => Some(rspice_ui_kit::widgets::chip_width(ui, label)),
-            ControlKind::Glyph(_) => None,
-        })
-        .fold(0.0, f32::max);
     ui.spacing_mut().item_spacing.x = CONTROL_GAP;
     let mut group = None;
     for control in &controls {
@@ -185,16 +178,15 @@ pub fn show_plot_tools(ui: &mut Ui, host: &mut impl WaveInstrumentHost) {
             super::instrument_separator(ui);
         }
         group = Some(control.group);
-        let response = match &control.kind {
-            ControlKind::Text(label) => {
-                rspice_ui_kit::widgets::compact_chip(ui, label, control.on, lettered)
-                    .on_hover_text(&control.tooltip)
-            }
-            ControlKind::Glyph(icon) => IconButton::new(*icon)
+        let response = if let ControlKind::Glyph(icon) = &control.kind {
+            IconButton::new(*icon)
                 .side(height)
                 .on(control.on)
                 .tooltip(&control.tooltip)
-                .show(ui),
+                .show(ui)
+        } else {
+            let label = control.kind.label().unwrap_or_default();
+            instrument_segment(ui, label, control.on, &control.tooltip, height)
         };
         if response.clicked()
             && let Some(action) = control.action()
@@ -219,10 +211,25 @@ const MORE: &str = "More";
 /// What one control of the bar is.
 #[derive(Debug, Clone, PartialEq)]
 enum ControlKind {
-    /// A lettered control.
-    Text(String),
-    /// A glyph.
+    /// A cursor tool, one segment of the bar's tool group: lit by a neutral
+    /// fill, as a segmented control's segment is.
+    Segment(String),
+    /// A lettered toggle: the kit's bordered button, lit while it is on.
+    Toggle(String),
+    /// A lettered action: the kit's bordered button.
+    Action(String),
+    /// A glyph, drawn flat as a toolbar's tools are.
     Glyph(Icon),
+}
+
+impl ControlKind {
+    /// The words the control reads, or none for a glyph.
+    fn label(&self) -> Option<&str> {
+        match self {
+            Self::Segment(label) | Self::Toggle(label) | Self::Action(label) => Some(label),
+            Self::Glyph(_) => None,
+        }
+    }
 }
 
 /// One control of the bar, which it draws in its row while there is room
@@ -249,7 +256,10 @@ impl BarControl {
         let side = ResultBarMetrics::of(ui).instrument_control;
         let own = match &self.kind {
             ControlKind::Glyph(_) => side,
-            ControlKind::Text(label) => {
+            ControlKind::Toggle(label) | ControlKind::Action(label) => {
+                Button::new(label).measured_width(ui)
+            }
+            ControlKind::Segment(label) => {
                 let galley = ui.painter().layout_no_wrap(
                     label.clone(),
                     theme::mono(tokens::FS_0, FontWeight::Medium),
@@ -262,15 +272,33 @@ impl BarControl {
     }
 
     fn show_on_bar(&self, ui: &mut Ui) -> egui::Response {
-        ui.add_enabled_ui(self.enabled, |ui| match &self.kind {
-            ControlKind::Text(label) => instrument_control(ui, label, self.on, &self.tooltip),
-            ControlKind::Glyph(icon) => IconButton::new(*icon)
-                .side(ResultBarMetrics::of(ui).instrument_control)
-                .on(self.on)
-                .tooltip(&self.tooltip)
-                .show(ui),
-        })
-        .inner
+        match &self.kind {
+            ControlKind::Toggle(label) => Button::new(label)
+                .selected(self.on)
+                .enabled(self.enabled)
+                .show(ui)
+                .on_hover_text(&self.tooltip),
+            ControlKind::Action(label) => Button::new(label)
+                .enabled(self.enabled)
+                .show(ui)
+                .on_hover_text(&self.tooltip),
+            ControlKind::Segment(label) => {
+                ui.add_enabled_ui(self.enabled, |ui| {
+                    instrument_control(ui, label, self.on, &self.tooltip)
+                })
+                .inner
+            }
+            ControlKind::Glyph(icon) => {
+                ui.add_enabled_ui(self.enabled, |ui| {
+                    IconButton::new(*icon)
+                        .side(ResultBarMetrics::of(ui).instrument_control)
+                        .on(self.on)
+                        .tooltip(&self.tooltip)
+                        .show(ui)
+                })
+                .inner
+            }
+        }
     }
 
     fn show_in_menu(&self, ui: &mut Ui) -> egui::Response {
@@ -304,7 +332,7 @@ fn bar_controls(
     let mut bar = vec![
         control(
             0,
-            ControlKind::Text("A|B".to_owned()),
+            ControlKind::Segment("A|B".to_owned()),
             "A/B cursors",
             "A/B cursor tool",
             controls.plot_tool == ResultPlotTool::Cursor && controls.cursor_armed,
@@ -313,7 +341,7 @@ fn bar_controls(
         ),
         control(
             0,
-            ControlKind::Text("H".to_owned()),
+            ControlKind::Segment("H".to_owned()),
             "Horizontal cursor",
             "Horizontal cursors - click or drag in the active pane; click H again to remove them",
             controls.plot_tool == ResultPlotTool::HorizontalCursor,
@@ -369,7 +397,7 @@ fn bar_controls(
         ),
         control(
             3,
-            ControlKind::Text("Limits".to_owned()),
+            ControlKind::Toggle("Limits".to_owned()),
             "Limits",
             "Show exact compatible project specification limits",
             controls.show_spec_limits,
@@ -378,7 +406,7 @@ fn bar_controls(
         ),
         control(
             3,
-            ControlKind::Text("Envelope".to_owned()),
+            ControlKind::Toggle("Envelope".to_owned()),
             "Envelope",
             "Show min/max envelope from retained family samples",
             controls.show_family_envelope,
@@ -387,7 +415,7 @@ fn bar_controls(
         ),
         control(
             3,
-            ControlKind::Text("Grid".to_owned()),
+            ControlKind::Toggle("Grid".to_owned()),
             "Grid",
             "Show minor waveform grid",
             controls.show_minor_grid,
@@ -396,7 +424,7 @@ fn bar_controls(
         ),
         control(
             3,
-            ControlKind::Text("+M".to_owned()),
+            ControlKind::Action("+M".to_owned()),
             "Drop marker",
             "Drop marker at cursor A on selected or nearest visible trace",
             false,
@@ -409,7 +437,7 @@ fn bar_controls(
         let label = format!("{hidden} hidden");
         bar.push(control(
             4,
-            ControlKind::Text(label.clone()),
+            ControlKind::Action(label.clone()),
             &label,
             "Restore closed waveform strips",
             true,
@@ -441,17 +469,7 @@ fn fold(ui: &Ui, controls: &[BarControl], width: f32) -> (usize, bool) {
     if total <= width {
         return (controls.len(), false);
     }
-    let more = BarControl {
-        group: u8::MAX,
-        kind: ControlKind::Text(MORE.to_owned()),
-        name: String::new(),
-        tooltip: String::new(),
-        on: false,
-        enabled: true,
-        action: || None,
-    }
-    .width(ui)
-        + SEPARATOR_WIDTH;
+    let more = Button::new(MORE).menu().measured_width(ui) + CONTROL_GAP + SEPARATOR_WIDTH;
     let mut used = 0.0;
     let mut shown = 0;
     for (index, control_width) in widths.iter().enumerate() {

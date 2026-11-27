@@ -58,18 +58,25 @@ pub struct ResultBarMetrics {
     pub instrument_control: f32,
 }
 
-/// Space a row keeps around its control at the mockup fine-pointer sizes:
-/// 41 − 30 for the tab strip, 31 − 23 for the instrument bar.
+/// Space a row keeps around its control: 41 − 30 for the tab strip at the
+/// mockup's fine-pointer sizes, and for the instrument bar 4 px above its
+/// control, 4 px below it and the bar's 1 px rule under that.
 const RESULT_TAB_STRIP_CHROME: f32 = 11.0;
-const RESULT_CONTROL_ROW_CHROME: f32 = 8.0;
+const RESULT_CONTROL_ROW_CHROME: f32 = 9.0;
+/// The height every control of the instrument bar stands at under a fine
+/// pointer: the kit's standard button in a row shorter than the theme's
+/// control, which is its label and the least gap the kit keeps above and
+/// below it. Its glyph tools, segments and selects take the same height, and
+/// the bar's even height above its rule leaves each a whole, equal gap.
+const RESULT_BAR_CONTROL: f32 = 22.0;
 
 impl ResultBarMetrics {
     pub fn resolve(tokens: &Tokens) -> Self {
         let fine = Self {
             viewer_tabs: 41.0,
             viewer_tab: 30.0,
-            sheet_bar: 31.0,
-            instrument_control: 23.0,
+            sheet_bar: RESULT_BAR_CONTROL + RESULT_CONTROL_ROW_CHROME,
+            instrument_control: RESULT_BAR_CONTROL,
         };
         if !tokens.metrics.is_touch() {
             return fine;
@@ -274,6 +281,20 @@ pub fn instrument_control<'a>(
     active: bool,
     tooltip: &'a str,
 ) -> egui::Response {
+    let height = ResultBarMetrics::of(ui).instrument_control;
+    instrument_segment(ui, label, active, tooltip, height)
+}
+
+/// [`instrument_control`] `height` tall: the same segment on a band whose
+/// controls stand at another height than the bar's, as the dock's Plot page
+/// band's stand at the compact height.
+pub fn instrument_segment(
+    ui: &mut Ui,
+    label: &str,
+    active: bool,
+    tooltip: &str,
+    height: f32,
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let galley = ui.painter().layout_no_wrap(
         label.to_owned(),
@@ -285,35 +306,25 @@ pub fn instrument_control<'a>(
         },
     );
     let width = (galley.size().x + 12.0).max(26.0);
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(width, ResultBarMetrics::of(ui).instrument_control),
-        egui::Sense::click(),
-    );
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     response
         .widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), active, tooltip));
     if ui.is_rect_visible(rect) {
         let hover = response.hovered();
+        // A segment is marked by its fill alone, the neutral one a lit
+        // segment of the kit's segmented control takes: an underline marks
+        // a strip tab and nothing else, and no accent is drawn on the bar.
         if active || hover {
             ui.painter().rect_filled(
                 rect,
                 2.0,
                 if active {
-                    t.color.accent_dim
+                    t.color.bg_active
                 } else {
                     t.color.bg_hover
                 },
             );
         }
-        if active {
-            ui.painter().hline(
-                egui::Rangef::new(rect.left() + 2.0, rect.right() - 2.0),
-                rect.bottom() - 0.5,
-                egui::Stroke::new(1.0, t.color.accent),
-            );
-        }
-        // The active control reads in the primary text over its wash, as a
-        // selected tab does; the underline carries the accent. Accent text on
-        // the accent wash fell to 4.37:1 in the light interface.
         ui.painter().galley(
             egui::pos2(
                 rect.center().x - galley.size().x * 0.5,
@@ -334,7 +345,11 @@ pub fn instrument_control<'a>(
 }
 
 pub fn instrument_separator(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, 17.0), egui::Sense::hover());
+    // Two points shorter than the row's controls at either end, so it keeps
+    // a whole, equal gap above and below on every band: 18 px on the bar,
+    // 17 px on a band of compact controls.
+    let height = (ui.spacing().interact_size.y - 4.0).max(1.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, height), egui::Sense::hover());
     ui.painter().vline(
         rect.center().x,
         rect.y_range(),
@@ -462,7 +477,9 @@ pub struct ExportRequests {
 
 pub fn export_menu(ui: &mut Ui) -> ExportRequests {
     let mut requests = ExportRequests::default();
-    rspice_ui_kit::widgets::menu_button(ui, "Export…", |ui| {
+    // The kit's bordered button, as every text control on the bar is.
+    let export = rspice_ui_kit::widgets::Button::new("Export…").show(ui);
+    egui::Popup::menu(&export).show(|ui| {
         // The same table the data export writes, for pasting into a
         // spreadsheet or a report without a file in between.
         if ui.button("Copy values").clicked() {

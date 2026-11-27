@@ -393,7 +393,11 @@ pub fn show(ui: &mut Ui, host: &mut impl SheetBarHost) {
         node.set_label(accessible_label);
     });
 
-    let content = rect.shrink2(egui::vec2(8.0, 0.0));
+    // The bar's last point is its rule: its controls stand centred in what
+    // is above the rule, with an equal gap above and below each.
+    let content = rect
+        .with_max_y(rect.bottom() - 1.0)
+        .shrink2(egui::vec2(8.0, 0.0));
     let mut child = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(content)
