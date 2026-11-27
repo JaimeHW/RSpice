@@ -926,35 +926,23 @@ pub fn show_plot<'a>(
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let exprs = input.expressions;
-    let (mut y0, mut y1) = input
+    let (y0, y1) = input
         .y_view
         .filter(|(minimum, maximum)| !log_y || (*minimum > 0.0 && *maximum > 0.0))
         .unwrap_or((auto_y0, auto_y1));
 
     let x_axis = model_x_axis(model, x0, x1, quantity_policy);
+    // An unzoomed degree pane fits its data as any pane does and is ruled
+    // on the degree steps a phase is read at, 45° where they serve; a zoom,
+    // or a window too narrow for them, takes plain linear ticks.
     let lattice = !log_y && pane.axis_unit() == "°" && input.y_view.is_none();
-    if lattice {
-        // An unzoomed degree pane keeps the 45° lattice a Bode phase
-        // reading expects; arbitrary zoom depths fall back to plain linear
-        // ticks, which stay legible where the lattice would crowd.
-        (y0, y1, _) = rspice_results::plot_axis::degree_lattice((y0, y1), 0);
-    }
     let y_axis_with = |density: usize| {
+        let degrees = lattice
+            .then(|| rspice_results::plot_axis::degree_ticks((y0, y1), density))
+            .filter(|ticks| !ticks.is_empty());
         let y_axis = if log_y {
             Axis::log_decades(y0, y1, pane.axis_unit())
-        } else if lattice {
-            // Continuous phase does not stay inside one turn: an unwrapped
-            // loop response walks thousands of degrees, and 45° steps across
-            // it are thousands of labels stacked into an unreadable band —
-            // and thousands of galleys laid out every frame. The lattice
-            // thins by whole 45° multiples so what is left still falls on the
-            // values a phase reading is taken at.
-            // A shorter pane halves the lattice again for each step of
-            // density it gives up.
-            let (_, _, ticks) = rspice_results::plot_axis::degree_lattice(
-                (y0, y1),
-                DENSEST_Y_LADDER.saturating_sub(density),
-            );
+        } else if let Some(ticks) = degrees {
             Axis::with_ticks(y0, y1, "°", &ticks)
         } else {
             Axis::linear_with(y0, y1, pane.axis_unit(), density)

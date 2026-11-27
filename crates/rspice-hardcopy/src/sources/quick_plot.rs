@@ -19,6 +19,10 @@ use overlay::{placed_notes, resolved_overlay_geometry};
 pub use strips::QuickAbscissa;
 use strips::{StripRect, strip_rects};
 
+/// The most steps a printed strip in degrees is ruled in, as many as the
+/// sheet's tallest pane rules.
+const PRINTED_DEGREE_STEPS: usize = 6;
+
 /// Where a printed plot's frames stand: from the page gutter at its top
 /// left, `plot_width` across and `plot_height` down, with `foot` under
 /// them for the abscissa's values, its caption and its anchor.
@@ -206,7 +210,7 @@ pub(crate) fn quick_plot_in(
     });
     let (x_minimum, x_maximum) = nondegenerate_range(x_minimum, x_maximum);
     let (plot_width, plot_height) = (area.plot_width, area.plot_height);
-    // A strip in degrees is ruled on the sheet's 45° lattice unless the
+    // A strip in degrees is ruled on the sheet's degree steps unless the
     // reader pinned its window, as the sheet rules it.
     let lattices = units
         .iter()
@@ -231,10 +235,7 @@ pub(crate) fn quick_plot_in(
             // are ruled and named, as on the sheet.
             let fitted = rspice_results::plot_axis::padded_fit(data);
             let (y_minimum, y_maximum) = match overlay {
-                _ if lattices[strip] => {
-                    let (low, high, _) = rspice_results::plot_axis::degree_lattice(fitted, 0);
-                    (low, high)
-                }
+                _ if lattices[strip] => fitted,
                 Some(overlay) if units.len() == 1 => overlay.framed_y(scales[0], fitted),
                 _ => fitted,
             };
@@ -436,9 +437,15 @@ fn strip_axes(
         .zip(lattices)
         .zip(scales)
     {
-        let (mut horizontals, anchor) = if *lattice {
-            let (_, _, values) =
-                rspice_results::plot_axis::degree_lattice((frame.y_minimum, frame.y_maximum), 0);
+        let degrees = (*lattice)
+            .then(|| {
+                rspice_results::plot_axis::degree_ticks(
+                    (frame.y_minimum, frame.y_maximum),
+                    PRINTED_DEGREE_STEPS,
+                )
+            })
+            .filter(|values| !values.is_empty());
+        let (mut horizontals, anchor) = if let Some(values) = degrees {
             (ruled_at(SemanticAxisKind::Vertical, frame, &values)?, None)
         } else {
             ruled_axis(SemanticAxisKind::Vertical, *scale, frame, unit)?

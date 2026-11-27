@@ -61,7 +61,9 @@ pub struct TickSeries {
 pub const FIT_HEADROOM: f64 = 0.04;
 
 /// A linear fit of the values spanning `min..max`, padded by
-/// [`FIT_HEADROOM`] each side.
+/// [`FIT_HEADROOM`] each side. Values never below zero (a magnitude, a
+/// delay, a density) stand on zero: their padding never reaches below it,
+/// where no value of theirs can be.
 ///
 /// A span that cannot survive its own padding is flat as far as any axis
 /// can draw it: exactly constant, or constant to within a few ulps. Both
@@ -73,28 +75,67 @@ pub fn padded_fit((min, max): (f64, f64)) -> (f64, f64) {
     if pad <= 0.0 {
         return (min - 1.0, max + 1.0);
     }
-    (min - pad, max + pad)
+    let low = if min >= 0.0 {
+        (min - pad).max(0.0)
+    } else {
+        min - pad
+    };
+    (low, max + pad)
 }
 
 /// However tall the pane, an axis past this many gridlines is a hatch, not a
 /// scale — and every one of them costs a line and a label layout per frame.
 pub const MAX_AXIS_TICKS: usize = 40;
 
-/// The 45° lattice a phase in degrees is ruled on, as a Bode phase is
-/// read: `(min, max)` widened out to whole 45° steps, and the values
-/// ruled across it. Every step is ruled while they number at most
-/// [`MAX_AXIS_TICKS`]; past that the lattice thins by whole multiples of
-/// 45°, so what is left still falls on values a phase is read at, and
-/// it halves again for each step of `thinning` a short pane gives up.
-pub fn degree_lattice((min, max): (f64, f64), thinning: usize) -> (f64, f64, Vec<f64>) {
-    let (low, high) = ((min / 45.0).floor() * 45.0, (max / 45.0).ceil() * 45.0);
-    let steps = ((high - low) / 45.0).round().max(0.0) as usize;
-    let stride = (steps + 1).div_ceil(MAX_AXIS_TICKS).max(1) << thinning;
-    let values = (0..=steps)
-        .step_by(stride)
-        .map(|index| 45.0f64.mul_add(index as f64, low))
+/// The steps a phase in degrees is ruled at, finest first: 15°, 30°, 45°,
+/// 90° and a half turn, then whole turns on a 1-2-5 ladder.
+fn degree_step(rung: usize) -> f64 {
+    const FIRST: [f64; 5] = [15.0, 30.0, 45.0, 90.0, 180.0];
+    FIRST.get(rung).copied().unwrap_or_else(|| {
+        let past = rung - FIRST.len();
+        let decade = i32::try_from(past / 3).unwrap_or(i32::MAX);
+        360.0 * [1.0, 2.0, 5.0][past % 3] * 10f64.powi(decade)
+    })
+}
+
+/// The values a phase in degrees over `(min, max)` is ruled at, `most` + 1
+/// at most, the window as it stands: the finest multiple of 45° that rules
+/// three or more, as a Bode phase is read at 0°, −45° and −90°; else the
+/// finest of 15°, 30° and on that rules three or more; else the finest
+/// multiple of 45° that rules two. Empty when none does, as in a window
+/// narrower than 30°, which a linear ladder rules instead.
+#[must_use]
+pub fn degree_ticks((min, max): (f64, f64), most: usize) -> Vec<f64> {
+    let span = max - min;
+    if !(span.is_finite() && span > 0.0) {
+        return Vec::new();
+    }
+    let limit = most.max(1) + 1;
+    // A window is ruled at a step no wider than itself: every step that
+    // could rule two of its values.
+    let steps: Vec<f64> = (0..)
+        .map(degree_step)
+        .take_while(|step| *step <= span)
         .collect();
-    (low, high, values)
+    let indices = |step: f64| ((min / step).ceil() as i64, (max / step).floor() as i64);
+    let count = |step: f64| {
+        let (first, last) = indices(step);
+        usize::try_from(last - first + 1).unwrap_or(0)
+    };
+    let quarter = |step: &f64| step % 45.0 == 0.0;
+    let rules = |least: usize| move |step: &f64| (least..=limit).contains(&count(*step));
+    let Some(step) = steps
+        .iter()
+        .copied()
+        .filter(quarter)
+        .find(rules(3))
+        .or_else(|| steps.iter().copied().find(rules(3)))
+        .or_else(|| steps.iter().copied().filter(quarter).find(rules(2)))
+    else {
+        return Vec::new();
+    };
+    let (first, last) = indices(step);
+    (first..=last).map(|index| index as f64 * step).collect()
 }
 
 /// The outer ring a polar chart rules a linear magnitude to: the first
@@ -620,18 +661,49 @@ mod tests {
         assert!(series.anchor.is_none());
     }
 
+    /// A single pole's phase, 0° to −90°, fits its data with a small pad
+    /// either side and is ruled at 0°, −45° and −90°, not widened out to
+    /// −135° … 45°.
     #[test]
-    fn a_phase_is_ruled_on_whole_forty_five_degree_steps() {
+    fn a_phase_fits_its_data_and_is_ruled_on_degree_steps() {
+        let (low, high) = padded_fit((-90.0, 0.0));
+        assert!((-94.0..-90.0).contains(&low) && (0.0..4.0).contains(&high));
+        assert_eq!(degree_ticks((low, high), 6), [-90.0, -45.0, 0.0]);
+        // A half turn reads on 45° steps, a whole turn on 90° ones, and a
+        // shorter pane's ladder on wider steps.
         assert_eq!(
-            degree_lattice((-170.0, -3.0), 0),
-            (-180.0, 0.0, vec![-180.0, -135.0, -90.0, -45.0, 0.0])
+            degree_ticks(padded_fit((-180.0, 0.0)), 6),
+            [-180.0, -135.0, -90.0, -45.0, 0.0]
         );
-        // A span past the tick budget thins by whole steps, and each step
-        // of thinning halves it again.
-        let (_, _, wide) = degree_lattice((0.0, 45.0 * 60.0), 0);
-        assert_eq!(wide[1] - wide[0], 90.0);
-        let (_, _, thinned) = degree_lattice((0.0, 45.0 * 60.0), 1);
-        assert_eq!(thinned[1] - thinned[0], 180.0);
+        assert_eq!(
+            degree_ticks(padded_fit((-360.0, 0.0)), 6),
+            [-360.0, -270.0, -180.0, -90.0, 0.0]
+        );
+        assert_eq!(
+            degree_ticks(padded_fit((-180.0, 0.0)), 2),
+            [-180.0, -90.0, 0.0]
+        );
+        // An unwrapped loop thousands of degrees long is ruled on whole
+        // turns, within the ladder's count.
+        let unwrapped = degree_ticks(padded_fit((-36_000.0, 0.0)), 6);
+        assert!(unwrapped.len() <= 7 && unwrapped[1] - unwrapped[0] == 7200.0);
+        // A window too narrow for two degree steps takes a linear ladder.
+        assert!(degree_ticks((-41.0, -12.0), 6).is_empty());
+    }
+
+    /// Values never below zero stand on zero: a group delay of 0 … 5 µs
+    /// fits 0 … 5.2 µs, never −200 ns; values that go below zero keep their
+    /// padding on both sides.
+    #[test]
+    fn nonnegative_values_never_pad_below_zero() {
+        let (low, high) = padded_fit((0.0, 5.0e-6));
+        assert_eq!(low, 0.0);
+        assert!((high - 5.2e-6).abs() < 1e-15);
+        let (low, high) = padded_fit((1.0, 2.0));
+        assert!((low - 0.96).abs() < 1e-12 && (high - 2.04).abs() < 1e-12);
+        assert_eq!(padded_fit((0.01, 1.0)).0, 0.0);
+        let (low, _) = padded_fit((-1.0, 1.0));
+        assert!((low + 1.08).abs() < 1e-12);
     }
 
     #[test]
