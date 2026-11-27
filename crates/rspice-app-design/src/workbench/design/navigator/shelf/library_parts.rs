@@ -1,9 +1,7 @@
-//! The shelf's library parts: every part the indexed model libraries offer
-//! this shelf, and where a click on one goes: armed now, or the pack
-//! confirmation first.
+//! The shelf's library parts: every part the loaded model libraries offer
+//! this shelf, armed on a click.
 
 use super::*;
-use crate::services::model_hub::ModelHubService;
 
 /// Complete one click on a library-part row.
 pub(super) fn apply_library_part_row(
@@ -14,9 +12,6 @@ pub(super) fn apply_library_part_row(
 ) {
     match row.action {
         LibraryPartAction::Arm(placement) => arm_library_part(model, wb, *placement, ctx),
-        LibraryPartAction::Review {
-            pack_id, version, ..
-        } => request_library_part(wb, row.part_id, pack_id, version),
         // A refused row renders disabled, so its click never arrives.
         LibraryPartAction::Refused(_) => {}
     }
@@ -26,11 +21,11 @@ pub(super) fn apply_library_part_row(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryPartRow {
     pub part_id: String,
-    /// The part's device class, in the unified index's vocabulary.
+    /// The part's device class, in the index's vocabulary.
     pub(in crate::workbench::design::navigator) device: String,
-    /// The part's address: its pack, or the project library holding it.
+    /// The project library holding the part, or nothing for a built-in one.
     pub(in crate::workbench::design::navigator) source: String,
-    /// The meta column: the part's device class, and where it stands.
+    /// The meta column: the part's device class.
     pub meta: String,
     pub action: LibraryPartAction,
 }
@@ -38,104 +33,58 @@ pub struct LibraryPartRow {
 /// Where one library-part click goes.
 ///
 /// The same fork the Models workspace shelf decides in its `place` module: a
-/// definition the project already holds is armed directly, a release it has
-/// not adopted is reviewed first, and a part that cannot be drawn is refused
-/// with the sentence the disabled row carries.
+/// definition a loaded library holds is armed directly, and a part that cannot
+/// be drawn is refused with the sentence the disabled row carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LibraryPartAction {
-    /// Arm now: the definition is already in this project's catalog —
-    /// compiled in, or retained when the part was added.
+    /// Arm now: the definition is in this project's catalog — compiled in,
+    /// or held by one of the project's model files.
     Arm(Box<PartPlacement>),
-    /// Raise the pack confirmation in the Models workspace. Only right for a
-    /// release that still needs installing or retaining; the hub operation
-    /// arms the cursor when the retention lands.
-    Review {
-        pack_id: String,
-        version: String,
-        pack_name: String,
-    },
     /// No placement exists for this part; the sentence the disabled control
     /// carries.
     Refused(String),
 }
 
-/// Every part the unified index can offer this shelf.
+/// Every part the loaded model libraries can offer this shelf.
 ///
-/// A part the project retained — and a compiled-in foundation part — is
-/// listed here and arms directly. The "Project library" section below reads
-/// the symbol-cell library, not the model-library manager, so this section is
-/// the only door such a definition has onto the canvas. Pack releases the
-/// project has not adopted sit beside them and go through the pack
-/// confirmation instead.
-pub fn library_part_rows(
-    model_hub: &ModelHubService,
-    model: &Model,
-    query: &ShelfQuery,
-) -> Vec<LibraryPartRow> {
+/// The "Project library" section below reads the symbol-cell library, not the
+/// model-library manager, so this section is the only door such a definition
+/// has onto the canvas.
+pub fn library_part_rows(model: &Model, query: &ShelfQuery) -> Vec<LibraryPartRow> {
     let libraries = model.model_library_manager.libraries_sorted();
-    let index = model_hub.part_index(&libraries);
-    shelf_rows(&index, &libraries, query)
+    shelf_rows(&library_part_index(&libraries), &libraries, query)
 }
 
-/// Decides each indexed row's door, dropping the rows that have none.
+/// Decides each indexed part's door, dropping the parts that have none.
 ///
-/// Separated from [`library_part_rows`] so a test can feed it an index
-/// without opening a hub over a store.
+/// Separated from [`library_part_rows`] so a test can feed it libraries
+/// without a model.
 pub(in crate::workbench::design::navigator) fn shelf_rows(
-    index: &[ModelHubPartRow],
+    index: &[LibraryPart],
     libraries: &[&ModelLibrary],
     query: &ShelfQuery,
 ) -> Vec<LibraryPartRow> {
     /// Rows the shelf lists before asking the user to narrow the search.
     ///
-    /// A published catalog is unbounded; a navigator column is not. The cap is
-    /// a rendering decision, and the footer says when it bit.
+    /// A foundry library is large; a navigator column is not. The cap is a
+    /// rendering decision, and the footer says when it bit.
     const SHELF_ROWS: usize = 200;
 
-    // A part the project adopted is the retained row's to place: its
-    // installed-pack row is dropped rather than offering to review and add
-    // something that is already added — the same rule the Models workspace
-    // shelf applies to its own two halves.
-    let retained = index
-        .iter()
-        .filter(|row| matches!(row.provenance, PartProvenance::ProjectRetained { .. }))
-        .map(|row| row.part_id.as_str())
-        .collect::<HashSet<_>>();
     index
         .iter()
-        .filter(|row| match &row.provenance {
-            PartProvenance::InstalledPack { .. } => !retained.contains(row.part_id.as_str()),
-            // A section-scoped subcircuit key cannot be referenced by its
-            // bare name, so it is not a part a reader picks.
-            PartProvenance::Foundation | PartProvenance::ProjectRetained { .. } => {
-                !row.part_id.contains('\u{1f}')
-            }
-            PartProvenance::RemoteRelease { .. } => true,
-        })
-        .filter(|row| {
-            library_part_rank(
-                query,
-                &row.part_id,
-                &row.device,
-                part_source(&row.provenance),
-            )
-            .is_some()
+        .filter(|part| {
+            library_part_rank(query, &part.part_id, &part.device, part_source(part)).is_some()
         })
         .take(SHELF_ROWS)
-        .filter_map(|row| library_part_row(libraries, row))
+        .filter_map(|part| library_part_row(libraries, part))
         .collect()
 }
 
-/// The address a part row is searched by besides its number: the pack for a
-/// pack row, the holding library for a project one — the same column the
-/// Models workspace shelf searches.
-fn part_source(provenance: &PartProvenance) -> &str {
-    match provenance {
-        PartProvenance::InstalledPack { pack_id, .. }
-        | PartProvenance::RemoteRelease { pack_id, .. } => pack_id.as_str(),
-        PartProvenance::ProjectRetained { library } => library.as_str(),
-        PartProvenance::Foundation => "",
-    }
+/// The address a part is searched by besides its number: the project library
+/// holding it — the same column the Models workspace shelf searches. A
+/// compiled-in part has none.
+fn part_source(part: &LibraryPart) -> &str {
+    if part.built_in { "" } else { &part.library }
 }
 
 /// How one library part answers a query. Its number and address are part
@@ -155,77 +104,27 @@ pub(super) fn library_part_rank(
 }
 
 /// One shelf row, with the route its click takes.
-fn library_part_row(libraries: &[&ModelLibrary], row: &ModelHubPartRow) -> Option<LibraryPartRow> {
-    let (meta, action) = match &row.provenance {
-        PartProvenance::Foundation | PartProvenance::ProjectRetained { .. } => {
-            let holder = holding_library(libraries, &row.provenance, &row.part_id)?;
-            let action = match plan_library_placement(holder, &row.part_id) {
-                Ok(placement) => LibraryPartAction::Arm(Box::new(placement)),
-                Err(reason) => LibraryPartAction::Refused(refusal_sentence(reason)),
-            };
-            // A part that is here and placeable is the normal case; where
-            // it came from is the Models workspace's business.
-            (row.device.clone(), action)
-        }
-        PartProvenance::InstalledPack { pack_id, version }
-        | PartProvenance::RemoteRelease { pack_id, version } => {
-            let pack_name = row.pack_name.clone().unwrap_or_else(|| pack_id.clone());
-            let meta = match &row.state {
-                PartState::Installed => row.device.clone(),
-                PartState::Available => format!("{} · available", row.device),
-                PartState::UpdateAvailable { latest, .. } => {
-                    format!("{} · update {latest}", row.device)
-                }
-                PartState::Incompatible { missing } => {
-                    format!("{} · needs {}", row.device, missing.join(", "))
-                }
-            };
-            let action = match &row.state {
-                // The row stays searchable and stays readable; only the
-                // action is refused, and the refusal says why in the same
-                // words the pack manifest used.
-                PartState::Incompatible { missing } => LibraryPartAction::Refused(format!(
-                    "This build of RSpice does not offer {}, which {} requires.",
-                    missing.join(", "),
-                    pack_name
-                )),
-                _ => LibraryPartAction::Review {
-                    pack_id: pack_id.clone(),
-                    version: version.clone(),
-                    pack_name,
-                },
-            };
-            (meta, action)
-        }
+///
+/// The part comes out of the same library set this frame read, so a library
+/// that is not in it means the part and the set disagree — the part is dropped
+/// rather than offered against bytes that are not there.
+fn library_part_row(libraries: &[&ModelLibrary], part: &LibraryPart) -> Option<LibraryPartRow> {
+    let holder = libraries
+        .iter()
+        .copied()
+        .find(|library| library.name == part.library)?;
+    let action = match plan_library_placement(holder, &part.part_id) {
+        Ok(placement) => LibraryPartAction::Arm(Box::new(placement)),
+        Err(reason) => LibraryPartAction::Refused(refusal_sentence(reason)),
     };
     Some(LibraryPartRow {
-        part_id: row.part_id.clone(),
-        device: row.device.clone(),
-        source: part_source(&row.provenance).to_owned(),
-        meta,
+        part_id: part.part_id.clone(),
+        device: part.device.clone(),
+        source: part_source(part).to_owned(),
+        // A part that is here and placeable is the normal case; where it
+        // came from is the Models workspace's business.
+        meta: part.device.clone(),
         action,
-    })
-}
-
-/// The loaded library whose definition a foundation or retained row names.
-///
-/// Both come straight out of the same library set the index was built from in
-/// this frame, so a miss means the row and the set disagree — the row is
-/// dropped rather than offered against bytes that are not there.
-fn holding_library<'a>(
-    libraries: &[&'a ModelLibrary],
-    provenance: &PartProvenance,
-    part: &str,
-) -> Option<&'a ModelLibrary> {
-    libraries.iter().copied().find(|library| match provenance {
-        PartProvenance::ProjectRetained { library: name } => library.name == *name,
-        PartProvenance::Foundation => {
-            matches!(library.source_authority, ModelSourceAuthority::BuiltIn)
-                && (library.models.contains_key(part)
-                    || library.top_level_models.contains_key(part)
-                    || library.subcircuits.contains_key(part))
-        }
-        PartProvenance::InstalledPack { .. } | PartProvenance::RemoteRelease { .. } => false,
     })
 }
 
@@ -272,12 +171,6 @@ pub(super) fn library_parts_section(
                     LibraryPartAction::Arm(_) => {
                         Some(response.on_hover_text(format!("Click to arm {}", row.part_id)))
                     }
-                    LibraryPartAction::Review {
-                        pack_name, version, ..
-                    } => Some(response.on_hover_text(format!(
-                        "Review and add {} from {} {}",
-                        row.part_id, pack_name, version
-                    ))),
                 }
             })
             .inner;
@@ -311,24 +204,4 @@ fn arm_library_part(
 ) {
     let _ = crate::workbench::app::arm_pack_part(model, placement);
     finish_shelf_placement(wb, ctx);
-}
-
-/// Raises the pack confirmation for one shelf part.
-///
-/// The decision is shown in the Models workspace rather than over the canvas:
-/// it commits the project to a licence, a download, and a capability claim,
-/// and those are exactly what that workspace is for. The placement is armed
-/// on the cursor when the install completes, so the round trip ends where the
-/// user started.
-fn request_library_part(
-    wb: &mut WorkbenchSession,
-    part_id: String,
-    pack_id: String,
-    version: String,
-) {
-    wb.outbox.push(ConfirmPackAttach {
-        part_id,
-        pack_id,
-        version,
-    });
 }

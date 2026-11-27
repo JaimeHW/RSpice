@@ -17,7 +17,7 @@ use crate::schematic::{ComponentCategory, component_palette, supply_palette};
 #[cfg(test)]
 use crate::schematic::{PaletteRow, palette_rows};
 #[cfg(test)]
-use crate::state::model_hub::{ModelHubPartRow, PartPlacement, PartProvenance, PartState};
+use crate::state::model_hub::PartPlacement;
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
 #[cfg(test)]
 use crate::state::{ComponentType, engine_only_xspice_devices};
@@ -197,13 +197,7 @@ fn a_foundation_part_arms_from_its_built_in_library() {
     card.spice_type = Some("NPN".to_owned());
     library.add_model(card);
     let libraries = vec![&library];
-    let index = crate::state::model_hub::provider::part_index(
-        &libraries,
-        &[],
-        None,
-        &crate::state::model_hub::Recalls::default(),
-        None,
-    );
+    let index = crate::state::model_library::library_part_index(&libraries);
 
     let rows = shelf_rows(
         &index,
@@ -226,101 +220,6 @@ fn a_foundation_part_arms_from_its_built_in_library() {
         "{:?}",
         row.action
     );
-}
-
-/// A part the project adopted is offered once, as the armable retained row —
-/// not a second time as its pack's "review and add" row.
-#[test]
-fn an_adopted_part_is_offered_once_as_the_retained_row() {
-    use rspice_pack::PartKind;
-
-    let library = retained_model_library("proving_parts");
-    let libraries = vec![&library];
-    let mut index = crate::state::model_hub::provider::part_index(
-        &libraries,
-        &[],
-        None,
-        &crate::state::model_hub::Recalls::default(),
-        None,
-    );
-    index.push(ModelHubPartRow {
-        part_id: "RSPICE_ZENER".to_owned(),
-        kind: PartKind::Model,
-        device: "diode".to_owned(),
-        terminals: vec!["A".to_owned(), "K".to_owned()],
-        provenance: PartProvenance::InstalledPack {
-            pack_id: "rspice-diodes".to_owned(),
-            version: "1.0.0".to_owned(),
-        },
-        state: PartState::Installed,
-        pack_name: Some("RSpice diodes".to_owned()),
-        source: None,
-    });
-
-    let rows = shelf_rows(
-        &index,
-        &libraries,
-        &super::super::shelf::search::ShelfQuery::new(""),
-    );
-    let zener = rows
-        .iter()
-        .filter(|row| row.part_id == "RSPICE_ZENER")
-        .collect::<Vec<_>>();
-    assert_eq!(zener.len(), 1, "{rows:?}");
-    assert!(matches!(zener[0].action, LibraryPartAction::Arm(_)));
-}
-
-/// Pack releases the project has not adopted keep their two states: review
-/// for one this engine can run, and a refusal naming the missing capability
-/// for one it cannot.
-#[test]
-fn an_unadopted_release_reviews_and_an_incompatible_one_refuses() {
-    use rspice_pack::PartKind;
-
-    let release = |part: &str, state: PartState| ModelHubPartRow {
-        part_id: part.to_owned(),
-        kind: PartKind::Subckt,
-        device: "opamp".to_owned(),
-        terminals: Vec::new(),
-        provenance: PartProvenance::RemoteRelease {
-            pack_id: "vendor-amps".to_owned(),
-            version: "2.1.0".to_owned(),
-        },
-        state,
-        pack_name: Some("Vendor amplifiers".to_owned()),
-        source: None,
-    };
-    let index = vec![
-        release("VENDOR_OA1", PartState::Available),
-        release(
-            "VENDOR_RF9",
-            PartState::Incompatible {
-                missing: vec!["harmonic-balance-2".to_owned()],
-            },
-        ),
-    ];
-
-    let rows = shelf_rows(
-        &index,
-        &[],
-        &super::super::shelf::search::ShelfQuery::new(""),
-    );
-    assert_eq!(
-        rows[0].action,
-        LibraryPartAction::Review {
-            pack_id: "vendor-amps".to_owned(),
-            version: "2.1.0".to_owned(),
-            pack_name: "Vendor amplifiers".to_owned(),
-        }
-    );
-    let LibraryPartAction::Refused(reason) = &rows[1].action else {
-        panic!("an incompatible release is refused: {:?}", rows[1].action);
-    };
-    assert!(
-        reason.contains("harmonic-balance-2") && reason.contains("Vendor amplifiers"),
-        "{reason}"
-    );
-    assert_eq!(rows[1].meta, "opamp · needs harmonic-balance-2");
 }
 
 // ------------------------------------------------------------ shelf identity

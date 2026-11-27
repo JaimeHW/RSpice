@@ -99,11 +99,11 @@ impl ShelfHarness {
     }
 }
 
-/// The canvas-side shelf can place what the project already holds: a retained
-/// part arms the cursor directly instead of re-raising the pack confirmation.
-/// This is the road that used to dead-end — the row was filtered out of this
-/// section, and the Project-library section below reads the symbol library,
-/// not the model-library manager, so an adopted pack part had no shelf door.
+/// The canvas-side shelf can place what the project already holds: a part of
+/// one of the project's model files arms the cursor directly. The
+/// Project-library section below reads the symbol library, not the
+/// model-library manager, so this section is the only shelf door such a part
+/// has.
 #[test]
 fn a_part_the_project_retained_arms_from_the_component_shelf() {
     let mut app = RSpiceApp::test_instance();
@@ -113,7 +113,6 @@ fn a_part_the_project_retained_arms_from_the_component_shelf() {
         .add_library(retained_model_library("proving_parts"));
 
     let rows = library_part_rows(
-        &app.model_hub,
         &app.state.model,
         &rspice_app_design::workbench::design::navigator::shelf::search::ShelfQuery::new(
             "proving_parts",
@@ -126,9 +125,9 @@ fn a_part_the_project_retained_arms_from_the_component_shelf() {
     };
 
     let macromodel = row("PROVING_DIV");
-    // The catalog's word for a subcircuit, not a second one: the same column
-    // carries pack rows, and the class chip that narrows it spells it this
-    // way. Where it came from is normal and is the Models workspace's.
+    // The catalog's word for a subcircuit, not a second one: the class chip
+    // that narrows it spells it this way. Where it came from is normal and is
+    // the Models workspace's.
     assert_eq!(macromodel.meta, "subckt");
     let LibraryPartAction::Arm(placement) = &macromodel.action else {
         panic!(

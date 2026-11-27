@@ -38,8 +38,6 @@ pub mod properties;
 pub mod schematic;
 
 mod services {
-    pub(crate) use rspice_app_services::services::model_hub;
-
     #[cfg(test)]
     mod drc_tests;
 }

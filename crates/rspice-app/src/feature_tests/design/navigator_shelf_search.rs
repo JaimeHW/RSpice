@@ -7,7 +7,7 @@ use rspice_app_design::workbench::design::navigator::shelf::*;
 
 fn hits(app: &RSpiceApp, raw: &str) -> Vec<ShelfHit> {
     let query = ShelfQuery::new(raw);
-    let parts = library_part_rows(&app.model_hub, &app.state.model, &query);
+    let parts = library_part_rows(&app.state.model, &query);
     let cells = cell_candidates(&app.state.model);
     shelf_hits(&app.state.model, &query, &parts, &cells)
 }

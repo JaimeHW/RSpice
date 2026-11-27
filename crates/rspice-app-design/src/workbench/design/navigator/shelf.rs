@@ -22,7 +22,7 @@ pub(super) use library_parts::shelf_rows;
 pub use library_parts::{LibraryPartAction, LibraryPartRow, library_part_rows};
 use library_parts::{apply_library_part_row, library_part_rank, library_parts_section};
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use egui::{Response, ScrollArea, Ui};
 use rspice_design::schematic::device_catalog::CatalogXspiceDeviceDescriptor;
@@ -32,11 +32,8 @@ use crate::schematic::{
     ComponentCategory, ComponentPaletteEntry, PaletteRow, SupplyPaletteEntry, component_palette,
     device_class_keywords, palette_rows, supply_palette,
 };
-use crate::state::model_hub::{
-    ModelHubPartRow, PartPlacement, PartProvenance, PartState, plan_library_placement,
-    refusal_sentence,
-};
-use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
+use crate::state::model_hub::{PartPlacement, plan_library_placement, refusal_sentence};
+use crate::state::model_library::{LibraryPart, ModelLibrary, library_part_index};
 use crate::state::{
     ComponentType, FunctionalPartDescriptor, LibraryCellInstance, LibraryCellPlacementCandidate,
     Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports, engine_only_xspice_devices,
@@ -48,7 +45,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::Model;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::feature::Cx;
-use crate::workbench::framework::requests::{ConfirmPackAttach, FocusPlacementSearch};
+use crate::workbench::framework::requests::FocusPlacementSearch;
 use crate::workbench::slots::DesignState;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_state::veriloga_library::{
@@ -281,7 +278,7 @@ pub(super) fn component_shelf(ui: &mut Ui, cx: &mut Cx<'_, DesignFeature>) {
     let keys = shelf_search(ui, cx.state, cx.wb);
     rail::open(ui.ctx());
     let query = ShelfQuery::new(&cx.state.placement_query);
-    let library_parts = library_part_rows(cx.handles.model_hub, cx.model, &query);
+    let library_parts = library_part_rows(cx.model, &query);
     let cells = cell_candidates(cx.model);
     if !query.is_empty() {
         let hits = shelf_hits(cx.model, &query, &library_parts, &cells);

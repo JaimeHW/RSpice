@@ -11,6 +11,7 @@
 
 mod compatibility;
 mod manager;
+mod part_index;
 mod source_label;
 
 pub(crate) use compatibility::placement_component_for_model;
@@ -34,6 +35,7 @@ pub use manager::model_library_source_digest;
 pub use manager::{
     ModelLibraryManager, PackModelHit, ProjectModelCommit, SealedModelExecutionSources,
 };
+pub use part_index::{LibraryPart, LibraryPartKind, library_part_index};
 pub use rspice_model_library::DeviceModel;
 pub use rspice_model_library::ProjectModelRevisionDefinition;
 pub use rspice_model_library::first_unreachable_source;
