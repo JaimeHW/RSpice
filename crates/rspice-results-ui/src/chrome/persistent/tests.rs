@@ -34,11 +34,12 @@ fn pane_slot_geometry_sanitizes_nonfinite_available_extents() {
     assert_slots_are_finite_and_bounded(stage, &slots, 4);
 }
 
-/// Every pane of a page is the same size to the physical pixel, and the
-/// gutter runs along all four edges of the stage as well as between panes,
-/// whatever the stage's odd pixels.
+/// Every pane of a page is the same size to the physical pixel, two
+/// neighbours stand one hairline apart, across and down, and the panes run
+/// to the stage's edges but for the odd pixels rounding leaves there,
+/// whatever the stage's size.
 #[test]
-fn panes_are_equal_to_the_pixel_with_a_gutter_on_every_edge() {
+fn panes_abut_equal_to_the_pixel_with_one_hairline_between() {
     for (ppp, width, height) in [
         (1.0, 1203.0, 707.0),
         (1.25, 1517.6, 811.2),
@@ -68,7 +69,25 @@ fn panes_are_equal_to_the_pixel_with_a_gutter_on_every_edge() {
                     "{layout:?} {slot:?}"
                 );
             }
-            let gap = pixels(PANE_GAP);
+            let hairline = pixels(PANE_DIVIDER);
+            let (columns, rows) = grid_of(layout, count);
+            for (index, slot) in slots.iter().enumerate() {
+                if index % columns + 1 < columns {
+                    let next = slots[index + 1];
+                    assert_eq!(
+                        pixels(next.left()) - pixels(slot.right()),
+                        hairline,
+                        "{layout:?} at {ppp}: {slot:?} beside {next:?}"
+                    );
+                }
+                if let Some(below) = slots.get(index + columns) {
+                    assert_eq!(
+                        pixels(below.top()) - pixels(slot.bottom()),
+                        hairline,
+                        "{layout:?} at {ppp}: {slot:?} over {below:?}"
+                    );
+                }
+            }
             let left = slots
                 .iter()
                 .map(|slot| slot.left())
@@ -82,17 +101,19 @@ fn panes_are_equal_to_the_pixel_with_a_gutter_on_every_edge() {
                 .iter()
                 .map(|slot| slot.bottom())
                 .fold(f32::MIN, f32::max);
-            for edge in [
-                pixels(left) - pixels(stage.left()),
-                pixels(top) - pixels(stage.top()),
-                pixels(stage.right()) - pixels(right),
-                pixels(stage.bottom()) - pixels(bottom),
-            ] {
-                assert!(
-                    edge >= gap,
-                    "{layout:?} at {ppp}: an edge gutter of {edge} px"
-                );
-            }
+            // What rounding leaves over is fewer pixels than there are panes
+            // along the axis, shared between its two ends.
+            let across =
+                pixels(left) - pixels(stage.left()) + pixels(stage.right()) - pixels(right);
+            let down = pixels(top) - pixels(stage.top()) + pixels(stage.bottom()) - pixels(bottom);
+            assert!(
+                (0.0..columns as f32).contains(&across),
+                "{layout:?} at {ppp}: {across} px left over across"
+            );
+            assert!(
+                (0.0..rows as f32).contains(&down),
+                "{layout:?} at {ppp}: {down} px left over down"
+            );
         }
     }
 }

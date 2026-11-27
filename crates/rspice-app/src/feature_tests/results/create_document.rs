@@ -1026,15 +1026,17 @@ fn a_press_activates_a_pane_and_its_analysis_row_moves_and_removes_it() {
     assert_eq!(panes(&window), [first]);
 }
 
-/// A document pane's analysis row as one frame draws it.
+/// A document pane's analysis tag as one frame draws it.
 #[cfg(not(target_arch = "wasm32"))]
 struct AnalysisRowMark {
     /// Where it stands.
     at: egui::Pos2,
     /// It reports itself selected.
     selected: bool,
-    /// It is painted with the kit's selected-row fill.
+    /// Something is filled in the accent's selected-row wash under it.
     filled: bool,
+    /// It reads in full text, not dim.
+    full: bool,
 }
 
 /// The analysis rows the frame draws, top to bottom and left to right, with
@@ -1052,17 +1054,36 @@ fn analysis_row_marks(window: &mut ResultsWindow) -> (Vec<AnalysisRowMark>, Vec<
             _ => {}
         }
     }
+    /// Where each painted "TR" stands, and its ink.
+    fn tags(shape: &egui::Shape, found: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text() == "TR" => {
+                let ink = text
+                    .galley
+                    .job
+                    .sections
+                    .first()
+                    .map_or(text.fallback_color, |section| section.format.color);
+                found.push((text.visual_bounding_rect(), ink));
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    tags(shape, found);
+                }
+            }
+            _ => {}
+        }
+    }
     let mut output = window.frame(Vec::new());
     for _ in 0..2 {
         output = window.frame(Vec::new());
     }
-    let selected_fill = rspice_ui_kit::tokens::Tokens::get(&window.ctx)
-        .color
-        .accent_dim;
-    let (mut filled, mut texts) = (Vec::new(), Vec::new());
+    let tokens = rspice_ui_kit::tokens::Tokens::get(&window.ctx);
+    let (mut filled, mut texts, mut inks) = (Vec::new(), Vec::new(), Vec::new());
     for clipped in &output.shapes {
-        fills(&clipped.shape, selected_fill, &mut filled);
+        fills(&clipped.shape, tokens.color.accent_dim, &mut filled);
         painted_texts(&clipped.shape, &mut texts);
+        tags(&clipped.shape, &mut inks);
     }
     let mut rows = output
         .platform_output
@@ -1080,9 +1101,11 @@ fn analysis_row_marks(window: &mut ResultsWindow) -> (Vec<AnalysisRowMark>, Vec<
             Some(AnalysisRowMark {
                 at: row.center(),
                 selected: node.is_selected() == Some(true),
-                filled: filled.iter().any(|fill| {
-                    (fill.min - row.min).length() < 0.5 && (fill.max - row.max).length() < 0.5
-                }),
+                filled: filled.iter().any(|fill| fill.contains(row.center())),
+                full: inks
+                    .iter()
+                    .find(|(at, _)| row.expand(1.0).contains(at.center()))
+                    .is_some_and(|(_, ink)| *ink == tokens.color.text),
             })
         })
         .collect::<Vec<_>>();
@@ -1091,14 +1114,15 @@ fn analysis_row_marks(window: &mut ResultsWindow) -> (Vec<AnalysisRowMark>, Vec<
 }
 
 /// The pane a reader works in, on a page of two, is the one whose analysis
-/// row takes the selected fill, and the inspector names it by its place: a
-/// press in the other pane moves both.
+/// tag reads in full text, the other's dim, with nothing filled under
+/// either, and the inspector names it by its place: a press in the other
+/// pane moves both.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn a_press_in_another_pane_moves_the_selected_fill_and_the_inspectors_pane() {
+fn a_press_in_another_pane_moves_the_full_tag_and_the_inspectors_pane() {
     let marks = |rows: &[AnalysisRowMark]| {
         rows.iter()
-            .map(|row| (row.selected, row.filled))
+            .map(|row| (row.selected, row.filled, row.full))
             .collect::<Vec<_>>()
     };
     let mut window = ResultsWindow::new();
@@ -1107,7 +1131,7 @@ fn a_press_in_another_pane_moves_the_selected_fill_and_the_inspectors_pane() {
     let (rows, texts) = analysis_row_marks(&mut window);
     assert_eq!(
         marks(&rows),
-        [(true, true), (false, false)],
+        [(true, false, true), (false, false, false)],
         "the first pane is the one worked in"
     );
     assert!(
@@ -1119,8 +1143,8 @@ fn a_press_in_another_pane_moves_the_selected_fill_and_the_inspectors_pane() {
     let (rows, texts) = analysis_row_marks(&mut window);
     assert_eq!(
         marks(&rows),
-        [(false, false), (true, true)],
-        "the fill follows the press into the second pane"
+        [(false, false, false), (true, false, true)],
+        "the full tag follows the press into the second pane"
     );
     assert!(
         texts.iter().any(|text| text == "Bottom \u{b7} analysis"),

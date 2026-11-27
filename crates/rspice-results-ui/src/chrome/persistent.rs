@@ -22,19 +22,12 @@ pub fn page<R>(
     // cannot enlarge the Results document or create recursive scroll growth.
     let size = finite_stage_size(ui.available_size());
     let (stage_rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    // The gutters between panes are the workspace's own ground, so each pane
-    // reads as a card of its own and one pane's ruler never meets the next
-    // pane's analysis row.
-    ui.painter()
-        .rect_filled(stage_rect, 0.0, Tokens::get(ui.ctx()).color.bg_app);
-    let slots = bounded_pane_slots(
-        stage_rect,
-        layout,
-        pane_ids.len(),
-        ui.ctx().pixels_per_point(),
-    );
+    let t = Tokens::get(ui.ctx());
+    ui.painter().rect_filled(stage_rect, 0.0, t.color.bg_app);
+    let pane_count = pane_ids.len();
+    let slots = bounded_pane_slots(stage_rect, layout, pane_count, ui.ctx().pixels_per_point());
     let mut activated_pane_id = None;
-    for (index, (pane_id, rect)) in pane_ids.zip(slots).enumerate() {
+    for (index, (pane_id, rect)) in pane_ids.zip(slots.iter().copied()).enumerate() {
         let mut pane_ui = ui.new_child(
             UiBuilder::new()
                 .id_salt(("persistent-result-pane-slot", pane_id.get()))
@@ -45,13 +38,40 @@ pub fn page<R>(
         let activated = render_pane(&mut pane_ui, index);
         activated_pane_id = activated.or(activated_pane_id);
     }
+    // The panes abut: one hairline between two neighbours, across and down,
+    // and none along the stage's edges, where the docks' own rules stand.
+    // The hairlines go over the panes, so nothing a pane draws to its edge
+    // covers one.
+    let (columns, _) = grid_of(layout, pane_count);
+    for (index, rect) in slots.iter().enumerate() {
+        let right = (index % columns + 1 < columns)
+            .then(|| slots.get(index + 1))
+            .flatten();
+        if let Some(next) = right {
+            ui.painter().rect_filled(
+                Rect::from_min_max(
+                    pos2(rect.right(), rect.top()),
+                    pos2(next.left(), rect.bottom()),
+                ),
+                0.0,
+                t.color.border,
+            );
+        }
+        if let Some(below) = slots.get(index + columns) {
+            // As far as the hairline beside it, so the two cross whole.
+            let end = right.map_or(rect.right(), |next| next.left());
+            ui.painter().rect_filled(
+                Rect::from_min_max(pos2(rect.left(), rect.bottom()), pos2(end, below.top())),
+                0.0,
+                t.color.border,
+            );
+        }
+    }
     activated_pane_id
 }
 
-/// The gutter around and between panes, across and down alike. It runs
-/// along the stage's edges too, so no pane's hairline lies against a dock
-/// separator and doubles it.
-const PANE_GAP: f32 = 4.0;
+/// The hairline between two neighbouring panes, across and down alike.
+const PANE_DIVIDER: f32 = 1.0;
 
 fn finite_stage_size(size: egui::Vec2) -> egui::Vec2 {
     vec2(finite_extent(size.x), finite_extent(size.y))
@@ -67,9 +87,9 @@ fn finite_extent(value: f32) -> f32 {
 
 /// Where each of `count` panes starts along an axis that runs from `low` to
 /// `high`, and how long every one of them is, in points. The panes are equal
-/// to the physical pixel, with a gutter of the same width between them and
-/// along both ends; the pixels left over from rounding widen the two end
-/// gutters, never the last pane.
+/// to the physical pixel and run to both ends, with one hairline between
+/// two of them; the few pixels left over from rounding stand at the two
+/// ends, never in the last pane.
 fn bounded_axis_cells(low: f32, high: f32, count: usize, pixels_per_point: f32) -> (Vec<f32>, f32) {
     let count = count.max(1);
     let ppp = if pixels_per_point.is_finite() && pixels_per_point > 0.0 {
@@ -79,11 +99,14 @@ fn bounded_axis_cells(low: f32, high: f32, count: usize, pixels_per_point: f32) 
     };
     let first = (low * ppp).round();
     let extent = ((high * ppp).round() - first).max(0.0);
-    let gutters = (count + 1) as f32;
-    let gap = (PANE_GAP * ppp).round().min((extent / gutters).floor());
-    let cell = ((extent - gap * gutters) / count as f32).floor().max(0.0);
-    let spare = (extent - gap * gutters - cell * count as f32).max(0.0);
-    let lead = first + gap + (spare / 2.0).floor();
+    let dividers = (count - 1) as f32;
+    let gap = (PANE_DIVIDER * ppp)
+        .round()
+        .max(1.0)
+        .min((extent / count as f32).floor());
+    let cell = ((extent - gap * dividers) / count as f32).floor().max(0.0);
+    let spare = (extent - gap * dividers - cell * count as f32).max(0.0);
+    let lead = first + (spare / 2.0).floor();
     let starts = (0..count)
         .map(|index| (lead + index as f32 * (cell + gap)) / ppp)
         .collect();
@@ -163,41 +186,30 @@ fn bounded_pane_slots(
         .collect()
 }
 
-fn bounded_inset(rect: Rect, requested: f32) -> Rect {
-    let inset = requested
-        .max(0.0)
-        .min(rect.width() * 0.5)
-        .min(rect.height() * 0.5);
-    rect.shrink(inset)
-}
-
-/// Draw a pane frame around host-composed controls and its qualified viewer.
+/// Draw a pane's ground under host-composed controls and its qualified
+/// viewer, to the edges of its slot: the page draws the hairlines between
+/// panes.
 ///
-/// Every pane has the same hairline frame. The pane being worked in, when
-/// it is `marked`, is told apart by its analysis rows alone, which take the
-/// selected-row fill: an accent frame round the plot fought the traces.
+/// On a page of several panes, `active` says whether this is the one a
+/// reader works in: its analysis tag reads in full text and every other
+/// pane's dim, with no fill, tint or outline on any pane. A page of one
+/// pane passes `None`, and its tag reads in full text.
 pub fn pane_frame<R>(
     ui: &mut Ui,
     pane_id: PaneId,
-    marked: bool,
+    active: Option<bool>,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let t = Tokens::get(ui.ctx());
     let rect = ui.available_rect_before_wrap();
-    if marked {
-        crate::strip::select_header_rows(ui.ctx(), rect);
+    if let Some(active) = active {
+        crate::strip::mark_header_rows(ui.ctx(), rect, active);
     }
     ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
-    ui.painter().rect_stroke(
-        rect,
-        0.0,
-        egui::Stroke::new(1.0, t.color.border),
-        egui::StrokeKind::Inside,
-    );
     ui.scope_builder(
         UiBuilder::new()
             .id_salt(("persistent-result-pane", pane_id.get()))
-            .max_rect(bounded_inset(rect, 1.0))
+            .max_rect(rect)
             .layout(Layout::top_down(Align::Min)),
         add_contents,
     )
@@ -403,34 +415,43 @@ pub fn pane_menu(ui: &Ui, rect: Rect, menu: PaneMenu) -> Option<PaneAction> {
     let mut action = None;
     for row in crate::strip::header_rows(ui.ctx(), rect) {
         crate::context_menu::context_menu(&row, |ui| {
-            let mut item = |ui: &mut Ui, enabled: bool, label: &str, chosen: PaneAction| {
-                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                    action = Some(chosen);
-                    ui.close();
-                }
-            };
-            item(
-                ui,
-                menu.earlier,
-                "Move pane earlier",
-                PaneAction::MoveEarlier,
-            );
-            item(ui, menu.later, "Move pane later", PaneAction::MoveLater);
-            ui.separator();
-            item(
-                ui,
-                menu.x_link.is_some(),
-                if menu.x_link == Some(true) {
-                    "Unlink X axis"
-                } else {
-                    "Link X axis"
-                },
-                PaneAction::ToggleLinkX,
-            );
-            ui.separator();
-            item(ui, menu.removable, "Remove pane", PaneAction::Remove);
+            action = pane_menu_entries(ui, menu).or(action);
         });
     }
+    action
+}
+
+/// The pane menu's entries, in a menu already open: the pane menu itself,
+/// or the head of a waveform pane's bar's menu. Returns what the reader
+/// chose; the host validates and applies it.
+pub fn pane_menu_entries(ui: &mut Ui, menu: PaneMenu) -> Option<PaneAction> {
+    let mut action = None;
+    let mut item = |ui: &mut Ui, enabled: bool, label: &str, chosen: PaneAction| {
+        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+            action = Some(chosen);
+            ui.close();
+        }
+    };
+    item(
+        ui,
+        menu.earlier,
+        "Move pane earlier",
+        PaneAction::MoveEarlier,
+    );
+    item(ui, menu.later, "Move pane later", PaneAction::MoveLater);
+    ui.separator();
+    item(
+        ui,
+        menu.x_link.is_some(),
+        if menu.x_link == Some(true) {
+            "Unlink X axis"
+        } else {
+            "Link X axis"
+        },
+        PaneAction::ToggleLinkX,
+    );
+    ui.separator();
+    item(ui, menu.removable, "Remove pane", PaneAction::Remove);
     action
 }
 

@@ -754,10 +754,10 @@ fn render_pane(
 ) -> Option<u64> {
     let is_active = pane.id.get() == active_pane_id;
     let viewer = pane_viewer(is_active, active_viewer, &pane.viewer_id);
-    persistent::pane_frame(ui, pane.id, marks_active && is_active, |ui| {
+    persistent::pane_frame(ui, pane.id, marks_active.then_some(is_active), |ui| {
         // A press anywhere in a pane makes it the one worked in: its analysis
-        // rows take the selected fill, and the inspector's Active pane names
-        // its place.
+        // tag reads in full text, the others' dim, and the inspector's Active
+        // pane names its place.
         let rect = ui.max_rect();
         let activated_pane_id = (!is_active
             && persistent::pressed_in(ui, rect)

@@ -39,8 +39,11 @@ pub(crate) const WINDOW_CONTROL_GAP: f32 = 4.0;
 pub(crate) const X_SCALE_LABEL: &str = "log X";
 
 /// The chip that returns a zoomed strip to its automatic view.
-const FIT_LABEL: &str = "Fit";
-const EXPRESSION_ACTION_LABEL: &str = "+ Expression";
+pub(crate) const FIT_LABEL: &str = "Fit";
+pub(crate) const EXPRESSION_ACTION_LABEL: &str = "+ Expression";
+/// What the expression action's hover says.
+pub(crate) const EXPRESSION_ACTION_TIP: &str =
+    "Add an expression trace, e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))";
 
 /// Where the window control `slot` places from the right stands in a header
 /// row spanning `rect`: the rightmost, 0, ends on the rule every row of strip
@@ -61,7 +64,7 @@ pub(crate) fn scale_chip_right(rect: Rect, slots: usize) -> f32 {
 }
 
 /// The width the scale chip reading `label` takes: the toggle chip's own.
-fn scale_chip_width(ui: &Ui, label: &str) -> f32 {
+pub(crate) fn scale_chip_width(ui: &Ui, label: &str) -> f32 {
     let t = Tokens::get(ui.ctx());
     let text = ui.fonts_mut(|fonts| {
         fonts
@@ -333,44 +336,147 @@ fn note_header_row(ctx: &egui::Context, id: egui::Id, rect: Rect) {
     });
 }
 
-/// Where the strip header rows drawn in one pass are selected.
+/// Where the strip header rows drawn in one pass are marked, and whether
+/// each place is the pane a reader works in.
 #[derive(Clone, Default)]
-struct SelectedRows {
+struct MarkedRows {
     pass: u64,
-    within: Vec<Rect>,
+    within: Vec<(Rect, bool)>,
 }
 
-/// The memory key the selected rows of a pass are kept under.
-const SELECTED_ROWS: &str = "rspice.results.strip-header-selected-rows";
+/// The memory key the marked rows of a pass are kept under.
+const MARKED_ROWS: &str = "rspice.results.strip-header-marked-rows";
 
-/// Select the strip header rows drawn within `within` for the rest of this
-/// pass: they take the kit's selected-row fill and report themselves
-/// selected. Whatever holds the strips says so before drawing them: the pane
-/// a reader works in, on a page of several.
-pub fn select_header_rows(ctx: &egui::Context, within: Rect) {
+/// Mark the strip header rows drawn within `within` for the rest of this
+/// pass as one pane's of a page of several: `active` for the pane a reader
+/// works in, whose rows report themselves selected and whose analysis tag
+/// reads in full text, and not for every other pane, whose tag reads dim.
+/// Nothing is filled or tinted: the tag's ink is the whole mark. Whatever
+/// holds the strips says so before drawing them.
+pub fn mark_header_rows(ctx: &egui::Context, within: Rect, active: bool) {
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|data| {
-        let selected = data.get_temp_mut_or_default::<SelectedRows>(egui::Id::new(SELECTED_ROWS));
-        if selected.pass != pass {
-            *selected = SelectedRows {
+        let marked = data.get_temp_mut_or_default::<MarkedRows>(egui::Id::new(MARKED_ROWS));
+        if marked.pass != pass {
+            *marked = MarkedRows {
                 pass,
                 within: Vec::new(),
             };
         }
-        selected.within.push(within);
+        marked.within.push((within, active));
     });
 }
 
-fn header_row_selected(ctx: &egui::Context, row: Rect) -> bool {
+/// How the header row at `row` is marked this pass: `Some(true)` in the
+/// pane a reader works in, `Some(false)` in another pane of its page, and
+/// `None` on a page of one pane or outside a page.
+pub(crate) fn header_row_mark(ctx: &egui::Context, row: Rect) -> Option<bool> {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data(|data| data.get_temp::<SelectedRows>(egui::Id::new(SELECTED_ROWS)))
-        .is_some_and(|selected| {
-            selected.pass == pass
-                && selected
-                    .within
-                    .iter()
-                    .any(|within| within.contains(row.center()))
+    ctx.data(|data| data.get_temp::<MarkedRows>(egui::Id::new(MARKED_ROWS)))
+        .filter(|marked| marked.pass == pass)
+        .and_then(|marked| {
+            marked
+                .within
+                .iter()
+                .find(|(within, _)| within.contains(row.center()))
+                .map(|(_, active)| *active)
         })
+}
+
+/// The ink of a header row's analysis tag marked `mark`: full text but in
+/// another pane than the one a reader works in.
+fn tag_ink(tokens: &Tokens, mark: Option<bool>) -> egui::Color32 {
+    if mark == Some(false) {
+        tokens.color.text_dim
+    } else {
+        tokens.color.text
+    }
+}
+
+/// The width [`analysis_tag`] takes for `kind`, its warning mark included:
+/// where the legend of a pane under the bar starts, level with the bar's.
+pub(crate) fn analysis_tag_width(ui: &Ui, kind: &str, incomplete: Option<&str>) -> f32 {
+    let text = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                kind.to_owned(),
+                theme::mono(tokens::FS_0, FontWeight::Medium),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+    });
+    let mark_room = if incomplete.is_some() {
+        KIND_MARK_GAP + KIND_MARK_SIDE
+    } else {
+        0.0
+    };
+    text + mark_room
+}
+
+/// The analysis tag a waveform pane's one bar starts with, at the left of
+/// `row`: the strip's kind in mono medium, in the ink its pane's mark gives
+/// it, and an incomplete result's warning mark after it, with the reason on
+/// hover. It names the bar to assistive technology and reports the pane a
+/// reader works in as selected; presses fall through it to the bar. Returns
+/// where it ends.
+pub(crate) fn analysis_tag(
+    ui: &mut Ui,
+    row: Rect,
+    id: egui::Id,
+    kind: &str,
+    incomplete: Option<&str>,
+) -> f32 {
+    let t = Tokens::get(ui.ctx());
+    let mark = header_row_mark(ui.ctx(), row);
+    let galley = ui.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(
+            kind.to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            tag_ink(&t, mark),
+        )
+    });
+    let left = row.left() + HEADER_PADDING_X;
+    let rect = Rect::from_min_max(
+        egui::pos2(left, row.top()),
+        egui::pos2(
+            (left + analysis_tag_width(ui, kind, incomplete)).min(row.right()),
+            row.bottom(),
+        ),
+    );
+    let tag = ui.interact(rect, id, Sense::hover());
+    tag.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), kind));
+    if mark == Some(true) {
+        ui.ctx()
+            .accesskit_node_builder(tag.id, |node| node.set_selected(true));
+    }
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    let text_left = rect.left();
+    let width = galley.size().x;
+    painter.galley(
+        egui::pos2(text_left, row.center().y - galley.size().y * 0.5),
+        galley,
+        tag_ink(&t, mark),
+    );
+    if incomplete.is_some() {
+        paint_problem_mark(
+            &painter,
+            Rect::from_center_size(
+                egui::pos2(
+                    text_left + width + KIND_MARK_GAP + KIND_MARK_SIDE * 0.5,
+                    row.center().y,
+                ),
+                egui::Vec2::splat(KIND_MARK_SIDE),
+            ),
+            Problem::Warning,
+        );
+    }
+    let hover = match incomplete {
+        Some(reason) => format!("{kind} \u{b7} {reason}"),
+        None => kind.to_owned(),
+    };
+    tag.on_hover_text(hover);
+    rect.right()
 }
 
 /// The rows of the strip headers drawn this pass within `within`, each with
@@ -437,6 +543,8 @@ pub struct StripHeader<'a> {
     field_width: f32,
     x_scale: bool,
     window_slots: usize,
+    expr_trailing: bool,
+    height: f32,
 }
 
 impl<'a> StripHeader<'a> {
@@ -459,7 +567,23 @@ impl<'a> StripHeader<'a> {
             field_width: 0.0,
             x_scale: false,
             window_slots: 0,
+            expr_trailing: false,
+            height: HEADER_HEIGHT,
         }
+    }
+
+    /// How tall the row stands: a document pane's header stands as tall as
+    /// the one bar of its neighbours.
+    pub(crate) fn height(mut self, height: f32) -> Self {
+        self.height = height;
+        self
+    }
+
+    /// Stand "+ Expression" at the row's end, left of the scale chip, as a
+    /// document pane's one bar stands it, rather than after the legend.
+    pub(crate) fn expr_trailing(mut self, on: bool) -> Self {
+        self.expr_trailing = on;
+        self
     }
 
     /// Name this header among the others its parent draws: the analysis a
@@ -575,7 +699,7 @@ impl<'a> StripHeader<'a> {
         let mut out = StripHeaderResponse::default();
 
         let width = ui.available_width();
-        let (rect, _) = ui.allocate_exact_size(vec2(width, HEADER_HEIGHT), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(width, self.height), Sense::hover());
         if !ui.is_rect_visible(rect) {
             return out;
         }
@@ -586,17 +710,14 @@ impl<'a> StripHeader<'a> {
         let row_id = ui.make_persistent_id(self.id_salt.with("strip-header-row"));
         let row = ui.interact(rect, row_id, Sense::CLICK);
         row.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), self.kind));
-        let selected = header_row_selected(ui.ctx(), rect);
-        if selected {
+        let mark = header_row_mark(ui.ctx(), rect);
+        if mark == Some(true) {
             ui.ctx()
                 .accesskit_node_builder(row.id, |node| node.set_selected(true));
         }
         note_header_row(ui.ctx(), row.id, rect);
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, c.bg_panel);
-        if selected {
-            painter.rect_filled(rect, 0.0, c.accent_dim);
-        }
         painter.hline(
             rect.x_range(),
             rect.bottom() - 0.5,
@@ -620,15 +741,21 @@ impl<'a> StripHeader<'a> {
         } else {
             0.0
         };
+        let trailing_expr = self.pane_actions && self.expr_action && self.expr_trailing;
+        let expr_width = if trailing_expr {
+            action_chip_width(ui, EXPRESSION_ACTION_LABEL) + WINDOW_CONTROL_GAP
+        } else {
+            0.0
+        };
         let actions_width = if self.pane_actions {
-            trailing_actions_width(
+            (trailing_actions_width(
                 HEADER_ICON_SIDE,
                 slots,
                 scale_width,
                 self.zoomed,
                 fit_chip_width,
-            )
-            .min(inner.width())
+            ) + expr_width)
+                .min(inner.width())
         } else {
             0.0
         };
@@ -666,7 +793,7 @@ impl<'a> StripHeader<'a> {
             0.0,
             egui::TextFormat {
                 font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-                color: c.text,
+                color: tag_ink(&t, mark),
                 ..Default::default()
             },
         );
@@ -696,8 +823,8 @@ impl<'a> StripHeader<'a> {
             content_rect.width(),
             kind_natural_width,
             subtitle_natural_width,
-            !self.legend.is_empty() || self.expr_action,
-            legend_natural_width(ui, self.legend, self.expr_action),
+            !self.legend.is_empty() || (self.expr_action && !trailing_expr),
+            legend_natural_width(ui, self.legend, self.expr_action && !trailing_expr),
         );
         let span_rect = |span: HorizontalSpan| {
             Rect::from_min_max(
@@ -750,7 +877,7 @@ impl<'a> StripHeader<'a> {
         let removable = self.removable;
         let mut chip_menu = self.chip_menu;
         let legend = self.legend;
-        let expr_action = self.expr_action;
+        let expr_action = self.expr_action && !trailing_expr;
         let legend_rect = span_rect(layout.legend);
         let mut legend_ui = ui.new_child(
             egui::UiBuilder::new()
@@ -792,12 +919,7 @@ impl<'a> StripHeader<'a> {
                     }
                     if expr_action {
                         ui.add_space(2.0);
-                        if action_chip(
-                            ui,
-                            EXPRESSION_ACTION_LABEL,
-                            "Add an expression trace, e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))",
-                        )
-                        .clicked()
+                        if action_chip(ui, EXPRESSION_ACTION_LABEL, EXPRESSION_ACTION_TIP).clicked()
                         {
                             out.add_expr_clicked = true;
                         }
@@ -850,6 +972,25 @@ impl<'a> StripHeader<'a> {
                 );
                 out.scale_rect = Some(scale);
                 left = scale.left();
+            }
+            if trailing_expr {
+                let width = action_chip_width(ui, EXPRESSION_ACTION_LABEL);
+                let right = left - WINDOW_CONTROL_GAP;
+                let at = Rect::from_min_max(
+                    egui::pos2((right - width).max(actions_rect.left()), inner.top()),
+                    egui::pos2(right, inner.bottom()),
+                );
+                let mut slot = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt((self.id_salt, "expression"))
+                        .max_rect(at)
+                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                );
+                if action_chip(&mut slot, EXPRESSION_ACTION_LABEL, EXPRESSION_ACTION_TIP).clicked()
+                {
+                    out.add_expr_clicked = true;
+                }
+                left = at.left();
             }
             // FIT's place is made whether or not the view is zoomed: a child
             // made only now and then would renumber every widget after it,
@@ -914,7 +1055,7 @@ fn truncated_label(ui: &mut Ui, rect: Rect, label: Label, full_text: &str) {
     response.on_hover_text(full_text);
 }
 
-fn action_chip_width(ui: &mut Ui, label: &str) -> f32 {
+pub(crate) fn action_chip_width(ui: &mut Ui, label: &str) -> f32 {
     ui.fonts_mut(|fonts| {
         fonts
             .layout_no_wrap(
@@ -928,8 +1069,11 @@ fn action_chip_width(ui: &mut Ui, label: &str) -> f32 {
     })
 }
 
-/// A small mono action chip ("Fit", "+ Expression") in the strip header.
-fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
+/// A plain ghost button of a strip header ("Fit", "+ Expression"): its mono
+/// words in the secondary ink on the row's own ground, with no outline, as
+/// tall as the row's toggles, taking the hover fill and the full ink under
+/// the pointer. Nothing on a strip header is drawn in the accent.
+pub(crate) fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -937,11 +1081,13 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
         f.layout_no_wrap(
             label.to_owned(),
             theme::mono(tokens::FS_0, FontWeight::Medium),
-            c.accent,
+            c.text_dim,
         )
     });
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(galley.size().x + 14.0, 18.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(galley.size().x + 14.0, HEADER_ICON_SIDE),
+        Sense::click(),
+    );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), tooltip));
     if !ui.is_rect_visible(rect) {
         return response;
@@ -951,20 +1097,16 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
         ui.ctx()
             .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
     let painter = ui.painter();
-    painter.rect(
-        rect,
-        t.radius,
-        mix(c.bg_panel, c.bg_hover, hover),
-        Stroke::new(1.0, c.accent_dim),
-        egui::StrokeKind::Inside,
-    );
+    if hover > 0.0 {
+        painter.rect_filled(rect, t.radius, mix(c.bg_panel, c.bg_hover, hover));
+    }
     painter.galley(
         egui::pos2(
             rect.center().x - galley.size().x * 0.5,
             rect.center().y - galley.size().y * 0.5,
         ),
         galley,
-        c.accent,
+        mix(c.text_dim, c.text, hover),
     );
 
     theme::paint_focus_ring(ui, &response, rect);
