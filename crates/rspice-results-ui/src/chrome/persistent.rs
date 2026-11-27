@@ -22,6 +22,11 @@ pub fn page<R>(
     // cannot enlarge the Results document or create recursive scroll growth.
     let size = finite_stage_size(ui.available_size());
     let (stage_rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    // The gutters between panes are the workspace's own ground, so each pane
+    // reads as a card of its own and one pane's ruler never meets the next
+    // pane's analysis row.
+    ui.painter()
+        .rect_filled(stage_rect, 0.0, Tokens::get(ui.ctx()).color.bg_app);
     let slots = bounded_pane_slots(stage_rect, layout, pane_ids.len());
     let mut activated_pane_id = None;
     for (index, (pane_id, rect)) in pane_ids.zip(slots).enumerate() {
@@ -38,7 +43,8 @@ pub fn page<R>(
     activated_pane_id
 }
 
-const PANE_GAP: f32 = 1.0;
+/// The gutter between two panes, across and down alike.
+const PANE_GAP: f32 = 4.0;
 
 fn finite_stage_size(size: egui::Vec2) -> egui::Vec2 {
     vec2(finite_extent(size.x), finite_extent(size.y))
@@ -52,18 +58,25 @@ fn finite_extent(value: f32) -> f32 {
     }
 }
 
+/// One pane's extent along an axis of `count` panes, in whole points so
+/// the panes are the same size to a point and every gutter the same width,
+/// and the gutter between two of them.
 fn bounded_axis_cells(extent: f32, count: usize) -> (f32, f32) {
     let count = count.max(1);
-    let total_gap = (PANE_GAP * count.saturating_sub(1) as f32).min(extent);
-    ((extent - total_gap) / count as f32, total_gap)
+    if count == 1 {
+        return (extent, 0.0);
+    }
+    let gap = PANE_GAP.min(extent / (count - 1) as f32);
+    let cell = ((extent - gap * (count - 1) as f32) / count as f32)
+        .floor()
+        .max(0.0);
+    (cell, gap)
 }
 
-fn bounded_pane_slots(stage: Rect, layout: PageLayout, pane_count: usize) -> Vec<Rect> {
-    if pane_count == 0 {
-        return Vec::new();
-    }
-    let stage = Rect::from_min_size(stage.min, finite_stage_size(stage.size()));
-    let (columns, rows) = match layout {
+/// How many columns and rows `layout` sets `pane_count` panes in.
+fn grid_of(layout: PageLayout, pane_count: usize) -> (usize, usize) {
+    let pane_count = pane_count.max(1);
+    match layout {
         PageLayout::SinglePane => (1, 1),
         PageLayout::Rows => (1, pane_count),
         PageLayout::Columns => (pane_count, 1),
@@ -71,19 +84,17 @@ fn bounded_pane_slots(stage: Rect, layout: PageLayout, pane_count: usize) -> Vec
             let columns = usize::from(columns.max(1)).min(pane_count);
             (columns, pane_count.div_ceil(columns))
         }
-    };
-    let (pane_width, horizontal_gap_budget) = bounded_axis_cells(stage.width(), columns);
-    let (pane_height, vertical_gap_budget) = bounded_axis_cells(stage.height(), rows);
-    let horizontal_gap = if columns > 1 {
-        horizontal_gap_budget / (columns - 1) as f32
-    } else {
-        0.0
-    };
-    let vertical_gap = if rows > 1 {
-        vertical_gap_budget / (rows - 1) as f32
-    } else {
-        0.0
-    };
+    }
+}
+
+fn bounded_pane_slots(stage: Rect, layout: PageLayout, pane_count: usize) -> Vec<Rect> {
+    if pane_count == 0 {
+        return Vec::new();
+    }
+    let stage = Rect::from_min_size(stage.min, finite_stage_size(stage.size()));
+    let (columns, rows) = grid_of(layout, pane_count);
+    let (pane_width, horizontal_gap) = bounded_axis_cells(stage.width(), columns);
+    let (pane_height, vertical_gap) = bounded_axis_cells(stage.height(), rows);
 
     (0..pane_count)
         .map(|index| {
@@ -93,7 +104,21 @@ fn bounded_pane_slots(stage: Rect, layout: PageLayout, pane_count: usize) -> Vec
                 stage.left() + column as f32 * (pane_width + horizontal_gap),
                 stage.top() + row as f32 * (pane_height + vertical_gap),
             );
-            Rect::from_min_size(min, vec2(pane_width, pane_height)).intersect(stage)
+            // The last column and row take the stage's odd points, so the
+            // panes meet its edges rather than leave a sliver of ground.
+            let max = pos2(
+                if column + 1 == columns {
+                    stage.right()
+                } else {
+                    min.x + pane_width
+                },
+                if row + 1 == rows {
+                    stage.bottom()
+                } else {
+                    min.y + pane_height
+                },
+            );
+            Rect::from_min_max(min, max).intersect(stage)
         })
         .collect()
 }
