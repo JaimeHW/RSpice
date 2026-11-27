@@ -90,6 +90,20 @@ impl Plane {
         }
     }
 
+    /// The coordinate of the map a value in rad/s stands at along an axis:
+    /// [`Self::value_at`] read back.
+    fn coordinate_at(self, value: f64) -> f64 {
+        let Self::Logarithmic { floor } = self else {
+            return value;
+        };
+        let reach = value.abs() / floor;
+        if reach >= 1.0 {
+            value.signum() * (1.0 + reach.log10())
+        } else {
+            value / floor
+        }
+    }
+
     /// The axis over `[min, max]` of the map, quantity `label`, in rad/s.
     fn axis(self, min: f64, max: f64, label: &str) -> Axis {
         let Self::Logarithmic { floor } = self else {
@@ -121,19 +135,27 @@ impl Plane {
     }
 }
 
-/// The spans of σ and of jω in rad/s that the plane's drawn `axes` show:
+/// The interval in rad/s an interval of the map spans along either axis:
 /// the map's own coordinates on the linear plane, and on the logarithmic
-/// one the signed |s| its edges stand at, so a status bar states either
-/// plane's view in the units its ticks read.
+/// one the signed |s| its ends stand at, so a status bar or a range field
+/// states either plane's view in the units its ticks read.
 #[must_use]
-pub fn plane_span(
+pub fn plane_values(data: &PoleZeroData, logarithmic: bool, (low, high): (f64, f64)) -> (f64, f64) {
+    let plane = Plane::of(data, logarithmic);
+    (plane.value_at(low), plane.value_at(high))
+}
+
+/// The interval of the map an interval in rad/s along either axis stands
+/// at: [`plane_values`] read back, so a range typed in rad/s holds the
+/// logarithmic plane where its ticks read it.
+#[must_use]
+pub fn plane_coordinates(
     data: &PoleZeroData,
     logarithmic: bool,
-    (sigma, omega): ((f64, f64), (f64, f64)),
-) -> ((f64, f64), (f64, f64)) {
+    (low, high): (f64, f64),
+) -> (f64, f64) {
     let plane = Plane::of(data, logarithmic);
-    let span = |(low, high): (f64, f64)| (plane.value_at(low), plane.value_at(high));
-    (span(sigma), span(omega))
+    (plane.coordinate_at(low), plane.coordinate_at(high))
 }
 
 /// The sheet's own control in its bar: the plane on linear or logarithmic
@@ -717,12 +739,28 @@ mod tests {
         data.roots.push(ComplexRoot::pole(-8.0e3, 0.0));
         data.roots.push(ComplexRoot::zero(-4.0e3, 0.0));
         // The smallest root, 4k, sets the floor at the decade 1k.
-        let drawn = ((-3.0, 3.0), (-0.5, 2.0));
-        let ((sigma_low, sigma_high), (omega_low, omega_high)) = plane_span(&data, true, drawn);
         let near = |value: f64, expected: f64| (value - expected).abs() <= 1.0e-9 * expected.abs();
+        let (sigma_low, sigma_high) = plane_values(&data, true, (-3.0, 3.0));
         assert!(near(sigma_low, -1.0e5) && near(sigma_high, 1.0e5));
+        let (omega_low, omega_high) = plane_values(&data, true, (-0.5, 2.0));
         assert!(near(omega_low, -500.0) && near(omega_high, 1.0e4));
-        assert_eq!(plane_span(&data, false, drawn), drawn);
+        assert_eq!(plane_values(&data, false, (-0.5, 2.0)), (-0.5, 2.0));
+        // A range typed in rad/s reads back onto the map, inside the unit
+        // radius and out on the decades alike.
+        for value in [-1.0e5, -2.5e3, -400.0, 0.0, 700.0, 1.0e3, 3.3e4] {
+            let (coordinate, _) = plane_coordinates(&data, true, (value, value));
+            let (read, _) = plane_values(&data, true, (coordinate, coordinate));
+            assert!(
+                (read - value).abs() <= 1.0e-9 * value.abs().max(1.0),
+                "{value} read {read}"
+            );
+        }
+        let (low, high) = plane_coordinates(&data, true, (-1.0e5, 1.0e4));
+        assert!(near(low, -3.0) && near(high, 2.0));
+        assert_eq!(
+            plane_coordinates(&data, false, (-1.0e5, 1.0e4)),
+            (-1.0e5, 1.0e4)
+        );
     }
 
     /// The words of one row of the root table.

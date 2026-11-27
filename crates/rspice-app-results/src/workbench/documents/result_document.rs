@@ -2753,10 +2753,16 @@ pub fn active_axis_range(
     }
     let drawn = state.results.session.drawn_axes.get(&viewer).copied();
     let pinned = state.results.session.plot_view(viewer, 0);
-    match axis {
+    let range = match axis {
         PaneAxis::X => pinned.x.or_else(|| drawn.map(|(x, _)| x)),
         PaneAxis::Y => pinned.y.or_else(|| drawn.map(|(_, y)| y)),
+    };
+    // The pole-zero plane is read in rad/s on either plane; the logarithmic
+    // one keeps its view in its map's own coordinates.
+    if viewer == ResultViewer::PoleZero {
+        return range.map(|range| pz::axis_values(state, range));
     }
+    range
 }
 
 /// Whether the active sheet's axis is pinned to an explicit interval rather
@@ -2789,6 +2795,11 @@ pub fn set_active_axis_range(
     if viewer_uses_wave_stack(viewer) {
         return waves::set_active_pane_axis_range(tokens, state, axis, range);
     }
+    let range = if viewer == ResultViewer::PoleZero {
+        range.map(|range| pz::axis_coordinates(state.results_reads(), range))
+    } else {
+        range
+    };
     let view =
         state
             .results

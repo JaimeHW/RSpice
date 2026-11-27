@@ -89,7 +89,7 @@ pub fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 /// The spans of σ and of jω in rad/s the plane last drew, on either plane:
 /// on the logarithmic one, the signed |s| its edges stand at.
 pub(super) fn drawn_span(state: ResultsReads<'_>) -> Option<((f64, f64), (f64, f64))> {
-    let axes = state
+    let (sigma, omega) = state
         .results
         .session
         .drawn_axes
@@ -97,7 +97,24 @@ pub(super) fn drawn_span(state: ResultsReads<'_>) -> Option<((f64, f64), (f64, f
         .copied()?;
     let data = active_data(state)?;
     let logarithmic = super::sheet_settings::logarithmic_plane(state);
-    Some(view::plane_span(&data, logarithmic, axes))
+    let values = |range| view::plane_values(&data, logarithmic, range);
+    Some((values(sigma), values(omega)))
+}
+
+/// An interval of the plane's map along either axis as the range field
+/// reads it, in rad/s on either plane.
+pub(super) fn axis_values(state: ResultsReads<'_>, range: (f64, f64)) -> (f64, f64) {
+    let logarithmic = super::sheet_settings::logarithmic_plane(state);
+    active_data(state).map_or(range, |data| view::plane_values(&data, logarithmic, range))
+}
+
+/// The interval of the plane's map an interval typed in rad/s along either
+/// axis stands at: [`axis_values`] read back.
+pub(super) fn axis_coordinates(state: ResultsReads<'_>, range: (f64, f64)) -> (f64, f64) {
+    let logarithmic = super::sheet_settings::logarithmic_plane(state);
+    active_data(state).map_or(range, |data| {
+        view::plane_coordinates(&data, logarithmic, range)
+    })
 }
 
 /// The sheet's bar: the plane on linear or logarithmic axes. The choice is
@@ -195,5 +212,73 @@ mod tests {
             rspice_results::pole_zero::data::RootType::Zero
         );
         assert_eq!((data.roots[2].real, data.roots[2].imag), (-3.0, 0.0));
+    }
+
+    /// The range fields read, and are typed, the logarithmic plane in rad/s
+    /// as its ticks read it, while the plane keeps its view in its map's
+    /// own coordinates.
+    #[test]
+    fn the_logarithmic_plane_is_ranged_in_rad_per_second() {
+        use crate::workbench::documents::result_document::{
+            ActivePaneFacts, PaneAxis, ResultViewer, active_axis_range, set_active_axis_range,
+        };
+        let root = |real: f64| ComplexResultValue {
+            real,
+            imaginary: 0.0,
+        };
+        let mut state = ResultsTestHost::default();
+        state.model.simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+                AnalysisResultPayload::PoleZero {
+                    poles: vec![root(-8.0e3)],
+                    zeros: vec![root(-4.0e3)],
+                    pole_evidence: qualified_evidence(1),
+                    zero_evidence: qualified_evidence(1),
+                    gain: None,
+                },
+            ),
+        );
+        state.model.simulation.view.active_analysis_idx = Some(0);
+        state.results.results.session.viewer = ResultViewer::PoleZero;
+        super::super::sheet_settings::keep(
+            &mut state.results_parts(),
+            ResultViewer::PoleZero,
+            Some(SheetSettingValue::PoleZero { logarithmic: true }),
+        );
+        let facts = ActivePaneFacts {
+            unit: None,
+            x_unit: None,
+            analysis: None,
+            scale: None,
+            limit_mask: "off",
+            x_extent: None,
+            y_extent: None,
+        };
+        let tokens = crate::ui::tokens::Tokens::default();
+        // The smallest root, 4k, sets the floor at the decade 1k: 100k is
+        // the map's third decade.
+        assert!(set_active_axis_range(
+            &tokens,
+            &mut state.results_parts(),
+            PaneAxis::X,
+            Some((-1.0e5, 1.0e5)),
+        ));
+        let held = state
+            .results
+            .results
+            .session
+            .plot_view(ResultViewer::PoleZero, 0)
+            .x
+            .expect("the typed range holds the axis");
+        assert!(
+            (held.0 + 3.0).abs() < 1.0e-9 && (held.1 - 3.0).abs() < 1.0e-9,
+            "{held:?}"
+        );
+        let (low, high) = active_axis_range(state.results_reads(), &facts, PaneAxis::X)
+            .expect("the field reads the held range");
+        assert!(
+            (low + 1.0e5).abs() < 1.0e-6 && (high - 1.0e5).abs() < 1.0e-6,
+            "{low} … {high}"
+        );
     }
 }
