@@ -612,7 +612,7 @@ pub(super) fn validate_dataset_bindings(bindings: &[DatasetBinding]) -> Result<(
     if bindings.len() > MAX_DATASET_BINDINGS {
         return Err(ReportError::InvalidValue {
             field: "reference.dataset-bindings",
-            message: format!("at most {MAX_DATASET_BINDINGS} dataset bindings are permitted"),
+            message: format!("a block may name at most {MAX_DATASET_BINDINGS} runs"),
         });
     }
     let mut identities = HashSet::with_capacity(bindings.len());

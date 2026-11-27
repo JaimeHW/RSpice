@@ -432,7 +432,7 @@ pub enum VisualizationRasterError {
         expected: Vec<DatasetBinding>,
         actual: Vec<DatasetBinding>,
     },
-    #[error("duplicate immutable binding for dataset {0}")]
+    #[error("run {0} is named twice")]
     DuplicateDatasetBinding(rspice_vocabulary::product::DatasetId),
     #[error("page {0} is not present in the selected document revision")]
     PageNotFound(u64),
@@ -767,7 +767,7 @@ pub fn resolve_cartesian_line_scene(
         .collect::<Vec<_>>();
     if pane_cursors.len() > MAX_RASTER_CURSORS {
         return Err(VisualizationRasterError::ResourceLimit {
-            resource: "retained raster cursors",
+            resource: "cursors in one pane",
             maximum: MAX_RASTER_CURSORS,
             actual: pane_cursors.len(),
         });
@@ -1105,7 +1105,7 @@ fn insert_actual_binding(
     }
     if bindings.len() >= MAX_RASTER_DATASET_BINDINGS {
         return Err(VisualizationRasterError::ResourceLimit {
-            resource: "pane dataset bindings",
+            resource: "runs in one pane",
             maximum: MAX_RASTER_DATASET_BINDINGS,
             actual: bindings.len().saturating_add(1),
         });
@@ -1123,7 +1123,7 @@ fn canonicalize_expected_bindings(
 ) -> Result<Vec<DatasetBinding>, VisualizationRasterError> {
     if bindings.len() > MAX_RASTER_DATASET_BINDINGS {
         return Err(VisualizationRasterError::ResourceLimit {
-            resource: "report dataset bindings",
+            resource: "runs in one report figure",
             maximum: MAX_RASTER_DATASET_BINDINGS,
             actual: bindings.len(),
         });

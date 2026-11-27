@@ -443,7 +443,7 @@ fn page_elements(
             .enabled(writable && retained_figure_available)
             .show(ui)
             .on_disabled_hover_text(if writable {
-                "Create or retain a result document before inserting it into this report page."
+                "Create a result document before inserting it into this report page."
             } else {
                 host.blocked_reason()
             });

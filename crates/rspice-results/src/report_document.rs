@@ -184,13 +184,13 @@ impl<'de> Deserialize<'de> for FrozenReportArtifact {
             .map_err(|error| {
                 serde::de::Error::custom(ReportError::InvalidValue {
                     field: "frozen-artifact.payload-base64",
-                    message: format!("payload is not canonical base64: {error}"),
+                    message: format!("the embedded copy is not canonical base64: {error}"),
                 })
             })?;
         if BASE64_STANDARD.encode(&payload) != wire.payload_base64 {
             return Err(serde::de::Error::custom(ReportError::InvalidValue {
                 field: "frozen-artifact.payload-base64",
-                message: "payload must use canonical padded base64 encoding".to_owned(),
+                message: "the embedded copy must use canonical padded base64 encoding".to_owned(),
             }));
         }
         let artifact = Self {
@@ -249,7 +249,7 @@ impl FrozenReportArtifact {
             return Err(ReportError::InvalidValue {
                 field: "frozen-artifact.payload",
                 message: format!(
-                    "frozen artifacts require 1 to {MAX_FROZEN_ARTIFACT_BYTES} payload bytes"
+                    "an embedded copy must hold 1 to {MAX_FROZEN_ARTIFACT_BYTES} bytes"
                 ),
             });
         }
@@ -257,7 +257,7 @@ impl FrozenReportArtifact {
         if computed != self.content_digest {
             return Err(ReportError::InvalidValue {
                 field: "frozen-artifact.content-digest",
-                message: "artifact content digest does not authenticate the exact payload bytes"
+                message: "the embedded copy does not match its checksum"
                     .to_owned(),
             });
         }
@@ -301,7 +301,7 @@ impl ReportReferenceSnapshot {
             if !exact_binding {
                 return Err(ReportError::InvalidValue {
                     field: "reference.dataset-bindings",
-                    message: "a dataset source must include its exact immutable dataset binding"
+                    message: "a run source must name the exact run it reads"
                         .to_owned(),
                 });
             }
@@ -781,7 +781,7 @@ impl ReportReferenceInventory {
                 return Err(ReportError::InvalidValue {
                     field: "reference-inventory.figure-artifacts",
                     message: format!(
-                        "report block {} figure payload has no exact source inventory entry",
+                        "report block {} figure has no matching source entry",
                         figure.block_id()
                     ),
                 });
@@ -1067,7 +1067,7 @@ impl<'de> Deserialize<'de> for ReportDocument {
         let Some(revision_history) = wire.revision_history else {
             return Err(serde::de::Error::custom(ReportError::InvalidValue {
                 field: "report-document.revision-history",
-                message: "report documents must retain their revision history".to_owned(),
+                message: "report documents must keep their revision history".to_owned(),
             }));
         };
         let document = Self {
@@ -1903,7 +1903,7 @@ pub enum ReportError {
     },
     #[error("duplicate key '{0}'")]
     DuplicateKey(String),
-    #[error("duplicate immutable binding for dataset {0}")]
+    #[error("run {0} is named twice")]
     DuplicateDatasetBinding(DatasetId),
     #[error("duplicate reference inventory source {0:?}")]
     DuplicateReferenceSource(ReportSourceId),
@@ -1939,7 +1939,7 @@ pub enum ReportError {
     CapacityExceeded(&'static str),
     #[error("report revision space is exhausted")]
     RevisionSpaceExhausted,
-    #[error("report source revision {revision:?} is not retained for document {document_id}")]
+    #[error("document {document_id} has no saved revision {revision:?}")]
     RevisionNotRetained {
         document_id: ResultDocumentId,
         revision: ObjectRevision,

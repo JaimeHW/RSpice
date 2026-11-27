@@ -381,7 +381,7 @@ fn empty_report_workspace(ui: &mut Ui, host: &mut impl ComposerHost) {
                 ui.add_space(7.0);
                 ui.label(
                     egui::RichText::new(
-                        "Plan an explicit project-owned report artifact before authoring pages and evidence.",
+                        "Plan a report for this project before adding pages to it.",
                     )
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(t.color.text_dim),
@@ -646,7 +646,7 @@ fn page_settings(
             }
 
             ui.add_space(8.0);
-            report_form_label(ui, "Evidence binding");
+            report_form_label(ui, "Run");
             let evidence_options = host.evidence_options(page.evidence_binding());
             let evidence_labels = evidence_options
                 .iter()
@@ -656,7 +656,7 @@ fn page_settings(
             if let Some(index) = select(
                 ui,
                 "report-page-evidence-binding",
-                "Report page evidence binding",
+                "Report page run",
                 &evidence_current,
                 &evidence_labels,
                 ui.available_width(),

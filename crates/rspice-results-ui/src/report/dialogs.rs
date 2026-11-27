@@ -291,7 +291,7 @@ fn remove_report_block_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) 
         "Remove",
     )
     .description(
-        "Remove the selected element from this report revision. Its stable identity is retained as a tombstone in the report audit history.",
+        "Remove the selected element from this report. The report's history keeps a record that it was removed.",
     )
     .ghost("Cancel")
     .primary_enabled(valid && writable)
@@ -348,7 +348,7 @@ fn insert_result_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut 
         "Insert result document",
     )
     .description(
-        "Insert one exact visualization-document revision with all immutable dataset bindings retained for publication audit.",
+        "Insert this version of a result document, tied to the exact runs it shows.",
     )
     .ghost("Cancel")
     .primary_enabled(valid && writable)
@@ -362,11 +362,11 @@ fn insert_result_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut 
             );
             let current = source_options
                 .get(source_index)
-                .map_or("No retained result documents", String::as_str);
+                .map_or("No result documents", String::as_str);
             if let Some(index) = select(
                 ui,
                 "report-insert-result-source",
-                "Immutable result document",
+                "Result document",
                 current,
                 &source_options,
                 ui.available_width(),
@@ -417,14 +417,14 @@ fn insert_result_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut 
         ui.checkbox(
             &mut host.editor()
                 .insert_result_frozen,
-            "Freeze self-contained source payload in this report revision",
+            "Embed a copy of the source data in this report",
         );
         ui.label(if host.editor()
             .insert_result_frozen
         {
-            "The exact source snapshot and deterministic publication PNG are embedded and digest-authenticated."
+            "The report carries its own copy of the source data and the figure image."
         } else {
-            "The block remains linked to one exact immutable visualization revision."
+            "The figure stays linked to this version of the result document."
         });
         if !writable {
             problem_line(ui, Problem::Failure, host.blocked_reason());
@@ -628,11 +628,11 @@ fn add_report_element_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
                     .min(run_options.len().saturating_sub(1));
                 let current = run_options
                     .get(run_index)
-                    .map_or("No immutable dataset retained", String::as_str);
+                    .map_or("No runs with results", String::as_str);
                 if let Some(index) = select(
                     ui,
                     "report-add-element-source",
-                    "Immutable dataset source",
+                    "Source run",
                     current,
                     &run_options,
                     ui.available_width(),

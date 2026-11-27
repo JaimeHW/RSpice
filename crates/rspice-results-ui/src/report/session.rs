@@ -89,7 +89,7 @@ impl ReportAuthoringState {
             5 => ("rspice-local-session", "Review note.", ""),
             6 => (
                 "Verification evidence",
-                "Summarize the retained evidence.",
+                "Summarize the verification results.",
                 "",
             ),
             _ => (
