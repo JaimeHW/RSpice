@@ -44,7 +44,8 @@ const NAME_MAX_W: f32 = 320.0;
 /// Where a name, a section title and a name column's header all start.
 const NAME_INSET: f32 = 22.0;
 const NAME_END_PAD: f32 = 8.0;
-const VALUE_W: f32 = 104.0;
+/// Room a column's head keeps beside it for its sort mark.
+const SORT_MARK_ROOM: f32 = 11.0;
 /// Rounding room when a column's edge meets the sheet's.
 const WHOLE_COLUMN_TOLERANCE: f32 = 0.5;
 const CELL_INSET: f32 = 8.0;
@@ -587,6 +588,8 @@ impl PlanBuilder<'_> {
         columns: Vec<PlanColumn>,
     ) -> PlanSection {
         // A cell carries its value's prefix; its column's head, the unit.
+    /// The regions the listed devices stand in.
+    regions: BTreeSet<&'static str>,
         let longest_unit = usize::from(!columns.is_empty());
         PlanSection {
             kind,
@@ -729,6 +732,7 @@ impl PlanBuilder<'_> {
                 "No device falls within the run's device-detail scope."
             };
             self.add_note(OpRowKind::Device, DEVICES_TITLE, note);
+                    self.regions.extend(entry.region);
             return;
         };
         let mut families: Vec<_> = families.into_iter().collect();
@@ -808,6 +812,8 @@ impl OpPlan {
         dc: Option<&DcOpResult>,
         devices: Option<&DeviceOpReport>,
         detail: Option<&RetainedDetail>,
+    /// The regions the region column lists.
+    regions: BTreeSet<&'static str>,
     ) -> OpPlan {
         let mut builder = PlanBuilder {
             controls,
@@ -833,6 +839,7 @@ impl OpPlan {
             significant_digits: controls.significant_digits,
             sections: builder.sections,
             rows: builder.rows,
+            regions: BTreeSet::new(),
             node_shown,
             no_match,
             scope_note: reduced_scope_note(devices, detail),
@@ -851,6 +858,7 @@ impl OpPlan {
         mut self,
         baseline: OpBaseline,
         delta: bool,
+            regions: builder.regions,
         dc: Option<&DcOpResult>,
         devices: Option<&DeviceOpReport>,
     ) -> Self {
@@ -907,18 +915,40 @@ impl OpPlan {
         }
     }
 
-    /// The value grid every section shares, at the mono `advance`: the
-    /// sheet's own column width, grown by whatever the widest number and the
-    /// longest prefix and unit on the sheet need.
-    fn value_grid(&self, advance: f32) -> ValueGrid {
+    /// The value grid every section shares: as wide as the widest thing a
+    /// column holds, a number at the mono `advance` with its prefix and unit,
+    /// a column's head with room for its sort mark, or a region, each as
+    /// `measure` sets it in its font. The sheet scrolls sideways only when
+    /// columns that wide overflow it.
+    fn value_grid(&self, advance: f32, measure: impl Fn(&str, egui::FontId) -> f32) -> ValueGrid {
         let longest = |of: fn(&PlanSection) -> usize| {
             self.sections.iter().map(of).max().unwrap_or(0) as f32 * advance
         };
         let unit_slot = UNIT_SLOT_W.max(longest(|section| section.longest_unit).ceil());
         let mantissa = longest(|section| section.longest_mantissa).ceil();
-        let narrowest = CELL_INSET + mantissa + MANTISSA_GAP + UNIT_SLOT_W;
+        let number = CELL_INSET + mantissa + MANTISSA_GAP + unit_slot;
+        let head_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+        let head = self
+            .sections
+            .iter()
+            .flat_map(|section| &section.columns)
+            .map(|column| {
+                CELL_INSET + SORT_MARK_ROOM + measure(&column.head(), head_font.clone()) + MANTISSA_GAP
+            })
+            .fold(0.0, f32::max);
+        let region = if self.region_slot {
+            let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+            self.regions
+                .iter()
+                .map(|region| measure(region, font.clone()))
+                .chain([measure(REGION_HEADER, head_font) + SORT_MARK_ROOM])
+                .map(|width| width + 2.0 * CELL_INSET)
+                .fold(0.0, f32::max)
+        } else {
+            0.0
+        };
         ValueGrid {
-            width: VALUE_W.max(narrowest) + unit_slot - UNIT_SLOT_W,
+            width: number.max(head).max(region).ceil(),
             unit_slot,
         }
     }
@@ -2105,7 +2135,12 @@ fn show_sheet<M: SchematicMapping>(
         .size()
         .x;
     let name_w = name_column_width(advance, plan.longest_name);
-    let values = plan.value_grid(advance);
+    let values = plan.value_grid(advance, |text, font| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font, colors.text)
+            .size()
+            .x
+    });
     let content_w = name_w + plan.widest_values(values);
     let content_h = plan.offsets.total_height() + SHEET_END_PAD;
     let table = egui::ScrollArea::both()

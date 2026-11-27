@@ -865,6 +865,7 @@ fn a_device_is_titled_as_drawn_and_identified_by_its_deck_name() {
 
 #[test]
 fn only_a_whole_column_is_painted_and_the_last_one_can_always_be_reached() {
+    const VALUE_W: f32 = 104.0;
     let visible = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
     let at = |scrolled: f32| Grid {
         origin: egui::pos2(-scrolled, 0.0),
@@ -893,6 +894,76 @@ fn only_a_whole_column_is_painted_and_the_last_one_can_always_be_reached() {
         egui::pos2(visible.right() - 10.0, 0.0),
         egui::vec2(VALUE_W, ROW_H),
     )));
+}
+
+/// A family's columns are as wide as what they hold, so seven MOSFET
+/// quantities stand whole on a sheet as wide as a Results pane: the last of
+/// them, gds, is not left blank behind a sideways scroll.
+#[test]
+fn a_column_is_as_wide_as_what_it_holds_and_the_last_one_stands_whole() {
+    let dc = DcOpResult {
+        node_voltages: vec![node("V(in)", 0.72), node("V(out)", 0.9125)],
+        branch_currents: vec![OperatingPointValue {
+            name: "I(VDD)".to_owned(),
+            value: -1.25e-4,
+            unit: "A".to_owned(),
+        }],
+        ..DcOpResult::default()
+    };
+    let report = DeviceOpReport {
+        entries: vec![device(
+            "M1",
+            "MOSFET",
+            Some("saturation"),
+            vec![
+                ("id", 1.25e-4),
+                ("vgs", 0.72),
+                ("vds", 0.9125),
+                ("vth", 0.48),
+                ("vdsat", 0.21),
+                ("gm", 9.8e-4),
+                ("gds", 8.2e-6),
+            ],
+        )],
+    };
+    let plan = plan_of(Some(&dc), Some(&report));
+    let mapping = Mapped {
+        node: true,
+        device: None,
+    };
+    let view = OpView {
+        evidence: &evidence(),
+        dc: Some(&dc),
+        devices: Some(&report),
+        selection: None,
+        mapping: &mapping,
+        failure_site: None,
+    };
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..2 {
+        let input = rspice_ui_kit::raster::display_input(egui::vec2(980.0, 400.0), 1.0);
+        let output = ctx.run_ui(input, |ui| {
+            let _ = show(ui, Some(&plan), &view);
+        });
+        nodes = output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default();
+    }
+    let heads: Vec<&str> = nodes
+        .iter()
+        .map(|(_, node)| node)
+        .filter(|node| node.role() == egui::accesskit::Role::ColumnHeader)
+        .filter_map(|node| node.label())
+        .collect();
+    assert!(
+        heads.iter().any(|head| head.starts_with("MOSFET: gds (S);")),
+        "{heads:?}"
+    );
 }
 
 #[test]
