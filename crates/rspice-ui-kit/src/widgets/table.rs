@@ -1145,10 +1145,9 @@ impl<'a> DataTable<'a> {
         let given = ui.available_rect_before_wrap();
         let bled = crate::panels::panel_bleed(ui, given);
         if bled != given {
-            let top = given.top() - crate::panels::flush_under_header(ui);
             let mut edge = ui.new_child(
                 egui::UiBuilder::new()
-                    .max_rect(bled.with_min_y(top))
+                    .max_rect(bled)
                     .layout(*ui.layout()),
             );
             let scrolls = ui
@@ -1163,7 +1162,7 @@ impl<'a> DataTable<'a> {
             let response = self.show(&mut edge, row_at);
             let height = edge.min_rect().height();
             ui.advance_cursor_after_rect(Rect::from_min_size(
-                egui::pos2(given.left(), top),
+                given.left_top(),
                 vec2(given.width(), height),
             ));
             crate::panels::end_flush_band(ui);

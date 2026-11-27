@@ -23,11 +23,22 @@ pub(super) const SECTION_HEADER_COLUMN_GAP: f32 = 8.0;
 /// How far a header action's hover fill reaches past its words.
 const ACTION_PAD: Vec2 = Vec2::new(6.0, 3.0);
 
+/// The face a header's metadata is set in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MetaFace {
+    /// A figure, a count or a size, in the monospace face, so figures line
+    /// up from header to header and a count that changes never shifts.
+    Figures,
+    /// Words, "None" or "Engine defaults", in the UI's own face.
+    Words,
+}
+
 /// What one header says.
 #[derive(Clone, Copy)]
 struct Header<'a> {
     title: &'a str,
     meta: Option<&'a str>,
+    meta_face: MetaFace,
     problem: Option<Problem>,
     /// One action at the trailing edge, and whether it can be taken.
     action: Option<(&'a str, bool)>,
@@ -39,6 +50,7 @@ impl<'a> Header<'a> {
         Self {
             title,
             meta: None,
+            meta_face: MetaFace::Figures,
             problem: None,
             action: None,
             explanation: None,
@@ -47,12 +59,28 @@ impl<'a> Header<'a> {
 }
 
 /// A panel section's header: its title as written — sentence case, no letter
-/// tracking — with optional metadata at the trailing edge.
+/// tracking — with optional metadata at the trailing edge: a figure, a count
+/// or a size, in the monospace face. Metadata in words is
+/// [`section_header_words`].
 pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     let _ = header(
         ui,
         Header {
             meta,
+            ..Header::titled(title)
+        },
+    );
+}
+
+/// [`section_header`] whose metadata is words, not a figure — what a section
+/// with no rows holds, "None", or why it has none, "Not recorded" — in the
+/// UI's own face, as words are everywhere else on the panel.
+pub fn section_header_words(ui: &mut Ui, title: &str, words: &str) {
+    let _ = header(
+        ui,
+        Header {
+            meta: Some(words),
+            meta_face: MetaFace::Words,
             ..Header::titled(title)
         },
     );
@@ -222,7 +250,10 @@ fn header(ui: &mut Ui, header: Header<'_>) -> Option<Response> {
 fn paint(ui: &mut Ui, header: Header<'_>) -> Option<Response> {
     let t = Tokens::get(ui.ctx());
     let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let meta_font = match header.meta_face {
+        MetaFace::Figures => theme::mono(tokens::FS_0, FontWeight::Regular),
+        MetaFace::Words => theme::sans(tokens::FS_0, FontWeight::Regular),
+    };
     let action_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let inset = panel_inset(ui);
     let width = ui.available_width().max(1.0);

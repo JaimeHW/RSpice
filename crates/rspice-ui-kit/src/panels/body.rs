@@ -9,11 +9,14 @@
 //! [`panel_bleed`] rather than across their own allocation.
 //!
 //! The rhythm is owned the same way. Inside a body a section header leaves
-//! [`PANEL_SECTION_GAP`] above itself unless it opens the body, and
-//! [`PANEL_HEADER_GAP`] below; rows are [`PANEL_ROW_H`] tall and stack with no
-//! spacing between them; the body closes with one more section gap. A band
-//! that rules its own edges, a table, sits flush: right under a header it
-//! takes the header's gap back, and a header right under it leaves none.
+//! [`PANEL_SECTION_GAP`] above itself unless it opens the body or stands
+//! right under another header, and nothing below: its first row sits on its
+//! band, at the pitch rows stack at. Rows are [`PANEL_ROW_H`] tall and stack
+//! with no spacing between them, so a section with no rows is its header's
+//! band alone. The body closes with one more section gap unless it ends on a
+//! header. A band that rules its own edges, a table, sits flush: right under
+//! a header its top rule lies on the header's band, and a header right under
+//! it leaves none.
 
 use egui::{Rect, Ui, UiBuilder, UiStackInfo, Vec2};
 
@@ -23,8 +26,6 @@ pub const PANEL_INSET: f32 = 10.0;
 /// A panel row's height at compact density: a property row, a note's line, a
 /// problem's line.
 pub const PANEL_ROW_H: f32 = 24.0;
-/// Space between a section header and the first row under it.
-pub const PANEL_HEADER_GAP: f32 = 4.0;
 /// Space between one section's last row and the next section's header, and
 /// between two blocks of one section's body.
 pub const PANEL_SECTION_GAP: f32 = 8.0;
@@ -94,7 +95,9 @@ pub fn panel_body<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
             spacing.text_edit_width = f32::INFINITY;
             let top = ui.cursor().top();
             let inner = add(ui);
-            if ui.cursor().top() > top + 0.5 {
+            // A body that ends on a header ends on its band: the gap would
+            // read as the empty strip of a section with nothing in it.
+            if ui.cursor().top() > top + 0.5 && !under_header(ui) {
                 ui.add_space(PANEL_SECTION_GAP);
             }
             let body = ui.stack().id;
@@ -169,10 +172,11 @@ fn flush_bottom_id(body: egui::Id) -> egui::Id {
 }
 
 /// Space a section header leaves above itself: one section gap, unless it is
-/// the first thing in its body or stands right under a flush band, whose
-/// closing rule its own rule then lies on, so the two read as one hairline.
-/// Outside a body a header leaves none; the surface it sits on owns that
-/// space.
+/// the first thing in its body, stands right under a header whose section
+/// has no rows, whose band it then sits on, or stands right under a flush
+/// band, whose closing rule its own rule then lies on, so the two read as one
+/// hairline. Outside a body a header leaves none; the surface it sits on owns
+/// that space.
 pub(super) fn before_header(ui: &mut Ui) {
     if let Some((_, inner, body)) = enclosing_body(ui) {
         let top = ui.cursor().top();
@@ -181,23 +185,18 @@ pub(super) fn before_header(ui: &mut Ui) {
             .is_some_and(|bottom| (top - bottom).abs() < 0.5);
         if flush {
             ui.add_space(-HAIRLINE);
-        } else if top > inner.top() + 0.5 {
+        } else if top > inner.top() + 0.5 && !under_header(ui) {
             ui.add_space(PANEL_SECTION_GAP);
         }
     }
 }
 
-/// How far a band that rules its own edges reaches up to sit flush under the
-/// section header above it: the header's gap when nothing stands between the
-/// header and the band, and nothing anywhere else.
-pub(crate) fn flush_under_header(ui: &Ui) -> f32 {
-    let header_bottom = enclosing_body(ui)
-        .and_then(|(_, _, body)| ui.data(|data| data.get_temp::<f32>(header_bottom_id(body))));
-    if header_bottom.is_some_and(|bottom| (ui.cursor().top() - bottom).abs() < 0.5) {
-        PANEL_HEADER_GAP
-    } else {
-        0.0
-    }
+/// Whether nothing stands between the cursor and the section header above
+/// it, in the body around `ui`.
+fn under_header(ui: &Ui) -> bool {
+    enclosing_body(ui)
+        .and_then(|(_, _, body)| ui.data(|data| data.get_temp::<f32>(header_bottom_id(body))))
+        .is_some_and(|bottom| (ui.cursor().top() - bottom).abs() < 0.5)
 }
 
 /// Marks the cursor as where a band that rules its own edges ends, so a
@@ -209,24 +208,21 @@ pub(crate) fn end_flush_band(ui: &mut Ui) {
     }
 }
 
-/// Space a section header leaves under itself, recorded so the body's first
-/// block can tell that it is first.
+/// Where a section header ends, recorded so the body's first block can tell
+/// that it is first, and the next header that its section has no rows.
 pub(super) fn after_header(ui: &mut Ui) {
     let Some((_, _, body)) = enclosing_body(ui) else {
         return;
     };
-    ui.add_space(PANEL_HEADER_GAP);
     let bottom = ui.cursor().top();
     ui.data_mut(|data| data.insert_temp(header_bottom_id(body), bottom));
 }
 
 /// One section gap between two blocks of the same section body — a list of
 /// rows and the button row under it, say. The block right under a header
-/// takes none: the header's own gap already sits above it.
+/// takes none: it sits on the header's band, as a row does.
 pub fn section_block_gap(ui: &mut Ui) {
-    let header_bottom = enclosing_body(ui)
-        .and_then(|(_, _, body)| ui.data(|data| data.get_temp::<f32>(header_bottom_id(body))));
-    if header_bottom.is_none_or(|bottom| ui.cursor().top() > bottom + 0.5) {
+    if !under_header(ui) {
         ui.add_space(PANEL_SECTION_GAP);
     }
 }

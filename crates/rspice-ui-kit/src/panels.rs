@@ -10,16 +10,16 @@ pub mod inspector;
 mod section;
 
 pub use body::{
-    PANEL_HEADER_GAP, PANEL_INSET, PANEL_ROW_H, PANEL_SECTION_GAP, panel_bleed, panel_body,
-    panel_inset, property_row_height, section_block_gap,
+    PANEL_INSET, PANEL_ROW_H, PANEL_SECTION_GAP, panel_bleed, panel_body, panel_inset,
+    property_row_height, section_block_gap,
 };
-pub(crate) use body::{end_flush_band, flush_under_header};
+pub(crate) use body::end_flush_band;
 pub use captioned::{
     PropertyRowCaption, property_row_captioned, property_row_flagged, property_row_input_captioned,
 };
 pub use section::{
     code_inspector_section, section_header, section_header_action, section_header_explained,
-    subsection_header,
+    section_header_words, subsection_header,
 };
 
 use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
