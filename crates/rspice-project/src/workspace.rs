@@ -195,6 +195,17 @@ pub struct ProjectWorkspace {
     /// belong to no document.
     #[serde(default, skip)]
     pub visualization_documents_modified: HashSet<ResultDocumentId>,
+    /// When each result document last changed, in milliseconds since the
+    /// Unix epoch, by its identity: what Open result document dates and
+    /// orders the documents by. The project takes no clock; the application
+    /// stamps the changes it made with
+    /// [`Self::stamp_visualization_document_changes`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub visualization_documents_changed_at: BTreeMap<uuid::Uuid, u64>,
+    /// The result documents changed since the application last stamped
+    /// their changes.
+    #[serde(default, skip)]
+    pub visualization_documents_unstamped: HashSet<ResultDocumentId>,
     /// Runtime dirty projection for committed per-document page setups.
     #[serde(default, skip)]
     pub hardcopy_setups_dirty: bool,
@@ -252,6 +263,8 @@ impl Default for ProjectWorkspace {
             report_documents_dirty: false,
             visualization_documents_dirty: false,
             visualization_documents_modified: HashSet::new(),
+            visualization_documents_changed_at: BTreeMap::new(),
+            visualization_documents_unstamped: HashSet::new(),
             hardcopy_setups_dirty: false,
             hardcopy_receipts_dirty: false,
             project_print_mappings_dirty: false,

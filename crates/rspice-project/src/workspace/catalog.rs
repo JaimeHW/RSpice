@@ -373,6 +373,7 @@ impl ProjectWorkspace {
         self.visualization_documents.insert(at, document);
         self.visualization_documents_dirty = true;
         self.visualization_documents_modified.insert(document_id);
+        self.visualization_documents_unstamped.insert(document_id);
         Ok(document_id)
     }
 
@@ -402,7 +403,34 @@ impl ProjectWorkspace {
         })?;
         self.visualization_documents_dirty = true;
         self.visualization_documents_modified.insert(document_id);
+        self.visualization_documents_unstamped.insert(document_id);
         Ok(())
+    }
+
+    /// Stamp every result document changed since the last stamp as
+    /// changed at `unix_ms`, and forget the times of the documents the
+    /// project no longer holds.
+    pub fn stamp_visualization_document_changes(&mut self, unix_ms: u64) {
+        for document_id in self.visualization_documents_unstamped.drain() {
+            self.visualization_documents_changed_at
+                .insert(document_id.as_uuid(), unix_ms);
+        }
+        let held = self
+            .visualization_documents
+            .iter()
+            .map(|document| document.id().as_uuid())
+            .collect::<HashSet<_>>();
+        self.visualization_documents_changed_at
+            .retain(|document_id, _| held.contains(document_id));
+    }
+
+    /// When the result document `document_id` last changed, in milliseconds
+    /// since the Unix epoch, if its change was stamped.
+    #[must_use]
+    pub fn visualization_document_changed_at(&self, document_id: ResultDocumentId) -> Option<u64> {
+        self.visualization_documents_changed_at
+            .get(&document_id.as_uuid())
+            .copied()
     }
 
     #[must_use]
@@ -440,6 +468,7 @@ impl ProjectWorkspace {
             })?;
         self.visualization_documents_dirty = true;
         self.visualization_documents_modified.insert(document_id);
+        self.visualization_documents_unstamped.insert(document_id);
         Ok(receipt)
     }
 
@@ -470,6 +499,7 @@ impl ProjectWorkspace {
             })?;
         self.visualization_documents_dirty = true;
         self.visualization_documents_modified.insert(document_id);
+        self.visualization_documents_unstamped.insert(document_id);
         Ok(committed)
     }
 
@@ -515,6 +545,7 @@ impl ProjectWorkspace {
             })?;
         self.visualization_documents_dirty = true;
         self.visualization_documents_modified.insert(document_id);
+        self.visualization_documents_unstamped.insert(document_id);
         Ok(taken)
     }
 

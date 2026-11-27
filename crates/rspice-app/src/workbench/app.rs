@@ -474,6 +474,17 @@ impl RSpiceApp {
 
     pub(crate) fn prepare_frame(&mut self, ctx: &Context) {
         self.state.drain_notices(ctx);
+        // A result document changed last frame takes the time it changed,
+        // which Open result document dates and orders it by. The time sits
+        // beside the documents and changes nothing derived from them.
+        let content = &mut self.state.model.workspace.content;
+        if !content.visualization_documents_unstamped.is_empty()
+            && let Ok(now) = rspice_app_state::time_compat::checked_unix_time_ms()
+        {
+            content
+                .unstamped_mut()
+                .stamp_visualization_document_changes(now);
+        }
         self.state.reconcile_schematic_drag(ctx, false);
         let initializing_frame = self.first_frame;
         if initializing_frame {

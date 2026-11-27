@@ -63,6 +63,8 @@ impl ProjectFile {
                 self.workspace.report_documents = working.workspace.report_documents.clone();
                 self.workspace.visualization_documents =
                     working.workspace.visualization_documents.clone();
+                self.workspace.visualization_documents_changed_at =
+                    working.workspace.visualization_documents_changed_at.clone();
             }
             ProjectDocumentId::StimulusLibrary => {
                 self.workspace.stimulus_library = working.workspace.stimulus_library.clone();
