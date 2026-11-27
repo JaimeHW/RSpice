@@ -1066,6 +1066,11 @@ fn statistics_rows(
         run.push_str(&format!(" \u{b7} {} diverged", plan.failures));
     }
 
+    let span = |low: f64, high: f64| format!("{} \u{2026} {}", value(low), value(high));
+    let whiskers = span(statistics.whisker_low, statistics.whisker_high);
+    // With nothing past the whiskers the range is the whiskers again.
+    let range =
+        Some(span(statistics.minimum, statistics.maximum)).filter(|range| *range != whiskers);
     let mut rows = vec![
         (
             "Trials",
@@ -1078,33 +1083,21 @@ fn statistics_rows(
         ("Q1", value(statistics.q1), false),
         // Q3 − Q1, with both of them one row up.
         ("Q3", value(statistics.q3), false),
-        (
-            "Whiskers",
-            format!(
-                "{} \u{2026} {}",
-                value(statistics.whisker_low),
-                value(statistics.whisker_high)
-            ),
-            false,
-        ),
+        ("Whiskers", whiskers, false),
         ("Mean", value(statistics.mean), false),
         (
             "Std dev",
             population::std_dev(&column.sorted).map_or_else(|| "\u{2014}".to_owned(), value),
             false,
         ),
-        (
-            "Range",
-            format!(
-                "{} \u{2026} {}",
-                value(statistics.minimum),
-                value(statistics.maximum)
-            ),
-            false,
-        ),
+    ];
+    if let Some(range) = range {
+        rows.push(("Range", range, false));
+    }
+    rows.extend([
         ("Outliers", outliers.to_string(), false),
         ("Yield", yield_row, true),
-    ];
+    ]);
     if let Some(interval) = interval {
         rows.push(("95 % CI (Wilson)", interval, false));
     }
