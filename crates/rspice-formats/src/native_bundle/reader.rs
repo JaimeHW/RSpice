@@ -29,6 +29,17 @@ struct NativeBundleManifest {
     schema: String,
     dataset_member: String,
     dataset_sha256: String,
+    /// Every further member of a `.step` sweep or Monte Carlo study the bundle holds, in family
+    /// order: `dataset_member` is the first.
+    #[serde(default)]
+    family: Vec<NativeBundleFamilyEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeBundleFamilyEntry {
+    dataset_member: String,
+    dataset_sha256: String,
 }
 
 /// Versioned file fields, retained internally until waveform interpretation.
@@ -96,9 +107,18 @@ pub struct NativeBundleRead {
     /// The member of a `.step` sweep or Monte Carlo study the dataset is, when the bundle names
     /// one.
     pub member: Option<NativeBundleMember>,
-    /// The archive's members besides the manifest and the dataset, in name order: what a later
+    /// Every further member of the family a bundle of every member holds, in family order.
+    pub family: Vec<NativeBundleFamilyRead>,
+    /// The archive's members besides the manifest and the datasets, in name order: what a later
     /// version wrote that this one does not read.
     pub unread_members: Vec<String>,
+}
+
+/// One further member of a bundle of every member of a family.
+#[derive(Debug)]
+pub struct NativeBundleFamilyRead {
+    pub dataset: DecodedNumericDataset,
+    pub member: Option<NativeBundleMember>,
 }
 
 /// [`decode_native_bundle_with_member`], with the members the bundle holds that this version
@@ -174,27 +194,71 @@ pub fn read_native_bundle(
             manifest.schema
         )));
     }
-    if manifest.dataset_member != "dataset.json" {
+    if manifest.dataset_member != "dataset.json"
+        || manifest
+            .family
+            .iter()
+            .any(|entry| entry.dataset_member == "dataset.json")
+    {
         return Err(NativeBundleError::InvalidData(
             "manifest must bind the canonical dataset.json member".into(),
         ));
     }
     let mut unread_members = names
         .into_iter()
-        .filter(|name| name != "manifest.json" && *name != manifest.dataset_member)
+        .filter(|name| {
+            name != "manifest.json"
+                && *name != manifest.dataset_member
+                && !manifest
+                    .family
+                    .iter()
+                    .any(|entry| entry.dataset_member == *name)
+        })
         .collect::<Vec<_>>();
     unread_members.sort();
-    let dataset_bytes = read_zip_member(
+    let (dataset, member) = read_dataset(
         &mut archive,
         &manifest.dataset_member,
-        limits.max_member_bytes,
+        &manifest.dataset_sha256,
+        limits,
     )?;
+    let mut family = Vec::with_capacity(manifest.family.len());
+    for entry in &manifest.family {
+        let (dataset, member) = read_dataset(
+            &mut archive,
+            &entry.dataset_member,
+            &entry.dataset_sha256,
+            limits,
+        )?;
+        family.push(NativeBundleFamilyRead { dataset, member });
+    }
+    Ok(NativeBundleRead {
+        dataset,
+        member,
+        family,
+        unread_members,
+    })
+}
+
+/// The dataset `name` of `archive`, checked against the digest the manifest binds it to.
+fn read_dataset(
+    archive: &mut zip::ZipArchive<Cursor<&[u8]>>,
+    name: &str,
+    sha256: &str,
+    limits: NativeBundleReadLimits,
+) -> Result<(DecodedNumericDataset, Option<NativeBundleMember>), NativeBundleError> {
+    if name.starts_with('/') || name.contains("..") || name.contains('\\') {
+        return Err(NativeBundleError::InvalidData(format!(
+            "unsafe or unsupported archive member '{name}'"
+        )));
+    }
+    let dataset_bytes = read_zip_member(archive, name, limits.max_member_bytes)?;
     use sha2::Digest as _;
     let digest = format!("{:x}", sha2::Sha256::digest(&dataset_bytes));
-    if !manifest.dataset_sha256.eq_ignore_ascii_case(&digest) {
-        return Err(NativeBundleError::InvalidData(
-            "dataset.json SHA-256 does not match the manifest's dataset_sha256".into(),
-        ));
+    if !sha256.eq_ignore_ascii_case(&digest) {
+        return Err(NativeBundleError::InvalidData(format!(
+            "{name} SHA-256 does not match the manifest's dataset_sha256"
+        )));
     }
     admission::check(&dataset_bytes, limits)?;
     let dataset: NativeDataset =
@@ -289,11 +353,7 @@ pub fn read_native_bundle(
     decoded
         .normalize_coordinate_unit()
         .map_err(NativeBundleError::InvalidData)?;
-    Ok(NativeBundleRead {
-        dataset: decoded,
-        member: dataset.member,
-        unread_members,
-    })
+    Ok((decoded, dataset.member))
 }
 
 pub(super) fn read_zip_member(

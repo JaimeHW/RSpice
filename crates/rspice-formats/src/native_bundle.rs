@@ -12,7 +12,7 @@ mod writer;
 use std::borrow::Cow;
 
 pub use reader::{
-    NativeBundleRead, NativeBundleReadLimits, decode_native_bundle,
+    NativeBundleFamilyRead, NativeBundleRead, NativeBundleReadLimits, decode_native_bundle,
     decode_native_bundle_with_member, read_native_bundle,
 };
 pub use writer::encode_native_bundle;
