@@ -1145,11 +1145,7 @@ impl<'a> DataTable<'a> {
         let given = ui.available_rect_before_wrap();
         let bled = crate::panels::panel_bleed(ui, given);
         if bled != given {
-            let mut edge = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(bled)
-                    .layout(*ui.layout()),
-            );
+            let mut edge = ui.new_child(egui::UiBuilder::new().max_rect(bled).layout(*ui.layout()));
             let scrolls = ui
                 .stack()
                 .iter()

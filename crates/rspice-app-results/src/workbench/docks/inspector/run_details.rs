@@ -973,7 +973,11 @@ fn point_words(
     let point = run
         .facts
         .as_ref()
-        .zip(analysis.provenance().and_then(|provenance| provenance.pvt_point()))
+        .zip(
+            analysis
+                .provenance()
+                .and_then(|provenance| provenance.pvt_point()),
+        )
         .and_then(|(facts, point)| facts.point_words(point));
     match (member, point) {
         (Some(member), Some(point)) => Some(format!("{member}, {point}")),

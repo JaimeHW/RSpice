@@ -132,23 +132,19 @@ fn add_design_variable(
     let plan = state.model.sim_setup.stable_analysis_plan().unwrap().id();
     let content = &mut state.model.workspace.content;
     content.migrate_active_plan_data(plan);
-    content
-        .plan_data_mut(plan)
-        .unwrap()
-        .design_variables
-        .push(
-            DesignVariable::new(
-                name.to_owned(),
-                value.to_owned(),
-                DesignVariableQuantity::Dimensionless,
-                DesignVariableScope::Testbench,
-                String::new(),
-                None,
-                DesignVariableSweepEligibility::NestedSweepAndOptimization,
-                DesignVariableOverridePolicy::ExplicitTestLocalOverride,
-            )
-            .unwrap(),
-        );
+    content.plan_data_mut(plan).unwrap().design_variables.push(
+        DesignVariable::new(
+            name.to_owned(),
+            value.to_owned(),
+            DesignVariableQuantity::Dimensionless,
+            DesignVariableScope::Testbench,
+            String::new(),
+            None,
+            DesignVariableSweepEligibility::NestedSweepAndOptimization,
+            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+        )
+        .unwrap(),
+    );
 }
 
 /// The divider's plan run at 85 °C, with two design variables and a

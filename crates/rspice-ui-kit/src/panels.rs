@@ -9,11 +9,11 @@ mod captioned;
 pub mod inspector;
 mod section;
 
+pub(crate) use body::end_flush_band;
 pub use body::{
     PANEL_INSET, PANEL_ROW_H, PANEL_SECTION_GAP, panel_bleed, panel_body, panel_inset,
     property_row_height, section_block_gap,
 };
-pub(crate) use body::end_flush_band;
 pub use captioned::{
     PropertyRowCaption, property_row_captioned, property_row_flagged, property_row_input_captioned,
 };
