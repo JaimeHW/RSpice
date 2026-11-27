@@ -10,7 +10,8 @@ use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
     ResultImportSource, RetainedTrace, SimulationRunLifecycle, SimulationRunProvenance,
 };
-use crate::ui::tokens::Tokens;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::documents::result_document::import::{
     RESULT_IMPORT_PREVIEW_ROWS, ResultImportDialogState, ResultImportJob, ResultImportPlots,
@@ -26,7 +27,7 @@ use rspice_formats::spice_raw::streamed_import::{
 };
 use rspice_results::number_format::fmt_column_reading;
 use rspice_results::provenance::AnalysisResultFamilyMember;
-use rspice_ui_kit::panels::{Fact, PANEL_INSET, fact_rows, panel_body};
+use rspice_ui_kit::panels::{Fact, PANEL_INSET, PANEL_SECTION_H, fact_rows, panel_body};
 use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, LineHeights};
 use rspice_ui_kit::widgets::{
     Button, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogHintTone, DialogSize,
@@ -246,15 +247,27 @@ const RESULT_IMPORT_PURPOSE: &str =
 const RESULT_IMPORT_PRIMARIES: [&str; 3] = ["Map signals", "Validate import", "Import"];
 /// The review's height on every step: its pages whole, under the kit's
 /// header and over its footer. Detect and Validate state a source's facts
-/// and a note over the source preview's [`RESULT_IMPORT_PREVIEW_ROWS`] rows;
-/// Map its two mapping rows and [`RESULT_IMPORT_SIGNAL_ROWS`] signals over
-/// the same preview. One height, so a step on a screen that holds it scrolls
-/// only for a source with more to say than one analysis, and the footer never
+/// and a note, Map its two mapping rows and [`RESULT_IMPORT_SIGNAL_ROWS`]
+/// signals, each over the source preview, which takes the rows the page
+/// leaves it. One height, so a step on a screen that holds it scrolls only
+/// for a source with more to say than one analysis, and the footer never
 /// moves from step to step. A screen too short for it holds it to the screen
-/// less the kit's margin, its body scrolling and its footer pinned.
+/// less the kit's margin, the preview showing fewer rows.
 const RESULT_IMPORT_HEIGHT: f32 = 720.0;
 /// How many signals the Map step lists before its list scrolls.
 const RESULT_IMPORT_SIGNAL_ROWS: f32 = 5.0;
+/// The densest row a theme sets a grid in, the preview's included.
+const RESULT_IMPORT_DENSEST_ROW: f32 = 20.0;
+// The parsed rows the review keeps for its preview are as many as its whole
+// height holds in the densest rows, so no page is ever short of rows to fill.
+const _: () =
+    assert!(RESULT_IMPORT_PREVIEW_ROWS as f32 * RESULT_IMPORT_DENSEST_ROW >= RESULT_IMPORT_HEIGHT);
+/// The first step of a source's read, which the strip names before the job
+/// reports it.
+const RESULT_IMPORT_READ_STEP: &str = "Reading";
+/// The step of the import that builds and checks each analysis before the
+/// run is added: its only one.
+const RESULT_IMPORT_CHECK_STEP: &str = "Checking";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedResultDataset {
@@ -426,7 +439,7 @@ fn read_native_file(path: &Path, job: &JobContext) -> Result<Vec<u8>, JobStop> {
                 path.display()
             )
         })?;
-    job.step("Reading", size);
+    job.step(RESULT_IMPORT_READ_STEP, size);
     loop {
         job.check()?;
         let read = (&mut file)
@@ -720,6 +733,7 @@ fn open_review_draft(state: &mut ResultsParts<'_>, staged: StagedResultImport) {
         source_format_id: parsed.source_format.canonical_id().to_owned(),
         delimiter: parsed.delimiter,
         analysis_type: parsed.analysis_type,
+        inferred_analysis_type: parsed.analysis_type,
         coordinate_name: parsed.coordinate_name,
         coordinate_unit: parsed.coordinate_unit,
         sample_count: parsed.sample_count,
@@ -833,7 +847,7 @@ fn parsed_result_from_draft(
         waveforms,
         family_metadata: draft.family_metadata.clone(),
         delimiter: draft.delimiter,
-        notes: draft.notes.clone(),
+        notes: result_import_draft_notes(draft),
         event_payload: draft.event_payload.clone(),
         event_dump: draft.event_dump.clone(),
         plots: draft.plots.clone(),
@@ -879,9 +893,8 @@ pub(crate) fn start_result_import_commit(state: &mut ResultsParts<'_>) -> Result
     let parsed = parsed_result_from_draft(state.result_import)?;
     let source_name = state.result_import.source_name.clone();
     let job = ResultsJob::start("result-import-commit", move |job| {
-        job.step("Checking", 0);
         job.check()?;
-        Ok(keep_reviewed_draft(&source_name, parsed)?)
+        Ok(keep_reviewed_draft(job, &source_name, parsed)?)
     });
     state.result_import.job = Some(ResultImportJob::Committing(job));
     Ok(())
@@ -892,7 +905,7 @@ fn commit_parsed_result_dataset(
     source_name: &str,
     parsed: ParsedResultDataset,
 ) -> Result<(), String> {
-    let kept = keep_reviewed_draft(source_name, parsed)?;
+    let kept = keep_reviewed_draft(&JobContext::detached(), source_name, parsed)?;
     insert_kept_import(state, kept)
 }
 
@@ -909,12 +922,15 @@ pub struct KeptResultImport {
     notes: Vec<String>,
 }
 
-/// Build and check the analyses `parsed` becomes. Reads no history, so it
-/// runs off the UI thread.
+/// Build and check the analyses `parsed` becomes, telling `job` each one
+/// done of all it holds. Reads no history, so it runs off the UI thread.
 fn keep_reviewed_draft(
+    job: &JobContext,
     source_name: &str,
     parsed: ParsedResultDataset,
 ) -> Result<KeptResultImport, String> {
+    let further_count = parsed.plots.as_ref().map_or(0, |plots| plots.further.len());
+    job.step(RESULT_IMPORT_CHECK_STEP, 1 + further_count as u64);
     let analysis_type = parsed.analysis_type;
     let sample_count = parsed.sample_count;
     let signal_count = parsed.waveforms.len();
@@ -941,6 +957,7 @@ fn keep_reviewed_draft(
     }
     reviewed.validate_retained_evidence()?;
     analyses.push(reviewed);
+    job.done(analyses.len() as u64);
     // A source of several analyses lands as one run that holds them all, the
     // reviewed one first and the rest in source order, each as written.
     for plot in parsed.plots.iter().flat_map(|plots| &plots.further) {
@@ -958,6 +975,7 @@ fn keep_reviewed_draft(
         .retained(source_name, parsed.source_format, &mut bus_count)?;
         further.validate_retained_evidence()?;
         analyses.push(further);
+        job.done(analyses.len() as u64);
     }
     Ok(KeptResultImport {
         source_name: source_name.to_owned(),
@@ -1232,13 +1250,16 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
             });
             return;
         }
+        // While the run is added the strip says what is happening, and the
+        // page's sentence of what pressing on would do gives way to it.
+        let busy = job.is_some();
         match draft.stage {
             ResultImportStage::Detect => {
-                choose_log = result_import_detect_page(ui, &draft, digits);
+                choose_log = result_import_detect_page(ui, &draft, digits, busy);
             }
             ResultImportStage::Map => result_import_map_page(ui, &mut draft, digits),
             ResultImportStage::Validate => {
-                choose_log = result_import_validate_page(ui, &draft, digits);
+                choose_log = result_import_validate_page(ui, &draft, digits, busy);
             }
         }
     });
@@ -1307,16 +1328,21 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut Results
 }
 
 /// What the strip over the footer says while the draft's job runs: what it
-/// is doing to which file, and how far it has got.
+/// is doing to which file, and how far it has got. Until the job reports its
+/// first step, the strip names that step: a read's size is the job's to
+/// learn, but the import's work is its analyses, known before it starts, so
+/// none of it done reads 0%.
 fn result_import_progress(source_name: &str, job: &ResultImportJob) -> (String, String) {
     let progress = job.state();
-    let step = match &progress {
-        JobState::Running { step, .. } if !step.is_empty() => step.as_str(),
-        _ => "Starting",
-    };
-    let detail = match progress.fraction() {
-        Some(fraction) => format!("{step} \u{00b7} {:.0}%", fraction * 100.0),
-        None => step.to_owned(),
+    let detail = match (&progress, progress.fraction()) {
+        (JobState::Running { step, .. }, Some(fraction)) if !step.is_empty() => {
+            format!("{step} \u{00b7} {:.0}%", fraction * 100.0)
+        }
+        (JobState::Running { step, .. }, None) if !step.is_empty() => step.clone(),
+        _ => match job {
+            ResultImportJob::Reading(_) => RESULT_IMPORT_READ_STEP.to_owned(),
+            ResultImportJob::Committing(_) => format!("{RESULT_IMPORT_CHECK_STEP} \u{00b7} 0%"),
+        },
     };
     let title = match job {
         ResultImportJob::Reading(_) => format!("Opening {source_name}"),
@@ -1418,10 +1444,15 @@ fn result_import_facts(ui: &mut egui::Ui, facts: &[(&str, String)]) {
     fact_rows(ui, &facts);
 }
 
-/// A line of words on the panel rhythm, wrapping across the body.
+/// A line of words on the panel rhythm, wrapping across the body, in the
+/// face and size the fact rows above it set their values in.
 fn result_import_line(ui: &mut egui::Ui, text: &str) {
     ui.add_space(4.0);
-    ui.label(egui::RichText::new(text).color(Tokens::get(ui.ctx()).color.text));
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .color(Tokens::get(ui.ctx()).color.text),
+    );
 }
 
 fn result_import_stage_header(ui: &mut egui::Ui, active: ResultImportStage) {
@@ -1498,6 +1529,7 @@ fn result_import_detect_page(
     ui: &mut egui::Ui,
     draft: &ResultImportDialogState,
     digits: usize,
+    busy: bool,
 ) -> bool {
     band_header(ui, "Detected source", None);
     let mut facts = vec![
@@ -1505,7 +1537,7 @@ fn result_import_detect_page(
         ("Format", result_import_format_name(draft)),
         (
             "Inferred domain",
-            result_import_domain_name(draft.analysis_type).to_owned(),
+            result_import_domain_name(draft.inferred_analysis_type).to_owned(),
         ),
         ("Coordinate", draft.coordinate_name.clone()),
         ("Coordinate unit", result_import_coordinate_unit_fact(draft)),
@@ -1516,7 +1548,9 @@ fn result_import_detect_page(
     let choose_log = result_import_block(ui, |ui| {
         result_import_facts(ui, &facts);
         let choose_log = result_import_notes(ui, draft);
-        result_import_line(ui, "Nothing is added until you import.");
+        if !busy {
+            result_import_line(ui, "Nothing is added until you import.");
+        }
         choose_log
     });
     result_import_preview(ui, draft, digits);
@@ -1527,10 +1561,11 @@ fn result_import_detect_page(
 /// kit's warning mark, and, when a stepped rawfile's runs are numbered for
 /// want of a log, the button that asks for it. True when it was pressed.
 fn result_import_notes(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bool {
-    if !draft.notes.is_empty() {
+    let notes = result_import_draft_notes(draft);
+    if !notes.is_empty() {
         ui.add_space(4.0);
     }
-    for note in &draft.notes {
+    for note in &notes {
         problem_line(ui, Problem::Warning, note);
     }
     let unnamed = unnamed_result_import_runs(draft) > 0;
@@ -1538,6 +1573,49 @@ fn result_import_notes(ui: &mut egui::Ui, draft: &ResultImportDialogState) -> bo
         ui.add_space(4.0);
     }
     unnamed && Button::new("Choose log\u{2026}").show(ui).clicked()
+}
+
+/// Every note the draft carries, how its coordinate is read first: what the
+/// review shows and the Console repeats when the run is added.
+fn result_import_draft_notes(draft: &ResultImportDialogState) -> Vec<String> {
+    result_import_coordinate_note(draft)
+        .into_iter()
+        .chain(draft.notes.iter().cloned())
+        .collect()
+}
+
+/// How a coordinate that states no unit is read, in the domain the review
+/// reads it in now, so the note says what the coordinate unit fact does
+/// whichever domain the Map step chose: time in seconds, frequency in hertz,
+/// or, when a delimited file's first column read as neither by its name and
+/// the review still reads it so, a DC sweep. None for a coordinate that
+/// states its unit.
+fn result_import_coordinate_note(draft: &ResultImportDialogState) -> Option<String> {
+    match result_import_coordinate_unit(draft) {
+        Some((_, false)) => None,
+        Some((unit, true)) => Some(format!(
+            "The {}coordinate states no unit, so it is read as {}.",
+            match draft.coordinate_name.trim() {
+                "" => String::new(),
+                name => format!("'{name}' "),
+            },
+            if unit == "s" {
+                "time in seconds"
+            } else {
+                "frequency in hertz"
+            }
+        )),
+        None => (draft.analysis_type == AnalysisType::DcSweep
+            && draft.inferred_analysis_type == AnalysisType::DcSweep
+            && matches!(
+                ResultImportFormat::from_canonical_id(&draft.source_format_id),
+                Some(ResultImportFormat::CsvRfc4180 | ResultImportFormat::Tsv)
+            ))
+        .then(|| {
+            "The file's first column is neither time nor frequency by name or unit, so the file is read as a DC sweep over it."
+                .to_owned()
+        }),
+    }
 }
 
 /// The domains a source that states none can be read in, as the Map step
@@ -1657,6 +1735,7 @@ fn result_import_validate_page(
     ui: &mut egui::Ui,
     draft: &ResultImportDialogState,
     digits: usize,
+    busy: bool,
 ) -> bool {
     band_header(ui, "Validate import", None);
     let selected = draft
@@ -1686,7 +1765,7 @@ fn result_import_validate_page(
         let choose_log = result_import_notes(ui, draft);
         // A refusal is the footer's, beside the Import it holds back. Being
         // ready is the absence of a problem, said in plain words.
-        if parsed_result_from_draft(draft).is_ok() {
+        if !busy && parsed_result_from_draft(draft).is_ok() {
             let analyses = draft
                 .plots
                 .as_deref()
@@ -1737,8 +1816,14 @@ fn result_import_signal_label(waveform: &RetainedTrace) -> String {
 /// band, each value a reading at the reader's significant digits with its
 /// unit's prefix, as every other results table reads them. The band says
 /// how much of the source the rows are.
+///
+/// The preview takes the rows that fit between the page above it and the
+/// body's end, so no bare band is left under it and the body does not
+/// scroll. The dialog's height is fixed, so its body ends at one place on
+/// every frame whatever the page holds; the page above is laid out by now,
+/// on this frame. Nothing is taken from a frame before, so the count cannot
+/// chase itself.
 fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState, digits: usize) {
-    const MAX_PREVIEW_ROWS: usize = RESULT_IMPORT_PREVIEW_ROWS;
     const MAX_PREVIEW_SIGNALS: usize = 8;
 
     let facts = sample_facts_of(draft);
@@ -1762,11 +1847,12 @@ fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState, dig
         return;
     }
 
-    let rows = included[0]
-        .1
-        .len()
-        .min(draft.sample_count.max(1))
-        .min(MAX_PREVIEW_ROWS);
+    let lines = LineHeights::grid(&Tokens::get(ui.ctx()));
+    let fit = Dialog::body_fill_floor(ui).map_or(usize::MAX, |floor| {
+        let room = floor - ui.cursor().top() - PANEL_SECTION_H - lines.head;
+        (room / lines.row + 1e-3).floor().max(1.0) as usize
+    });
+    let rows = included[0].1.len().min(draft.sample_count.max(1)).min(fit);
     let selected = draft
         .selected_signals
         .iter()
@@ -1969,20 +2055,9 @@ fn parse_delimited_result_dataset(
         waveform.unit = unit;
         waveforms.push(waveform);
     }
-    // A coordinate that states no unit was read by its name alone, and the review says so.
-    let coordinate_name = &headers[0].name;
-    let notes = match (headers[0].canonical_unit(), analysis_type) {
-        (Some(_), _) => Vec::new(),
-        (None, AnalysisType::Transient) => vec![format!(
-            "The '{coordinate_name}' column states no unit, so it is read as time in seconds."
-        )],
-        (None, AnalysisType::Ac) => vec![format!(
-            "The '{coordinate_name}' column states no unit, so it is read as frequency in hertz."
-        )],
-        (None, _) => vec![format!(
-            "The '{coordinate_name}' column is neither time nor frequency by name or unit, so the file is read as a DC sweep over it."
-        )],
-    };
+    // A coordinate that states no unit is read by its name alone. The review
+    // says how, in whichever domain it reads the file in by then, and so does
+    // the Console when the run is added.
     Ok(ParsedResultDataset {
         source_format: if delimiter == b'\t' {
             ResultImportFormat::Tsv
@@ -1996,7 +2071,7 @@ fn parse_delimited_result_dataset(
         waveforms,
         family_metadata: None,
         delimiter,
-        notes,
+        notes: Vec::new(),
         event_payload: None,
         event_dump: None,
         plots: None,
@@ -2380,27 +2455,124 @@ mod tests {
         }
     }
 
+    /// The import states its work as the analyses it checks, so the strip
+    /// reads a share of them done while the run is added; a read is named by
+    /// its first step until the job learns its size. Both read "Starting"
+    /// until the job reported, and the import reported no total at all.
+    #[test]
+    fn the_strip_names_each_job_by_its_step_and_the_import_by_its_share() {
+        let mut state = staged_review();
+        let context = JobContext::detached();
+        let parsed = parsed_result_from_draft(state.results_parts().result_import)
+            .expect("the draft commits");
+        keep_reviewed_draft(&context, "browser-import.csv", parsed).expect("the import checks");
+        assert_eq!(
+            context.reported(),
+            (RESULT_IMPORT_CHECK_STEP.to_owned(), 1, 1),
+            "one analysis checked of one"
+        );
+
+        crate::workbench::results_job::hold_jobs_for_tests(true);
+        let reading = ResultsJob::start("result-import-test", |_| {
+            Err::<StagedResultImport, _>(JobStop::Cancelled)
+        });
+        crate::workbench::results_job::hold_jobs_for_tests(false);
+        let job = ResultImportJob::Reading(reading);
+        assert_eq!(
+            result_import_progress("scope.csv", &job),
+            (
+                "Opening scope.csv".to_owned(),
+                RESULT_IMPORT_READ_STEP.to_owned()
+            )
+        );
+        job.cancel();
+    }
+
+    /// The source preview takes the rows the body leaves it on every step,
+    /// counted on the frame that draws it from the dialog's fixed height: the
+    /// same count from the review's first frame on, the frame it is laid out
+    /// unseen included, and more rows than the eight it held, which left a
+    /// bare band under it.
+    #[test]
+    fn the_preview_fills_the_body_from_the_review_s_first_frame() {
+        for stage in [
+            ResultImportStage::Detect,
+            ResultImportStage::Map,
+            ResultImportStage::Validate,
+        ] {
+            let mut state = staged_review();
+            state.results_parts().result_import.stage = stage;
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let counts = (0..4)
+                .map(|_| {
+                    frame_nodes(&ctx, &mut state).iter().find_map(|node| {
+                        let band = node.label().or(node.value())?;
+                        let rows = band.strip_prefix("Source preview, first ")?;
+                        rows.strip_suffix(" of 400 rows")?.parse::<usize>().ok()
+                    })
+                })
+                .collect::<Vec<_>>();
+            let first = counts[0].unwrap_or_else(|| panic!("{stage:?} drew no preview band"));
+            assert!(
+                counts.iter().all(|count| *count == Some(first)),
+                "{stage:?} counted {counts:?}"
+            );
+            assert!(first > 8, "{stage:?} left the preview {first} rows");
+        }
+    }
+
+    /// Whether a node the frame published says `text`, as its name or, for
+    /// words on the page, its value.
+    fn says(nodes: &[egui::accesskit::Node], text: &str) -> bool {
+        nodes
+            .iter()
+            .any(|node| node.label() == Some(text) || node.value() == Some(text))
+    }
+
     /// While the run is added the review stays up where it stood, the strip
     /// over its footer saying what it is doing beside a live Cancel, with
     /// nothing else to press; it closes on the frame that adds the run. The
-    /// progress was a window of its own, which replaced the review.
+    /// progress was a window of its own, which replaced the review. The
+    /// strip names the import's step from the frame it starts, a share of it
+    /// done, and the page's sentence of what Import would do gives way to it.
     #[test]
     fn the_review_stays_up_over_the_import_until_the_run_is_added() {
+        const READY: &str = "Ready to import: it adds one run and opens it in Results.";
         let mut state = staged_review();
         state.results_parts().result_import.stage = ResultImportStage::Validate;
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let labels = [RESULT_IMPORT_TITLE, "Cancel", "Back", "Import"];
-        let mut reviewed = Vec::new();
+        let mut nodes = Vec::new();
         for _ in 0..3 {
-            reviewed = drawn(&ctx, &mut state, &labels);
+            nodes = frame_nodes(&ctx, &mut state);
         }
+        let reviewed = labels
+            .iter()
+            .map(|label| node(&nodes, label).and_then(node_rect))
+            .collect::<Vec<_>>();
+        assert!(says(&nodes, READY), "the review says what Import does");
 
         crate::workbench::results_job::hold_jobs_for_tests(true);
         start_result_import_commit(&mut state.results_parts()).expect("the draft commits");
         crate::workbench::results_job::hold_jobs_for_tests(false);
-        let mut nodes = Vec::new();
+        let job = state
+            .results_parts()
+            .result_import
+            .job
+            .clone()
+            .expect("a job");
+        assert_eq!(
+            result_import_progress("browser-import.csv", &job),
+            (
+                "Importing browser-import.csv".to_owned(),
+                format!("{RESULT_IMPORT_CHECK_STEP} \u{00b7} 0%")
+            ),
+            "the strip names the import's step before the job reports it"
+        );
         for _ in 0..3 {
             nodes = frame_nodes(&ctx, &mut state);
         }
@@ -2409,6 +2581,7 @@ mod tests {
             .map(|label| node(&nodes, label).and_then(node_rect))
             .collect::<Vec<_>>();
         assert_eq!(placed, reviewed, "the review moved when the import began");
+        assert!(!says(&nodes, READY), "the ready sentence outlived Import");
         let progress = node(&nodes, "Importing browser-import.csv").expect("the progress strip");
         assert_eq!(progress.role(), egui::accesskit::Role::Status);
         assert!(!node(&nodes, "Cancel").expect("Cancel").is_disabled());
@@ -2582,7 +2755,7 @@ mod tests {
 
     /// A header reads as the file says: a bracket against a name is part of it (`bus[3]`), a
     /// parenthesized unit after a space is a unit (`time (s)` is a transient), and a coordinate
-    /// that states no unit is read by its name, which the review says.
+    /// that states no unit is read by its name.
     #[test]
     fn headers_read_bus_members_as_names_and_parenthesized_units_as_units() {
         let parsed = parse_result_dataset(
@@ -2605,18 +2778,78 @@ mod tests {
 
         let guessed = parse_result_dataset("sweep.csv", b"x,V(out)\n0,1\n1,2\n").unwrap();
         assert_eq!(guessed.analysis_type, AnalysisType::DcSweep);
-        assert!(
-            guessed.notes[0].contains("read as a DC sweep over it"),
-            "{:?}",
-            guessed.notes
-        );
         let by_name = parse_result_dataset("scope.csv", b"time,V(out)\n0,1\n1,2\n").unwrap();
         assert_eq!(by_name.analysis_type, AnalysisType::Transient);
-        assert!(
-            by_name.notes[0].contains("read as time in seconds"),
-            "{:?}",
-            by_name.notes
+    }
+
+    /// A coordinate that states no unit is read by the domain the review reads
+    /// the file in, and its note says how in the domain chosen now: a domain
+    /// picked on Map says the new reading, as the coordinate unit fact does,
+    /// never the one the file was first read in. A DC sweep is explained only
+    /// while it is the reader's guess. The note was written once, as the file
+    /// was parsed, and read "time in seconds" over an AC domain.
+    #[test]
+    fn the_coordinate_note_follows_the_domain_the_review_reads_in() {
+        let staged = |name: &str, csv: &[u8]| {
+            let mut state = ResultsTestHost::default();
+            state.platform.project_lifecycle.authority.open_session();
+            stage_imported_result_dataset(&mut state.results_parts(), name, csv)
+                .expect("the CSV stages");
+            state
+        };
+        let reading = |state: &mut ResultsTestHost, domain: AnalysisType| {
+            let parts = state.results_parts();
+            parts.result_import.analysis_type = domain;
+            let draft = &*parts.result_import;
+            let note = result_import_coordinate_note(draft);
+            // A domain the samples cannot be read in is refused; one they can
+            // carries the note into the Console when the run is added.
+            if let Ok(committed) = parsed_result_from_draft(draft) {
+                assert_eq!(committed.notes.first(), note.as_ref(), "{domain:?}");
+            }
+            (result_import_coordinate_unit_fact(draft), note)
+        };
+
+        let mut scope = staged("scope.csv", b"time,V(out)\n1,1\n2,2\n");
+        let (fact, note) = reading(&mut scope, AnalysisType::Transient);
+        assert_eq!(fact, "s, assumed");
+        assert_eq!(
+            note.as_deref(),
+            Some("The 'time' coordinate states no unit, so it is read as time in seconds.")
         );
+        assert_eq!(
+            parsed_result_from_draft(scope.results_parts().result_import)
+                .expect("a transient commits")
+                .notes,
+            [note.expect("a note")]
+        );
+        let (fact, note) = reading(&mut scope, AnalysisType::Ac);
+        assert_eq!(fact, "Hz, assumed");
+        assert!(
+            note.expect("a note")
+                .ends_with("read as frequency in hertz.")
+        );
+        assert_eq!(
+            reading(&mut scope, AnalysisType::DcSweep),
+            ("None".to_owned(), None),
+            "a DC sweep the user chose needs no explaining"
+        );
+
+        let mut sweep = staged("sweep.csv", b"x,V(out)\n1,1\n2,2\n");
+        let (fact, note) = reading(&mut sweep, AnalysisType::DcSweep);
+        assert_eq!(fact, "None");
+        assert!(
+            note.expect("a note")
+                .ends_with("read as a DC sweep over it.")
+        );
+        let (fact, note) = reading(&mut sweep, AnalysisType::Transient);
+        assert_eq!(fact, "s, assumed");
+        assert!(note.expect("a note").ends_with("read as time in seconds."));
+
+        let mut stated = staged("stated.csv", b"time (s),V(out)\n1,1\n2,2\n");
+        for domain in [AnalysisType::Transient, AnalysisType::Ac] {
+            assert_eq!(reading(&mut stated, domain), ("s".to_owned(), None));
+        }
     }
 
     #[test]

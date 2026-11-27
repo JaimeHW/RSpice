@@ -91,7 +91,12 @@ fn a_member_bundle_imports_as_that_member() {
         )
         .expect("a member bundle");
         let parsed = parse_native_bundle(&bytes, format).expect("a member bundle reads");
-        let kept = keep_reviewed_draft("member.bundle", parsed).expect("a member bundle imports");
+        let kept = keep_reviewed_draft(
+            &crate::workbench::results_job::JobContext::detached(),
+            "member.bundle",
+            parsed,
+        )
+        .expect("a member bundle imports");
         let analysis = &kept.analyses[0];
         assert_eq!(
             analysis.family_member(),

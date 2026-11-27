@@ -24,6 +24,10 @@ pub struct ResultImportDialogState {
     pub source_format_id: String,
     pub delimiter: u8,
     pub analysis_type: crate::state::AnalysisType,
+    /// The domain the source read as before the Map step chose one: what
+    /// Detect states, and what says whether a DC sweep was the reader's
+    /// guess or the user's choice.
+    pub inferred_analysis_type: crate::state::AnalysisType,
     pub coordinate_name: String,
     pub coordinate_unit: Option<String>,
     pub sample_count: usize,
@@ -94,8 +98,10 @@ impl ResultImportJob {
     }
 }
 
-/// Rows of each parsed signal the review preview shows.
-pub const RESULT_IMPORT_PREVIEW_ROWS: usize = 8;
+/// Rows of each parsed signal kept for the review's preview: as many as the
+/// review's whole height holds in a grid's densest rows, so the preview,
+/// which shows the rows its page leaves room for, is never short of them.
+pub const RESULT_IMPORT_PREVIEW_ROWS: usize = 36;
 
 /// What the review pages need of the parsed samples, read once.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -179,6 +185,7 @@ impl Default for ResultImportDialogState {
             source_format_id: String::new(),
             delimiter: b',',
             analysis_type: crate::state::AnalysisType::Transient,
+            inferred_analysis_type: crate::state::AnalysisType::Transient,
             coordinate_name: String::new(),
             coordinate_unit: None,
             sample_count: 0,

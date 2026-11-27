@@ -49,7 +49,7 @@ pub(super) fn stream_spice_raw(
         analysis: format!("Imported \u{00b7} {source_name}"),
         ..RunMeta::default()
     };
-    job.step("Reading", length);
+    job.step(RESULT_IMPORT_READ_STEP, length);
     let mut stopped = None;
     let kept = keep_segment(&schema, &meta, &mut |push: &mut PushRows<'_>| {
         read_into(&mut import, job, &mut file, path, &head, push).map_err(|stop| {
