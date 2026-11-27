@@ -641,7 +641,10 @@ fn a_signals_new_result_document_opens_on_the_signals_run_and_analysis() {
     let head = browser_rows::run_head(&nodes, &desk.label_of(newer));
     let mut signals = nodes
         .iter()
-        .filter(|(_, node)| node.label().is_some_and(|label| label.starts_with("V(out), ")))
+        .filter(|(_, node)| {
+            node.label()
+                .is_some_and(|label| label.starts_with("V(out), "))
+        })
         .filter_map(|(_, node)| node.bounds())
         .filter(|bounds| bounds.y0 > head.top)
         .collect::<Vec<_>>();
