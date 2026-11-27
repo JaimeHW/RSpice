@@ -338,7 +338,7 @@ pub(in crate::workbench) fn results(
                         || signals.pending()
                         || !signals.is_empty()
                         || !artifacts.is_empty();
-                    let label = analysis_label(analysis);
+                    let label = analysis_label_at(run, analysis);
                     matches_analysis.then(|| ResultAnalysis {
                         domain: result_analysis_domain(
                             analysis.analysis_type,
@@ -2701,6 +2701,33 @@ impl OrderGroups {
 /// its label. A deck that labelled its analysis with the same code the kind
 /// glyph carries would print that code twice; the canonical name is the
 /// useful title in that case.
+/// [`analysis_label`] for an analysis of `run`, named by the point it
+/// solved at where the run solved more than one: `DC Operating Point ·
+/// 1.62 V, 125 °C`, as Run details names it. A family's member is named by
+/// its own label already.
+fn analysis_label_at(
+    run: &crate::state::SimulationRun,
+    analysis: &crate::state::AnalysisResult,
+) -> String {
+    let label = analysis_label(analysis);
+    if analysis.family_member().is_some() {
+        return label;
+    }
+    let point = run
+        .facts
+        .as_ref()
+        .zip(
+            analysis
+                .provenance()
+                .and_then(|provenance| provenance.pvt_point()),
+        )
+        .and_then(|(facts, point)| facts.point_words(point));
+    match point {
+        Some(point) => format!("{label} \u{b7} {point}"),
+        None => label,
+    }
+}
+
 pub(crate) fn analysis_label(analysis: &crate::state::AnalysisResult) -> String {
     if analysis
         .label

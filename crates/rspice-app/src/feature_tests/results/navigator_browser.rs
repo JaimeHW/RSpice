@@ -877,3 +877,38 @@ fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui:
     }
     lines
 }
+
+/// A run of several points names each of its analyses by the point it
+/// solved at, as Run details names its rows: four operating points of one
+/// run are not four rows alike.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_pvt_runs_analyses_are_named_by_their_points() {
+    use rspice_app_runs::simulation::controller::test_execution::{pvt, run_generated_batch};
+    use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
+
+    let state = pvt::run_set_divider(
+        AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
+        &["-40", "125"],
+    );
+    let run = run_generated_batch(
+        state,
+        rspice_results::run::SimulationRunLifecycle::Completed,
+    );
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Results;
+    app.state.model.simulation.retained.runs.push(run);
+    let lines = navigator_painted_lines(900.0, app);
+    for point in [
+        "1.62 V, \u{2212}40",
+        "1.62 V, 125",
+        "1.8 V, \u{2212}40",
+        "1.8 V, 125",
+    ] {
+        let name = format!("DC Operating Point \u{b7} {point} \u{b0}C");
+        assert!(
+            lines.iter().any(|(words, _)| *words == name),
+            "the data browser names no row {name}: {lines:?}"
+        );
+    }
+}
