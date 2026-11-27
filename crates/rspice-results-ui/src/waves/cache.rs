@@ -335,10 +335,12 @@ impl ModelsCache {
                 AnalysisType::Noise | AnalysisType::Hbnoise | AnalysisType::Qpnoise => true,
                 // A periodic noise run referred to the carrier's phase keeps
                 // decibels, and is the Phase Noise sheet's.
-                AnalysisType::Pnoise => model
-                    .traces
-                    .iter()
-                    .any(|trace| trace.kind == super::TraceKind::NoiseDensity),
+                AnalysisType::Pnoise => model.traces.iter().any(|trace| {
+                    matches!(
+                        trace.kind,
+                        super::TraceKind::NoiseDensity | super::TraceKind::NoisePower
+                    )
+                }),
                 _ => false,
             },
             _ => true,

@@ -321,8 +321,12 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                 TraceKind::PhaseDeg => {
                     displayed_phase_series(derived, derived_key, samples, context.phase_continuous)
                 }
-                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => samples.clone(),
-                // A projection a strip asks for is made after the families.
+                TraceKind::Value
+                | TraceKind::Real
+                | TraceKind::Imaginary
+                | TraceKind::NoisePower => samples.clone(),
+                // A projection a strip asks for is made after the families,
+                // for every member ([`super::project_strips`]).
                 TraceKind::GroupDelay => continue,
             };
             let visibility_key = FamilyTraceVisibilityKey::new(

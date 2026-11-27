@@ -32,6 +32,8 @@ pub enum SignalForm {
     NoiseDensity,
     /// The group delay of a complex response, in seconds.
     GroupDelay,
+    /// A noise power density read as the power density it is.
+    NoisePower,
 }
 
 impl SignalForm {

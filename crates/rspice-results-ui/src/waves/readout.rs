@@ -1386,6 +1386,7 @@ fn copied_trace_value(
     match kind {
         TraceKind::PhaseDeg => policy.copy_angle_degrees(value),
         TraceKind::NoiseDensity => policy.copy_scaled_unit_value(value, NOISE_DENSITY_UNIT),
+        TraceKind::NoisePower => policy.copy_scaled_unit_value(value, unit),
         TraceKind::MagnitudeDb
         | TraceKind::Value
         | TraceKind::Real

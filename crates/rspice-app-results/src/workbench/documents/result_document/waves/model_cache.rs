@@ -162,10 +162,14 @@ fn built_models(
                     )
                 },
             );
-            // The forms the reader's strips show a complex signal in.
-            if let Some(run) = simulation.display_runs().first() {
-                rspice_results_ui::waves::project_strips(&mut built, run, strips);
-            }
+            // The forms the reader's strips show a signal in, for every
+            // member and overlay run the stack draws.
+            rspice_results_ui::waves::project_strips(
+                &mut built,
+                &display_runs,
+                strips,
+                projection.selection,
+            );
             // A running transient's strip frames its run from start to stop while it runs.
             if let Some(run) = simulation.active_run() {
                 for model in &mut built {

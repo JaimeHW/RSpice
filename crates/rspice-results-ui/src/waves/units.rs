@@ -33,7 +33,9 @@ pub const NOISE_DENSITY_UNIT: &str = "nV/√Hz";
 
 /// The projections a trace kind performs own their own unit: a decibel
 /// magnitude, a phase, and an amplitude-density projection are all computed
-/// here, so the source series' retained unit does not describe them.
+/// here, so the source series' retained unit does not describe them. A
+/// power density reads the retained PSD as it stands, in its unit spelled
+/// with a true superscript, `V²/Hz`, whatever spelling the run stored.
 /// Everything else reads the source directly and takes its unit.
 pub(super) fn signal_unit<'a>(
     name: &str,
@@ -50,6 +52,11 @@ pub(super) fn signal_unit<'a>(
             Some("A²/Hz" | "A^2/Hz") => "nA/√Hz",
             Some("s²/Hz" | "s^2/Hz") => "ns/√Hz",
             _ => NOISE_DENSITY_UNIT,
+        },
+        TraceKind::NoisePower => match retained_unit {
+            Some("A²/Hz" | "A^2/Hz") => "A²/Hz",
+            Some("s²/Hz" | "s^2/Hz") => "s²/Hz",
+            _ => "V²/Hz",
         },
         TraceKind::Value | TraceKind::Real | TraceKind::Imaginary => {
             quantity_unit(name, retained_unit, analysis_unit)
@@ -187,6 +194,18 @@ mod tests {
             signal_unit("onoise", TraceKind::NoiseDensity, Some("V^2/Hz"), "V^2/Hz"),
             NOISE_DENSITY_UNIT
         );
+        // A power density reads the PSD in its own unit, spelled squared.
+        for (retained, unit) in [
+            (Some("V^2/Hz"), "V²/Hz"),
+            (Some("A^2/Hz"), "A²/Hz"),
+            (Some("A²/Hz"), "A²/Hz"),
+            (None, "V²/Hz"),
+        ] {
+            assert_eq!(
+                signal_unit("noise", TraceKind::NoisePower, retained, "V^2/Hz"),
+                unit
+            );
+        }
     }
 
     #[test]

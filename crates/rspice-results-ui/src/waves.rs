@@ -82,6 +82,9 @@ pub enum TraceKind {
     NoiseDensity = 6,
     /// Group delay of a complex response, in seconds.
     GroupDelay = 7,
+    /// A retained noise PSD read as the power density it is, in V²/Hz or
+    /// A²/Hz: the square of its amplitude density.
+    NoisePower = 8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -596,7 +599,11 @@ impl StripModel {
             // A strip mixing voltages and currents has no single Y unit, so
             // a value is named by the unit its own signal is measured in —
             // the same unit that decided which pane draws it.
-            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary | TraceKind::GroupDelay => {
+            TraceKind::Value
+            | TraceKind::Real
+            | TraceKind::Imaginary
+            | TraceKind::GroupDelay
+            | TraceKind::NoisePower => {
                 fmt_column_reading(value, self.trace_unit(trace), significant_digits)
             }
             TraceKind::MagnitudeDb => {
@@ -1317,6 +1324,7 @@ pub const fn signal_form(kind: TraceKind) -> SignalForm {
         TraceKind::Imaginary => SignalForm::Imaginary,
         TraceKind::NoiseDensity => SignalForm::NoiseDensity,
         TraceKind::GroupDelay => SignalForm::GroupDelay,
+        TraceKind::NoisePower => SignalForm::NoisePower,
     }
 }
 
