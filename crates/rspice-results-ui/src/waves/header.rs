@@ -87,6 +87,13 @@ pub struct PaneExpression {
     pub values: rspice_results::waveform::SharedWaveformValues,
 }
 
+impl PaneExpression {
+    /// Whether it is shown but draws no curve yet: still being evaluated.
+    pub fn is_pending(&self) -> bool {
+        self.visible && self.curves == 0
+    }
+}
+
 /// Display state qualified by the host for this pane and its own cursor domain.
 pub struct PaneHeader {
     pub height: f32,
@@ -854,13 +861,18 @@ fn expression_chip(
 ) {
     let t = Tokens::get(ui.ctx());
     let (swatch, swatch_response) = ui.allocate_exact_size(LEGEND_SWATCH, egui::Sense::click());
-    paint_trace_swatch(
-        ui.painter(),
-        swatch,
-        expression.color,
-        expression.swatch.look(t.color_safe_traces),
-        t.color.bg_panel,
-    );
+    // One still being evaluated draws no curve yet, so its swatch is hollow.
+    if expression.is_pending() {
+        crate::strip::paint_pending_swatch(ui.painter(), swatch.center(), expression.color);
+    } else {
+        paint_trace_swatch(
+            ui.painter(),
+            swatch,
+            expression.color,
+            expression.swatch.look(t.color_safe_traces),
+            t.color.bg_panel,
+        );
+    }
     swatch_response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::Button,

@@ -293,6 +293,24 @@ pub enum LegendGlyph {
     Ring,
     /// A filled dot, for points drawn as dots.
     Dot,
+    /// A hollow bar, for a curve still being evaluated: nothing is drawn
+    /// yet, so the swatch is not filled as a drawn curve's is.
+    Pending,
+}
+
+/// The swatch of a curve still being evaluated, centred on `center`: the
+/// outline of a line swatch, unfilled, wherever a legend names one.
+pub(crate) fn paint_pending_swatch(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    color: egui::Color32,
+) {
+    painter.rect_stroke(
+        Rect::from_center_size(center, vec2(14.0, 6.0)),
+        1.5,
+        egui::Stroke::new(1.0, color),
+        egui::StrokeKind::Inside,
+    );
 }
 
 impl LegendGlyph {
@@ -315,6 +333,7 @@ impl LegendGlyph {
             Self::Dot => {
                 painter.circle_filled(center, 3.5, color);
             }
+            Self::Pending => paint_pending_swatch(painter, center, color),
         }
     }
 }

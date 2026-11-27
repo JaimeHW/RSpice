@@ -1003,14 +1003,12 @@ pub fn show(
                             .map(|expr| {
                                 let complex =
                                     host.expression_is_complex(model.analysis_key, &expr.text);
-                                let label = expression_label(expr, complex);
-                                if host.expression_pending(model.analysis_key, &expr.text) {
-                                    format!("{label} \u{b7} evaluating\u{2026}")
-                                } else {
-                                    label
-                                }
+                                expression_label(expr, complex)
                             })
                             .collect();
+                        // One still being evaluated draws a hollow swatch,
+                        // as its pane legend entry does; the entry is what
+                        // says "evaluating".
                         let legend: Vec<LegendChip<'_>> = strip_exprs
                             .iter()
                             .enumerate()
@@ -1018,7 +1016,11 @@ pub fn show(
                                 name: &expr_labels[i],
                                 color: expr_color(&t, expr_palette_slot(model, i)),
                                 on: expr.visible,
-                                glyph: crate::strip::LegendGlyph::Line,
+                                glyph: if host.expression_pending(model.analysis_key, &expr.text) {
+                                    crate::strip::LegendGlyph::Pending
+                                } else {
+                                    crate::strip::LegendGlyph::Line
+                                },
                             })
                             .collect();
 
