@@ -964,6 +964,10 @@ pub struct ResultViewerState {
     /// of the shown run it has a pane for. Like the persistent context, it
     /// routes what the reader does on a strip to the view that keeps it.
     pub working_view_panes: Vec<PersistentPaneContext>,
+    /// What the reader chose from the pane entries at the head of a
+    /// waveform pane's bar's menu, for the page drawing the pane to carry
+    /// out once the pane is drawn.
+    pub pane_menu_choice: Option<crate::chrome::persistent::PaneAction>,
     /// Markers of the persistent pane currently being projected.
     ///
     /// Single-pane and wholesale-replaced: panes project, render and capture

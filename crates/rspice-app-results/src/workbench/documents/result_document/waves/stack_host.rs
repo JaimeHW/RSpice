@@ -258,6 +258,25 @@ fn show_unit_pane_header(
             true
         }
 
+        fn offers_pane_menu(&self) -> bool {
+            self.state.results.session.persistent_pane_context.is_some()
+        }
+
+        fn pane_menu(&mut self, ui: &mut Ui) {
+            let Some(context) = self.state.results.session.persistent_pane_context else {
+                return;
+            };
+            let menu = super::super::document_edit::pane_menu(
+                self.state.results_reads(),
+                context.document_id,
+                context.pane_id,
+            );
+            if let Some(action) = rspice_results_ui::chrome::persistent::pane_menu_entries(ui, menu)
+            {
+                self.state.results.session.pane_menu_choice = Some(action);
+            }
+        }
+
         fn trace_command(&mut self, trace: &StripTrace, command: pane_header::TraceCommand) {
             use crate::workbench::results::commands::ResultsCommand;
             if let pane_header::TraceCommand::Style(style) = command {

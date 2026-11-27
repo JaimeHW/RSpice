@@ -869,10 +869,12 @@ fn pane_viewer(
 }
 
 /// Carry out what the reader asked of the pane through the menu on the rows
-/// of the strips it drew within `rect`.
+/// of the strips it drew within `rect`, or through the head of the menu of
+/// a waveform pane's bar.
 fn pane_menu(ui: &Ui, state: &mut ResultsParts<'_>, pane: &PaneProjection, rect: egui::Rect) {
     let menu = super::document_edit::pane_menu(state.results_reads(), pane.document_id, pane.id);
-    let Some(action) = persistent::pane_menu(ui, rect, menu) else {
+    let chosen = persistent::pane_menu(ui, rect, menu);
+    let Some(action) = chosen.or_else(|| state.results.session.pane_menu_choice.take()) else {
         return;
     };
     match action {
