@@ -115,13 +115,14 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 (rect.width() - chooser_width - create_width).max(0.0),
                 hidden_button_width,
             );
+            // The widest a tab is drawn.
+            let tab_cap = fit.cap.map_or(TAB_MAX_WIDTH, |cap| cap.min(TAB_MAX_WIDTH));
             // The tabs' track: the strip's width while tabs scroll in it, else
             // just the tabs, so the "+" stands right after the last one.
             let track = if create.is_some() && !fit.overflowing {
-                let cap = fit.cap.map_or(TAB_MAX_WIDTH, |cap| cap.min(TAB_MAX_WIDTH));
                 natural
                     .iter()
-                    .map(|width| width.min(cap))
+                    .map(|width| width.min(tab_cap))
                     .sum::<f32>()
                     .min(fit.tabs_width)
             } else {
@@ -130,6 +131,8 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
             let tab_menu = (app.workbench().workspace == Workspace::Results)
                 .then(|| result_document_tab_menu_rows(app, ctx));
             let mut request = StripRequest::default();
+            // Whether the strip ends on a whole tab, short of its right edge.
+            let mut ends_whole = false;
             ui.horizontal(|ui| {
                 let scroll = ui
                     .allocate_ui_with_layout(
@@ -145,6 +148,22 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                                     egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
                                 )
                                 .show(ui, |ui| {
+                                    // Scrolled, the strip ends on a whole
+                                    // tab, as it starts on one: the tab its
+                                    // right edge would cut is left out of
+                                    // view, and "+N" lists it.
+                                    if fit.overflowing {
+                                        let clip = ui.clip_rect();
+                                        let offset = clip.left() - ui.max_rect().left();
+                                        if let Some(end) = whole_tabs_end(
+                                            natural.iter().map(|width| width.min(tab_cap)),
+                                            offset,
+                                            clip.width(),
+                                        ) {
+                                            ends_whole = true;
+                                            ui.set_clip_rect(clip.with_max_x(clip.left() + end));
+                                        }
+                                    }
                                     let tabs = ui.horizontal(|ui| {
                                         let tabs = document_tabs(
                                             ui,
@@ -181,7 +200,7 @@ pub fn show(root: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                     let key = egui::Id::new(("workbench.document_tabs.active", &active));
                     ctx.data_mut(|data| data.insert_temp(revealed_key(), (key, true)));
                 }
-                paint_scroll_fades(ui, &scroll, t.color.bg_panel);
+                paint_scroll_fades(ui, &scroll, t.color.bg_panel, ends_whole);
                 if let Some(refusal) = &create {
                     request.create = create_document_button(
                         ui,
@@ -595,10 +614,13 @@ pub fn shared_width_cap(natural: &[f32], available: f32) -> Option<f32> {
 }
 
 /// Fade the strip's ends where tabs carry on out of view, above the hairline.
+/// A strip that `ends_whole`, on a whole tab short of its right edge, fades
+/// no tab there: the room after the tab and "+N" say that more follow.
 fn paint_scroll_fades(
     ui: &Ui,
     scroll: &egui::scroll_area::ScrollAreaOutput<Vec<Rect>>,
     color: egui::Color32,
+    ends_whole: bool,
 ) {
     let band = scroll
         .inner_rect
@@ -613,7 +635,7 @@ fn paint_scroll_fades(
         let edge = Rect::from_min_size(band.left_top(), Vec2::new(width, band.height()));
         paint_horizontal_fade(ui.painter(), edge, color, egui::Color32::TRANSPARENT);
     }
-    if after > 0.5 {
+    if after > 0.5 && !ends_whole {
         let edge = Rect::from_min_max(egui::pos2(band.right() - width, band.top()), band.max);
         paint_horizontal_fade(ui.painter(), edge, egui::Color32::TRANSPARENT, color);
     }
@@ -1321,6 +1343,30 @@ fn trailing_room(tabs: &[Rect], width: f32) -> f32 {
     (start + width - end).max(0.0)
 }
 
+/// Where the last tab wholly in view ends, from the left edge of a viewport
+/// `width` wide scrolled to `offset`, when the viewport's right edge cuts the
+/// tab after it: tabs `widths` wide laid end to end. `None` when no tab is
+/// cut there, or when no tab stands wholly in view to end on.
+fn whole_tabs_end(widths: impl IntoIterator<Item = f32>, offset: f32, width: f32) -> Option<f32> {
+    let right = offset + width;
+    let mut start = 0.0;
+    let mut whole = None;
+    for tab in widths {
+        let end = start + tab;
+        if end > right + 0.5 {
+            // The first tab past the right edge: cut by it, or after it.
+            return whole
+                .filter(|_| start < right - 0.5)
+                .map(|end: f32| end - offset);
+        }
+        if start >= offset - 0.5 {
+            whole = Some(end);
+        }
+        start = end;
+    }
+    None
+}
+
 /// Stand the scrolled strip on a tab's start, so no tab is cut at its left
 /// edge, and bring the active tab into view when it becomes active, whether
 /// by a press, Ctrl+Tab or the navigator. The active tab is brought in only
@@ -1765,6 +1811,22 @@ mod whole_tab_tests {
             .map(|(start, end)| Rect::from_min_max(egui::pos2(start, 0.0), egui::pos2(end, 28.0)));
         assert_eq!(trailing_room(&rects, 250.0), 50.0);
         assert_eq!(trailing_room(&rects, 400.0), 0.0);
+    }
+
+    #[test]
+    fn the_strip_ends_on_the_last_whole_tab_its_right_edge_does_not_cut() {
+        let widths = TABS.map(|(start, end)| end - start);
+        // At the start the third tab is cut: the strip ends on the second.
+        assert_eq!(whole_tabs_end(widths, 0.0, 250.0), Some(200.0));
+        // Stood on the second tab's start, it ends on the third.
+        assert_eq!(whole_tabs_end(widths, 100.0, 250.0), Some(200.0));
+        // Every tab after the offset in view, or every tab: nothing is cut.
+        assert_eq!(whole_tabs_end(widths, 100.0, 300.0), None);
+        assert_eq!(whole_tabs_end(widths, 0.0, 400.0), None);
+        // A tab ending on the edge leaves the next one out of view whole.
+        assert_eq!(whole_tabs_end(widths, 0.0, 200.0), None);
+        // A tab wider than the viewport is no tab to end on.
+        assert_eq!(whole_tabs_end([300.0, 100.0], 0.0, 250.0), None);
     }
 }
 
