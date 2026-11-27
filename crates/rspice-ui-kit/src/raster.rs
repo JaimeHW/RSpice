@@ -681,6 +681,17 @@ fn fill_triangle(
     for y in min_y..=(max_y as usize) {
         for x in min_x..=(max_x as usize) {
             let point = egui::pos2(x as f32 + 0.5, y as f32 + 0.5);
+            // A pixel is drawn only where its centre lies inside the clip, as
+            // a GPU's scissor has it. The bounds above round outwards, and a
+            // picture laid a point past its pane's edge was drawn over the
+            // hairline beside the pane, which no screen shows.
+            if point.x < clip.min.x
+                || point.x >= clip.max.x
+                || point.y < clip.min.y
+                || point.y >= clip.max.y
+            {
+                continue;
+            }
             let w0 = edge(positions[1], positions[2], point) / area;
             let w1 = edge(positions[2], positions[0], point) / area;
             let w2 = edge(positions[0], positions[1], point) / area;
