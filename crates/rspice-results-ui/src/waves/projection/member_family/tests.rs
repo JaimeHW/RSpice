@@ -172,7 +172,7 @@ fn a_stepped_dc_sweep_draws_its_points_as_one_family_on_one_strip() {
     let [strip] = built.as_slice() else {
         panic!("one strip for the family, got {}", built.len());
     };
-    assert_eq!(strip.subtitle, "Sweep · 3 points");
+    assert_eq!(strip.subtitle, "Sweep · 3 members");
     let names: Vec<_> = strip
         .traces
         .iter()
@@ -287,7 +287,7 @@ fn the_runs_of_an_imported_stepped_rawfile_draw_as_one_family() {
     let [strip] = built.as_slice() else {
         panic!("one strip for the runs, got {}", built.len());
     };
-    assert_eq!(strip.subtitle, "Imported · Transient Analysis · 3 points");
+    assert_eq!(strip.subtitle, "Imported · Transient Analysis · 3 members");
     let names: Vec<_> = strip
         .traces
         .iter()
@@ -603,7 +603,7 @@ fn a_stepped_run_overlays_every_member_on_its_own_counterpart() {
     let [strip] = built.as_slice() else {
         panic!("one strip for the family, got {}", built.len());
     };
-    assert_eq!(strip.subtitle, "Transient · 3 points · +1 run overlaid");
+    assert_eq!(strip.subtitle, "Transient · 3 members · +1 run overlaid");
     let read = |overlay: bool| -> Vec<(String, f64, [u8; 4])> {
         strip
             .traces

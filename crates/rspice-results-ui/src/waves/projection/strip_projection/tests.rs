@@ -195,7 +195,7 @@ fn a_strip_shown_as_group_delay_draws_the_delay_lines_delay() {
         [TraceKind::PhaseDeg as u8, TraceKind::GroupDelay as u8]
     );
     let delay = &model.traces[1];
-    assert_eq!(delay.name, "groupDelay(V(out))");
+    assert_eq!(delay.name, "V(out) group delay");
     assert_eq!(model.trace_unit(delay), "s");
     let samples = whole(&delay.y).expect("the delay's samples");
     assert_eq!(samples.len(), 61);
@@ -307,7 +307,7 @@ fn a_stepped_runs_group_delay_strip_draws_every_member_and_overlay() {
         assert_eq!(delay.run_id, if *overlay { 2 } else { 1 });
         assert_eq!(
             delay.name,
-            name.replace("|V(out)|", "groupDelay(V(out))"),
+            name.replace("|V(out)|", "V(out) group delay"),
             "named by its point"
         );
         assert_eq!(

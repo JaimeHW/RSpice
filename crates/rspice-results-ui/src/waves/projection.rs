@@ -31,6 +31,8 @@ pub use strip_projection::{
 };
 
 mod member_family;
+pub(crate) use member_family::member_value;
+pub use member_family::{FamilyMembers, family_of};
 mod retick;
 pub use retick::{Retick, retick};
 #[cfg(test)]

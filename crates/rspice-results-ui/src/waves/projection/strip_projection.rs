@@ -215,19 +215,25 @@ impl StripProjection {
         }
     }
 
-    /// The curve's name in the legend.
+    /// The curve's name in the legend: the signal, then the form it is
+    /// drawn in, in words, `V(out) group delay`, `onoise power density`.
+    /// The retained magnitude in decibels, the form the sheet draws it in,
+    /// keeps the name the run gives it.
     fn curve_name(self, source: Projectable<'_>) -> String {
-        let Projectable::Complex(source) = source else {
-            return source.column().to_owned();
+        let signal = match source {
+            Projectable::Complex(complex) => complex.name.as_str(),
+            Projectable::Noise(name) => name,
         };
-        match self {
-            Self::Phase => format!("phase({})", source.name),
-            Self::Real => format!("re({})", source.name),
-            Self::Imaginary => format!("im({})", source.name),
-            Self::GroupDelay => format!("groupDelay({})", source.name),
-            Self::Decibels | Self::Magnitude | Self::Density | Self::PowerDensity => {
-                source.magnitude.clone()
-            }
+        match (self, source) {
+            (Self::Decibels, Projectable::Complex(complex)) => complex.magnitude.clone(),
+            (Self::Decibels, Projectable::Noise(_)) => signal.to_owned(),
+            (Self::Phase, _) => format!("{signal} phase"),
+            (Self::Real, _) => format!("{signal} real part"),
+            (Self::Imaginary, _) => format!("{signal} imaginary part"),
+            (Self::GroupDelay, _) => format!("{signal} group delay"),
+            (Self::Magnitude, _) => format!("{signal} magnitude"),
+            (Self::Density, _) => format!("{signal} density"),
+            (Self::PowerDensity, _) => format!("{signal} power density"),
         }
     }
 }

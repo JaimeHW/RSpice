@@ -240,24 +240,133 @@ fn swept_styles(points: &[&AnalysisResult<RetainedTrace>]) -> Vec<(FamilyTraceSt
 }
 
 /// What the family's strip says it holds: the host's label without its own
-/// member, then the count, `Transient · 3 trials`.
+/// member, then the count, `Transient · 3 trials`, `AC · 5 members`.
 pub(super) fn family_subtitle(host_label: &str, family: &Family) -> String {
     let Some(first) = family.members.first() else {
         return host_label.to_owned();
     };
-    let noun = match family.kind {
+    format!(
+        "{} · {}",
+        host_base(host_label, &first.label),
+        member_count(family.kind, family.members.len())
+    )
+}
+
+/// The host's label without its own member: `AC` of `AC · C1=1nF`.
+fn host_base<'l>(host_label: &'l str, member: &str) -> &'l str {
+    host_label
+        .strip_suffix(&format!(" · {member}"))
+        .unwrap_or(host_label)
+}
+
+/// How many members a family has, in words: `3 trials`, `5 members` of a
+/// sweep, `7 corners`.
+fn member_count(kind: MemberKind, count: usize) -> String {
+    let noun = match kind {
         MemberKind::Trial => "trial",
-        MemberKind::Point => "point",
+        MemberKind::Point => "member",
         MemberKind::Corner => "corner",
     };
-    let base = host_label
-        .strip_suffix(&format!(" · {}", first.label))
-        .unwrap_or(host_label);
-    let count = family.members.len();
-    format!(
-        "{base} · {count} {noun}{}",
-        if count == 1 { "" } else { "s" }
-    )
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+}
+
+/// A member's label as its family's legend names it: the quantity it is
+/// stepped in, and its value there without the unit the quantity's name
+/// already implies, `("C1", "1n")` for `C1=1nF`. None for a label naming
+/// several quantities, a trial or a corner by name.
+pub(crate) fn member_value(label: &str) -> Option<(&str, String)> {
+    if label.contains(", ") {
+        return None;
+    }
+    let (quantity, value) = label.split_once('=')?;
+    let value = value.trim();
+    let digits = value
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | '\u{2212}')))
+        .unwrap_or(value.len());
+    let (number, rest) = value.split_at(digits);
+    if number.is_empty() {
+        return None;
+    }
+    // A decade the value is stepped on stays; a unit after it goes.
+    let rest = rest.trim_start();
+    let prefix = [
+        "Meg", "a", "f", "p", "n", "u", "\u{b5}", "m", "k", "M", "G", "T",
+    ]
+    .into_iter()
+    .find(|prefix| rest.starts_with(prefix))
+    .unwrap_or_default();
+    Some((quantity.trim(), format!("{number}{prefix}")))
+}
+
+/// The members of the family an analysis is drawn in, as its details name
+/// them.
+#[derive(Debug, Clone)]
+pub struct FamilyMembers {
+    kind: MemberKind,
+    /// Each member's analysis in the run and its label, in family order,
+    /// the host first.
+    pub members: Vec<(usize, String)>,
+}
+
+impl FamilyMembers {
+    /// How many members the family has, in words: `5 members`.
+    #[must_use]
+    pub fn count(&self) -> String {
+        member_count(self.kind, self.members.len())
+    }
+
+    /// The quantity the members are stepped in and the values they run
+    /// from and to, `C1 = 1n … 5n`, when one quantity names them.
+    #[must_use]
+    pub fn span(&self) -> Option<String> {
+        let (_, first) = self.members.first()?;
+        let (_, last) = self.members.last()?;
+        let (quantity, from) = member_value(first)?;
+        let (last_quantity, to) = member_value(last)?;
+        (quantity == last_quantity).then(|| format!("{quantity} = {from} \u{2026} {to}"))
+    }
+
+    /// The pane drawing the family, named by its analysis, its span and
+    /// its count: `AC · C1 = 1n … 5n (5 members)`. `host_label` is the
+    /// host member's own label, `AC · C1=1nF`.
+    #[must_use]
+    pub fn pane_name(&self, host_label: &str) -> String {
+        let base = self
+            .members
+            .first()
+            .map_or(host_label, |(_, label)| host_base(host_label, label));
+        match self.span() {
+            Some(span) => format!("{base} · {span} ({})", self.count()),
+            None => format!("{base} ({})", self.count()),
+        }
+    }
+}
+
+/// The family `analysis` is drawn in among `analyses`, host or member;
+/// none for an analysis drawn on its own.
+pub fn family_of<A: AsRef<AnalysisResult<RetainedTrace>>>(
+    analyses: &[A],
+    analysis: usize,
+) -> Option<FamilyMembers> {
+    member_families(analyses)
+        .into_values()
+        .find_map(|role| match role {
+            FamilyRole::Host(family)
+                if family.members.len() > 1
+                    && family.members.iter().any(|slot| slot.analysis == analysis) =>
+            {
+                Some(family)
+            }
+            _ => None,
+        })
+        .map(|family| FamilyMembers {
+            kind: family.kind,
+            members: family
+                .members
+                .into_iter()
+                .map(|slot| (slot.analysis, slot.label))
+                .collect(),
+        })
 }
 
 /// The identity a member's curves share on the strip, the same for every

@@ -1,7 +1,7 @@
 //! Waveform pane legend, visibility controls and Y-axis actions.
 
 use super::pane::SwatchStyle;
-use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
+use super::{ReadoutPolicy, StripModel, StripTrace, TraceKind, UnitPane, cursor_interpolation};
 use crate::strip::{self, HEADER_PADDING_X, header_button, header_button_width};
 use egui::Ui;
 use rspice_results::visualization_document::{Abscissa, Strip};
@@ -485,22 +485,46 @@ pub fn show_header(
     // The row names the entries that fit and counts the rest, so the entries
     // are measured in order only until the measured ones fill it: a pane of a
     // million curves measures the handful of names its row can hold.
+    // A family names its signal once, at its first member, then each
+    // member by its value: `V(out) group delay   C1 = 1n 2n 3n`.
     let mut chips: Vec<LegendEntry> = Vec::new();
     let mut measured = 0.0;
+    let mut family: Option<(String, Option<String>)> = None;
     for at in 0..entry_count {
         if measured > legend_rect.width() {
             break;
         }
         let chip = match entry(at) {
-            Entry::Signal(trace) => legend_entry(
-                ui,
-                model,
-                trace,
-                &cursor_a_value,
-                name_budget,
-                &display_name,
-            ),
-            Entry::Expression(expression) => expression_entry(ui, expression, name_budget),
+            Entry::Signal(trace) => {
+                let shown = curve_words(&display_name(&trace.name), trace.kind).into_owned();
+                let (lead, name) = match family_member(trace, &shown) {
+                    Some((title, quantity, value)) => {
+                        let group = (title, quantity);
+                        let lead = (family.as_ref() != Some(&group)).then(|| match &group {
+                            (title, Some(quantity)) => format!("{title}   {quantity} ="),
+                            (title, None) => title.clone(),
+                        });
+                        family = Some(group);
+                        (lead, value)
+                    }
+                    None => {
+                        family = None;
+                        (None, shown)
+                    }
+                };
+                legend_entry(
+                    ui,
+                    model,
+                    trace,
+                    &cursor_a_value,
+                    name_budget,
+                    (lead, &name),
+                )
+            }
+            Entry::Expression(expression) => {
+                family = None;
+                expression_entry(ui, expression, name_budget)
+            }
         };
         measured += chip.width;
         chips.push(chip);
@@ -704,11 +728,79 @@ fn pane_name<'a>(pane: &UnitPane<'a>) -> &'a str {
 /// One plotted trace's legend chip, measured before it is laid out so the
 /// row can tell how many fit.
 struct LegendEntry {
+    /// What the row reads before the chip: a family's name and the quantity
+    /// its members step, at its first member.
+    lead: Option<String>,
     label: String,
     width: f32,
 }
 
 const LEGEND_SWATCH: egui::Vec2 = egui::vec2(18.0, 19.0);
+
+/// The gap between two items of the legend row.
+const LEGEND_GAP: f32 = 3.0;
+
+/// A curve's name as the legend reads it: a form the run names as a
+/// function, `phase(V(out))`, `groupDelay(S21)`, in words after the signal,
+/// `V(out) phase`, and a noise spectrum by the density it is drawn as,
+/// `onoise density`, `onoise power density`, so the two read apart without
+/// the axis. A member keeps its point after the name.
+pub(crate) fn curve_words(name: &str, kind: TraceKind) -> Cow<'_, str> {
+    let (base, member) = match name.split_once(" \u{b7} ") {
+        Some((base, member)) => (base, Some(member)),
+        None => (name, None),
+    };
+    let inside = |function: &str| {
+        base.strip_prefix(function)
+            .and_then(|rest| rest.strip_prefix('('))
+            .and_then(|rest| rest.strip_suffix(')'))
+    };
+    let words = if let Some(signal) = inside("phase") {
+        format!("{signal} phase")
+    } else if let Some(signal) = inside("groupDelay") {
+        format!("{signal} group delay")
+    } else {
+        match kind {
+            TraceKind::NoiseDensity if !base.ends_with("density") => format!("{base} density"),
+            TraceKind::NoisePower if !base.ends_with("power density") => {
+                format!("{base} power density")
+            }
+            _ => return Cow::Borrowed(name),
+        }
+    };
+    Cow::Owned(match member {
+        Some(member) => format!("{words} \u{b7} {member}"),
+        None => words,
+    })
+}
+
+/// A family member's entry, from the name the legend reads it by: the
+/// family's name, the quantity its members step when one does, and the
+/// member's value there, `("V(out) group delay", Some("C1"), "1n")`, or its
+/// label when no one quantity names it. None for a curve of no family.
+fn family_member(trace: &StripTrace, shown: &str) -> Option<(String, Option<String>, String)> {
+    trace.family_group_ordinal?;
+    let (title, label) = shown.rsplit_once(" \u{b7} ")?;
+    Some(match super::projection::member_value(label) {
+        Some((quantity, value)) => (title.to_owned(), Some(quantity.to_owned()), value),
+        None => (title.to_owned(), None, label.to_owned()),
+    })
+}
+
+/// The width a lead of the legend row takes, its gap included.
+fn lead_width(ui: &Ui, lead: Option<&str>) -> f32 {
+    lead.map_or(0.0, |lead| {
+        ui.painter()
+            .layout_no_wrap(
+                lead.to_owned(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                egui::Color32::WHITE,
+            )
+            .size()
+            .x
+            + LEGEND_GAP
+    })
+}
 
 fn legend_entry(
     ui: &Ui,
@@ -716,11 +808,10 @@ fn legend_entry(
     trace: &StripTrace,
     cursor_a: &Option<(f64, ReadoutPolicy, QuantityPresentationPolicy)>,
     name_budget: f32,
-    display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>,
+    (lead, shown): (Option<String>, &str),
 ) -> LegendEntry {
     let font = egui::TextStyle::Button.resolve(ui.style());
-    let shown = display_name(&trace.name);
-    let name = rspice_ui_kit::panels::elide_middle(ui, &shown, &font, name_budget);
+    let name = rspice_ui_kit::panels::elide_middle(ui, shown, &font, name_budget);
     // The instrument idiom: a trace states its own value at cursor A right
     // where its name is, so reading one curve never costs a trip to the
     // readout register.
@@ -739,8 +830,12 @@ fn legend_entry(
         }
         None => name,
     };
-    let width = LEGEND_SWATCH.x + 3.0 + control_width(ui, &label) + 3.0;
-    LegendEntry { label, width }
+    let width = lead_width(ui, lead.as_deref())
+        + LEGEND_SWATCH.x
+        + LEGEND_GAP
+        + control_width(ui, &label)
+        + LEGEND_GAP;
+    LegendEntry { lead, label, width }
 }
 
 /// One entry of a pane's legend: a signal, or one of the strip's expressions.
@@ -754,7 +849,7 @@ impl Entry<'_> {
     /// reads.
     fn listed_name(&self, display_name: &impl for<'a> Fn(&'a str) -> Cow<'a, str>) -> String {
         match self {
-            Self::Signal(trace) => display_name(&trace.name).into_owned(),
+            Self::Signal(trace) => curve_words(&display_name(&trace.name), trace.kind).into_owned(),
             Self::Expression(expression) => expression.label.clone(),
         }
     }
@@ -929,8 +1024,12 @@ fn expression_entry(ui: &Ui, expression: &PaneExpression, name_budget: f32) -> L
     } else {
         label
     };
-    let width = LEGEND_SWATCH.x + 3.0 + control_width(ui, &label) + 3.0;
-    LegendEntry { label, width }
+    let width = LEGEND_SWATCH.x + LEGEND_GAP + control_width(ui, &label) + LEGEND_GAP;
+    LegendEntry {
+        lead: None,
+        label,
+        width,
+    }
 }
 
 /// An expression's chip, as a signal's: its swatch hides it, its name
@@ -1094,7 +1193,7 @@ fn trace_list_row(
     let t = Tokens::get(ui.ctx());
     let (name, color, look, visible, typed) = match entry {
         Entry::Signal(trace) => (
-            display_name(&trace.name).into_owned(),
+            curve_words(&display_name(&trace.name), trace.kind).into_owned(),
             trace.color,
             SwatchStyle::of(trace).look(t.color_safe_traces),
             trace.visible,
@@ -1159,6 +1258,12 @@ fn legend_chip(
     output: &mut UnitPaneHeaderResponse,
 ) {
     let t = Tokens::get(ui.ctx());
+    let shown = curve_words(&display_name(&trace.name), trace.kind).into_owned();
+    // A family's name and the quantity it steps, once, before its first
+    // member's swatch.
+    if let Some(lead) = &entry.lead {
+        ui.add(egui::Label::new(legend_text(ui, lead, dimmed)).selectable(false));
+    }
     let (swatch, swatch_response) = ui.allocate_exact_size(LEGEND_SWATCH, egui::Sense::click());
     paint_trace_swatch(
         ui.painter(),
@@ -1167,7 +1272,6 @@ fn legend_chip(
         SwatchStyle::of(trace).look(t.color_safe_traces),
         t.color.bg_panel,
     );
-    let shown = display_name(&trace.name);
     swatch_response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::Button,
@@ -1186,7 +1290,7 @@ fn legend_chip(
     let selected = host.trace_selected(trace);
     let label = ui
         .selectable_label(selected, legend_text(ui, &entry.label, dimmed))
-        .on_hover_text(&*shown);
+        .on_hover_text(&shown);
     let label = drag_curve(label, curve);
     if label.clicked() {
         if ui.input(|input| input.modifiers.command) {
@@ -1339,6 +1443,54 @@ mod tests {
                 "V(G) [VG=1.5; point 2]",
             ]
         );
+    }
+
+    /// A form the run names as a function reads in words after its signal,
+    /// a member keeping its point, and a noise spectrum names the density
+    /// it is drawn as.
+    #[test]
+    fn a_curve_reads_its_form_in_words() {
+        let cases = [
+            ("phase(V(out))", TraceKind::PhaseDeg, "V(out) phase"),
+            (
+                "groupDelay(V(out)) \u{b7} C1=1nF",
+                TraceKind::GroupDelay,
+                "V(out) group delay \u{b7} C1=1nF",
+            ),
+            ("onoise", TraceKind::NoiseDensity, "onoise density"),
+            ("onoise", TraceKind::NoisePower, "onoise power density"),
+            (
+                "onoise power density",
+                TraceKind::NoisePower,
+                "onoise power density",
+            ),
+            ("|V(out)|", TraceKind::MagnitudeDb, "|V(out)|"),
+            (
+                "V(out) group delay",
+                TraceKind::GroupDelay,
+                "V(out) group delay",
+            ),
+        ];
+        for (name, kind, words) in cases {
+            assert_eq!(curve_words(name, kind), words, "{name}");
+        }
+    }
+
+    /// A member is named by its value in the one quantity its family
+    /// steps, the unit the quantity implies left off; a trial or a corner
+    /// keeps its own name.
+    #[test]
+    fn a_member_is_named_by_its_value() {
+        use super::super::projection::member_value;
+        assert_eq!(member_value("C1=1nF"), Some(("C1", "1n".to_owned())));
+        assert_eq!(member_value("r=2k"), Some(("r", "2k".to_owned())));
+        assert_eq!(
+            member_value("temp=125 \u{b0}C"),
+            Some(("temp", "125".to_owned()))
+        );
+        assert_eq!(member_value("VG=1.5"), Some(("VG", "1.5".to_owned())));
+        assert_eq!(member_value("trial 3"), None);
+        assert_eq!(member_value("ff, temp=125 \u{b0}C"), None);
     }
 
     /// A pane too narrow for both regions gives up the legend, and never
