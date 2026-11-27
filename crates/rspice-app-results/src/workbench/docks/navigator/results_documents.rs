@@ -27,8 +27,31 @@ pub(super) fn group_expanded(ctx: &egui::Context) -> bool {
         .unwrap_or(true)
 }
 
-pub(super) fn set_group_expanded(ctx: &egui::Context, expanded: bool) {
+fn set_group_expanded(ctx: &egui::Context, expanded: bool) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(GROUP_ID), expanded));
+}
+
+/// What the group's head asks for once drawn: a click, or Left and Right
+/// while it has the focus, closes or opens the group. A query holds it
+/// open, since every document it lists matches.
+pub(super) fn documents_head_actions(head: &Response, expanded: bool, filtering: bool) {
+    if filtering {
+        return;
+    }
+    if head.clicked() {
+        set_group_expanded(&head.ctx, !expanded);
+    }
+    if head.has_focus() {
+        let (collapse, expand) = head.ctx.input_mut(|input| {
+            (
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            )
+        });
+        if (collapse && expanded) || (expand && !expanded) {
+            set_group_expanded(&head.ctx, expand);
+        }
+    }
 }
 
 /// One saved document's row: its name, in the accent while Results shows

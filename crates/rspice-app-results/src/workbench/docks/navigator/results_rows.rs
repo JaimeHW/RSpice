@@ -29,7 +29,7 @@ use super::results_actions::{
     update_result_browser_multi_selection,
 };
 use super::results_documents::{
-    document_row, document_row_actions, group_expanded, set_group_expanded,
+    document_row, document_row_actions, documents_head_actions, group_expanded,
 };
 use super::results_tree::{InstanceNode, SignalKind, TreeItem, split_hierarchy};
 use crate::product::ResultDocumentId;
@@ -51,7 +51,7 @@ pub const RESULT_QUANTITY_ROW_HEIGHT: f32 = 22.0;
 /// The same row at relaxed density.
 const RESULT_QUANTITY_ROW_HEIGHT_RELAXED: f32 = 24.0;
 const RESULT_BROWSER_VIRTUALIZATION_THRESHOLD: usize = 250;
-const RESULT_BROWSER_RENDER_WINDOW_ROWS: usize = 120;
+pub(super) const RESULT_BROWSER_RENDER_WINDOW_ROWS: usize = 120;
 const RESULT_BROWSER_OVERSCAN_ROWS: usize = 20;
 pub const TOUCH_TARGET_HEIGHT: f32 = crate::ui::tokens::TOUCH_TARGET;
 
@@ -1087,26 +1087,7 @@ pub(super) fn show_virtualized_result_signals(
                         |ui| match row {
                         ResultSignalVirtualRow::Documents { expanded } => {
                             let head = documents_head(ui, documents.len(), expanded);
-                            if head.clicked() && !filtering {
-                                set_group_expanded(ui.ctx(), !expanded);
-                            }
-                            if head.has_focus() && !filtering {
-                                let (collapse, expand) = head.ctx.input_mut(|input| {
-                                    (
-                                        input.consume_key(
-                                            egui::Modifiers::NONE,
-                                            egui::Key::ArrowLeft,
-                                        ),
-                                        input.consume_key(
-                                            egui::Modifiers::NONE,
-                                            egui::Key::ArrowRight,
-                                        ),
-                                    )
-                                });
-                                if (collapse && expanded) || (expand && !expanded) {
-                                    set_group_expanded(ui.ctx(), expand);
-                                }
-                            }
+                            documents_head_actions(&head, expanded, filtering);
                         }
                         ResultSignalVirtualRow::Document { document } => {
                             let document = &documents[document];
@@ -2049,7 +2030,7 @@ enum HeadLabel<'a> {
 type HeadResponse = (Response, Option<egui::Rect>);
 
 /// The saved documents' group head: their count, and its disclosure.
-fn documents_head(ui: &mut Ui, count: usize, expanded: bool) -> Response {
+pub(super) fn documents_head(ui: &mut Ui, count: usize, expanded: bool) -> Response {
     result_browser_analysis_head(
         ui,
         None,

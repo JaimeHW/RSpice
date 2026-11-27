@@ -102,6 +102,7 @@ pub mod workbench {
             pub mod results;
             pub mod results_actions;
             mod results_catalogue;
+            mod results_datasets;
             mod results_documents;
             pub mod results_rows;
             pub(crate) mod results_runs;

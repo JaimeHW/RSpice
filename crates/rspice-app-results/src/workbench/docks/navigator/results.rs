@@ -21,19 +21,18 @@ use rspice_results::result_presentation::{
 use rspice_results_ui::operational::ResultOperationalState;
 use rspice_results_ui::selection::{ResultBrowserSelectionKey, ResultExpressionPresentationKey};
 
-use super::super::super::commands::result_navigation::{open_run_log, ticked_result_quantities};
+use super::super::super::commands::result_navigation::ticked_result_quantities;
 use super::super::super::design_system::WorkbenchIcon;
 use super::results_actions::{
-    compare_enabled, execute, locate_on_schematic_menu, select_result_analysis_by_key,
-    select_result_browser_key, set_result_quantities_ticked,
+    compare_enabled, execute, locate_on_schematic_menu, select_result_browser_key,
+    set_result_quantities_ticked,
 };
 use super::results_catalogue::{ListedArtifact, ListedSignals, ListingAsk, Quantity};
 use super::results_rows::{
     ResultCompletenessClass, artifact_hierarchical_name, artifact_signal_kind, expression_header,
     is_plottable_artifact, result_analysis_browser_status, result_analysis_completeness,
-    result_analysis_domain, result_browser_manifest_row, result_run_completeness,
-    result_run_operational_label, retained_result_artifacts, show_virtualized_result_signals,
-    signal_row, signal_rows,
+    result_analysis_domain, result_run_completeness, result_run_operational_label,
+    retained_result_artifacts, show_virtualized_result_signals, signal_row, signal_rows,
 };
 use super::results_sets::{save_ticked_as_set, signal_sets_menu};
 use super::results_tree::{BrowserQuery, SignalKind};
@@ -679,212 +678,26 @@ pub(in crate::workbench) fn results(
         );
         return;
     }
+    if tab == ResultsBrowserTab::Datasets {
+        super::results_datasets::show_datasets(
+            ui,
+            state,
+            run_details,
+            &documents,
+            shown_document,
+            runs,
+            active_run,
+            active_analysis,
+            !query.is_empty(),
+        );
+        return;
+    }
     ScrollArea::vertical()
         .id_salt("workbench.results.navigator")
         .auto_shrink([false, true])
         .show(ui, |ui| match tab {
-            ResultsBrowserTab::Signals => {
-                unreachable!("signal rows return through the virtualized result browser")
-            }
-            ResultsBrowserTab::Datasets => {
-                if runs.is_empty() {
-                    muted(
-                        ui,
-                        if state.model.simulation.retained.runs.is_empty() {
-                            "No results yet — run a simulation"
-                        } else {
-                            "No dataset or analysis matches this filter."
-                        },
-                    );
-                }
-                let marks = run_marks(state, runs);
-                for (run_at, (run, mark)) in runs.iter().zip(&marks).enumerate() {
-                    let run_active = active_run == Some(run.run_index);
-                    // A run whose results store no folder holds, or holds damaged, says so
-                    // before anything about its data.
-                    let unread = state
-                        .model
-                        .simulation
-                        .retained
-                        .runs
-                        .get(run.run_index)
-                        .and_then(crate::state::SimulationRun::unread_results);
-                    let checking = state
-                        .model
-                        .simulation
-                        .retained
-                        .runs
-                        .get(run.run_index)
-                        .and_then(crate::state::SimulationRun::checking_results);
-                    let checking_meta;
-                    let run_meta = if let Some((done, total)) = checking {
-                        checking_meta = match done.saturating_mul(100).checked_div(total) {
-                            Some(percent) => format!("checking {percent}%"),
-                            None => "checking".to_owned(),
-                        };
-                        checking_meta.as_str()
-                    } else if unread.is_some() {
-                        "results not found"
-                    } else {
-                        ""
-                    };
-                    let overlaid = state.model.simulation.is_dataset_overlaid(run.dataset_id);
-                    let pinned = state
-                        .model
-                        .simulation
-                        .retained
-                        .runs
-                        .get(run.run_index)
-                        .is_some_and(|retained| retained.retention().is_pinned());
-                    let pinned_meta;
-                    let run_meta = match (pinned, run_meta.is_empty()) {
-                        (false, _) => run_meta,
-                        (true, true) => "pinned",
-                        (true, false) => {
-                            pinned_meta = format!("pinned \u{b7} {run_meta}");
-                            pinned_meta.as_str()
-                        }
-                    };
-                    let responses = result_dataset_row(
-                        ui,
-                        run_row_id(run.dataset_id),
-                        if run.success {
-                            WorkbenchIcon::Success
-                        } else {
-                            WorkbenchIcon::Warning
-                        },
-                        &run.label,
-                        run_active,
-                        run_meta,
-                        overlaid,
-                        mark.as_ref().map(|mark| mark.width(ui)),
-                    );
-                    if let (Some(mark), Some(slot)) = (mark, responses.mark) {
-                        let asked = mark.show_in(ui, slot, run.dataset_id);
-                        mark.apply(state, &asked);
-                    }
-                    // Up and Down on a run's row step to the run above or
-                    // below it and show that one, as a click on it would.
-                    let stepped = responses
-                        .selection
-                        .has_focus()
-                        .then(|| {
-                            ui.input_mut(|input| {
-                                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
-                                    run_at.checked_sub(1)
-                                } else if input
-                                    .consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
-                                {
-                                    Some(run_at + 1)
-                                } else {
-                                    None
-                                }
-                            })
-                        })
-                        .flatten()
-                        .and_then(|at| runs.get(at));
-                    let picked = if let Some(next) = stepped {
-                        ui.memory_mut(|memory| memory.request_focus(run_row_id(next.dataset_id)));
-                        Some((next.dataset_id, &next.label))
-                    } else if responses.selection.clicked() {
-                        responses.selection.request_focus();
-                        Some((run.dataset_id, &run.label))
-                    } else {
-                        None
-                    };
-                    if let Some((dataset, label)) = picked {
-                        // A plan's run is shown through the plan's view, which
-                        // holds on it unless it is the plan's newest.
-                        if let Err(error) =
-                            crate::workbench::chrome::document_bar::results::show_run(
-                                state, dataset,
-                            )
-                        {
-                            state
-                                .workbench
-                                .prompt(format!("Could not show {label}: {error}"));
-                        }
-                        state.results.session.selected_trace = None;
-                        state.results.session.selected_result_artifact = None;
-                    }
-                    if let Some(reason) = &unread {
-                        responses.selection.clone().on_hover_text(format!(
-                            "The results of {} cannot be read: {reason}",
-                            run.label
-                        ));
-                    }
-                    let mut details = false;
-                    let mut log = false;
-                    let mut locate = false;
-                    responses.selection.context_menu(|ui| {
-                        super::results_runs::run_menu(ui, state, run.dataset_id);
-                        ui.separator();
-                        if unread.is_some() && ui.button("Locate results\u{2026}").clicked() {
-                            locate = true;
-                            ui.close();
-                        }
-                        if ui.button("Run details\u{2026}").clicked() {
-                            details = true;
-                            ui.close();
-                        }
-                        if ui.button("Open run log").clicked() {
-                            log = true;
-                            ui.close();
-                        }
-                    });
-                    if locate {
-                        locate_results(state);
-                    }
-                    if let Some(run_id) = state
-                        .model
-                        .simulation
-                        .retained
-                        .runs
-                        .get(run.run_index)
-                        .map(|retained| retained.id)
-                    {
-                        if details {
-                            super::super::inspector::run_details::open(
-                                run_details,
-                                &state.model.simulation,
-                                run_id,
-                            );
-                        }
-                        if log {
-                            open_run_log(state.model, state.workbench, run_id);
-                        }
-                    }
-                    if responses.overlay.is_some_and(|response| response.clicked()) {
-                        let enabled = state
-                            .model
-                            .simulation
-                            .toggle_dataset_overlay(run.dataset_id);
-                        state.workbench.prompt(if enabled {
-                            format!("Overlaying {} on the active result sheet.", run.label)
-                        } else {
-                            format!("Removed {} from the active result sheet.", run.label)
-                        });
-                    }
-                    if !run_active && query.is_empty() {
-                        continue;
-                    }
-                    for analysis in &run.analyses {
-                        let analysis_active =
-                            run_active && active_analysis == Some(analysis.analysis_index);
-                        if result_browser_manifest_row(
-                            ui,
-                            analysis.short_label,
-                            &analysis.label,
-                            &analysis.domain,
-                            analysis_active,
-                            analysis.success,
-                        )
-                        .clicked()
-                        {
-                            select_result_analysis_by_key(state, analysis.presentation_key);
-                        }
-                    }
-                }
+            ResultsBrowserTab::Signals | ResultsBrowserTab::Datasets => {
+                unreachable!("signal and dataset rows return through their own lists")
             }
             ResultsBrowserTab::Expressions => {
                 // Both ways of having no analysis read the same to the
@@ -1657,17 +1470,19 @@ pub(crate) fn shown_run_reads_as(state: ResultsReads<'_>) -> Option<ResultOperat
 /// became of each run, the shown run's as its sheet reads it where that is
 /// the run's reading.
 pub(super) fn run_marks(state: &mut ResultsParts<'_>, runs: &[ResultRun]) -> Vec<Option<RunMark>> {
-    let shown = state.model.simulation.view.active_run_idx;
-    runs.iter()
-        .map(|run| {
-            let reads_as = run.data_state.reads_as?;
-            Some(if shown == Some(run.run_index) {
-                RunMark::shown(state, reads_as)
-            } else {
-                RunMark::of(state, run.run_index, reads_as)
-            })
-        })
-        .collect()
+    runs.iter().map(|run| run_mark(state, run)).collect()
+}
+
+/// The mark `run`'s row carries, as [`run_marks`] reads it.
+pub(super) fn run_mark(state: &mut ResultsParts<'_>, run: &ResultRun) -> Option<RunMark> {
+    let reads_as = run.data_state.reads_as?;
+    Some(
+        if state.model.simulation.view.active_run_idx == Some(run.run_index) {
+            RunMark::shown(state, reads_as)
+        } else {
+            RunMark::of(state, run.run_index, reads_as)
+        },
+    )
 }
 
 pub const fn result_analysis_data_state(
@@ -2390,16 +2205,16 @@ pub(super) struct ResultRun {
     pub(super) analyses: Vec<ResultAnalysis>,
 }
 
-struct ResultDatasetRowResponses {
-    selection: Response,
-    overlay: Option<Response>,
+pub(super) struct ResultDatasetRowResponses {
+    pub(super) selection: Response,
+    pub(super) overlay: Option<Response>,
     /// Where the run's mark stands, after its label, when it has one.
-    mark: Option<egui::Rect>,
+    pub(super) mark: Option<egui::Rect>,
 }
 
 /// Locate results: the folder the reader picks is searched for the results store of every run
 /// that cannot read its samples.
-fn locate_results(state: &mut ResultsParts<'_>) {
+pub(super) fn locate_results(state: &mut ResultsParts<'_>) {
     let Some(folder) = pick_results_folder() else {
         return;
     };
@@ -2433,11 +2248,11 @@ fn pick_results_folder() -> Option<std::path::PathBuf> {
 
 /// The data browser's row of the run of `dataset`, which Up and Down hand the
 /// keyboard on to.
-fn run_row_id(dataset: DatasetId) -> egui::Id {
+pub(super) fn run_row_id(dataset: DatasetId) -> egui::Id {
     egui::Id::new(("workbench.results.run-row", dataset))
 }
 
-fn result_dataset_row(
+pub(super) fn result_dataset_row(
     ui: &mut Ui,
     id: egui::Id,
     icon: WorkbenchIcon,
