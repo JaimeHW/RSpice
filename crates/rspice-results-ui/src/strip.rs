@@ -459,9 +459,6 @@ pub struct StripHeaderResponse {
     pub scale_rect: Option<Rect>,
 }
 
-/// What a legend chip's context menu adds, given the chip's index.
-type ChipMenu<'a> = dyn FnMut(&mut Ui, usize) + 'a;
-
 /// Strip header builder. `StripHeader::new(...).closable(true).show(ui)`.
 pub struct StripHeader<'a> {
     kind: &'a str,
@@ -472,7 +469,6 @@ pub struct StripHeader<'a> {
     zoomed: bool,
     expr_action: bool,
     removable: std::ops::Range<usize>,
-    chip_menu: Option<&'a mut ChipMenu<'a>>,
     pane_actions: bool,
     incomplete: Option<&'a str>,
     id_salt: egui::Id,
@@ -496,7 +492,6 @@ impl<'a> StripHeader<'a> {
             zoomed: false,
             expr_action: false,
             removable: usize::MAX..usize::MAX,
-            chip_menu: None,
             pane_actions: true,
             incomplete: None,
             id_salt: egui::Id::new(kind),
@@ -610,14 +605,6 @@ impl<'a> StripHeader<'a> {
     /// them, which the sheet draws itself, do not.
     pub fn removable(mut self, chips: std::ops::Range<usize>) -> Self {
         self.removable = chips;
-        self
-    }
-
-    /// What a legend chip's context menu offers ahead of Remove, drawn by
-    /// the sheet that knows what the chip stands for: the conversions a
-    /// trace's own menu offers, say.
-    pub fn chip_menu(mut self, menu: &'a mut ChipMenu<'a>) -> Self {
-        self.chip_menu = Some(menu);
         self
     }
 
@@ -814,7 +801,6 @@ impl<'a> StripHeader<'a> {
         // Chips own exactly the remaining clipped width; drag/wheel scrolling
         // keeps every trace reachable without crossing into the action rect.
         let removable = self.removable;
-        let mut chip_menu = self.chip_menu;
         let legend = self.legend;
         let expr_action = self.expr_action && !trailing_expr;
         let legend_rect = span_rect(layout.legend);
@@ -833,23 +819,16 @@ impl<'a> StripHeader<'a> {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     for (index, chip) in legend.iter().enumerate() {
-                        let (response, visibility) = legend_chip(ui, chip, false);
+                        let (response, visibility) = legend_chip(ui, chip);
                         if response.clicked() && !visibility.clicked() {
                             out.legend_clicked = Some(index);
                         }
                         if visibility.clicked() {
                             out.legend_visibility_clicked = Some(index);
                         }
-                        let removes = removable.contains(&index);
-                        if removes || chip_menu.is_some() {
+                        if removable.contains(&index) {
                             crate::context_menu::context_menu(&response, |ui| {
-                                if let Some(menu) = chip_menu.as_mut() {
-                                    menu(ui, index);
-                                    if removes {
-                                        ui.separator();
-                                    }
-                                }
-                                if removes && ui.button("Remove expression").clicked() {
+                                if ui.button("Remove expression").clicked() {
                                     out.legend_removed = Some(index);
                                     ui.close();
                                 }
@@ -1042,11 +1021,7 @@ fn legend_natural_width(ui: &mut Ui, legend: &[LegendChip<'_>], expr_action: boo
 
 /// A legend chip: the series' mark in its colour, then its mono name;
 /// dimmed when off.
-fn legend_chip(
-    ui: &mut Ui,
-    chip: &LegendChip<'_>,
-    selected: bool,
-) -> (egui::Response, egui::Response) {
+fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> (egui::Response, egui::Response) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -1069,7 +1044,7 @@ fn legend_chip(
         WidgetInfo::selected(
             WidgetType::SelectableLabel,
             ui.is_enabled(),
-            selected,
+            false,
             format!("{} trace selection", chip.name),
         )
     });
@@ -1096,9 +1071,7 @@ fn legend_chip(
         .animate_bool_with_time(response.id, hovered, ui.style().animation_time);
     let opacity = if chip.on { 1.0 } else { 0.38 };
     let painter = ui.painter();
-    if selected {
-        painter.rect_filled(rect, t.radius, c.accent_dim);
-    } else if hover > 0.0 {
+    if hover > 0.0 {
         painter.rect_filled(
             rect,
             t.radius,
