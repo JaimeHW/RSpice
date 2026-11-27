@@ -181,9 +181,13 @@ pub fn dataset_export_form(state: ResultsReads<'_>) -> DatasetExportForm {
             })
             .count();
         let mut label = analysis.label.clone();
-        // Two strips of one kind read alike; their place in the run tells
-        // them apart.
-        if run
+        // A member of a `.step` sweep or Monte Carlo study is told apart by
+        // its parameter values or trial, as its strip names it.
+        if let Some(member) = analysis.family_member()
+            && !label.contains(&member.label())
+        {
+            label = member.titled(&label);
+        } else if run
             .analyses
             .iter()
             .filter(|other| other.label == label)

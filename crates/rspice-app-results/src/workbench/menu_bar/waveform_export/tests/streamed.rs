@@ -416,6 +416,124 @@ fn a_waveform_table_is_written_as_it_is_read_byte_for_byte() {
     );
 }
 
+/// Every other format that writes a run's samples writes a run kept in a results store as it
+/// reads it: its writer reads no stored column whole, the window's frames read no column while
+/// the export starts and its job writes, and the file reads back as the run, every sample bit
+/// for bit. NumPy (one array and an archive), MATLAB, HDF5, both bundles and a PWL source.
+#[test]
+fn every_sample_format_writes_a_stored_run_as_it_reads_it() {
+    use crate::workbench::workflows::result_import_workflow::{
+        exported_waveform_limits, parse_result_dataset,
+    };
+    use rspice_formats::native_bundle::NativeBundleKind;
+    use rspice_formats::waveform_io::result::ExportMember;
+
+    // Three blocks of rows and a few more.
+    const ROWS: u64 = 3 * (1 << 16) + 7;
+    let scratch = Scratch::new("formats");
+    let analysis = stored_transient(&scratch.0, ROWS);
+    let waveforms = analysis.waveforms.iter().collect::<Vec<_>>();
+    let members = [ExportMember::new(&analysis, waveforms.clone())];
+    let limits = exported_waveform_limits();
+    let sink = &mut std::io::sink();
+    let work = ColumnWork::read();
+    rspice_formats::numpy::result::write_npy(&analysis, &waveforms, limits, sink)
+        .expect("the array writes");
+    rspice_formats::numpy::result::write_npz(&members, limits, sink).expect("the archive writes");
+    rspice_formats::matlab::result::write_matlab(&members, limits, sink)
+        .expect("the MAT file writes");
+    rspice_formats::hdf5::result::write_hdf5(&members, limits, sink).expect("the HDF5 writes");
+    for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
+        rspice_formats::native_bundle::result::write_native_bundle(kind, &members, sink)
+            .expect("the bundle writes");
+    }
+    super::super::pwl::write_pwl("TRAN", &analysis.waveforms[0], sink).expect("the PWL writes");
+    assert_eq!(
+        work.since().stored_reads,
+        0,
+        "no stored column is read whole"
+    );
+
+    // The same trace held in memory, which the PWL source of the stored one equals byte for byte.
+    let held = RetainedTrace::new(
+        "V(s0)",
+        (0..ROWS).map(|row| row as f64 * STEP_S).collect::<Vec<_>>(),
+        (0..ROWS).map(sample).collect::<Vec<_>>(),
+        "#00aaff",
+    )
+    .with_unit("V");
+    let mut held_pwl = Vec::new();
+    super::super::pwl::write_pwl("TRAN", &held, &mut held_pwl).expect("the held PWL writes");
+
+    let mut state = state_with_typed_result(analysis);
+    for (choice, name) in [
+        (6, "waveforms.npy"),
+        (7, "waveforms.npz"),
+        (9, "waveforms.mat"),
+        (8, "waveforms.h5"),
+        (3, "waveforms.rspiceresult"),
+        (4, "waveforms.rspicedata"),
+        (12, "waveforms.inc"),
+    ] {
+        state
+            .model
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::EngineeringExport, choice)
+            .expect("an export preference");
+        let path = scratch.0.join(name);
+        let work = ColumnWork::read();
+        let export = action_export_dataset_with_io(
+            &mut state.results_parts(),
+            &FileExportIo(path.clone()),
+            &DatasetExportChoice::default(),
+        )
+        .unwrap_or_else(|| panic!("{name}: the export starts: {}", last_log_message(&state)));
+        let started = Instant::now();
+        let mut running = Some(export);
+        while let Some(export) = running.take() {
+            running = finish_export_job(&mut state.results_parts(), export);
+            if running.is_some() {
+                assert!(
+                    started.elapsed() < Duration::from_secs(600),
+                    "{name}: the export ends"
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        assert_eq!(work.since(), ColumnWork::default(), "{name}");
+        assert!(
+            last_log_message(&state).starts_with("Exported "),
+            "{name}: {}",
+            last_log_message(&state)
+        );
+        let bytes = std::fs::read(&path).expect("the export reads");
+        if choice == 12 {
+            assert!(bytes == held_pwl, "{name}: the stored source differs");
+            continue;
+        }
+        let parsed = parse_result_dataset(name, &bytes)
+            .unwrap_or_else(|error| panic!("{name}: the export reads back: {error}"));
+        // One array keeps no names, and MATLAB keeps the name as an identifier: the one signal
+        // read back is the trace.
+        let [trace] = parsed.waveforms.as_slice() else {
+            panic!("{name}: one trace reads back");
+        };
+        let (x, y) = (
+            trace.x.read_whole().expect("the time reads"),
+            trace.y.read_whole().expect("the values read"),
+        );
+        assert_eq!((x.len(), y.len()), (ROWS as usize, ROWS as usize), "{name}");
+        for row in 0..ROWS {
+            let at = row as usize;
+            assert_eq!(
+                (x[at].to_bits(), y[at].to_bits()),
+                ((row as f64 * STEP_S).to_bits(), sample(row).to_bits()),
+                "{name}: row {row}"
+            );
+        }
+    }
+}
+
 /// A run of 10 GiB of samples, past what the computer can hold, exports as a rawfile written as
 /// it is read. Run by hand, alone; it needs about 16 GiB free on the target volume.
 // Run by hand to read its times, so it prints them.

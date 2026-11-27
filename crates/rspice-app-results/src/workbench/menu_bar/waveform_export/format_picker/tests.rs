@@ -181,6 +181,44 @@ fn form_nodes(
     nodes
 }
 
+/// Every text the form paints on its last frame, notes included.
+fn painted(state: &mut ResultsTestHost) -> Vec<String> {
+    fn texts(shape: &egui::Shape, into: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, into)),
+            _ => {}
+        }
+    }
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut painted = Vec::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                show_dataset_export_picker(
+                    ctx,
+                    &mut state.results.dataset_export,
+                    &mut state.results.dataset_export_form,
+                    &mut state.model.preferences,
+                );
+            },
+        );
+        painted.clear();
+        for clipped in &output.shapes {
+            texts(&clipped.shape, &mut painted);
+        }
+    }
+    painted
+}
+
 fn spoken(
     nodes: &std::collections::HashMap<egui::accesskit::NodeId, egui::accesskit::Node>,
 ) -> Vec<String> {
@@ -215,6 +253,61 @@ fn a_view_of_two_strips_asks_which_analysis_and_offers_the_active_one() {
         !words.iter().any(|word| word.contains("Maximize")),
         "{words:?}"
     );
+}
+
+/// Over the members of a `.step`, the form offers all of them at once, which a table writes as
+/// one long table; a format that holds one analysis says it writes the member chosen.
+#[test]
+fn a_stepped_view_offers_all_members_and_a_one_member_format_says_so() {
+    use rspice_results::provenance::{AnalysisResultFamilyMember, AnalysisResultStepCoordinate};
+
+    let mut state = two_strip_state();
+    for (index, analysis) in state.model.simulation.retained.runs[0]
+        .analyses
+        .iter_mut()
+        .enumerate()
+    {
+        analysis.import_source = Some(rspice_results::result_import::ResultImportSource {
+            source_name: "stepped.raw".to_owned(),
+            format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
+            coordinate: None,
+            family_member: Some(AnalysisResultFamilyMember::StepPoint {
+                index,
+                coordinate: vec![AnalysisResultStepCoordinate {
+                    name: "r".to_owned(),
+                    value: 1000.0 * (index + 1) as f64,
+                    unit: String::new(),
+                }],
+            }),
+            event_dump: None,
+        });
+    }
+    let analysis_question = |nodes: &std::collections::HashMap<
+        egui::accesskit::NodeId,
+        egui::accesskit::Node,
+    >| {
+        nodes
+            .values()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::ComboBox && node.label() == Some("Analysis")
+            })
+            .and_then(|node| node.value().map(str::to_owned))
+    };
+
+    open_form(&mut state, 0);
+    let nodes = form_nodes(&mut state);
+    assert_eq!(analysis_question(&nodes).as_deref(), Some(ALL_MEMBERS));
+    assert!(!painted(&mut state).iter().any(|text| text == ONE_MEMBER_NOTE));
+
+    open_form(&mut state, NPY);
+    let nodes = form_nodes(&mut state);
+    // The active strip's member, named by its parameter value.
+    assert_eq!(
+        analysis_question(&nodes).as_deref(),
+        Some("Transient \u{00b7} r=2k")
+    );
+    let texts = painted(&mut state);
+    assert!(texts.iter().any(|text| text == ONE_MEMBER_NOTE), "{texts:?}");
 }
 
 /// A view of one analysis has nothing to ask about the analysis.

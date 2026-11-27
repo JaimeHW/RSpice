@@ -11,6 +11,7 @@ use crate::workbench::documents::result_document::test_fixtures::{MockExportWork
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
 mod binary_formats;
+mod family;
 mod periodic_noise;
 mod pwl;
 mod soa;
