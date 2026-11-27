@@ -435,6 +435,18 @@ impl WaveformWriter {
         dataset: &WaveformDataset,
         delimiter: char,
     ) -> Result<String, WaveformWriteError> {
+        let (mut contents, record) = Self::delimited_frame(dataset, delimiter)?;
+        Self::delimited_rows(dataset, delimiter, &mut contents);
+        contents.push_str(&record);
+        Ok(contents)
+    }
+
+    /// Whether `dataset` is a table the delimited writer writes: a coordinate, a sample and a
+    /// signal, every signal on the coordinate's samples, and no infinite sample. Returns its
+    /// coordinate. A table written a chunk of rows at a time checks each chunk so.
+    pub(crate) fn check_delimited(
+        dataset: &WaveformDataset,
+    ) -> Result<&WaveformSignal, WaveformWriteError> {
         let coordinate = dataset.x_signal.as_ref().ok_or_else(|| {
             WaveformWriteError::InvalidData("Delimited export requires a coordinate column".into())
         })?;
@@ -470,6 +482,17 @@ impl WaveformWriter {
         {
             return Err(WaveformWriteError::InvalidData("Delimited export requires finite coordinates and finite or explicitly unavailable signal samples".into()));
         }
+        Ok(coordinate)
+    }
+
+    /// A delimited table's header line and its closing metadata record, each ending its line,
+    /// once `dataset` is checked ([`Self::check_delimited`]). A table written a chunk of rows at
+    /// a time writes these once, about its rows.
+    pub(crate) fn delimited_frame(
+        dataset: &WaveformDataset,
+        delimiter: char,
+    ) -> Result<(String, String), WaveformWriteError> {
+        let coordinate = Self::check_delimited(dataset)?;
         let separator = delimiter.to_string();
         let mut contents = String::new();
         let mut headers = Vec::new();
@@ -489,8 +512,23 @@ impl WaveformWriter {
             .collect::<Vec<_>>();
         contents.push_str(&escaped_headers.join(&separator));
         contents.push('\n');
+        let mut closing = record
+            .iter()
+            .map(|field| Self::escape_delimited_header(field, delimiter))
+            .collect::<Vec<_>>()
+            .join(&separator);
+        closing.push('\n');
+        Ok((contents, closing))
+    }
 
-        let num_points = axis.len();
+    /// The rows of `dataset`, each ending its line, appended to `contents`.
+    pub(crate) fn delimited_rows(
+        dataset: &WaveformDataset,
+        delimiter: char,
+        contents: &mut String,
+    ) {
+        let separator = delimiter.to_string();
+        let num_points = dataset.point_count();
         for i in 0..num_points {
             let mut values = Vec::new();
 
@@ -504,16 +542,6 @@ impl WaveformWriter {
             contents.push_str(&values.join(&separator));
             contents.push('\n');
         }
-        contents.push_str(
-            &record
-                .iter()
-                .map(|field| Self::escape_delimited_header(field, delimiter))
-                .collect::<Vec<_>>()
-                .join(&separator),
-        );
-        contents.push('\n');
-
-        Ok(contents)
     }
 
     fn delimited_metadata(

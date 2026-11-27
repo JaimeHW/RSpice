@@ -1,10 +1,14 @@
 //! Waveform interchange projections over canonical result data.
 
 mod bounds;
+mod delimited;
 mod export;
 pub use bounds::WaveformExportError;
 pub(crate) use bounds::{
     RowReader, check_export_shape, checked_coordinate, export_samples, shared_coordinate,
+};
+pub use delimited::{
+    DelimitedExportError, DelimitedTable, check_delimited_waveforms, write_delimited_waveforms,
 };
 
 #[cfg(test)]

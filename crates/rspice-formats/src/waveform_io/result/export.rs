@@ -94,9 +94,10 @@ struct ExportSignalSlice<'a> {
     y_values: &'a [f64],
 }
 
-/// Project selected traces without applying view selection or publishing a file.
-pub fn project_waveforms<W: AsRef<RetainedWaveform>>(
-    analysis: &AnalysisResult<W>,
+/// Project selected traces without applying view selection or publishing a file. The analysis
+/// gives the table's coordinate, title and metadata; its traces are `waveforms`.
+pub fn project_waveforms<A: AsRef<RetainedWaveform>, W: AsRef<RetainedWaveform>>(
+    analysis: &AnalysisResult<A>,
     waveforms: &[&W],
     touchstone: bool,
 ) -> Result<WaveformDataset, WaveformProjectionError> {

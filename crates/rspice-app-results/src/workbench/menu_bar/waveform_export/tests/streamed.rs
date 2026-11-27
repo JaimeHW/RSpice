@@ -310,6 +310,112 @@ fn a_cancelled_export_leaves_the_destination_as_it_was() {
     );
 }
 
+/// A waveform table is written as it is read, byte for byte the table the dataset writer makes
+/// of the same traces: a small run of real and complex traces as CSV and TSV, and a run kept in a
+/// results store, longer than the rows written at a time, without a column read whole and on a
+/// job where the export picks a file.
+#[test]
+fn a_waveform_table_is_written_as_it_is_read_byte_for_byte() {
+    use rspice_formats::waveform_io::result::{project_waveforms, write_delimited_waveforms};
+    use rspice_formats::waveform_io::{WaveformFormat, WaveformWriter};
+    let tables = |analysis: &AnalysisResult, delimiter: char| {
+        let waveforms = analysis.waveforms.iter().collect::<Vec<_>>();
+        let mut streamed = Vec::new();
+        write_delimited_waveforms(analysis, &waveforms, delimiter, &mut streamed)
+            .expect("the table is written as it is read");
+        let format = if delimiter == ',' {
+            WaveformFormat::Csv
+        } else {
+            WaveformFormat::Tsv
+        };
+        let dataset = project_waveforms(analysis, &waveforms, false).expect("the traces project");
+        let whole = WaveformWriter::new(format)
+            .write_text(&dataset)
+            .expect("the dataset is written");
+        (
+            String::from_utf8(streamed).expect("the table is text"),
+            whole,
+        )
+    };
+    let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        RetainedTrace::new(
+            "V(a,\"b\")",
+            vec![0.0, 1.0e-9, 2.5e-9],
+            vec![0.1, f64::NAN, -3.0],
+            "#00aaff",
+        )
+        .with_unit("V"),
+        RetainedTrace::new(
+            "I(R1)",
+            vec![0.0, 1.0e-9, 2.5e-9],
+            vec![1.0e-3, 2.0e-3, 0.0],
+            "#ff8800",
+        )
+        .with_unit("A"),
+    ]);
+    let ac = AnalysisResult::new(2, AnalysisType::Ac, "AC").with_waveforms(vec![
+        RetainedTrace::new(
+            "|V(out)|",
+            vec![1.0, 10.0, 100.0],
+            vec![1.0, 0.5, 0.1],
+            "#00aaff",
+        )
+        .with_complex_components("V(out)", vec![1.0, 0.3, -0.1], vec![0.0, -0.4, 0.0]),
+    ]);
+    for analysis in [&transient, &ac] {
+        for delimiter in [',', '\t'] {
+            let (streamed, whole) = tables(analysis, delimiter);
+            assert_eq!(
+                streamed, whole,
+                "{:?} with {delimiter:?}",
+                analysis.analysis_type
+            );
+        }
+    }
+
+    // Three chunks of rows and a few more, kept in a results store.
+    const ROWS: u64 = 3 * (1 << 16) + 7;
+    let scratch = Scratch::new("table");
+    let stored = stored_transient(&scratch.0, ROWS);
+    let work = ColumnWork::read();
+    let mut streamed = Vec::new();
+    let waveforms = stored.waveforms.iter().collect::<Vec<_>>();
+    let table = write_delimited_waveforms(&stored, &waveforms, ',', &mut streamed)
+        .expect("the stored table is written");
+    assert_eq!(
+        work.since().stored_reads,
+        0,
+        "no stored column is read whole"
+    );
+    assert_eq!((table.signals, table.points), (1, ROWS as usize));
+    let (_, whole) = tables(&stored, ',');
+    assert!(streamed == whole.as_bytes(), "the stored table differs");
+
+    let mut state = state_with_typed_result(stored);
+    state
+        .model
+        .preferences
+        .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 0)
+        .expect("a CSV preference");
+    let path = scratch.0.join("waveforms.csv");
+    let export = action_export_dataset_with_io(
+        &mut state.results_parts(),
+        &FileExportIo(path.clone()),
+        &DatasetExportChoice::default(),
+    )
+    .unwrap_or_else(|| panic!("the export starts: {}", last_log_message(&state)));
+    finish(&mut state, export, Duration::from_secs(120));
+    assert!(
+        last_log_message(&state).starts_with("Exported CSV: "),
+        "{}",
+        last_log_message(&state)
+    );
+    assert!(
+        std::fs::read(&path).expect("the export reads") == whole.as_bytes(),
+        "the exported file differs"
+    );
+}
+
 /// A run of 10 GiB of samples, past what the computer can hold, exports as a rawfile written as
 /// it is read. Run by hand, alone; it needs about 16 GiB free on the target volume.
 // Run by hand to read its times, so it prints them.

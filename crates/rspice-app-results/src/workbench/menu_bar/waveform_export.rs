@@ -1,5 +1,6 @@
 //! Waveform export actions.
 
+mod delimited;
 mod format_picker;
 mod hdf5;
 mod job;
@@ -425,6 +426,17 @@ pub fn action_export_dataset_with_io(
         return None;
     }
 
+    // Where this process writes the file, a table of the traces is written
+    // on a job as its samples are read, so a stored run of any length
+    // exports without a column read whole.
+    if io.writes_as_it_reads()
+        && matches!(
+            export_format,
+            TabularExportFormat::Csv | TabularExportFormat::Tsv
+        )
+    {
+        return delimited::export_delimited_as_read(state, io, &displayed, export_format, signals);
+    }
     let prepared = match prepare_waveform_dataset(
         state.results_reads(),
         &displayed,
