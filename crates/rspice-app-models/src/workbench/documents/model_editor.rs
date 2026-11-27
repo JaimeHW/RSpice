@@ -4,9 +4,11 @@
 //! model-library domain. This module retains only an open candidate, local
 //! text-entry buffers, validation evidence, and section/dialog presentation.
 
+mod operations;
 mod qualification_run;
 mod release_candidate;
 
+pub use operations::*;
 pub use qualification_run::*;
 // Crate-private: `release_candidate` exposes only `pub(super)` helpers, which
 // the sibling modules reach through `use super::*`.
