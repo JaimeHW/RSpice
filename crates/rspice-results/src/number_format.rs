@@ -163,6 +163,8 @@ pub fn si_tick_label(value: f64, unit: &str, digits: usize) -> String {
     let prefix = si_prefix(index);
     if is_plane_angle(unit) {
         format!("{mantissa}{exponent}{prefix}{unit}")
+    } else if powers_its_numerator(unit) {
+        format!("{mantissa}{exponent}{prefix} {unit}")
     } else {
         format!("{mantissa}{exponent} {prefix}{unit}")
             .trim_end()
@@ -176,11 +178,15 @@ pub fn si_tick_label(value: f64, unit: &str, digits: usize) -> String {
 ///
 /// The spelling [`si_tick_label`] gives a tick that is not on a ladder, so a
 /// number reads one way on every surface whose ticks state their own unit.
+/// A unit raised to a power keeps the prefix on the number, as the ticks
+/// under it do: `tick_with_unit("1f", "V²/Hz")` → `"1f V²/Hz"`.
 pub fn tick_with_unit(label: &str, unit: &str) -> String {
     let mantissa = label.trim_end_matches(char::is_alphabetic);
     let prefix = &label[mantissa.len()..];
     if is_plane_angle(unit) {
         format!("{mantissa}{prefix}{unit}")
+    } else if powers_its_numerator(unit) {
+        format!("{label} {unit}")
     } else {
         format!("{mantissa} {prefix}{unit}").trim_end().to_owned()
     }
@@ -536,7 +542,7 @@ pub fn leaves_prefix_slot_blank(reading: &str) -> bool {
             && !rest.is_empty()
             && (unit_takes_prefix(rest) || unit_carries_its_decade(unit))
     });
-    !prefixed && unit_takes_prefix(unit)
+    !prefixed && unit_takes_prefix(unit) && !powers_its_numerator(unit)
 }
 
 /// A statistic of samples spread over `spread`, as it reads: a value far
@@ -561,11 +567,25 @@ pub(crate) fn is_plane_angle(unit: &str) -> bool {
     unit == "°" || unit.starts_with("°/")
 }
 
+/// Whether `unit` raises its numerator to a power: `V²/Hz`, `m^2`. A prefix
+/// glued to such a unit is raised with it — `aV²` is `(aV)²`, 10⁻³⁶ V² —
+/// so a value in it carries its prefix on the number, apart from the unit,
+/// `4.000a V²/Hz`, and its reading has no prefix slot to hold.
+fn powers_its_numerator(unit: &str) -> bool {
+    unit.split('/')
+        .next()
+        .is_some_and(|numerator| numerator.contains(['²', '³', '^']))
+}
+
 /// A number and its unit as one reading: a space between them, none before
-/// a plane angle's degree sign, and none after a number with no unit.
+/// a plane angle's degree sign, and none after a number with no unit. A unit
+/// raised to a power takes the prefix on the number
+/// ([`powers_its_numerator`]).
 fn joined(number: &str, prefix: &str, unit: &str) -> String {
     if is_plane_angle(unit) {
         format!("{number}{unit}")
+    } else if powers_its_numerator(unit) {
+        format!("{number}{prefix} {unit}")
     } else {
         format!("{number} {prefix}{unit}").trim_end().to_owned()
     }
@@ -1539,6 +1559,7 @@ mod tests {
             "\u{2265} 39.5 dB \u{b7} 38 beyond"
         ));
         assert!(!leaves_prefix_slot_blank("101 measured \u{b7} 38 failing"));
+        assert!(!leaves_prefix_slot_blank("4.000a V\u{b2}/Hz"));
     }
 
     #[test]
@@ -1563,5 +1584,23 @@ mod tests {
         assert_eq!(snapped_to_spread(-26.38e-18, 2.0), 0.0);
         assert_eq!(snapped_to_spread(1.0e-6, 2.0), 1.0e-6);
         assert_eq!(snapped_to_spread(3.0, 0.0), 3.0);
+    }
+
+    /// A unit raised to a power never takes a prefix glued to it, where the
+    /// power would raise the prefix too: `aV²` is `(aV)²`. The prefix stays
+    /// on the number, on a reading and on an axis tick alike.
+    #[test]
+    fn a_unit_raised_to_a_power_keeps_its_prefix_on_the_number() {
+        let squared = "V\u{b2}/Hz";
+        assert_eq!(fmt_column_reading(4.0e-18, squared, 4), "4.000a V\u{b2}/Hz");
+        assert_eq!(fmt_column_reading(2.5, squared, 4), "2.500 V\u{b2}/Hz");
+        assert_eq!(fmt_si_significant(3.0e-6, "m^2", 4), "3\u{b5} m^2");
+        assert_eq!(tick_with_unit("1f", squared), "1f V\u{b2}/Hz");
+        assert_eq!(tick_with_unit("10", squared), "10 V\u{b2}/Hz");
+        assert_eq!(si_tick_label(1.0e-15, squared, 2), "1f V\u{b2}/Hz");
+        assert_eq!(
+            fmt_column_reading(4.0e-3, "V/\u{221a}Hz", 4),
+            "4.000 mV/\u{221a}Hz"
+        );
     }
 }
