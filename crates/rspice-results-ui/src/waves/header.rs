@@ -2,27 +2,22 @@
 
 use super::pane::SwatchStyle;
 use super::{ReadoutPolicy, StripModel, StripTrace, UnitPane, cursor_interpolation};
-use crate::strip::{self, HEADER_PADDING_X};
+use crate::strip::{self, HEADER_PADDING_X, header_button, header_button_width};
 use egui::Ui;
 use rspice_results::visualization_document::{Abscissa, Strip};
 use rspice_ui_kit::{
-    icons::Icon,
-    plot::paint_trace_swatch,
-    theme,
-    tokens::Tokens,
-    widgets::{IconButton, chip, chip_width},
+    icons::Icon, plot::paint_trace_swatch, theme, tokens::Tokens, widgets::IconButton,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::borrow::Cow;
 
-pub const WAVE_PANE_HEADER_HEIGHT: f32 = 25.0;
+/// A pane header row, its bottom rule included: the band above the rule is
+/// the compact button's height and two points either side of it, so every
+/// control stands centred on whole pixels.
+pub const WAVE_PANE_HEADER_HEIGHT: f32 = 26.0;
 
 /// How tall the pane's trace list grows before it scrolls.
 const TRACE_LIST_HEIGHT: f32 = 320.0;
-
-/// The height of the row's controls: the header chip's and the strip
-/// header's icon side.
-const ACTION_ICON_SIDE: f32 = 22.0;
 
 /// Source-qualified actions applied immediately in legend order.
 ///
@@ -277,14 +272,20 @@ struct BarPlaces {
 }
 
 fn bar_places(ui: &mut Ui, rect: egui::Rect, bar: Option<&StripBar>) -> BarPlaces {
+    // Each place spans the band above the row's rule; what stands in it is
+    // centred there.
+    let band = strip::header_band(rect);
     let centred = |right: f32, width: f32| {
-        egui::Rect::from_center_size(
-            egui::pos2(right - 0.5 * width, rect.center().y),
-            egui::vec2(width, ACTION_ICON_SIDE),
+        egui::Rect::from_min_max(
+            egui::pos2(right - width, band.top()),
+            egui::pos2(right, band.bottom()),
         )
     };
-    let window = strip::window_control_rect(rect, 0);
-    let log_y = centred(strip::scale_chip_right(rect, 1), chip_width(ui, "log Y"));
+    let window = strip::window_control_rect(band, 0);
+    let log_y = centred(
+        strip::scale_chip_right(rect, 1),
+        header_button_width(ui, "log Y"),
+    );
     let Some(bar) = bar else {
         return BarPlaces {
             maximize: None,
@@ -297,16 +298,16 @@ fn bar_places(ui: &mut Ui, rect: egui::Rect, bar: Option<&StripBar>) -> BarPlace
     };
     let log_x = centred(
         log_y.left() - strip::WINDOW_CONTROL_GAP,
-        strip::scale_chip_width(ui, strip::X_SCALE_LABEL),
+        header_button_width(ui, strip::X_SCALE_LABEL),
     );
     let expression = centred(
         log_x.left() - strip::WINDOW_CONTROL_GAP,
-        strip::action_chip_width(ui, strip::EXPRESSION_ACTION_LABEL),
+        header_button_width(ui, strip::EXPRESSION_ACTION_LABEL),
     );
     let fit = bar.zoomed.then(|| {
         centred(
             expression.left() - strip::WINDOW_CONTROL_GAP,
-            strip::action_chip_width(ui, strip::FIT_LABEL),
+            header_button_width(ui, strip::FIT_LABEL),
         )
     });
     BarPlaces {
@@ -441,23 +442,26 @@ pub fn show_header(
         // the place of the strip's maximize control, and the axis' scale
         // chip on the rule the strip's "log X" ends on, so every scale
         // toggle of the strip stands in one right-hand column.
-        let icon = strip::window_control_rect(rect, window_slots.max(1) - 1);
+        let band = strip::header_band(rect);
+        let icon = strip::window_control_rect(band, window_slots.max(1) - 1);
         let chip_right = strip::scale_chip_right(rect, window_slots);
-        let chip_width = chip_width(ui, "log Y");
+        let chip_width = header_button_width(ui, "log Y");
         let centred = |left: f32, width: f32| {
-            egui::Rect::from_center_size(
-                egui::pos2(left + 0.5 * width, rect.center().y),
-                egui::vec2(width, ACTION_ICON_SIDE),
+            egui::Rect::from_min_max(
+                egui::pos2(left, band.top()),
+                egui::pos2(left + width, band.bottom()),
             )
         };
+        let side = strip::header_control_side(ui);
         let fit = ui
             .scope_builder(
                 egui::UiBuilder::new()
                     .max_rect(centred(icon.left(), icon.width()))
+                    .layout(egui::Layout::right_to_left(egui::Align::Center))
                     .id_salt("pane-fit-y"),
                 |ui| {
                     IconButton::new(Icon::ZoomFit)
-                        .side(ACTION_ICON_SIDE)
+                        .side(side)
                         .tooltip("Fit Y to the traces in view")
                         .show(ui)
                 },
@@ -470,18 +474,11 @@ pub fn show_header(
             .scope_builder(
                 egui::UiBuilder::new()
                     .max_rect(centred(chip_right - chip_width, chip_width))
+                    .layout(egui::Layout::left_to_right(egui::Align::Center))
                     .id_salt("pane-log-y"),
-                |ui| {
-                    ui.add_enabled_ui(log_y_available, |ui| chip(ui, "log Y", log_y))
-                        .inner
-                },
+                |ui| log_y_button(ui, log_y, log_y_available),
             )
-            .inner
-            .on_hover_text(if log_y_available {
-                "Toggle logarithmic Y axis"
-            } else {
-                "Logarithmic Y needs a positive value to draw"
-            });
+            .inner;
         if log.clicked() {
             output.toggle_log_y = true;
         }
@@ -513,7 +510,7 @@ pub fn show_header(
         }
         None => rect.left() + HEADER_PADDING_X,
     };
-    let bar_legend = legend_region_from(legend_start, rect, action_width);
+    let bar_legend = legend_region_from(legend_start, strip::header_band(rect), action_width);
     let drops = bar.is_some()
         && bar_legend.width() < LEGEND_LEAST_WIDTH
         && ui.available_height() >= WAVE_PANE_HEADER_HEIGHT + LEGEND_ROW_PLOT_FLOOR;
@@ -528,7 +525,7 @@ pub fn show_header(
             row.bottom() - 0.5,
             egui::Stroke::new(1.0, c.border),
         );
-        legend_region(row, 0.0)
+        legend_region(strip::header_band(row), 0.0)
     } else {
         ui.painter().hline(
             rect.x_range(),
@@ -592,17 +589,19 @@ pub fn show_header(
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
             ui.set_clip_rect(legend_rect);
-            // The entries take the header controls' height. The theme's
-            // control height is taller than the band, and a row of them
-            // grew past it and sat a pixel and a half below its centre.
+            // The entries take the header controls' height, centred on the
+            // band as they are. The theme's control height is taller than
+            // the band, and a row of them grew past it and sat a pixel and a
+            // half below its centre.
+            let side = strip::header_control_side(ui);
             let spacing = ui.spacing_mut();
             spacing.item_spacing.x = 3.0;
-            spacing.interact_size.y = ACTION_ICON_SIDE;
+            spacing.interact_size.y = side;
             spacing.button_padding.y = spacing.button_padding.y.min(2.0);
             let folded = folded_axes.len();
             let fitted = fitted_chips(&chips, entry_count, legend_rect.width(), |overflow| {
                 trace_list_label(overflow, hidden_count, folded)
-                    .map_or(0.0, |label| chip_width(ui, &label) + 3.0)
+                    .map_or(0.0, |label| header_button_width(ui, &label) + 3.0)
             });
             for (at, chip) in chips.iter().enumerate().take(fitted) {
                 entry(at).show(
@@ -620,17 +619,18 @@ pub fn show_header(
             // Centred on the band as the scale chip and the icon are, and
             // under its own id, so the list stays open while a toggle in it
             // moves an entry onto or off the row in front of it.
-            let width = chip_width(ui, &label);
-            let slot = egui::Rect::from_center_size(
-                egui::pos2(ui.cursor().left() + 0.5 * width, legend_rect.center().y),
-                egui::vec2(width, ACTION_ICON_SIDE),
+            let width = header_button_width(ui, &label);
+            let slot = egui::Rect::from_min_max(
+                egui::pos2(ui.cursor().left(), legend_rect.top()),
+                egui::pos2(ui.cursor().left() + width, legend_rect.bottom()),
             );
             let list = ui
                 .scope_builder(
                     egui::UiBuilder::new()
                         .max_rect(slot)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center))
                         .id_salt("pane-trace-list"),
-                    |ui| chip(ui, &label, false),
+                    |ui| header_button(&label).show(ui),
                 )
                 .inner
                 .on_hover_text(format!("Traces of the {} pane", pane_name(pane)));
@@ -753,15 +753,11 @@ fn bar_controls(
     };
     // A pane with nothing plotted has no Y axis to scale.
     if plotted {
-        let mut slot = place(ui, places.log_y, "pane-log-y");
-        let log = slot
-            .add_enabled_ui(log_y_available, |ui| chip(ui, "log Y", log_y))
-            .inner
-            .on_hover_text(if log_y_available {
-                "Toggle logarithmic Y axis"
-            } else {
-                "Logarithmic Y needs a positive value to draw"
-            });
+        let log = log_y_button(
+            &mut place(ui, places.log_y, "pane-log-y"),
+            log_y,
+            log_y_available,
+        );
         if log.clicked() {
             output.toggle_log_y = true;
         }
@@ -776,7 +772,7 @@ fn bar_controls(
             "Maximize strip"
         };
         if IconButton::new(Icon::ZoomFit)
-            .side(ACTION_ICON_SIDE)
+            .side(strip::header_control_side(ui))
             .on(bar.maximized)
             .tooltip(tip)
             .show(&mut place(ui, at, "strip-maximize"))
@@ -796,26 +792,34 @@ fn bar_controls(
         output.toggle_log_x = true;
     }
     if let Some(at) = places.expression
-        && strip::action_chip(
-            &mut place(ui, at, "strip-expression"),
-            strip::EXPRESSION_ACTION_LABEL,
-            strip::EXPRESSION_ACTION_TIP,
-        )
-        .clicked()
+        && header_button(strip::EXPRESSION_ACTION_LABEL)
+            .show(&mut place(ui, at, "strip-expression"))
+            .on_hover_text(strip::EXPRESSION_ACTION_TIP)
+            .clicked()
     {
         output.add_expression = true;
     }
     if let Some(at) = places.fit
-        && strip::action_chip(
-            &mut place(ui, at, "strip-fit"),
-            strip::FIT_LABEL,
-            "Restore automatic view (double-click the plot does the same)",
-        )
-        .clicked()
+        && header_button(strip::FIT_LABEL)
+            .show(&mut place(ui, at, "strip-fit"))
+            .on_hover_text(strip::FIT_TIP)
+            .clicked()
     {
         output.fit = true;
     }
     (rect.right() - HEADER_PADDING_X) - places.left
+}
+
+/// A pane's Y scale toggle: the header's button reading "log Y", lit while
+/// the axis is logarithmic, and refused, with the reason on hover, where no
+/// value of the pane is positive.
+fn log_y_button(ui: &mut Ui, log_y: bool, available: bool) -> egui::Response {
+    header_button("log Y")
+        .selected(log_y)
+        .enabled(available)
+        .show(ui)
+        .on_hover_text("Toggle logarithmic Y axis")
+        .on_disabled_hover_text("Logarithmic Y needs a positive value to draw")
 }
 
 /// How the row names its pane to a reader: by its unit, or as the pane of an

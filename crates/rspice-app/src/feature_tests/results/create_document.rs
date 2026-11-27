@@ -1153,6 +1153,66 @@ fn a_press_in_another_pane_moves_the_full_tag_and_the_inspectors_pane() {
     assert!(!texts.iter().any(|text| text == "Top \u{b7} analysis"));
 }
 
+/// Every control on a document pane's bar stands centred on the band above
+/// the bar's 1 px rule: as far from the rule as from the bar's top, to the
+/// half point. A control centred on the row with its rule in it stood half a
+/// point low and read as resting on the rule.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_control_on_a_document_pane_bar_stands_centred_above_its_rule() {
+    use egui::accesskit::Role;
+    let rect = |node: &egui::accesskit::Node| {
+        node.bounds().map(|bounds| {
+            egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            )
+        })
+    };
+    let mut window = ResultsWindow::new();
+    window.create("Transient review").expect("document commits");
+    let nodes = window.settled_frames();
+    // Each bar's row: the analysis tag spans it, its rule included.
+    let rows: Vec<egui::Rect> = nodes
+        .iter()
+        .filter(|(_, node)| node.label() == Some("TR"))
+        .filter_map(|(_, node)| rect(node))
+        .collect();
+    assert_eq!(rows.len(), 2, "each pane of the document has its bar");
+    let mut checked = Vec::new();
+    for (_, node) in &nodes {
+        if !matches!(
+            node.role(),
+            Role::Button | Role::CheckBox | Role::RadioButton
+        ) {
+            continue;
+        }
+        let Some(control) = rect(node) else {
+            continue;
+        };
+        let Some(row) = rows
+            .iter()
+            .find(|row| row.contains_rect(control) && control.height() < row.height() - 1.0)
+        else {
+            continue;
+        };
+        let above = control.top() - row.top();
+        let below = (row.bottom() - 1.0) - control.bottom();
+        assert!(
+            (above - below).abs() <= 0.5,
+            "{:?} stands {above} below the bar's top and {below} above its rule",
+            node.label()
+        );
+        checked.push(node.label().unwrap_or_default().to_owned());
+    }
+    for control in ["+ Expression", "Logarithmic X axis", "Maximize strip"] {
+        assert!(
+            checked.iter().any(|label| label == control),
+            "{control} is among the bar's controls checked: {checked:?}"
+        );
+    }
+}
+
 /// An edit to one of two saved documents marks that document's tab and not
 /// the other's, and saving the project clears the mark.
 #[cfg(not(target_arch = "wasm32"))]

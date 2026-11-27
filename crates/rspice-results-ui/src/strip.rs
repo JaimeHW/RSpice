@@ -44,6 +44,8 @@ pub(crate) const EXPRESSION_ACTION_LABEL: &str = "+ Expression";
 /// What the expression action's hover says.
 pub(crate) const EXPRESSION_ACTION_TIP: &str =
     "Add an expression trace, e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))";
+/// What Fit's hover says.
+pub(crate) const FIT_TIP: &str = "Restore automatic view (double-click the plot does the same)";
 
 /// Where the window control `slot` places from the right stands in a header
 /// row spanning `rect`: the rightmost, 0, ends on the rule every row of strip
@@ -63,29 +65,36 @@ pub(crate) fn scale_chip_right(rect: Rect, slots: usize) -> f32 {
     window_control_rect(rect, slots.max(1) - 1).left() - WINDOW_CONTROL_GAP
 }
 
-/// The width the scale chip reading `label` takes: the toggle chip's own.
-pub(crate) fn scale_chip_width(ui: &Ui, label: &str) -> f32 {
-    let t = Tokens::get(ui.ctx());
-    let text = ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(
-                label.to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                t.color.text,
-            )
-            .size()
-            .x
-    });
-    let touch = if t.metrics.is_touch() {
-        t.metrics.touch_target()
-    } else {
-        0.0
-    };
-    (text + 18.0).max(touch)
+/// A text control of a strip or pane header ("Fit", "log X", "+ Expression"):
+/// the kit's bordered button at the compact height, since the header row is
+/// shorter than a control. Every text control on the Results bars and pane
+/// headers is that one button, so none of them reads as the row's own
+/// background with words on it.
+pub(crate) fn header_button(label: &str) -> rspice_ui_kit::widgets::Button<'_> {
+    rspice_ui_kit::widgets::Button::new(label).compact()
 }
 
-/// The strip's X scale toggle in the place its header kept for it: the chip
-/// each pane's Y toggle is, reading "log X", lit while the axis is
+/// The width [`header_button`] takes for `label`, so a row can make room for
+/// one before it draws it.
+pub(crate) fn header_button_width(ui: &Ui, label: &str) -> f32 {
+    header_button(label).measured_width(ui)
+}
+
+/// The band a header row spanning `rect` stands its controls in: the row
+/// above its bottom rule. Every control, tag and legend entry is centred on
+/// it, so each stands as far from the rule as from the row's top.
+pub(crate) fn header_band(rect: Rect) -> Rect {
+    rect.with_max_y((rect.bottom() - 1.0).max(rect.top()))
+}
+
+/// The side of a header's icon controls: the compact button's height, so an
+/// icon and a button beside it stand level, as far from the row's edges.
+pub(crate) fn header_control_side(ui: &Ui) -> f32 {
+    rspice_ui_kit::widgets::compact_height(&Tokens::get(ui.ctx()).metrics)
+}
+
+/// The strip's X scale toggle in the place its header kept for it: the
+/// toggle each pane's Y scale is, reading "log X", lit while the axis is
 /// logarithmic, and refused, with the reason on hover, where the axis
 /// cannot be. True when the reader toggled it.
 pub(crate) fn x_scale_chip(
@@ -101,11 +110,10 @@ pub(crate) fn x_scale_chip(
             .max_rect(rect)
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
-    let toggle = slot
-        .add_enabled_ui(!refused, |ui| {
-            rspice_ui_kit::widgets::chip(ui, X_SCALE_LABEL, logarithmic)
-        })
-        .inner
+    let toggle = header_button(X_SCALE_LABEL)
+        .selected(logarithmic)
+        .enabled(!refused)
+        .show(&mut slot)
         .on_hover_text("Toggle logarithmic X axis")
         .on_disabled_hover_text(refusal.map_or_else(String::new, |reason| {
             format!("A logarithmic X axis is not available: {reason}")
@@ -436,6 +444,9 @@ pub(crate) fn analysis_tag(
             tag_ink(&t, mark),
         )
     });
+    // The tag takes presses over the whole row, as the row it stands in
+    // does, and its words stand centred on the band above the rule.
+    let band = header_band(row);
     let left = row.left() + HEADER_PADDING_X;
     let rect = Rect::from_min_max(
         egui::pos2(left, row.top()),
@@ -454,7 +465,7 @@ pub(crate) fn analysis_tag(
     let text_left = rect.left();
     let width = galley.size().x;
     painter.galley(
-        egui::pos2(text_left, row.center().y - galley.size().y * 0.5),
+        egui::pos2(text_left, band.center().y - galley.size().y * 0.5),
         galley,
         tag_ink(&t, mark),
     );
@@ -464,7 +475,7 @@ pub(crate) fn analysis_tag(
             Rect::from_center_size(
                 egui::pos2(
                     text_left + width + KIND_MARK_GAP + KIND_MARK_SIDE * 0.5,
-                    row.center().y,
+                    band.center().y,
                 ),
                 egui::Vec2::splat(KIND_MARK_SIDE),
             ),
@@ -724,9 +735,11 @@ impl<'a> StripHeader<'a> {
             Stroke::new(1.0, c.border),
         );
 
-        let inner = rect.shrink2(vec2(HEADER_PADDING_X, 0.0));
+        // Everything on the row is centred on the band above its rule.
+        let band = header_band(rect);
+        let inner = band.shrink2(vec2(HEADER_PADDING_X, 0.0));
         let fit_chip_width = if self.pane_actions && self.zoomed {
-            action_chip_width(ui, FIT_LABEL)
+            header_button_width(ui, FIT_LABEL)
         } else {
             0.0
         };
@@ -737,13 +750,13 @@ impl<'a> StripHeader<'a> {
             0
         };
         let scale_width = if self.pane_actions && self.x_scale {
-            scale_chip_width(ui, X_SCALE_LABEL)
+            header_button_width(ui, X_SCALE_LABEL)
         } else {
             0.0
         };
         let trailing_expr = self.pane_actions && self.expr_action && self.expr_trailing;
         let expr_width = if trailing_expr {
-            action_chip_width(ui, EXPRESSION_ACTION_LABEL) + WINDOW_CONTROL_GAP
+            header_button_width(ui, EXPRESSION_ACTION_LABEL) + WINDOW_CONTROL_GAP
         } else {
             0.0
         };
@@ -919,7 +932,10 @@ impl<'a> StripHeader<'a> {
                     }
                     if expr_action {
                         ui.add_space(2.0);
-                        if action_chip(ui, EXPRESSION_ACTION_LABEL, EXPRESSION_ACTION_TIP).clicked()
+                        if header_button(EXPRESSION_ACTION_LABEL)
+                            .show(ui)
+                            .on_hover_text(EXPRESSION_ACTION_TIP)
+                            .clicked()
                         {
                             out.add_expr_clicked = true;
                         }
@@ -935,13 +951,14 @@ impl<'a> StripHeader<'a> {
                 ui.new_child(
                     egui::UiBuilder::new()
                         .id_salt((self.id_salt, salt))
-                        .max_rect(window_control_rect(rect, slot).intersect(actions_rect))
+                        .max_rect(window_control_rect(band, slot).intersect(actions_rect))
                         .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 )
             };
+            let icon_side = header_control_side(ui);
             if self.closable
                 && IconButton::new(Icon::Close)
-                    .side(HEADER_ICON_SIDE)
+                    .side(icon_side)
                     .tooltip("Close strip")
                     .show(&mut control(ui, 0, "close"))
                     .clicked()
@@ -955,7 +972,7 @@ impl<'a> StripHeader<'a> {
             };
             if self.maximizable
                 && IconButton::new(Icon::ZoomFit)
-                    .side(HEADER_ICON_SIDE)
+                    .side(icon_side)
                     .on(self.maximized)
                     .tooltip(tip)
                     .show(&mut control(ui, usize::from(self.closable), "maximize"))
@@ -974,7 +991,7 @@ impl<'a> StripHeader<'a> {
                 left = scale.left();
             }
             if trailing_expr {
-                let width = action_chip_width(ui, EXPRESSION_ACTION_LABEL);
+                let width = header_button_width(ui, EXPRESSION_ACTION_LABEL);
                 let right = left - WINDOW_CONTROL_GAP;
                 let at = Rect::from_min_max(
                     egui::pos2((right - width).max(actions_rect.left()), inner.top()),
@@ -986,7 +1003,10 @@ impl<'a> StripHeader<'a> {
                         .max_rect(at)
                         .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 );
-                if action_chip(&mut slot, EXPRESSION_ACTION_LABEL, EXPRESSION_ACTION_TIP).clicked()
+                if header_button(EXPRESSION_ACTION_LABEL)
+                    .show(&mut slot)
+                    .on_hover_text(EXPRESSION_ACTION_TIP)
+                    .clicked()
                 {
                     out.add_expr_clicked = true;
                 }
@@ -1009,12 +1029,10 @@ impl<'a> StripHeader<'a> {
                     .layout(egui::Layout::right_to_left(egui::Align::Center)),
             );
             if self.zoomed
-                && action_chip(
-                    &mut fit_ui,
-                    FIT_LABEL,
-                    "Restore automatic view (double-click the plot does the same)",
-                )
-                .clicked()
+                && header_button(FIT_LABEL)
+                    .show(&mut fit_ui)
+                    .on_hover_text(FIT_TIP)
+                    .clicked()
             {
                 out.fit_clicked = true;
             }
@@ -1055,67 +1073,6 @@ fn truncated_label(ui: &mut Ui, rect: Rect, label: Label, full_text: &str) {
     response.on_hover_text(full_text);
 }
 
-pub(crate) fn action_chip_width(ui: &mut Ui, label: &str) -> f32 {
-    ui.fonts_mut(|fonts| {
-        fonts
-            .layout_no_wrap(
-                label.to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Medium),
-                egui::Color32::WHITE,
-            )
-            .size()
-            .x
-            + 14.0
-    })
-}
-
-/// A plain ghost button of a strip header ("Fit", "+ Expression"): its mono
-/// words in the secondary ink on the row's own ground, with no outline, as
-/// tall as the row's toggles, taking the hover fill and the full ink under
-/// the pointer. Nothing on a strip header is drawn in the accent.
-pub(crate) fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-
-    let galley = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            label.to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            c.text_dim,
-        )
-    });
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(galley.size().x + 14.0, HEADER_ICON_SIDE),
-        Sense::click(),
-    );
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), tooltip));
-    if !ui.is_rect_visible(rect) {
-        return response;
-    }
-
-    let hover =
-        ui.ctx()
-            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
-    let painter = ui.painter();
-    if hover > 0.0 {
-        painter.rect_filled(rect, t.radius, mix(c.bg_panel, c.bg_hover, hover));
-    }
-    painter.galley(
-        egui::pos2(
-            rect.center().x - galley.size().x * 0.5,
-            rect.center().y - galley.size().y * 0.5,
-        ),
-        galley,
-        mix(c.text_dim, c.text, hover),
-    );
-
-    theme::paint_focus_ring(ui, &response, rect);
-
-    response
-        .on_hover_text(tooltip)
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
 /// The face a legend chip's name is set in.
 fn legend_chip_font() -> egui::FontId {
     theme::mono(tokens::FS_0, FontWeight::Regular)
@@ -1147,7 +1104,7 @@ fn legend_natural_width(ui: &mut Ui, legend: &[LegendChip<'_>], expr_action: boo
         })
         .sum();
     let action = if expr_action {
-        2.0 + action_chip_width(ui, EXPRESSION_ACTION_LABEL) + CHIP_SPACING
+        2.0 + header_button_width(ui, EXPRESSION_ACTION_LABEL) + CHIP_SPACING
     } else {
         0.0
     };
