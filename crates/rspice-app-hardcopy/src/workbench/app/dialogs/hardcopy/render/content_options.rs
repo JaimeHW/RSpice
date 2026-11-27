@@ -583,20 +583,9 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
     // where the contract makes the font decision itself. It says nothing
     // about outlining, so searchable text stays the operator's.
     draft.fit_fonts_to_format();
+    draft.fit_colors_to_printer();
 
-    let color_supported = draft.format != OutputFormat::NativePrinter
-        || draft
-            .printer_capabilities
-            .as_ref()
-            .is_some_and(|capabilities| capabilities.supports_color());
-    if !color_supported
-        && matches!(
-            draft.color_mapping,
-            ColorMapping::PrintSafeEngineeringPalette | ColorMapping::ScreenColors
-        )
-    {
-        draft.color_mapping = ColorMapping::GrayscaleWithDashMarkerRedundancy;
-    }
+    let color_supported = !draft.prints_black_only();
     form_row(ui, |row| {
         row.wide(|ui| {
             field(ui, "Color mapping", |ui| {

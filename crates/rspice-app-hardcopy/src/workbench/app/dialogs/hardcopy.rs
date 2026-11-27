@@ -695,6 +695,31 @@ impl HardcopyDialogState {
         }
     }
 
+    /// Whether the pages go to a printer known to print black only. A
+    /// printer still being looked for is not: what it prints is not yet
+    /// known, and nothing prints until it is found.
+    pub(crate) fn prints_black_only(&self) -> bool {
+        self.format == OutputFormat::NativePrinter
+            && self
+                .printer_capabilities
+                .as_ref()
+                .is_some_and(|capabilities| !capabilities.supports_color())
+    }
+
+    /// Keep the colors to what the printer prints. A printer that prints
+    /// black only would flatten a palette to one grey, so its traces and
+    /// layers are greys told apart by dash and marker.
+    pub(crate) fn fit_colors_to_printer(&mut self) {
+        if self.prints_black_only()
+            && matches!(
+                self.color_mapping,
+                ColorMapping::PrintSafeEngineeringPalette | ColorMapping::ScreenColors
+            )
+        {
+            self.color_mapping = ColorMapping::GrayscaleWithDashMarkerRedundancy;
+        }
+    }
+
     pub fn open_resolved(
         &mut self,
         workflow: HardcopyWorkflow,
@@ -1445,6 +1470,57 @@ mod tests {
             .unwrap(),
         );
         assert!(draft.build_setup().is_ok());
+    }
+
+    /// Only a printer known to print black only takes the traces as greys
+    /// told apart by dash and marker. One still being looked for leaves the
+    /// palette as it is, so opening Output before the printers are found
+    /// costs the page none of its colors.
+    #[test]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    fn only_a_black_only_printer_greys_the_palette() {
+        use crate::workbench::hardcopy_adapters::print::{
+            PrinterCapabilityDescriptor, PrinterCapabilitySnapshot, PrinterPaperCapability,
+            PrinterResolutionCapability,
+        };
+        let printer = |supports_color| {
+            PrinterCapabilitySnapshot::try_from_descriptor(PrinterCapabilityDescriptor {
+                device_id: "office-laser".to_owned(),
+                display_name: "Office laser".to_owned(),
+                driver_name: "RSpice test driver".to_owned(),
+                port_name: "TESTPORT:".to_owned(),
+                driver_spec_version: 1,
+                driver_version: 1,
+                papers: vec![
+                    PrinterPaperCapability::try_new(1, "Letter", 215_900, 279_400).unwrap(),
+                ],
+                trays: Vec::new(),
+                resolutions: vec![PrinterResolutionCapability::try_new(300, 300).unwrap()],
+                duplex_modes: vec![DuplexMode::Off],
+                maximum_copies: 1,
+                supports_collation: false,
+                supports_color,
+            })
+            .unwrap()
+        };
+        let mut draft = HardcopyDialogState::default();
+        draft.format = OutputFormat::NativePrinter;
+        draft.color_mapping = ColorMapping::PrintSafeEngineeringPalette;
+        for (capabilities, expected) in [
+            (None, ColorMapping::PrintSafeEngineeringPalette),
+            (
+                Some(printer(true)),
+                ColorMapping::PrintSafeEngineeringPalette,
+            ),
+            (
+                Some(printer(false)),
+                ColorMapping::GrayscaleWithDashMarkerRedundancy,
+            ),
+        ] {
+            draft.printer_capabilities = capabilities;
+            draft.fit_colors_to_printer();
+            assert_eq!(draft.color_mapping, expected);
+        }
     }
 
     #[test]

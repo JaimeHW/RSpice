@@ -972,6 +972,9 @@ pub(super) fn select_printer_capabilities(
         Ok(job) => {
             let id = capabilities.device_id().to_owned();
             parts.dialog.printer_capabilities = Some(capabilities);
+            // The page previews in the colors the chosen printer prints,
+            // not only once Output is opened.
+            parts.dialog.fit_colors_to_printer();
             parts.dialog.set_printer(id, job);
         }
         Err(error) => {
