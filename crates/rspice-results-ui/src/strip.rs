@@ -541,7 +541,10 @@ impl<'a> StripHeader<'a> {
         }
         // The row takes presses of its own, under everything drawn on it
         // and out of the keyboard's way: see [`header_rows`].
-        let row = ui.interact(rect, self.id_salt.with("strip-header-row"), Sense::CLICK);
+        // Two panes of one document can draw the same analysis: the row's id
+        // is the place's as well as the strip's.
+        let row_id = ui.make_persistent_id(self.id_salt.with("strip-header-row"));
+        let row = ui.interact(rect, row_id, Sense::CLICK);
         row.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), self.kind));
         note_header_row(ui.ctx(), row.id, rect);
         let painter = ui.painter();
