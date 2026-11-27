@@ -335,6 +335,10 @@ pub enum SemanticCaptionAnchor {
     #[default]
     Start,
     End,
+    /// The end of an abscissa's name, standing against its first value. It
+    /// is set as the screen's axis row sets it: in the values' face, a size
+    /// smaller and fainter than they are.
+    Abscissa,
 }
 
 /// One strip's axis box, in page coordinates: its top-left and bottom-right

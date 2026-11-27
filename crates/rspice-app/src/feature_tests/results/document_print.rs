@@ -19,7 +19,8 @@ use rspice_app_state::state::{
 use rspice_app_state::workbench::workspace::Workspace;
 use rspice_app_workbench::workbench::state::workbench_session::WorkspaceDocumentId;
 use rspice_hardcopy::render::{
-    HardcopyRenderer, HardcopyScene, HardcopySceneMetadata, ScenePrimitive, scene_from_resolved,
+    HardcopyRenderer, HardcopyScene, HardcopySceneMetadata, SceneFont, ScenePrimitive,
+    scene_from_resolved,
 };
 use rspice_hardcopy::sources::{
     HardcopySemanticDocument, ResolvedHardcopyDocument, SemanticAxisKind, SemanticPlot,
@@ -241,6 +242,31 @@ fn a_saved_transient_document_prints_the_strips_its_run_sheet_prints() {
     assert!(values(plot, SemanticAxisKind::Vertical).len() >= 6);
     let text = page_text(&page);
     assert!(text.iter().any(|text| text == "TIME \u{b7} s"), "{text:?}");
+    // The abscissa's name is set as the screen sets it beside its values: in
+    // their face, a size smaller and fainter.
+    let scene = page_scene(&page);
+    let lettered = |words: &str| {
+        scene
+            .primitives()
+            .iter()
+            .find_map(|primitive| match primitive {
+                ScenePrimitive::Text {
+                    text,
+                    font,
+                    size,
+                    color,
+                    ..
+                } if text == words => Some((*font, *size, *color)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{words} is lettered"))
+    };
+    let (font, size, color) = lettered("TIME \u{b7} s");
+    let (value_font, value_size, value_color) =
+        lettered(values(plot, SemanticAxisKind::Horizontal)[1]);
+    assert!(matches!(font, SceneFont::Monospace) && font == value_font);
+    assert!(size < value_size, "{size:?} against {value_size:?}");
+    assert_ne!(color, value_color);
     let keyed = |plot: &SemanticPlot| {
         plot.traces
             .iter()

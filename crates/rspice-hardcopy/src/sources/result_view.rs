@@ -1111,7 +1111,7 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
             PLOT_INSET_UM - X_CAPTION_GAP_UM,
             PLOT_INSET_UM + height + 2_600,
         ),
-        anchor: SemanticCaptionAnchor::End,
+        anchor: SemanticCaptionAnchor::Abscissa,
     });
     let mut paths = Vec::new();
     for outline in display.paths(&histogram, x0, x1) {

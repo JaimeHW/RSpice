@@ -1484,16 +1484,39 @@ impl<'a> SemanticSceneCompiler<'a> {
             self.add_mapping_legend(PrintObjectKind::Marker, &stable_id, stroke)?;
         }
         for caption in &plot.captions {
-            let anchor = match caption.anchor {
-                crate::sources::SemanticCaptionAnchor::Start => TextAnchor::Start,
-                crate::sources::SemanticCaptionAnchor::End => TextAnchor::End,
+            use crate::sources::SemanticCaptionAnchor;
+            let (anchor, font, size, color) = match caption.anchor {
+                SemanticCaptionAnchor::Start => (
+                    TextAnchor::Start,
+                    SceneFont::Sans,
+                    2_300,
+                    SemanticColor::Secondary,
+                ),
+                SemanticCaptionAnchor::End => (
+                    TextAnchor::End,
+                    SceneFont::Sans,
+                    2_300,
+                    SemanticColor::Secondary,
+                ),
+                // The screen letters an abscissa's values 11 px high in its
+                // dim text and the name beside them 10 px high in its faint
+                // text, whose ink is 110 parts of the dim text's 121 over the
+                // panel. The page keeps both: the values' face a pixel
+                // smaller, in the values' ink eased toward the paper by as
+                // much.
+                SemanticCaptionAnchor::Abscissa => (
+                    TextAnchor::End,
+                    SceneFont::Monospace,
+                    10 * crate::sources::AXIS_PIXEL_UM.unsigned_abs(),
+                    SemanticColor::Exact(Rgb8::new(106, 116, 125)),
+                ),
             };
             self.add_text_placed(
                 self.semantic_point(caption.position)?,
                 &caption.text,
-                SceneFont::Sans,
-                2_300,
-                SemanticColor::Secondary,
+                font,
+                size,
+                color,
                 (anchor, SceneTextRotation::Upright),
             )?;
         }
