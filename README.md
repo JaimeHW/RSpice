@@ -282,10 +282,7 @@ files can be read back for comparison.
 Every product build ships the small, generic
 [foundation library](models/spice/foundation/). It is the only SPICE pack in
 this repository, and like everything under `models/spice/`, it is authored by
-the RSpice project. Projects can import their own model sources. Further packs
-are published through the Model Hub as signed, immutable archives: a canonical
-manifest under ed25519 trust, a signed catalog snapshot and hardened archive
-reading, so an installed pack's provenance is checkable rather than assumed.
+the RSpice project. Projects can import their own model sources.
 
 ## Interfaces
 
