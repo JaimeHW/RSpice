@@ -1,13 +1,16 @@
 //! Run details…: one retained run, read the way a reader asks about a run.
 //!
 //! What the run was comes first, as one band of facts: its name, how it
-//! ended, when it started, how long it took and on which engine. Under it
-//! the analyses it ran, one row each with what it kept and how it ended; an
-//! analysis opens on Results, and each of its signals on the schematic, in
-//! one action. Then the inputs that produced it, in words, each one a link
-//! to what it names while that exists; then the solver's statistics. The
-//! identifiers and digests that prove where the run came from close the
-//! dialog, folded until the reader asks for them.
+//! ended, when it started, how long it took, on which engine and simulator,
+//! and at what temperature. Under it the analyses it ran, one row each with
+//! what it kept and how it ended; an analysis opens on Results, and each of
+//! its signals on the schematic, in one action. Then what the run set the
+//! engine to, its design variables and its options, as Spectre's and ADS's
+//! run logs state them up front; a long list folds to its count. Then the
+//! inputs that produced it, in words, each one a link to what it names while
+//! that exists; then the solver's statistics. The identifiers and digests
+//! that prove where the run came from close the dialog, folded until the
+//! reader asks for them.
 //!
 //! Every fact in the dialog stands on one label column, so the sections
 //! read as one sheet; identifiers alone are set in mono.
@@ -50,6 +53,10 @@ pub struct RunDetailsDialogState {
     rows_are_analyses: bool,
     /// The reader unfolded the Identifiers section.
     identifiers_shown: bool,
+    /// The reader unfolded a long list of design variables.
+    variables_shown: bool,
+    /// The reader unfolded a long list of options.
+    options_shown: bool,
 }
 
 impl RunDetailsDialogState {
@@ -73,6 +80,8 @@ impl RunDetailsDialogState {
             rows_are_analyses: run.prepared_receipt().is_none()
                 || run.validate_provenance().is_ok(),
             identifiers_shown: false,
+            variables_shown: false,
+            options_shown: false,
         }
     }
 
@@ -90,6 +99,10 @@ impl RunDetailsDialogState {
 /// At most this many significant digits for the times a convergence record
 /// names.
 const TIME_DIGITS: usize = 6;
+
+/// A list of what the run set that is longer than this folds to its count:
+/// past it, the list pushes the run's inputs off the dialog's first screen.
+const OPEN_SETTINGS: usize = 8;
 
 /// Open Run details… on the retained run `run_id`. A run that is no longer
 /// retained opens nothing.
@@ -284,6 +297,8 @@ pub fn show(
             .get(),
     );
     let mut identifiers_shown = dialog.identifiers_shown;
+    let mut variables_shown = dialog.variables_shown;
+    let mut options_shown = dialog.options_shown;
     let mut open_plan = false;
     let mut open_deck = None;
     let mut inventory_route = None;
@@ -298,6 +313,7 @@ pub fn show(
         .overlay_scrollbar()
         .show(ctx, |ui| {
             let summary = summary(ui, run, manifest);
+            let settings = settings(run);
             let inputs = inputs(model, run, manifest, plan_block, executed.as_deref());
             let identifiers = identifiers(run, manifest, dialog.dataset_digest());
             let convergence: Vec<(&str, ConvergenceLines<'_>)> = run
@@ -311,6 +327,8 @@ pub fn show(
             let lines = || {
                 summary
                     .iter()
+                    .chain(settings.variables.iter().flatten())
+                    .chain(settings.options.iter().flatten())
                     .chain(&inputs.lines)
                     .chain(&identifiers)
                     .chain(convergence.iter().flat_map(|(_, lines)| lines.all()))
@@ -331,6 +349,22 @@ pub fn show(
                 let top = ui.cursor().top();
                 inventory_route = inventory_table(ui, manifest, run, dialog.rows_are_analyses);
                 hairline(ui, top);
+                settings_section(
+                    ui,
+                    "Design variables",
+                    settings.variables.as_deref(),
+                    "None",
+                    &mut variables_shown,
+                    label_width,
+                );
+                settings_section(
+                    ui,
+                    "Options",
+                    settings.options.as_deref(),
+                    "Engine defaults",
+                    &mut options_shown,
+                    label_width,
+                );
                 section_header(ui, "Inputs", None);
                 match facts(ui, &inputs.lines, label_width) {
                     Some(line) if Some(line) == inputs.plan => open_plan = true,
@@ -386,6 +420,8 @@ pub fn show(
         *run_details = None;
     } else if let Some(dialog) = run_details.as_mut() {
         dialog.identifiers_shown = identifiers_shown;
+        dialog.variables_shown = variables_shown;
+        dialog.options_shown = options_shown;
     }
     RunDetailsRoutes {
         open_plan,
@@ -396,7 +432,8 @@ pub fn show(
 }
 
 /// What the run was: its name, how it ended, when it started, how long it
-/// took and on which engine, and how its checks came out when it had any.
+/// took, on which engine and simulator, at what temperature, and how its
+/// checks came out when it had any.
 fn summary(
     ui: &Ui,
     run: &crate::state::SimulationRun,
@@ -444,6 +481,15 @@ fn summary(
                 |target| target.label().to_owned(),
             ),
         ),
+        Line::new(
+            "Version",
+            run.facts
+                .as_ref()
+                .map(|facts| facts.simulator.as_str())
+                .filter(|simulator| !simulator.is_empty())
+                .unwrap_or("Not recorded"),
+        ),
+        Line::new("Temperature", temperature_words(run.facts.as_ref())),
     ];
     // Stated only for a run whose checks reported something: a run that
     // checked nothing has not passed anything.
@@ -458,6 +504,125 @@ fn summary(
         });
     }
     lines
+}
+
+/// The temperature the run's solves were set to: the one, or the range a
+/// sweep stepped them across.
+fn temperature_words(facts: Option<&rspice_results::run_facts::RunFacts>) -> String {
+    use rspice_results::number_format::spice_coordinate;
+    let temperatures = facts.map_or(&[][..], |facts| facts.temperatures.as_slice());
+    match temperatures {
+        [] => "Not recorded".to_owned(),
+        [only] => spice_coordinate(*only, "\u{b0}C"),
+        [first, .., last] => format!(
+            "{} to {}, {} temperatures",
+            spice_coordinate(*first, "\u{b0}C"),
+            spice_coordinate(*last, "\u{b0}C"),
+            temperatures.len()
+        ),
+    }
+}
+
+/// The values a sweep stepped a name across, as its range: the first value
+/// its points took to the last, and how many values that is.
+fn sweep_words(sweep: &rspice_results::run_facts::RunSweep) -> String {
+    match sweep.values.as_slice() {
+        [] => String::new(),
+        [only] => only.clone(),
+        [first, .., last] => format!("{first} to {last}, {} values", sweep.values.len()),
+    }
+}
+
+/// What the run set the engine to, as fact rows named by what they set;
+/// `None` where the run recorded nothing.
+struct Settings {
+    /// Its design variables, each at the range a sweep stepped it across
+    /// where one did, then whatever else its sweeps stepped.
+    variables: Option<Vec<Line>>,
+    /// The options it set away from their defaults.
+    options: Option<Vec<Line>>,
+}
+
+fn settings(run: &crate::state::SimulationRun) -> Settings {
+    let Some(facts) = run.facts.as_ref() else {
+        return Settings {
+            variables: None,
+            options: None,
+        };
+    };
+    let mut variables: Vec<Line> = facts
+        .variables
+        .iter()
+        .map(|variable| match facts.sweep_of(&variable.name) {
+            Some(sweep) => Line::new(&variable.name, sweep_words(sweep)),
+            None => Line::new(&variable.name, &variable.value),
+        })
+        .collect();
+    variables.extend(
+        facts
+            .sweeps
+            .iter()
+            .filter(|sweep| {
+                !facts
+                    .variables
+                    .iter()
+                    .any(|variable| variable.name.eq_ignore_ascii_case(&sweep.name))
+            })
+            .map(|sweep| Line::new(&sweep.name, sweep_words(sweep))),
+    );
+    let options = facts
+        .options
+        .iter()
+        .map(|option| {
+            // An option its name alone switches on.
+            let value = if option.value.is_empty() {
+                "On"
+            } else {
+                option.value.as_str()
+            };
+            Line::new(&option.name, value)
+        })
+        .collect();
+    Settings {
+        variables: Some(variables),
+        options: Some(options),
+    }
+}
+
+/// One section of what the run set: its header, then its rows on the
+/// dialog's label column. A long list folds to its count until the reader
+/// unfolds it, `shown`; a run that set nothing reads `empty`, and one that
+/// recorded nothing says so.
+fn settings_section(
+    ui: &mut Ui,
+    title: &str,
+    lines: Option<&[Line]>,
+    empty: &str,
+    shown: &mut bool,
+    label_width: f32,
+) {
+    match lines {
+        None => section_header(ui, title, Some("Not recorded")),
+        Some([]) => section_header(ui, title, Some(empty)),
+        Some(lines) if lines.len() > OPEN_SETTINGS => {
+            let fold = section_header_action(
+                ui,
+                &format!("{title} \u{b7} {}", lines.len()),
+                if *shown { "Hide" } else { "Show" },
+                true,
+            );
+            if fold.clicked() {
+                *shown = !*shown;
+            }
+            if *shown {
+                let _ = facts(ui, lines, label_width);
+            }
+        }
+        Some(lines) => {
+            section_header(ui, title, None);
+            let _ = facts(ui, lines, label_width);
+        }
+    }
 }
 
 /// The Inputs section's facts, and which of them are links.
