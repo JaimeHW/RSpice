@@ -76,8 +76,9 @@ fn version(rows: &[(String, String)]) -> &str {
         .map_or("", |(_, value)| value.as_str())
 }
 
-#[test]
-fn a_plan_run_at_85_c_records_and_shows_its_variables_and_options() {
+/// The divider's plan run at 85 °C, with two design variables and a
+/// relative tolerance tighter than the default.
+fn plan_run_at_85_c() -> SimulationRun {
     let mut state = divider();
     state
         .model
@@ -105,7 +106,24 @@ fn a_plan_run_at_85_c_records_and_shows_its_variables_and_options() {
         );
     }
 
-    let run = run_generated_batch(state, SimulationRunLifecycle::Completed);
+    run_generated_batch(state, SimulationRunLifecycle::Completed)
+}
+
+/// The divider's plan run across three temperatures, given out of order.
+fn temperature_sweep_run() -> SimulationRun {
+    let mut state = divider();
+    state.model.sim_setup.run_set.dimensions = vec![RunSetDimension::new(
+        "fixture-temperature",
+        RunSetDimensionKind::Temperature,
+        &["125", "-40", "27"],
+        1,
+    )];
+    run_generated_batch(state, SimulationRunLifecycle::Completed)
+}
+
+#[test]
+fn a_plan_run_at_85_c_records_and_shows_its_variables_and_options() {
+    let run = plan_run_at_85_c();
     let facts = run.facts.as_ref().expect("the run records what it set");
     assert_eq!(facts.temperatures, [85.0]);
 
@@ -123,15 +141,7 @@ fn a_plan_run_at_85_c_records_and_shows_its_variables_and_options() {
 
 #[test]
 fn a_temperature_sweep_shows_its_range() {
-    let mut state = divider();
-    state.model.sim_setup.run_set.dimensions = vec![RunSetDimension::new(
-        "fixture-temperature",
-        RunSetDimensionKind::Temperature,
-        &["125", "-40", "27"],
-        1,
-    )];
-
-    let run = run_generated_batch(state, SimulationRunLifecycle::Completed);
+    let run = temperature_sweep_run();
     let facts = run.facts.as_ref().expect("the run records what it set");
     assert_eq!(facts.temperatures, [-40.0, 27.0, 125.0]);
 
@@ -139,7 +149,7 @@ fn a_temperature_sweep_shows_its_range() {
     shows(
         &rows,
         "Temperature",
-        "-40 \u{b0}C to 125 \u{b0}C, 3 temperatures",
+        "\u{2212}40 \u{b0}C to 125 \u{b0}C, 3 temperatures",
     );
 }
 

@@ -70,7 +70,7 @@ fn read_stated(facts: &mut RunFacts, deck: &str) {
                 for (name, value) in assignments(body) {
                     // A function's definition is no variable.
                     if !value.is_empty() && !name.contains('(') {
-                        facts.set_variable(&name, &value);
+                        facts.set_variable(&name, &readable(&value));
                     }
                 }
             }
@@ -81,6 +81,19 @@ fn read_stated(facts: &mut RunFacts, deck: &str) {
             }
             _ => {}
         }
+    }
+}
+
+/// `value` as a reader writes it. A plan's design variable reaches the deck
+/// as its value in seventeen-digit scientific notation, `2.00000000000000000e3`,
+/// which is read back in SPICE's own notation, `2k`; any other value stands
+/// as its deck spells it.
+fn readable(value: &str) -> String {
+    match value.parse::<f64>() {
+        Ok(number) if format!("{number:.17e}") == value => {
+            rspice_results::number_format::spice_coordinate(number, "")
+        }
+        _ => value.to_owned(),
     }
 }
 
