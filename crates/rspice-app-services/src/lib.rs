@@ -27,7 +27,6 @@ pub mod io;
 
 pub mod services {
     pub mod live_protocol;
-    pub mod model_hub;
     pub mod recent_files;
     pub mod session;
 }

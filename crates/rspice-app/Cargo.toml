@@ -122,10 +122,6 @@ rustyhdf5 = { version = "1.93", default-features = false }
 # The notification centre's tests pin the local zone with `time`.
 time = { workspace = true }
 
-# The Model Hub's feature tests and the design shelf's tests verify signed
-# packs with the trust crate the models feature verifies them with.
-rspice-pack = { workspace = true }
-
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 lopdf = { version = "0.45", default-features = false }
 

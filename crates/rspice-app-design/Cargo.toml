@@ -52,7 +52,6 @@ rspice-ui-kit = { workspace = true, features = ["test-support"] }
 rspice-schematic-editor = { workspace = true, features = ["test-support"] }
 rspice-project = { workspace = true, features = ["document-fingerprint-observation", "library-test-fixtures"] }
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation", "test-support"] }
-rspice-pack = { workspace = true }
 
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }

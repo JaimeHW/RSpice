@@ -37,21 +37,6 @@ pub struct Schema {
     pub refusal: &'static str,
 }
 
-/// The Model Hub's verified packs: the catalog snapshot, its serial, and each
-/// pack archive under its own digest.
-pub const MODEL_HUB: Schema = Schema {
-    database: "rspice-model-hub",
-    version: 1,
-    store: "verified-packs",
-    // A call that never settles would otherwise hold the pack restore in its
-    // loading phase for the life of the tab, which presents as a workspace
-    // that silently never lists a pack.
-    timeout_ms: 30_000,
-    blocked: "another RSpice tab is upgrading pack storage",
-    pending: 64,
-    refusal: "too many model-pack storage operations are still pending",
-};
-
 /// The PDK configuration: a generation head per configuration path, its
 /// metadata, and each PDK archive under its own digest.
 pub const PDK_CONFIG: Schema = Schema {
@@ -686,10 +671,6 @@ mod tests {
     #[test]
     fn every_database_keeps_the_identity_its_records_were_written_under() {
         let identity = |schema: Schema| (schema.database, schema.version, schema.store);
-        assert_eq!(
-            identity(MODEL_HUB),
-            ("rspice-model-hub", 1, "verified-packs")
-        );
         assert_eq!(
             identity(PDK_CONFIG),
             ("rspice-pdk-config", 1, "content-addressed-pdk-config")

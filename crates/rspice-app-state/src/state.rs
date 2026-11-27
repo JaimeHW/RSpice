@@ -12,7 +12,6 @@ pub mod engineering_table;
 mod events;
 pub(crate) mod library_browser;
 mod model_bound_symbol;
-pub mod model_hub;
 pub mod model_library;
 mod netlist_artifacts;
 pub use rspice_design::netlist_document;

@@ -80,7 +80,6 @@ time = { workspace = true }
 # `time` answers that only in a single-threaded process on Unix, and this one
 # never is; chrono reads the zone database itself. The browser asks `Date`.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-rspice-pack = { workspace = true }
 
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }
@@ -107,7 +106,6 @@ uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "Notification", "NotificationOptions", "NotificationPermission", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
 js-sys = "0.3"
-rspice-pack = { workspace = true }
 time = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

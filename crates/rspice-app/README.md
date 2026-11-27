@@ -15,7 +15,7 @@ boundaries by `tools/ci/check_app_crate_dependencies.py`.
 | Module | Contents |
 | :--- | :--- |
 | `workbench/` | The sole owner of application chrome (menu bar, contextual toolbar, activity rail, document strip, responsive docks and drawers, console, status bar, phone navigation and the central engineering surface), plus the commands, routing, documents, workflows and host lifecycle behind them |
-| `state/` | The application-held domain owners and editor sessions: project workspace, library browser, model library and PDK configuration, Model Hub client, schematic and stimulus sessions |
+| `state/` | The application-held domain owners and editor sessions: project workspace, library browser, model library and PDK configuration, schematic and stimulus sessions |
 | `simulation/` | Analysis setup, source preparation and dispatch coordination |
 | `schematic/` | The application binding for the schematic and symbol editors |
 | `analysis/` | Calculator adaptation over retained application results |
@@ -24,7 +24,7 @@ boundaries by `tools/ci/check_app_crate_dependencies.py`.
 | `product/` | `CommandId`, plus the product identities `rspice-vocabulary` defines |
 | `quantity/` | Platform number-locale discovery, plus the quantity presentation and input policy `rspice-vocabulary` defines; values crossing this boundary are always in documented SI base units |
 | `diagnostics/` | What the application reports about itself: the console message model and the structured, filterable application log |
-| `services/` | Service and platform adapters: license keys, cloud account, live-session protocol, Model Hub transport |
+| `services/` | Service and platform adapters: license keys, cloud account, live-session protocol |
 | `io/` | File workflows and platform I/O adapters: project load/save, file exchange, netlist and waveform export, project execution |
 | `ui/` | The `rspice-ui-kit` exports application presentation uses |
 | `time_compat/` | `Instant` and `SystemTime` shims, because `std::time` traps at runtime on `wasm32-unknown-unknown` |
@@ -72,9 +72,6 @@ editor with completion and a parameter tuner).
 - `RSpiceApp`: the application root, constructed by both the desktop and the
   browser entry point. `main.rs` attaches the browser build to a
   `#rspice_canvas` element and requires a WebGPU-capable browser.
-- `ModelHub` with `ModelHubStore` and `ModelHubTransport`: the
-  model-distribution client: signed catalog, verified installation and the
-  part shelf over foundation, installed, catalog and retained parts.
 
 ## Feature flags
 
