@@ -114,6 +114,8 @@ pub struct OpControls<'a> {
 pub enum OpRowKind {
     Node,
     Branch,
+    /// A device's dissipated power, where the run kept it.
+    Power,
     Device,
 }
 
@@ -145,6 +147,10 @@ impl OpSelection {
             OpRowKind::Branch => {
                 position(dc?.branch_currents.iter().map(|row| &row.name), &self.name)
             }
+            OpRowKind::Power => position(
+                dc?.power_dissipation.iter().map(|row| &row.name),
+                &self.name,
+            ),
             OpRowKind::Device => {
                 position(devices?.entries.iter().map(|entry| &entry.name), &self.name)
             }
@@ -564,6 +570,17 @@ const BRANCHES: ScalarSection = ScalarSection {
     empty: "The DC solution has no branch currents.",
 };
 
+/// A run keeps device power only where it was asked for, as one read from a
+/// transient is: the section stands only when there are rows for it.
+const POWER: ScalarSection = ScalarSection {
+    kind: OpRowKind::Power,
+    title: "Device power dissipation",
+    name_header: "Device",
+    value_header: "Power",
+    not_retained: "Device power was not retained for this analysis.",
+    empty: "The retained DC solution contains no device-power rows.",
+};
+
 struct PlanBuilder<'a> {
     controls: OpControls<'a>,
     filter: String,
@@ -571,6 +588,8 @@ struct PlanBuilder<'a> {
     rows: Vec<PlanRow>,
     y: f32,
     longest_name: usize,
+    /// The regions the listed devices stand in.
+    regions: BTreeSet<&'static str>,
 }
 
 impl PlanBuilder<'_> {
@@ -588,8 +607,6 @@ impl PlanBuilder<'_> {
         columns: Vec<PlanColumn>,
     ) -> PlanSection {
         // A cell carries its value's prefix; its column's head, the unit.
-    /// The regions the listed devices stand in.
-    regions: BTreeSet<&'static str>,
         let longest_unit = usize::from(!columns.is_empty());
         PlanSection {
             kind,
@@ -715,6 +732,7 @@ impl PlanBuilder<'_> {
                 let (rank, title) = device_section(entry);
                 let also = [family, title.as_str(), entry.region.unwrap_or_default()];
                 if let Some(row) = ShownRow::matching(index, &entry.name, &also, &self.filter) {
+                    self.regions.extend(entry.region);
                     families.entry((rank, title)).or_default().push(row);
                 }
             }
@@ -732,7 +750,6 @@ impl PlanBuilder<'_> {
                 "No device falls within the run's device-detail scope."
             };
             self.add_note(OpRowKind::Device, DEVICES_TITLE, note);
-                    self.regions.extend(entry.region);
             return;
         };
         let mut families: Vec<_> = families.into_iter().collect();
@@ -795,6 +812,8 @@ pub struct OpPlan {
     /// lists a device with one. A section without regions leaves it blank,
     /// so its first value stands under every other section's first value.
     region_slot: bool,
+    /// The regions the region column lists.
+    regions: BTreeSet<&'static str>,
 }
 
 /// The sheet's one value grid: every section's value columns are one width
@@ -812,8 +831,6 @@ impl OpPlan {
         dc: Option<&DcOpResult>,
         devices: Option<&DeviceOpReport>,
         detail: Option<&RetainedDetail>,
-    /// The regions the region column lists.
-    regions: BTreeSet<&'static str>,
     ) -> OpPlan {
         let mut builder = PlanBuilder {
             controls,
@@ -822,9 +839,16 @@ impl OpPlan {
             rows: Vec::new(),
             y: 0.0,
             longest_name: 0,
+            regions: BTreeSet::new(),
         };
         let node_shown = builder.scalars(&NODES, dc.map(|dc| dc.node_voltages.as_slice()));
         builder.scalars(&BRANCHES, dc.map(|dc| dc.branch_currents.as_slice()));
+        if let Some(power) = dc
+            .map(|dc| dc.power_dissipation.as_slice())
+            .filter(|rows| !rows.is_empty())
+        {
+            builder.scalars(&POWER, Some(power));
+        }
         builder.devices(devices, detail);
         let no_match = (builder.sections.is_empty() && !builder.filter.is_empty()).then(|| {
             format!(
@@ -834,20 +858,21 @@ impl OpPlan {
         });
         OpPlan {
             region_slot: builder.sections.iter().any(|section| section.region),
+            regions: builder.regions,
             offsets: RowOffsets::from_heights(builder.rows.iter().map(|row| row.height())),
             longest_name: builder.longest_name,
             significant_digits: controls.significant_digits,
             sections: builder.sections,
             rows: builder.rows,
-            regions: BTreeSet::new(),
             node_shown,
             no_match,
             scope_note: reduced_scope_note(devices, detail),
             summary: OpSummary::of(devices),
             compare: None,
             changed: None,
-            row_total: dc.map_or(0, |dc| dc.node_voltages.len() + dc.branch_currents.len())
-                + devices.map_or(0, |report| report.entries.len()),
+            row_total: dc.map_or(0, |dc| {
+                dc.node_voltages.len() + dc.branch_currents.len() + dc.power_dissipation.len()
+            }) + devices.map_or(0, |report| report.entries.len()),
         }
     }
 
@@ -858,7 +883,6 @@ impl OpPlan {
         mut self,
         baseline: OpBaseline,
         delta: bool,
-            regions: builder.regions,
         dc: Option<&DcOpResult>,
         devices: Option<&DeviceOpReport>,
     ) -> Self {
@@ -1032,6 +1056,7 @@ pub struct OpCompare {
 pub struct OpBaseline {
     nodes: BTreeMap<String, f64>,
     branches: BTreeMap<String, f64>,
+    power: BTreeMap<String, f64>,
     /// Each device's quantities, by device and then by quantity.
     devices: BTreeMap<String, BTreeMap<String, f64>>,
 }
@@ -1047,6 +1072,9 @@ impl OpBaseline {
             nodes: dc.map(|dc| scalars(&dc.node_voltages)).unwrap_or_default(),
             branches: dc
                 .map(|dc| scalars(&dc.branch_currents))
+                .unwrap_or_default(),
+            power: dc
+                .map(|dc| scalars(&dc.power_dissipation))
                 .unwrap_or_default(),
             devices: devices
                 .map(|report| {
@@ -1066,6 +1094,7 @@ impl OpBaseline {
         match kind {
             OpRowKind::Node => self.nodes.get(name).copied(),
             OpRowKind::Branch => self.branches.get(name).copied(),
+            OpRowKind::Power => self.power.get(name).copied(),
             OpRowKind::Device => self.devices.get(name)?.get(quantity).copied(),
         }
     }
@@ -1118,6 +1147,11 @@ pub fn changed_rows(
         OpRowKind::Branch,
         dc.map_or(&[][..], |dc| dc.branch_currents.as_slice()),
         &baseline.branches,
+    );
+    scalars(
+        OpRowKind::Power,
+        dc.map_or(&[][..], |dc| dc.power_dissipation.as_slice()),
+        &baseline.power,
     );
     let entries = devices.map_or(&[][..], |report| report.entries.as_slice());
     for entry in entries {
@@ -1393,6 +1427,7 @@ impl<'a> RowSource<'a> {
         match kind {
             OpRowKind::Node => dc?.node_voltages.get(index).map(Self::Scalar),
             OpRowKind::Branch => dc?.branch_currents.get(index).map(Self::Scalar),
+            OpRowKind::Power => dc?.power_dissipation.get(index).map(Self::Scalar),
             OpRowKind::Device => devices?.entries.get(index).map(Self::Device),
         }
     }
@@ -2104,8 +2139,9 @@ fn locate_action(kind: OpRowKind, name: &str, mapping: &impl SchematicMapping) -
     match kind {
         OpRowKind::Node if mapping.node_available(name) => OpAction::LocateNode(name.to_owned()),
         OpRowKind::Node => OpAction::Refused(NODE_NOT_ON_SCHEMATIC),
-        // A branch current is the current through the source that owns it.
-        OpRowKind::Branch | OpRowKind::Device => {
+        // A branch current is the current through the source that owns it,
+        // and a device's power is the device's.
+        OpRowKind::Branch | OpRowKind::Power | OpRowKind::Device => {
             let device = signal_leaf(name);
             mapping
                 .device_target(device.strip_suffix("#branch").unwrap_or(device))
@@ -2339,6 +2375,7 @@ pub fn selection_detail(
         RowSource::Scalar(value) => {
             let label = match selection.kind {
                 OpRowKind::Node => NODES.value_header,
+                OpRowKind::Power => POWER.value_header,
                 _ => BRANCHES.value_header,
             };
             rows.push((

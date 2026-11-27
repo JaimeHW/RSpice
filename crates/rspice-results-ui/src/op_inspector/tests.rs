@@ -966,6 +966,54 @@ fn a_column_is_as_wide_as_what_it_holds_and_the_last_one_stands_whole() {
     );
 }
 
+/// Device power, where a run kept it, has its own section after the branch
+/// currents, its rows named for their devices and picked like any other; a
+/// run that kept none shows no such section.
+#[test]
+fn kept_device_power_is_a_section_after_the_branch_currents() {
+    let power = |name: &str, value: f64| OperatingPointValue {
+        name: name.to_owned(),
+        value,
+        unit: "W".to_owned(),
+    };
+    let mut dc = DcOpResult {
+        node_voltages: vec![node("V(a)", 1.0)],
+        branch_currents: vec![node("I(V1)", 1.0e-3)],
+        power_dissipation: vec![power("P(M1)", 1.0e-4), power("P(R1)", 2.0e-4)],
+    };
+    let plan = plan_of(Some(&dc), None);
+    assert_eq!(
+        &titles(&plan)[..3],
+        ["Node voltages", "Branch currents", "Device power dissipation"]
+    );
+    assert_eq!(labels(&plan, "Device power dissipation"), ["Power"]);
+    assert_eq!(
+        section_names(&plan, "Device power dissipation", |index| {
+            dc.power_dissipation[index].name.clone()
+        }),
+        ["P(M1)", "P(R1)"]
+    );
+    let picked = OpSelection {
+        kind: OpRowKind::Power,
+        index: 1,
+        name: "P(R1)".to_owned(),
+    };
+    let mapping = Mapped {
+        node: true,
+        device: None,
+    };
+    let detail =
+        selection_detail(&picked, Some(&dc), None, &mapping, 4).expect("the power row exists");
+    assert!(
+        detail.rows.iter().any(|(label, _)| label == "Power"),
+        "{:?}",
+        detail.rows
+    );
+
+    dc.power_dissipation.clear();
+    assert!(!titles(&plan_of(Some(&dc), None)).contains(&"Device power dissipation"));
+}
+
 #[test]
 fn a_failed_solve_offers_to_mark_what_it_named_at_the_end_of_its_row() {
     let (dc, report) = evidence_fixture(4, 4);
