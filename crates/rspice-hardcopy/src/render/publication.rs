@@ -268,7 +268,7 @@ impl HardcopyPreviewPage {
                 "unsupported preview worker manifest schema".to_owned(),
             ));
         }
-        if !(36..=1_200).contains(&expected_dpi) {
+        if !PREVIEW_DPI.contains(&expected_dpi) {
             return Err(HardcopyRenderError::InvalidPreviewDpi(expected_dpi));
         }
         let expected_zero_based_page_u32 =
@@ -388,7 +388,7 @@ fn validate_preview_worker_contract(
 ) -> Result<(), HardcopyRenderError> {
     validate_worker_authority(plan, source)?;
     validate_text("preview coordinate", &preview.coordinate, 128)?;
-    if preview.page_number == 0 || !(36..=1_200).contains(&preview.dpi) {
+    if preview.page_number == 0 || !PREVIEW_DPI.contains(&preview.dpi) {
         return Err(HardcopyRenderError::WorkerSnapshot(
             "preview page identity or DPI is invalid".to_owned(),
         ));
@@ -1122,7 +1122,7 @@ pub enum HardcopyRenderError {
     #[cfg(not(target_arch = "wasm32"))]
     #[error("the selected native printer job cannot mix portrait and landscape page geometry")]
     PrinterMixedPageGeometryUnsupported,
-    #[error("preview resolution {0} DPI is outside the supported 36–1200 DPI range")]
+    #[error("preview resolution {0} DPI is outside the supported 1–1200 DPI range")]
     InvalidPreviewDpi(u16),
     #[error("preview page index {index} is outside the planned {page_count} pages")]
     PreviewPageOutOfRange { index: usize, page_count: usize },
@@ -1234,7 +1234,7 @@ impl HardcopyRenderer {
         {
             return Err(HardcopyRenderError::ExtentMismatch);
         }
-        if !(36..=1_200).contains(&dpi) {
+        if !PREVIEW_DPI.contains(&dpi) {
             return Err(HardcopyRenderError::InvalidPreviewDpi(dpi));
         }
         if zero_based_pages.is_empty()

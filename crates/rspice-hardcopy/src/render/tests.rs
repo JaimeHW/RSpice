@@ -2890,9 +2890,9 @@ fn resolved_preview_rejects_authority_index_and_resolution_mismatch() {
             &source,
             resolved_metadata(),
             0,
-            12
+            0
         ),
-        Err(HardcopyRenderError::InvalidPreviewDpi(12))
+        Err(HardcopyRenderError::InvalidPreviewDpi(0))
     ));
 }
 

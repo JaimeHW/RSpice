@@ -184,7 +184,6 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
     if parts.dialog.printer_discovery_busy || parts.dialog.busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
-    ensure_preview(ctx, parts.dialog);
     let page = parts.dialog.page;
     let (title, primary, secondary): (&str, &str, Option<&str>) = match page {
         HardcopyDialogPage::Main => (
@@ -341,6 +340,9 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
             publish::select_retained_source(parts, &source_key, scope);
         }
     }
+    // After the body, so the page is rendered at the resolution the desk
+    // measured for it this pass rather than at a guess redone a pass later.
+    ensure_preview(ctx, parts.dialog);
     match choice {
         DialogChoice::Primary if page == HardcopyDialogPage::Main => {
             publish::commit_hardcopy_workflow(parts);
@@ -388,7 +390,13 @@ fn refused_preview(error: HardcopyRenderError) -> BlockedSetup {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
-    if draft.preview.is_some()
+    // A page rendered for another zoom stays on the desk, stretched, until
+    // the one for this zoom arrives.
+    let dpi = draft.preview_render_dpi();
+    if draft
+        .preview
+        .as_ref()
+        .is_some_and(|preview| preview.dpi() == dpi)
         || draft.preview_plan.is_none()
         || draft.preview_failed_generation == Some(draft.preview_generation)
     {
@@ -438,6 +446,8 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
                 draft.error_section = blocked.section;
             }
         }
+        // The pass has already been drawn; the next one shows the result.
+        ctx.request_repaint();
         return;
     }
     let schedule = PREVIEW_WORKER.with(|runtime| {
@@ -496,7 +506,7 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
                 &document,
                 metadata,
                 &page_indices,
-                72,
+                dpi,
                 || worker_cancelled.load(std::sync::atomic::Ordering::Acquire),
             )
             .map_err(refused_preview)
@@ -558,7 +568,11 @@ fn clear_preview_textures(ctx: &Context) {
 
 #[cfg(target_arch = "wasm32")]
 fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
-    if draft.preview.is_some()
+    let dpi = draft.preview_render_dpi();
+    if draft
+        .preview
+        .as_ref()
+        .is_some_and(|preview| preview.dpi() == dpi)
         || draft.preview_plan.is_none()
         || draft.preview_failed_generation == Some(draft.preview_generation)
     {
@@ -638,6 +652,7 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
                 draft.error_section = blocked.section;
             }
         }
+        ctx.request_repaint();
         return;
     }
 
@@ -680,7 +695,7 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
         &document,
         metadata,
         page_indices.clone(),
-        72,
+        dpi,
         draft.source_resolution_generation,
         draft.preview_generation,
         ctx.clone(),
@@ -689,7 +704,7 @@ fn ensure_preview(ctx: &Context, draft: &mut HardcopyDialogState) {
             *active.borrow_mut() = Some(ActiveBrowserPreview {
                 ticket,
                 page_indices,
-                dpi: 72,
+                dpi,
             });
         }),
         Err(error) => {

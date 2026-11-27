@@ -466,7 +466,10 @@ pub struct HardcopyDialogState {
     pub(crate) mapping_scope_draft: PrintMappingSaveScope,
     pub(crate) mapping_name_draft: String,
     pub(crate) preview_page: u32,
-    pub(crate) preview_zoom_percent: u16,
+    pub preview_zoom_percent: u16,
+    /// The resolution the page desk shows the page at, pixel for pixel, once
+    /// it has measured its place.
+    pub(crate) preview_dpi: Option<u16>,
     pub(crate) preview_generation: u64,
     pub(crate) preview_failed_generation: Option<u64>,
     pub source_resolution_generation: u64,
@@ -620,6 +623,7 @@ impl HardcopyDialogState {
             },
             preview_page: 0,
             preview_zoom_percent: 85,
+            preview_dpi: None,
             preview_generation: 1,
             preview_failed_generation: None,
             source_resolution_generation: 0,
@@ -1149,6 +1153,12 @@ impl HardcopyDialogState {
             HardcopyPlan::compile_with_sections(source, setup, extent, sections)
         }
         .map_err(BlockedSetup::from)
+    }
+
+    /// The resolution the preview is rendered at: the one the desk shows it
+    /// at, or 72 dpi while no desk has measured the page.
+    pub(crate) fn preview_render_dpi(&self) -> u16 {
+        self.preview_dpi.unwrap_or(72)
     }
 
     pub(crate) fn invalidate_preview_raster(&mut self) {

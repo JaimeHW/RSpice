@@ -3,9 +3,11 @@
 //!
 //! Every page shown is the renderer's own raster of the planned page, cached
 //! in one of two rotating texture slots by its digest, so the desk shows
-//! exactly what export and print will produce.
+//! exactly what export and print will produce. It is rendered at the size it
+//! is shown, pixel for pixel, so no line is lost to resampling.
 
 use super::*;
+use rspice_hardcopy::render::PREVIEW_DPI;
 
 pub(super) fn preview_column(ui: &mut Ui, draft: &mut HardcopyDialogState, height: f32) {
     let t = Tokens::get(ui.ctx());
@@ -80,11 +82,17 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
     Frame::NONE.fill(t.color.bg_inset).show(ui, |ui| {
         ui.set_min_size(vec2(width, height));
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        let Some(pages) = draft
-            .preview_plan
-            .as_ref()
-            .map(|plan| plan.pagination().pages().len())
-        else {
+        let Some((pages, paper)) = draft.preview_plan.as_ref().map(|plan| {
+            let pages = plan.pagination().pages();
+            let paper = pages
+                .get(draft.preview_page as usize)
+                .or_else(|| pages.first())
+                .map(|page| {
+                    let (width, height) = page.geometry().physical_size();
+                    (width.micrometres(), height.micrometres())
+                });
+            (pages.len(), paper)
+        }) else {
             ui.allocate_ui_with_layout(
                 vec2(width, height),
                 Layout::centered_and_justified(egui::Direction::LeftToRight),
@@ -97,13 +105,15 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
         let (count, tiled) = (pages.clamp(1, 2), pages > 1);
         // The card is sized from the page, not the other way round: the white
         // area is the sheet plus its margin, so the desk never shows a
-        // letterboxed page inside a card of some other proportion.
-        let aspect = draft.preview.as_ref().map_or_else(
+        // letterboxed page inside a card of some other proportion. The
+        // planned paper gives the proportion before any raster arrives, so
+        // the card does not change shape when one does.
+        let aspect = paper.map_or_else(
             || match draft.orientation {
                 Orientation::Portrait => 1.0 / std::f32::consts::SQRT_2,
                 _ => std::f32::consts::SQRT_2,
             },
-            |preview| preview.width() as f32 / preview.height() as f32,
+            |(width, height)| width as f32 / height.max(1) as f32,
         );
         let columns = count as f32;
         let max_card = vec2(
@@ -115,6 +125,16 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
             aspect,
         );
         let card = vec2(image.x + 20.0, image.y + 38.0);
+        // The page is rendered at the resolution it is shown at, and again
+        // when the zoom changes: a raster drawn smaller than it was rendered
+        // drops the thin lines that fall between the pixels it samples, and
+        // a trace then reads as dashes.
+        if let Some((width, _)) = paper {
+            let shown = image.x * f32::from(draft.preview_zoom_percent) / 85.0
+                * ui.ctx().pixels_per_point();
+            draft.preview_dpi = Some(shown_dpi(shown, width));
+        }
+        let shown = draft.preview_dpi;
         let group_width = card.x * columns + 16.0 * (columns - 1.0);
         let mut selected_adjacent = None;
         ui.allocate_ui_with_layout(vec2(width, height), Layout::top_down(Align::Min), |ui| {
@@ -128,22 +148,23 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
                     .flatten()
                     .collect::<Vec<_>>();
                 for slot in 0..count {
-                    if let Some(preview) = pages.get(slot).copied() {
-                        let selected =
-                            preview.page_number() == draft.preview_page.saturating_add(1);
-                        if preview_card(
-                            ui,
-                            (preview, tiled),
-                            selected,
-                            draft.preview_zoom_percent,
-                            slot,
-                            card,
-                        ) && !selected
-                        {
-                            selected_adjacent = Some(preview.page_number().saturating_sub(1));
-                        }
-                    } else {
-                        preview_placeholder(ui, slot == 0, card);
+                    let preview = pages.get(slot).map(|page| &***page);
+                    let selected = preview.map_or(slot == 0, |preview| {
+                        preview.page_number() == draft.preview_page.saturating_add(1)
+                    });
+                    let clicked = preview_card(
+                        ui,
+                        (preview, tiled),
+                        selected,
+                        (draft.preview_zoom_percent, shown),
+                        slot,
+                        card,
+                    );
+                    if clicked
+                        && !selected
+                        && let Some(preview) = preview
+                    {
+                        selected_adjacent = Some(preview.page_number().saturating_sub(1));
                     }
                 }
             });
@@ -359,15 +380,31 @@ fn page_caption(preview: &HardcopyPreviewPage, tiled: bool) -> String {
     }
 }
 
+/// The whole pixels per inch at which paper `paper_um` wide fills `pixels`
+/// of the screen without passing it.
+fn shown_dpi(pixels: f32, paper_um: u64) -> u16 {
+    let dpi = (f64::from(pixels) * 25_400.0 / paper_um.max(1) as f64).floor();
+    let (least, most) = (*PREVIEW_DPI.start(), *PREVIEW_DPI.end());
+    dpi.clamp(f64::from(least), f64::from(most)) as u16
+}
+
+/// A preview page on its card, or the card standing in for it while it
+/// renders. Both are one widget laid out alike, so a page arriving changes
+/// what the card shows, not which widget it is. `zoom` is the zoom percent
+/// and the resolution the desk shows the page at at that zoom.
 fn preview_card(
     ui: &mut Ui,
-    (preview, tiled): (&HardcopyPreviewPage, bool),
+    (preview, tiled): (Option<&HardcopyPreviewPage>, bool),
     selected: bool,
-    zoom_percent: u16,
+    (zoom_percent, shown_dpi): (u16, Option<u16>),
     texture_slot: usize,
     size: Vec2,
 ) -> bool {
-    let texture = preview_texture(ui.ctx(), preview, texture_slot);
+    let texture = preview.map(|preview| preview_texture(ui.ctx(), preview, texture_slot));
+    let caption = preview.map_or_else(
+        || "Rendering\u{2026}".to_owned(),
+        |preview| page_caption(preview, tiled),
+    );
     let t = Tokens::get(ui.ctx());
     let inner_width = (size.x - 20.0).max(20.0);
     let image_box = vec2(inner_width, (size.y - 38.0).max(20.0));
@@ -386,22 +423,42 @@ fn preview_card(
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let (rect, _) = ui.allocate_exact_size(image_box, Sense::hover());
-                let aspect = preview.width() as f32 / preview.height() as f32;
-                let fitted = fit_aspect(rect.size(), aspect);
-                let image_rect = egui::Rect::from_center_size(
-                    rect.center(),
-                    fitted * (zoom_percent as f32 / 85.0),
-                );
-                ui.painter().with_clip_rect(rect).image(
-                    texture.id(),
-                    image_rect,
-                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
+                if let (Some(preview), Some(texture)) = (preview, texture.as_ref()) {
+                    let aspect = preview.width() as f32 / preview.height() as f32;
+                    let fitted = fit_aspect(rect.size(), aspect);
+                    // A page rendered for this view is drawn pixel for pixel,
+                    // on whole pixels; one rendered for another zoom is
+                    // stretched to its place until its own arrives.
+                    let pixels_per_point = ui.ctx().pixels_per_point();
+                    let drawn = if shown_dpi == Some(preview.dpi()) {
+                        vec2(preview.width() as f32, preview.height() as f32) / pixels_per_point
+                    } else {
+                        fitted * (zoom_percent as f32 / 85.0)
+                    };
+                    let corner = rect.center() - drawn * 0.5;
+                    let whole =
+                        |points: f32| (points * pixels_per_point).round() / pixels_per_point;
+                    let image_rect = egui::Rect::from_min_size(
+                        egui::pos2(whole(corner.x), whole(corner.y)),
+                        drawn,
+                    );
+                    ui.painter().with_clip_rect(rect).image(
+                        texture.id(),
+                        image_rect,
+                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                } else {
+                    let side = ui.spacing().interact_size.y;
+                    egui::Spinner::new().paint_at(
+                        ui,
+                        egui::Rect::from_center_size(rect.center(), Vec2::splat(side)),
+                    );
+                }
                 ui.add_sized(
                     vec2(inner_width, 18.0),
                     egui::Label::new(
-                        egui::RichText::new(page_caption(preview, tiled))
+                        egui::RichText::new(caption.as_str())
                             .monospace()
                             .size(tokens::FS_0)
                             .color(egui::Color32::from_rgb(44, 44, 42)),
@@ -419,65 +476,16 @@ fn preview_card(
         );
     }
     let response = card.response.interact(Sense::click());
-    let label = page_caption(preview, tiled);
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::Button,
             ui.is_enabled(),
             selected,
-            label.clone(),
+            caption.clone(),
         )
     });
     theme::paint_focus_ring(ui, &response, response.rect);
-    response.clicked()
-}
-
-fn preview_placeholder(ui: &mut Ui, selected: bool, size: Vec2) {
-    let t = Tokens::get(ui.ctx());
-    let inner_width = (size.x - 20.0).max(20.0);
-    let card = Frame::NONE
-        .fill(egui::Color32::from_rgb(245, 244, 239))
-        .stroke(Stroke::new(1.0, egui::Color32::from_rgb(155, 155, 150)))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 4],
-            blur: 12,
-            spread: 0,
-            color: egui::Color32::from_black_alpha(71),
-        })
-        .inner_margin(Margin::same(10))
-        .show(ui, |ui| {
-            ui.set_width(inner_width);
-            ui.with_layout(Layout::top_down(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.allocate_ui_with_layout(
-                    vec2(inner_width, (size.y - 38.0).max(20.0)),
-                    Layout::centered_and_justified(egui::Direction::LeftToRight),
-                    |ui| {
-                        ui.spinner();
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    vec2(inner_width, 18.0),
-                    Layout::centered_and_justified(egui::Direction::LeftToRight),
-                    |ui| {
-                        ui.label(
-                            egui::RichText::new("Rendering…")
-                                .monospace()
-                                .size(tokens::FS_0)
-                                .color(egui::Color32::from_rgb(44, 44, 42)),
-                        );
-                    },
-                );
-            });
-        });
-    if selected {
-        ui.painter().rect_stroke(
-            card.response.rect,
-            0.0,
-            Stroke::new(2.0, t.color.accent),
-            egui::StrokeKind::Outside,
-        );
-    }
+    preview.is_some() && response.clicked()
 }
 
 fn preview_texture(ctx: &Context, preview: &HardcopyPreviewPage, slot: usize) -> TextureHandle {

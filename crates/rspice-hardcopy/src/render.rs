@@ -84,6 +84,10 @@ const MAX_SCENE_TEXT_BYTES: usize = 16 * 1_048_576;
 const MAX_LEGEND_ENTRIES: usize = 4_096;
 const MAX_METADATA_LINES: usize = 4_096;
 const MAX_PREVIEW_BATCH_PAGES: usize = 2;
+/// The resolutions a preview page is rendered at. A preview is rendered at
+/// the size it is shown, pixel for pixel, so a large sheet shown whole on a
+/// small desk asks for only a few pixels per inch.
+pub const PREVIEW_DPI: std::ops::RangeInclusive<u16> = 1..=1_200;
 // Browser-worker transport is a cross-target contract. Desktop builds retain
 // it for shared-source parity even though they use the in-process worker.
 const PREVIEW_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;

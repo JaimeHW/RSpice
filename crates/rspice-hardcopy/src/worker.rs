@@ -11,7 +11,7 @@ use sha2::{Digest as _, Sha256};
 use crate::render::{
     HardcopyRenderer, HardcopySceneMetadata, MAX_ARTIFACT_BYTES, MAX_PREVIEW_WORKER_MANIFEST_BYTES,
     MAX_PREVIEW_WORKER_RGBA_BYTES, MAX_PUBLICATION_BYTES, MAX_PUBLICATION_WORKER_MANIFEST_BYTES,
-    RenderedHardcopyPublication,
+    PREVIEW_DPI, RenderedHardcopyPublication,
 };
 use crate::sources::{MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument};
 use rspice_formats::zip::deterministic_stored_zip;
@@ -183,7 +183,7 @@ impl HardcopyWorkerRequest {
                 if page_indices.len() == 2 && page_indices[0] == page_indices[1] {
                     return Err("Hardcopy worker preview pages must be distinct.".to_owned());
                 }
-                if !(36..=1_200).contains(dpi) {
+                if !PREVIEW_DPI.contains(dpi) {
                     return Err("Hardcopy worker preview DPI is out of range.".to_owned());
                 }
             }
