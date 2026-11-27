@@ -583,8 +583,10 @@ pub fn nearest_sample_x(
                 .find(|trace| !trace.overlay && anchor_key(model, trace) == *anchor)
         })
         .or_else(|| readout_traces(model).next())?;
-    let (xs, _) = trace.held()?;
     let distance = |left: &f64, right: &f64| (left - x).abs().total_cmp(&(right - x).abs());
+    let Some((xs, _)) = trace.held() else {
+        return nearest_sample_around(&trace.x, &trace.shape, x, distance);
+    };
     if trace.shape.is_single_ascending() {
         let at = xs.partition_point(|sample| *sample < x);
         return [at.checked_sub(1), Some(at)]
@@ -597,6 +599,56 @@ pub fn nearest_sample_x(
     xs.iter()
         .copied()
         .filter(|sample| sample.is_finite())
+        .min_by(distance)
+}
+
+/// The sample of `xs` nearest `x` from the rows around it alone: the two
+/// either side of it in each monotone run of `shape`, found by bisection, so
+/// a stored axis whose whole column is not held reads a few rows a run.
+fn nearest_sample_around(
+    xs: &SharedWaveformValues,
+    shape: &rspice_ui_kit::plot::sample::SweepShape,
+    x: f64,
+    distance: impl Fn(&f64, &f64) -> std::cmp::Ordering,
+) -> Option<f64> {
+    use rspice_results::sampling::XOrientation;
+    let runs: Vec<(std::ops::Range<usize>, bool)> = if shape.is_single_ascending() {
+        vec![(0..xs.len(), true)]
+    } else {
+        shape
+            .runs()
+            .iter()
+            .map(|run| {
+                (
+                    run.start..run.end,
+                    run.orientation == XOrientation::Ascending,
+                )
+            })
+            .collect()
+    };
+    let sample = |index: usize| xs.sample(index).filter(|sample| sample.is_finite());
+    runs.into_iter()
+        .flat_map(|(rows, ascending)| {
+            let before = |sample: f64| if ascending { sample < x } else { sample > x };
+            // The first row of the run past `x`.
+            let (mut low, mut high) = (rows.start, rows.end);
+            while low < high {
+                let middle = low + (high - low) / 2;
+                if xs.sample(middle).is_some_and(before) {
+                    low = middle + 1;
+                } else {
+                    high = middle;
+                }
+            }
+            [
+                low.checked_sub(1).filter(|row| *row >= rows.start),
+                Some(low),
+            ]
+            .into_iter()
+            .flatten()
+            .filter(move |row| *row < rows.end)
+        })
+        .filter_map(sample)
         .min_by(distance)
 }
 
@@ -1435,6 +1487,109 @@ mod tests {
         assert_eq!(parse_typed_x("12", ""), Some(12.0));
         assert_eq!(parse_typed_x("ten", "s"), None);
         assert_eq!(parse_typed_x("", "s"), None);
+    }
+
+    /// A stored axis of `rows` rows, `value(row)` each, made as they are
+    /// read, counting the rows read.
+    struct Computed {
+        rows: u64,
+        value: fn(u64) -> f64,
+        ascending: bool,
+        read: std::sync::atomic::AtomicU64,
+    }
+
+    impl rspice_results::waveform::ColumnSource for Computed {
+        fn name(&self) -> &str {
+            "time"
+        }
+
+        fn store(&self) -> String {
+            "run.rsr".to_owned()
+        }
+
+        fn rows(&self) -> u64 {
+            self.rows
+        }
+
+        fn read(&self, first: u64, out: &mut [f64]) -> Result<(), String> {
+            self.read
+                .fetch_add(out.len() as u64, std::sync::atomic::Ordering::SeqCst);
+            for (row, slot) in (first..).zip(out.iter_mut()) {
+                *slot = (self.value)(row);
+            }
+            Ok(())
+        }
+
+        fn ascending(&self) -> bool {
+            self.ascending
+        }
+    }
+
+    fn computed(
+        rows: u64,
+        value: fn(u64) -> f64,
+        ascending: bool,
+    ) -> (std::sync::Arc<Computed>, SharedWaveformValues) {
+        let column = std::sync::Arc::new(Computed {
+            rows,
+            value,
+            ascending,
+            read: Default::default(),
+        });
+        let window = rspice_results::waveform::StoredWindow {
+            first: 0,
+            rows,
+            lead: rspice_results::waveform::WindowLead::None,
+        };
+        let values = SharedWaveformValues::stored(column.clone(), window).expect("it fits");
+        (column, values)
+    }
+
+    /// Snap finds the sample nearest a cursor on a stored axis whose column
+    /// is not held, from the rows around the cursor alone: on a run of two
+    /// hundred million rows, a few dozen of them; on a sweep that goes up and
+    /// back, the nearest of either way.
+    #[test]
+    fn snap_finds_the_nearest_sample_of_a_stored_axis_from_the_rows_around_it() {
+        use rspice_ui_kit::plot::sample::SweepShape;
+        let distance = |x: f64| move |a: &f64, b: &f64| (a - x).abs().total_cmp(&(b - x).abs());
+        let (column, axis) = computed(1 << 28, |row| row as f64 * 1.0e-9, true);
+        let shape = SweepShape::of_values(&axis);
+        for (at, row) in [(1000.4e-9, 1000_u32), (1000.6e-9, 1001), (-1.0, 0)] {
+            let nearest = f64::from(row) * 1.0e-9;
+            let snapped = nearest_sample_around(&axis, &shape, at, distance(at));
+            assert_eq!(
+                snapped.map(f64::to_bits),
+                Some(f64::to_bits(nearest)),
+                "{at}"
+            );
+        }
+        let read = column.read.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(read < 3 * 64, "{read} rows read");
+
+        // Up from 0 to 5 in steps of 1, then back down in steps of 0.75.
+        let (_, sweep) = computed(
+            13,
+            |row| {
+                if row <= 5 {
+                    row as f64
+                } else {
+                    5.0 - 0.75 * (row - 5) as f64
+                }
+            },
+            false,
+        );
+        let shape = SweepShape::of_values(&sweep);
+        assert_eq!(shape.runs().len(), 2);
+        let samples: Vec<f64> = sweep.samples(..).collect();
+        for at in [2.4, 2.7, 4.9, -0.2, 0.6] {
+            let every = samples.iter().copied().min_by(distance(at));
+            assert_eq!(
+                nearest_sample_around(&sweep, &shape, at, distance(at)),
+                every,
+                "{at}"
+            );
+        }
     }
 
     #[test]
