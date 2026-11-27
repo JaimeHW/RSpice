@@ -7,53 +7,12 @@ use rspice_formats::project_results::ProjectSimulationRun;
 use rspice_results::run::SimulationRun as RetainedRun;
 use std::ops::{Deref, DerefMut};
 
+pub use rspice_results::run::{ResultsStorageBudget, ResultsStorageStop};
+
 #[derive(Debug, Clone)]
 pub struct SimulationRun {
     pub data: RetainedRun<AnalysisResult>,
     elapsed_started_at: Option<crate::time_compat::Instant>,
-    /// The transient of the run its results storage stopped, while this session holds the run.
-    results_storage_stop: Option<ResultsStorageStop>,
-}
-
-/// A transient its results storage stopped: the volume holding the run's results store filled,
-/// or the run's results reached its plan's storage budget, and the run kept the rows it had
-/// written.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResultsStorageStop {
-    /// The analysis it stopped.
-    pub analysis: String,
-    /// The time of the last row kept.
-    pub at: Option<f64>,
-    /// The rows kept.
-    pub rows: u64,
-    /// The bytes they take in the store.
-    pub bytes: u64,
-    /// The bytes the volume had free when the run ended, where the host can say.
-    pub free: Option<u64>,
-    /// The folder holding the store.
-    pub folder: String,
-    /// The plan's storage budget, when it stopped the run rather than the volume.
-    pub budget: Option<ResultsStorageBudget>,
-}
-
-impl ResultsStorageStop {
-    /// Whether the store kept none of the run: it filled before the run's first row, and no
-    /// plan budget stopped it.
-    #[must_use]
-    pub fn kept_nothing(&self) -> bool {
-        self.rows == 0 && self.budget.is_none()
-    }
-}
-
-/// The storage budget a run's plan set, which its results reached.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResultsStorageBudget {
-    /// The bytes the plan lets the run keep.
-    pub budget: u64,
-    /// The bytes the run's results store held, across its analyses, when it stopped.
-    pub written: u64,
-    /// The Run Set point the stopped analysis solved, as a results table names it.
-    pub point: Option<String>,
 }
 
 impl Deref for SimulationRun {
@@ -91,7 +50,6 @@ impl SimulationRun {
         Self {
             data,
             elapsed_started_at: None,
-            results_storage_stop: None,
         }
     }
 
@@ -102,7 +60,6 @@ impl SimulationRun {
             data: RetainedRun::new(run_number, timestamp, ExecutionTarget::current())
                 .with_local_start_label(Self::local_offset(timestamp)),
             elapsed_started_at: Some(crate::time_compat::Instant::now()),
-            results_storage_stop: None,
         }
     }
 
@@ -117,7 +74,6 @@ impl SimulationRun {
             )
             .with_local_start_label(Self::local_offset(timestamp)),
             elapsed_started_at: Some(crate::time_compat::Instant::now()),
-            results_storage_stop: None,
         }
     }
 
@@ -150,13 +106,13 @@ impl SimulationRun {
     /// The transient of the run its results storage stopped, if one was.
     #[must_use]
     pub fn results_storage_stop(&self) -> Option<&ResultsStorageStop> {
-        self.results_storage_stop.as_ref()
+        self.data.results_storage_stop.as_ref()
     }
 
     /// Say that the volume holding the run's results store filled, or its results reached its
     /// plan's storage budget, and stopped `stop.analysis`.
     pub fn stop_on_results_storage(&mut self, stop: ResultsStorageStop) {
-        self.results_storage_stop = Some(stop);
+        self.data.results_storage_stop = Some(stop);
     }
 
     #[must_use]

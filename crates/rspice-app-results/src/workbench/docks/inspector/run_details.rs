@@ -411,6 +411,12 @@ fn summary(
     // warning, and as a failure only when nothing of it completed.
     let partly = failed > 0 && failed < run.analyses.len();
     let mark = match (run.lifecycle, failed) {
+        // A run its results storage stopped is marked as the status bar marks it.
+        (SimulationRunLifecycle::Completed | SimulationRunLifecycle::Failed, _)
+            if run.results_storage_stop().is_some() =>
+        {
+            Some(Problem::Failure)
+        }
         (SimulationRunLifecycle::Completed, 0) => None,
         (SimulationRunLifecycle::Completed, _) => Some(Problem::Warning),
         (SimulationRunLifecycle::Failed, _) if partly => Some(Problem::Warning),

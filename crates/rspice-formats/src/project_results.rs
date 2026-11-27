@@ -349,6 +349,10 @@ pub struct ProjectSimulationRun {
     /// dataset digest.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
+    /// How its results storage stopped the run, when it did. Outside the
+    /// dataset digest: the rows it kept are the result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub results_storage_stop: Option<rspice_results::run::ResultsStorageStop>,
 }
 
 impl ProjectSimulationRun {
@@ -483,6 +487,7 @@ impl ProjectSimulationRun {
         run.analyses = analyses;
         run.log = self.log;
         run.note = self.note;
+        run.results_storage_stop = self.results_storage_stop;
         run.set_retention(self.retention);
         run.success = !was_active && self.success;
         run.restore_campaign_membership(campaign_membership)?;
@@ -826,6 +831,7 @@ impl ProjectSimulationRun {
             specification_verdicts: run.specification_verdicts().map(<[_]>::to_vec),
             log: run.log.clone(),
             note: run.note.clone(),
+            results_storage_stop: run.results_storage_stop.clone(),
         }
     }
 }

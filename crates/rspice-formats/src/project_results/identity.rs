@@ -50,6 +50,7 @@ struct RunIdentity<'a> {
     success: bool,
     specification_verdicts: Option<&'a [SpecificationVerdict]>,
     note: &'a str,
+    results_storage_stop: Option<&'a rspice_results::run::ResultsStorageStop>,
 }
 
 #[derive(Serialize)]
@@ -120,6 +121,7 @@ impl<'a> RunIdentity<'a> {
             success: run.success,
             specification_verdicts: run.specification_verdicts.as_deref(),
             note: &run.note,
+            results_storage_stop: run.results_storage_stop.as_ref(),
         }
     }
 }

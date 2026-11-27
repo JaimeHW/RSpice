@@ -128,7 +128,8 @@ fn filled_after_a_saved_run(
 /// The rows the run wrote before the volume refused one stand as its result, its segment ends
 /// with `END` saying the volume filled, the run, its log, its findings and the status bar say so
 /// in words, and the earlier run and the saved project are as they were: the project reopens
-/// with the earlier run, and saved again it reopens with both.
+/// with the earlier run, and saved again it reopens with both, the stopped one still saying how
+/// its results storage stopped it.
 #[test]
 fn a_volume_that_fills_during_a_run_stops_it_in_words_and_leaves_the_project_whole() {
     let scratch = Scratch::new("full-disk");
@@ -250,6 +251,11 @@ fn a_volume_that_fills_during_a_run_stops_it_in_words_and_leaves_the_project_who
         logged,
         [format!("{}: {words}", stop.analysis)],
         "its log still says why"
+    );
+    assert_eq!(
+        stopped.results_storage_stop(),
+        Some(stop),
+        "it reopens saying its results storage stopped it"
     );
 }
 

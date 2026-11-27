@@ -315,8 +315,17 @@ pub(crate) fn run_failure_status(run: &SimulationRun) -> ResultOperationalStatus
 /// What became of `run`, as Run details and the Details' State row say it:
 /// its lifecycle, and for a run that completed with some of its analyses
 /// failed, how many. A run any of whose analyses failed ends Failed, so a
-/// failed run with an analysis that completed reads as completed too.
+/// failed run with an analysis that completed reads as completed too. A run
+/// its results storage stopped says where and why, as the status bar does,
+/// in this session or reopened.
 pub(crate) fn run_state_words(run: &SimulationRun) -> String {
+    if matches!(
+        run.lifecycle,
+        SimulationRunLifecycle::Completed | SimulationRunLifecycle::Failed
+    ) && let Some(stop) = run.results_storage_stop()
+    {
+        return storage_stop_state_words(stop);
+    }
     let failed = run
         .analyses
         .iter()
@@ -345,6 +354,32 @@ pub(crate) fn run_state_words(run: &SimulationRun) -> String {
         SimulationRunLifecycle::Interrupted => "Interrupted",
     }
     .to_owned()
+}
+
+/// How the results storage stopped a run, as its State row says it: where
+/// the run stopped and why, or that none of it was kept.
+fn storage_stop_state_words(stop: &crate::state::ResultsStorageStop) -> String {
+    if stop.kept_nothing() {
+        return "Results not kept: storage full".to_owned();
+    }
+    let at = stop
+        .at
+        .map(|at| {
+            format!(
+                " at {}s",
+                rspice_app_state::quantity::engineering::format_engineering_display_with(
+                    at,
+                    rspice_app_state::quantity::engineering::EngineeringPrecision::Adaptive,
+                )
+            )
+        })
+        .unwrap_or_default();
+    let cause = if stop.budget.is_some() {
+        "storage budget reached"
+    } else {
+        "results storage full"
+    };
+    format!("Stopped{at}: {cause}")
 }
 
 /// What actually failed in `run`, in the words of the owner that produced it.
@@ -755,6 +790,50 @@ mod tests {
         assert_eq!(run_state_words(run), "Failed");
         assert_eq!(mark.status.label(), "Failed");
         assert_eq!(mark.status.category(), ResultOperationalCategory::Error);
+    }
+
+    /// A run its results storage stopped says where and why in its State
+    /// row, not that it completed: the volume filled, the plan's budget was
+    /// reached, or the store kept none of it.
+    #[test]
+    fn a_run_its_results_storage_stopped_says_so_in_its_state() {
+        let mut state = ResultsTestHost::default();
+        let run = state.model.simulation.start_run();
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                RetainedTrace::new("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0], "#00aaff"),
+            ]),
+        );
+        run.mark_running().expect("the run starts");
+        run.finish_lifecycle(SimulationRunLifecycle::Completed)
+            .expect("the run ends");
+        let mut stop = crate::state::ResultsStorageStop {
+            analysis: "TRAN".to_owned(),
+            at: Some(1.0e-6),
+            rows: 2,
+            bytes: 64,
+            free: Some(0),
+            folder: "store".to_owned(),
+            budget: None,
+        };
+        let run = &mut state.model.simulation.retained.runs[0];
+        assert_eq!(run_state_words(run), "Completed");
+        run.stop_on_results_storage(stop.clone());
+        assert_eq!(run_state_words(run), "Stopped at 1µs: results storage full");
+        stop.budget = Some(crate::state::ResultsStorageBudget {
+            budget: 64,
+            written: 64,
+            point: None,
+        });
+        run.stop_on_results_storage(stop.clone());
+        assert_eq!(
+            run_state_words(run),
+            "Stopped at 1µs: storage budget reached"
+        );
+        stop.budget = None;
+        stop.rows = 0;
+        run.stop_on_results_storage(stop);
+        assert_eq!(run_state_words(run), "Results not kept: storage full");
     }
 }
 

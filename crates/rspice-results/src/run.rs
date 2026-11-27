@@ -272,6 +272,54 @@ pub struct SimulationRun<A = AnalysisResult> {
     /// What the reader wrote about the run, as Assembler's History keeps a
     /// note per run. Not result content: no digest of the run reads it.
     pub note: String,
+    /// How its results storage stopped the run, when it did: the volume
+    /// holding the store filled, or the run reached its plan's storage
+    /// budget, and the run kept the rows it had written. Saved with the run,
+    /// so it reopens saying so. Not result content: no digest reads it.
+    pub results_storage_stop: Option<ResultsStorageStop>,
+}
+
+/// A transient its results storage stopped: the volume holding the run's results store filled,
+/// or the run's results reached its plan's storage budget, and the run kept the rows it had
+/// written.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultsStorageStop {
+    /// The analysis it stopped.
+    pub analysis: String,
+    /// The time of the last row kept.
+    pub at: Option<f64>,
+    /// The rows kept.
+    pub rows: u64,
+    /// The bytes they take in the store.
+    pub bytes: u64,
+    /// The bytes the volume had free when the run ended, where the host can say.
+    pub free: Option<u64>,
+    /// The folder holding the store.
+    pub folder: String,
+    /// The plan's storage budget, when it stopped the run rather than the volume.
+    pub budget: Option<ResultsStorageBudget>,
+}
+
+impl ResultsStorageStop {
+    /// Whether the store kept none of the run: it filled before the run's first row, and no
+    /// plan budget stopped it.
+    #[must_use]
+    pub fn kept_nothing(&self) -> bool {
+        self.rows == 0 && self.budget.is_none()
+    }
+}
+
+/// The storage budget a run's plan set, which its results reached.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultsStorageBudget {
+    /// The bytes the plan lets the run keep.
+    pub budget: u64,
+    /// The bytes the run's results store held, across its analyses, when it stopped.
+    pub written: u64,
+    /// The Run Set point the stopped analysis solved, as a results table names it.
+    pub point: Option<String>,
 }
 
 impl<A> AsRef<SimulationRun<A>> for SimulationRun<A> {
@@ -307,6 +355,7 @@ impl<A> SimulationRun<A> {
             campaign_membership,
             log,
             note,
+            results_storage_stop,
         } = self;
         SimulationRun {
             job_id,
@@ -326,6 +375,7 @@ impl<A> SimulationRun<A> {
             campaign_membership,
             log,
             note,
+            results_storage_stop,
         }
     }
 
@@ -357,6 +407,7 @@ impl<A> SimulationRun<A> {
             campaign_membership: None,
             log: RunLog::default(),
             note: String::new(),
+            results_storage_stop: None,
         }
     }
 
@@ -399,6 +450,7 @@ impl<A> SimulationRun<A> {
             campaign_membership: None,
             log: RunLog::default(),
             note: String::new(),
+            results_storage_stop: None,
         }
     }
 
