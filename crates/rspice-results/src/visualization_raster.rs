@@ -122,10 +122,10 @@ impl Default for VisualizationRasterPalette {
             plot_background: Rgb8::new(250, 251, 252),
             grid: Rgb8::new(220, 225, 229),
             axes: Rgb8::new(61, 72, 80),
+            // As every trace palette, no hue is green.
             traces: vec![
                 Rgb8::new(0, 103, 192),
                 Rgb8::new(196, 78, 0),
-                Rgb8::new(0, 132, 99),
                 Rgb8::new(142, 68, 173),
                 Rgb8::new(202, 138, 4),
                 Rgb8::new(0, 149, 183),
