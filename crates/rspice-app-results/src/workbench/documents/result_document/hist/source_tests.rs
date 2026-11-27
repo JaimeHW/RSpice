@@ -97,10 +97,10 @@ fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
             .viewer_capability(ActiveViewer::Histogram)
             .available
     );
-    assert!(paint(&mut state, false).contains("GAIN"));
+    assert!(paint(&mut state, false).contains("gain"));
     assert!(paint(&mut state, true).contains("Std dev"));
     let text = paint(&mut state, false);
-    assert!(text.contains("GAIN"), "{text}");
+    assert!(text.contains("gain"), "{text}");
 }
 
 #[test]
@@ -468,7 +468,7 @@ fn hist_source_moments_preserve_representable_tiny_and_large_statistics() {
         min: 1e308,
         max: 1.7e308,
     });
-    assert!(paint(&mut state, false).contains("LARGE"));
+    assert!(paint(&mut state, false).contains("large"));
     assert!(paint(&mut state, true).contains("Std dev"));
 }
 
@@ -528,7 +528,7 @@ fn a_histogram_bin_and_a_scatter_brush_share_one_member_selection() {
             simulation.active_analysis().unwrap(),
         )
     };
-    assert!(paint(&mut state, false).contains("V(OUT)"));
+    assert!(paint(&mut state, false).contains("V(out)"));
     assert!(!paint(&mut state, false).contains("picked"));
 
     // Brushed in the scatter sheet: drawn over the histogram's bars.
@@ -675,5 +675,5 @@ fn a_measured_distribution_reads_in_its_unit_against_its_requirement() {
     }
     // The abscissa names the quantity and its unit; a count has none.
     let plot = paint(&mut state, false);
-    assert!(plot.contains("GAIN \u{b7} V"), "{plot}");
+    assert!(plot.contains("gain \u{b7} V"), "{plot}");
 }

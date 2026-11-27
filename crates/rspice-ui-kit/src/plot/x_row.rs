@@ -33,24 +33,67 @@ pub const X_CAPTION_GAP: f32 = 8.0;
 const CAPTION_EDGE: f32 = 2.0;
 
 /// What the gutter says beside an abscissa's values: the quantity, then the
-/// unit — "TIME · s", "FREQ · Hz", "VD · V", "TEMP · °C". Time and
-/// frequency are named by their unit; an axis with a unit but no quantity
-/// ("UI", "Re") states the unit alone.
+/// unit — "TIME · s", "FREQ · Hz", "TEMP · °C", "VD · V", "XBRIDGE.dR".
+/// Time and frequency are named by their unit, and a generic quantity word
+/// is set in capitals as they are. Any other quantity is a name and keeps
+/// the case it was written in: a signal or a function of one ("V(in)",
+/// "Re L(jω)"), a parameter, a measure or a source, since a node's name is
+/// case-sensitive and `j` is the imaginary unit. An axis with a unit but no
+/// quantity ("UI", "Re") states the unit alone.
 ///
 /// The tick values themselves are SI-prefixed bare numbers, so the gutter is
 /// where the axis states its unit, once, for the whole row.
 pub fn x_axis_caption(quantity: &str, unit: &str) -> String {
+    let quantity = quantity.trim();
     let name = match unit {
         "s" => "TIME".to_owned(),
         "Hz" => "FREQ".to_owned(),
         // ASCII only: an uppercase σ is Σ, the summation sign.
-        _ => quantity.trim().to_ascii_uppercase(),
+        _ if names_a_generic_quantity(quantity) => quantity.to_ascii_uppercase(),
+        _ => quantity.to_owned(),
     };
     match (name.is_empty(), unit.is_empty()) {
         (true, _) => unit.to_owned(),
         (false, true) => name,
         (false, false) => format!("{name} · {unit}"),
     }
+}
+
+/// The words an abscissa is labelled with when it names a kind of quantity
+/// rather than a signal, a parameter or a source.
+const GENERIC_QUANTITY_WORDS: &[&str] = &[
+    "time",
+    "frequency",
+    "freq",
+    "temperature",
+    "temp",
+    "iteration",
+    "iter",
+    "mode",
+    "offset",
+    "output",
+    "probe",
+    "parameter",
+    "sweep",
+    "value",
+    "voltage",
+    "current",
+    "magnitude",
+    "phase",
+    "trial",
+    "sample",
+    "index",
+];
+
+/// Whether `quantity` is made only of generic quantity words ("temp",
+/// "Output frequency"), as against a name a netlist or a reader gave.
+fn names_a_generic_quantity(quantity: &str) -> bool {
+    !quantity.is_empty()
+        && quantity.split_whitespace().all(|word| {
+            GENERIC_QUANTITY_WORDS
+                .iter()
+                .any(|generic| generic.eq_ignore_ascii_case(word))
+        })
 }
 
 /// The height of the line under a row's values that a caption too long for
@@ -258,13 +301,21 @@ mod tests {
         assert_eq!(x_axis_caption("t", "s"), "TIME \u{b7} s");
         assert_eq!(x_axis_caption("", "Hz"), "FREQ \u{b7} Hz");
         assert_eq!(x_axis_caption("VD", "V"), "VD \u{b7} V");
-        assert_eq!(x_axis_caption("Ibias", "A"), "IBIAS \u{b7} A");
         assert_eq!(x_axis_caption("temp", "\u{b0}C"), "TEMP \u{b7} \u{b0}C");
+        assert_eq!(x_axis_caption("Temperature", "C"), "TEMPERATURE \u{b7} C");
         assert_eq!(x_axis_caption("iteration", ""), "ITERATION");
+        assert_eq!(x_axis_caption("Probe offset", ""), "PROBE OFFSET");
+        // A name keeps its own spelling: its case is data.
+        assert_eq!(x_axis_caption("Ibias", "A"), "Ibias \u{b7} A");
+        assert_eq!(x_axis_caption("XBRIDGE.dR", ""), "XBRIDGE.dR");
+        assert_eq!(x_axis_caption("V(out)", "V"), "V(out) \u{b7} V");
+        assert_eq!(x_axis_caption("z", ""), "z");
         assert_eq!(x_axis_caption("σ", "rad/s"), "σ · rad/s");
         // An axis with a unit but no quantity states the unit alone, and an
         // axis with neither says nothing.
         assert_eq!(x_axis_caption("", "UI"), "UI");
+        assert_eq!(x_axis_caption("Re L(j\u{3c9})", ""), "Re L(j\u{3c9})");
+        assert_eq!(x_axis_caption("V(in)", "V"), "V(in) \u{b7} V");
         assert_eq!(x_axis_caption("", ""), "");
     }
 }
