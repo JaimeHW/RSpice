@@ -14,7 +14,7 @@ use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_branches_into,
 };
 use rspice_ui_kit::plot::{CursorPair, SampleInterpolation, XScale};
-use rspice_ui_kit::widgets::table::{Align, Cell, Column, DataTable};
+use rspice_ui_kit::widgets::table::{Cell, Column, DataTable, fitted_width};
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::AtomicUsize;
@@ -99,11 +99,18 @@ pub fn measurement_panel(
     });
     // A grid on the details pane's dense rows, as its other tables are: the
     // reading's name on the left, its value right-aligned on its own column.
+    // The value column is as wide as the widest value it has shown of these
+    // measurements and the name takes the rest, so a name is cut only where
+    // the row really has no room for it, and its hover holds it whole. The
+    // widths are measured from the rows drawn and take effect on the next
+    // frame, as the values themselves are read.
+    let width_id = ui.id().with("waves.measurements.value-width");
+    let (width_of, value_width) = ui
+        .data(|data| data.get_temp::<(MeasuredOf, f32)>(width_id))
+        .unwrap_or((of, MEASUREMENT_COLUMN_LEAST_W));
     let columns = [
         Column::name("Measurement", MEASUREMENT_COLUMN_LEAST_W).unsortable(),
-        Column::name("Value", MEASUREMENT_COLUMN_LEAST_W)
-            .align(Align::Right)
-            .unsortable(),
+        Column::number("Value", value_width).unsortable(),
     ];
     match shown {
         Shown::Measured(measured) => {
@@ -113,12 +120,15 @@ pub fn measurement_panel(
                 "Keep over the whole record"
             };
             let mut kept = None;
+            let mut values = Vec::new();
             crate::presentation::with_table_state(ui, "waves.measurements", |ui, state| {
                 let response = DataTable::new("results.measurements", &columns, measured.rows)
                     .state(state)
                     .show(ui, |row| {
                         let row = measured.row(model, row, wording);
                         let name = Cell::faint(row.label);
+                        let value = Cell::quantity(row.value);
+                        values.push(value.clone());
                         vec![
                             if row.keep.is_some() {
                                 name.hint(format!(
@@ -127,7 +137,7 @@ pub fn measurement_panel(
                             } else {
                                 name
                             },
-                            Cell::quantity(row.value),
+                            value,
                         ]
                     });
                 if let Some(index) = response.activate {
@@ -153,6 +163,20 @@ pub fn measurement_panel(
                     },
                 );
             });
+            // The same measurements keep the widest value seen, so the
+            // column holds still while the rows scroll; new ones start over.
+            let fitted = fitted_width(ui, "Value", &values).max(MEASUREMENT_COLUMN_LEAST_W);
+            let fitted = if width_of == of {
+                fitted.max(value_width)
+            } else {
+                fitted
+            };
+            if width_of != of || (fitted - value_width).abs() > 0.5 {
+                ui.data_mut(|data| data.insert_temp(width_id, (of, fitted)));
+                if (fitted - value_width).abs() > 0.5 {
+                    ui.ctx().request_repaint();
+                }
+            }
             kept
         }
         Shown::Measuring(signals) => {
@@ -171,8 +195,9 @@ pub fn measurement_panel(
     }
 }
 
-/// The least width of each of the Measurements table's two columns, which
-/// share the inspector's width between them.
+/// The least width of each of the Measurements table's two columns: the
+/// value column's until its values are measured, and the name column's
+/// however long the values are.
 const MEASUREMENT_COLUMN_LEAST_W: f32 = 64.0;
 
 /// What a strip's measurements were taken of: a build of its models, the
