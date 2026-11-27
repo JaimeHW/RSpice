@@ -54,8 +54,9 @@ pub trait StackHost {
     fn session(&self) -> &ResultViewerState;
     fn session_mut(&mut self) -> &mut ResultViewerState;
     fn expression_is_complex(&self, analysis: AnalysisPresentationKey, text: &str) -> bool;
-    /// Whether the expression is still being evaluated off the frame, so its
-    /// pane names it as pending rather than leaving it out.
+    /// Whether the expression is still being evaluated off the frame with no
+    /// curve drawn yet, so its pane and strip name it as pending rather than
+    /// leaving it out or showing a swatch for a curve that is not there.
     fn expression_pending(&self, _analysis: AnalysisPresentationKey, _text: &str) -> bool {
         false
     }
@@ -1002,7 +1003,12 @@ pub fn show(
                             .map(|expr| {
                                 let complex =
                                     host.expression_is_complex(model.analysis_key, &expr.text);
-                                expression_label(expr, complex)
+                                let label = expression_label(expr, complex);
+                                if host.expression_pending(model.analysis_key, &expr.text) {
+                                    format!("{label} \u{b7} evaluating\u{2026}")
+                                } else {
+                                    label
+                                }
                             })
                             .collect();
                         let legend: Vec<LegendChip<'_>> = strip_exprs

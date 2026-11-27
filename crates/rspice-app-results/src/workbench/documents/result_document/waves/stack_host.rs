@@ -42,10 +42,16 @@ impl StackHost for WaveStackHost<'_, '_> {
         super::expressions::resolve_abscissa_expression(self.0, model, text)
     }
     fn expression_pending(&self, analysis: AnalysisPresentationKey, text: &str) -> bool {
-        self.0
-            .results
-            .expression_jobs
-            .contains_key(&(analysis, text.to_owned()))
+        // A job re-evaluating an expression keeps its last landed curve
+        // drawn, so only one with no curve yet is pending to the reader.
+        let key = (analysis, text.to_owned());
+        self.0.results.expression_jobs.contains_key(&key)
+            && self
+                .0
+                .results
+                .analysis_expr_cache
+                .get(&key)
+                .is_none_or(|cached| cached.series.is_err())
     }
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String) {
         let key = (analysis, text);
