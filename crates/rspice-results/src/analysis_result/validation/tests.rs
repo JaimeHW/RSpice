@@ -96,6 +96,7 @@ fn only_an_unfinished_analysis_holds_the_live_plots_gaps() {
 
 /// An SOA analysis whose reporting view is its whole source history: a warning at the second of
 /// two samples.
+#[cfg(feature = "test-support")]
 fn soa_with_history() -> AnalysisResult {
     use crate::analysis_payload::AnalysisResultPayload;
     use crate::family_metadata::AnalysisResultFamilyMetadata;
