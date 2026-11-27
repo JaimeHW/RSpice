@@ -224,6 +224,9 @@ pub(in crate::workbench) fn results(
                 .iter()
                 .enumerate()
                 .filter_map(|(analysis_index, analysis)| {
+                    if states_one_temperature(analysis) {
+                        return None;
+                    }
                     let presentation_key =
                         AnalysisPresentationKey::new(run.dataset_id, analysis);
                     let evidence_valid = analysis_integrity
@@ -338,7 +341,7 @@ pub(in crate::workbench) fn results(
                         || signals.pending()
                         || !signals.is_empty()
                         || !artifacts.is_empty();
-                    let label = analysis_label_at(run, analysis);
+                    let (label, spoken) = analysis_names(run, analysis);
                     matches_analysis.then(|| ResultAnalysis {
                         domain: result_analysis_domain(
                             analysis.analysis_type,
@@ -360,6 +363,7 @@ pub(in crate::workbench) fn results(
                         analysis_index,
                         presentation_key,
                         label,
+                        spoken,
                         short_label: analysis.analysis_type.short_label(),
                         // A running analysis has not failed.
                         success: analysis.success || analysis.is_live_partial(),
@@ -1173,11 +1177,14 @@ fn loaded_signals(ctx: &egui::Context, state: &ResultsParts<'_>, show_internal: 
         .runs
         .iter()
         .flat_map(|run| {
-            run.analyses.iter().map(move |analysis| {
-                let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-                super::results_catalogue::loaded(ctx, key, analysis, show_internal)
-                    + retained_result_artifacts(analysis, key).len()
-            })
+            run.analyses
+                .iter()
+                .filter(|analysis| !states_one_temperature(analysis))
+                .map(move |analysis| {
+                    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+                    super::results_catalogue::loaded(ctx, key, analysis, show_internal)
+                        + retained_result_artifacts(analysis, key).len()
+                })
         })
         .sum()
 }
@@ -2442,7 +2449,12 @@ pub(super) struct ResultAnalysis {
     pub(super) analysis_index: usize,
     pub(super) presentation_key:
         crate::workbench::documents::result_document::AnalysisPresentationKey,
+    /// The words the row paints: where the run solved several points, the
+    /// point its kind chip stands beside.
     pub(super) label: String,
+    /// The row's whole name, kind and point, which it speaks and shows on
+    /// hover where its painted words leave the kind to the chip.
+    pub(super) spoken: String,
     pub(super) short_label: &'static str,
     /// Caption under the label: the domain this analysis swept. Repeating
     /// the analysis name here would state the head's own title twice.
@@ -2697,22 +2709,29 @@ impl OrderGroups {
     }
 }
 
-/// What the data browser calls `analysis`, and so the dock's Plot page too:
-/// its label. A deck that labelled its analysis with the same code the kind
-/// glyph carries would print that code twice; the canonical name is the
-/// useful title in that case.
-/// [`analysis_label`] for an analysis of `run`, named by the point it
-/// solved at where the run solved more than one: `DC Operating Point ·
-/// 1.62 V, 125 °C`, as Run details names it. A family's member is named by
-/// its own label already.
-fn analysis_label_at(
+/// Whether the browser leaves `analysis` out: a deck's `.temp 50` makes a
+/// temperature "family" of one point, which is the run's one temperature
+/// and no family a reader opens. Run details states it the same way.
+fn states_one_temperature(analysis: &crate::state::AnalysisResult) -> bool {
+    analysis
+        .family_metadata
+        .as_ref()
+        .is_some_and(|family| family.states_one_temperature())
+}
+
+/// What the browser paints on `analysis`'s row in `run`, and the row's whole
+/// name. Where the run solved more than one point, the row leads with the
+/// point it solved at, `1.62 V, 125 °C`, and its kind chip names the kind:
+/// the kind's name before it pushed the point out of view at the dock's
+/// width, and left every row of the run reading alike. A name the kind's
+/// own does not say, an FFT's or one the analysis was given, follows the
+/// point. The whole name, `DC Operating Point · 1.62 V, 125 °C`, is what
+/// Run details calls the row. A family's member is named by its own label.
+fn analysis_names(
     run: &crate::state::SimulationRun,
     analysis: &crate::state::AnalysisResult,
-) -> String {
+) -> (String, String) {
     let label = analysis_label(analysis);
-    if analysis.family_member().is_some() {
-        return label;
-    }
     let point = run
         .facts
         .as_ref()
@@ -2721,13 +2740,23 @@ fn analysis_label_at(
                 .provenance()
                 .and_then(|provenance| provenance.pvt_point()),
         )
-        .and_then(|(facts, point)| facts.point_words(point));
-    match point {
-        Some(point) => format!("{label} \u{b7} {point}"),
-        None => label,
+        .and_then(|(facts, point)| facts.point_words(point))
+        .filter(|_| analysis.family_member().is_none());
+    let Some(point) = point else {
+        return (label.clone(), label);
+    };
+    let spoken = format!("{label} \u{b7} {point}");
+    if label == analysis.analysis_type.display_name() {
+        (point, spoken)
+    } else {
+        (format!("{point} \u{b7} {label}"), spoken)
     }
 }
 
+/// What the data browser calls `analysis`, and so the dock's Plot page too:
+/// its label. A deck that labelled its analysis with the same code the kind
+/// glyph carries would print that code twice; the canonical name is the
+/// useful title in that case.
 pub(crate) fn analysis_label(analysis: &crate::state::AnalysisResult) -> String {
     if analysis
         .label

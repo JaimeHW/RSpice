@@ -878,19 +878,42 @@ fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui:
     lines
 }
 
-/// A run of several points names each of its analyses by the point it
-/// solved at, as Run details names its rows: four operating points of one
-/// run are not four rows alike.
+/// The kind chip painted on the row `words` stand on, if any: the chip and
+/// the row's words share its middle.
+fn chip_beside<'a>(lines: &'a [(String, egui::Rect)], words: &str) -> Vec<&'a str> {
+    lines
+        .iter()
+        .filter(|(painted, _)| painted == words)
+        .flat_map(|(_, row)| {
+            lines
+                .iter()
+                .filter(move |(_, at)| {
+                    at.right() <= row.left() && (at.center().y - row.center().y).abs() < 2.0
+                })
+                .map(|(chip, _)| chip.as_str())
+                .filter(|chip| matches!(*chip, "DC" | "TR"))
+        })
+        .collect()
+}
+
+/// A run of several points leads each analysis's row with the point it
+/// solved at, and its kind chip names the kind: four operating points and
+/// four transients of one run are not eight rows alike, nor rows whose
+/// point is cut away behind the kind's name.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn a_pvt_runs_analyses_are_named_by_their_points() {
+fn a_pvt_runs_analyses_lead_with_their_points() {
     use rspice_app_runs::simulation::controller::test_execution::{pvt, run_generated_batch};
     use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
 
-    let state = pvt::run_set_divider(
+    let mut state = pvt::run_set_divider(
         AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
         &["-40", "125"],
     );
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
+    let transient = AnalysisDraft::for_kind(AnalysisKind::Transient);
+    let (analysis, _) = plan.insert(transient.kind()).unwrap();
+    plan.edit(analysis, |target| *target = transient).unwrap();
     let run = run_generated_batch(
         state,
         rspice_results::run::SimulationRunLifecycle::Completed,
@@ -900,15 +923,58 @@ fn a_pvt_runs_analyses_are_named_by_their_points() {
     app.state.model.simulation.retained.runs.push(run);
     let lines = navigator_painted_lines(900.0, app);
     for point in [
-        "1.62 V, \u{2212}40",
-        "1.62 V, 125",
-        "1.8 V, \u{2212}40",
-        "1.8 V, 125",
+        "1.62 V, \u{2212}40 \u{b0}C",
+        "1.62 V, 125 \u{b0}C",
+        "1.8 V, \u{2212}40 \u{b0}C",
+        "1.8 V, 125 \u{b0}C",
     ] {
-        let name = format!("DC Operating Point \u{b7} {point} \u{b0}C");
-        assert!(
-            lines.iter().any(|(words, _)| *words == name),
-            "the data browser names no row {name}: {lines:?}"
+        let mut chips = chip_beside(&lines, point);
+        chips.sort_unstable();
+        assert_eq!(
+            chips,
+            ["DC", "TR"],
+            "each kind at {point} is one row, its chip naming the kind: {lines:?}"
         );
     }
+    assert!(
+        !lines
+            .iter()
+            .any(|(words, _)| words.starts_with("DC Operating Point")
+                || words.starts_with("Transient")),
+        "the chip names the kind, so the rows do not: {lines:?}"
+    );
+}
+
+/// A deck's `.temp 50` is the run's one temperature, not a family of one
+/// point listed beside the operating point it made.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_decks_one_temperature_is_no_family_in_the_data_browser() {
+    use rspice_app_runs::simulation::controller::test_execution::run_manual_batch;
+
+    let run = run_manual_batch(concat!(
+        "* divider\n",
+        "V1 in 0 1\n",
+        "R1 in out 3k\n",
+        "R2 out 0 1k\n",
+        ".temp 50\n",
+        ".op\n",
+        ".end\n",
+    ));
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.workspace = Workspace::Results;
+    app.state.model.simulation.retained.runs.push(run);
+    let lines = navigator_painted_lines(900.0, app);
+    let words = lines
+        .iter()
+        .map(|(words, _)| words.as_str())
+        .collect::<Vec<_>>();
+    // A run of one point keeps its kind's name.
+    assert!(words.contains(&"DC Operating Point"), "{words:?}");
+    assert!(
+        !words
+            .iter()
+            .any(|words| words.starts_with("Parametric") || *words == "PAR"),
+        "{words:?}"
+    );
 }

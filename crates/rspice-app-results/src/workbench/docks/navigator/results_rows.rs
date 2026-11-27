@@ -1149,7 +1149,10 @@ pub(super) fn show_virtualized_result_signals(
                             let (head, _) = result_browser_analysis_head(
                                 ui,
                                 Some(analysis.short_label),
-                                HeadLabel::Analysis(&analysis.label),
+                                HeadLabel::Analysis {
+                                    label: &analysis.label,
+                                    spoken: &analysis.spoken,
+                                },
                                 &analysis.domain,
                                 shown,
                                 analysis.total_signals,
@@ -1913,6 +1916,7 @@ pub(super) fn result_browser_manifest_row(
     ui: &mut Ui,
     glyph: &str,
     code: &str,
+    spoken: &str,
     domain: &str,
     selected: bool,
     ok: bool,
@@ -1929,7 +1933,7 @@ pub(super) fn result_browser_manifest_row(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            format!("{code}, {domain}"),
+            format!("{spoken}, {domain}"),
         )
     });
     if !ui.is_rect_visible(rect) {
@@ -2004,7 +2008,9 @@ enum HeadLabel<'a> {
         label: &'a str,
         mark: Option<f32>,
     },
-    Analysis(&'a str),
+    /// An analysis's painted words, and its whole name where those leave
+    /// its kind to the chip.
+    Analysis { label: &'a str, spoken: &'a str },
 }
 
 /// A group head's response, and where a run's mark stands after its name.
@@ -2037,9 +2043,9 @@ fn result_browser_analysis_head(
             theme::sans(tokens::FS_0, FontWeight::Medium),
             mark,
         ),
-        HeadLabel::Analysis(label) => (
+        HeadLabel::Analysis { label, spoken } => (
             label,
-            label,
+            spoken,
             theme::mono(tokens::FS_0, FontWeight::SemiBold),
             None,
         ),

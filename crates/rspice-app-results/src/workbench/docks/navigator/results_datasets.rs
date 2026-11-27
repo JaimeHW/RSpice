@@ -133,6 +133,7 @@ pub(super) fn show_datasets(
                                 ui,
                                 analysis.short_label,
                                 &analysis.label,
+                                &analysis.spoken,
                                 &analysis.domain,
                                 active,
                                 analysis.success,
