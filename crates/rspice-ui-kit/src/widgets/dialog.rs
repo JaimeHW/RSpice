@@ -526,8 +526,17 @@ impl DialogLayout {
                         // the viewport is the only ceiling that means
                         // anything, and holding the desktop number there made
                         // a content-height route scroll its last row inside a
-                        // portrait that had room for all of it.
-                        let ceiling = if narrow { viewport } else { spec.max_height };
+                        // portrait that had room for all of it. On a desktop
+                        // the window less its margins caps it too: a fixed
+                        // height of 740 held its whole height in a 700-point
+                        // window, its header and footer past the screen's
+                        // edges, where the body should have scrolled between
+                        // them.
+                        let ceiling = if narrow {
+                            viewport
+                        } else {
+                            spec.max_height.min(viewport)
+                        };
                         measured_height.unwrap_or(ceiling).min(ceiling)
                     }
                 },

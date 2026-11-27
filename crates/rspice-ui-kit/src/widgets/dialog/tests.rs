@@ -139,6 +139,36 @@ fn the_dialog_node_bounds_the_card_and_not_the_screen() {
     );
 }
 
+/// A fixed height holds a workflow surface still across its states, within
+/// the window: a window shorter than it holds it to the window less the
+/// size's margins, its body scrolling between the header and the footer,
+/// and a taller one leaves it at the height it asked for. It held the whole
+/// height in any window, so a 740-point dialog in a 700-point window put its
+/// header and its footer past the screen's edges.
+#[test]
+fn a_fixed_height_is_held_to_a_short_window_less_its_margins() {
+    let spec = DialogSize::Transaction.spec();
+    for (height, fixed, expected) in [
+        (700.0, 740.0, 700.0 - spec.vertical_inset),
+        (700.0, 600.0, 600.0),
+        (1_000.0, 740.0, 740.0),
+        (1_000.0, 900.0, spec.max_height),
+    ] {
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_000.0, height));
+        let surface =
+            DialogLayout::resolve(DialogSize::Transaction, screen, Some(fixed)).surface_rect;
+        assert_eq!(
+            surface.height(),
+            expected,
+            "a fixed height of {fixed} in a window {height} tall"
+        );
+        assert!(
+            screen.contains_rect(surface),
+            "{surface:?} leaves the {height}-point window"
+        );
+    }
+}
+
 #[test]
 fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace() {
     let ctx = Context::default();
