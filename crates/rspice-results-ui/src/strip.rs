@@ -333,6 +333,46 @@ fn note_header_row(ctx: &egui::Context, id: egui::Id, rect: Rect) {
     });
 }
 
+/// Where the strip header rows drawn in one pass are selected.
+#[derive(Clone, Default)]
+struct SelectedRows {
+    pass: u64,
+    within: Vec<Rect>,
+}
+
+/// The memory key the selected rows of a pass are kept under.
+const SELECTED_ROWS: &str = "rspice.results.strip-header-selected-rows";
+
+/// Select the strip header rows drawn within `within` for the rest of this
+/// pass: they take the kit's selected-row fill and report themselves
+/// selected. Whatever holds the strips says so before drawing them: the pane
+/// a reader works in, on a page of several.
+pub fn select_header_rows(ctx: &egui::Context, within: Rect) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| {
+        let selected = data.get_temp_mut_or_default::<SelectedRows>(egui::Id::new(SELECTED_ROWS));
+        if selected.pass != pass {
+            *selected = SelectedRows {
+                pass,
+                within: Vec::new(),
+            };
+        }
+        selected.within.push(within);
+    });
+}
+
+fn header_row_selected(ctx: &egui::Context, row: Rect) -> bool {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<SelectedRows>(egui::Id::new(SELECTED_ROWS)))
+        .is_some_and(|selected| {
+            selected.pass == pass
+                && selected
+                    .within
+                    .iter()
+                    .any(|within| within.contains(row.center()))
+        })
+}
+
 /// The rows of the strip headers drawn this pass within `within`, each with
 /// what the reader did to it: where whatever holds the strips gives their
 /// rows a menu of its own. A row answers behind its chips and actions, so a
@@ -546,9 +586,17 @@ impl<'a> StripHeader<'a> {
         let row_id = ui.make_persistent_id(self.id_salt.with("strip-header-row"));
         let row = ui.interact(rect, row_id, Sense::CLICK);
         row.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), self.kind));
+        let selected = header_row_selected(ui.ctx(), rect);
+        if selected {
+            ui.ctx()
+                .accesskit_node_builder(row.id, |node| node.set_selected(true));
+        }
         note_header_row(ui.ctx(), row.id, rect);
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, c.bg_panel);
+        if selected {
+            painter.rect_filled(rect, 0.0, c.accent_dim);
+        }
         painter.hline(
             rect.x_range(),
             rect.bottom() - 0.5,

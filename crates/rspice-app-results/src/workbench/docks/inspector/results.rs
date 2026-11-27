@@ -363,8 +363,16 @@ fn active_result_pane(
         Some(facts.unit.as_deref().unwrap_or_else(|| viewer.label())),
     );
     // The pane names the analysis it draws, which on a sheet outside the
-    // waveform stack is not the one the run's analysis selector points at.
-    property_row(ui, "Pane", facts.analysis.as_deref().unwrap_or(&pane_label));
+    // waveform stack is not the one the run's analysis selector points at,
+    // and, on a document page of several panes, where it sits.
+    let analysis = facts.analysis.as_deref().unwrap_or(&pane_label);
+    let pane =
+        crate::workbench::documents::result_document::persistent_document::active_pane_place(state)
+            .map_or_else(
+                || analysis.to_owned(),
+                |place| format!("{place} \u{b7} {analysis}"),
+            );
+    property_row(ui, "Pane", &pane);
     if let Some(scale) = facts.scale {
         property_row(ui, "Scale", scale);
     }

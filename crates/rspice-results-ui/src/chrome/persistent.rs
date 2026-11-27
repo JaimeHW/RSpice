@@ -87,6 +87,41 @@ fn grid_of(layout: PageLayout, pane_count: usize) -> (usize, usize) {
     }
 }
 
+/// Where the pane at `index` of `pane_count` sits on a page laid out as
+/// `layout`, in the reader's words: "Top", "Bottom right", "Row 4". A page of
+/// one pane has no place to name.
+pub fn pane_place(layout: PageLayout, index: usize, pane_count: usize) -> Option<String> {
+    if pane_count < 2 || index >= pane_count {
+        return None;
+    }
+    let (columns, rows) = grid_of(layout, pane_count);
+    let (column, row) = (index % columns, index / columns);
+    // A side of two or three cells is named by its ends and middle; a longer
+    // one is counted.
+    let side = |at: usize, cells: usize, ends: [&'static str; 2]| match (cells, at) {
+        (1, _) => Some(None),
+        (2 | 3, 0) => Some(Some(ends[0])),
+        (2, 1) | (3, 2) => Some(Some(ends[1])),
+        (3, 1) => Some(Some("middle")),
+        _ => None,
+    };
+    let place = match (
+        side(row, rows, ["top", "bottom"]),
+        side(column, columns, ["left", "right"]),
+    ) {
+        (Some(Some("middle")), Some(Some("middle"))) => "middle".to_owned(),
+        (Some(Some(vertical)), Some(Some(horizontal))) => format!("{vertical} {horizontal}"),
+        (Some(Some(side)), Some(None)) | (Some(None), Some(Some(side))) => side.to_owned(),
+        _ if columns == 1 => format!("row {}", row + 1),
+        _ if rows == 1 => format!("column {}", column + 1),
+        _ => format!("row {}, column {}", row + 1, column + 1),
+    };
+    let mut letters = place.chars();
+    letters
+        .next()
+        .map(|first| first.to_uppercase().chain(letters).collect())
+}
+
 fn bounded_pane_slots(stage: Rect, layout: PageLayout, pane_count: usize) -> Vec<Rect> {
     if pane_count == 0 {
         return Vec::new();
@@ -133,11 +168,20 @@ fn bounded_inset(rect: Rect, requested: f32) -> Rect {
 
 /// Draw a pane frame around host-composed controls and its qualified viewer.
 ///
-/// Every pane has the same hairline frame. The active pane is told apart by
-/// its header's title alone; an accent frame round the plot fought the traces.
-pub fn pane_frame<R>(ui: &mut Ui, pane_id: PaneId, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+/// Every pane has the same hairline frame. The pane being worked in, when
+/// it is `marked`, is told apart by its analysis rows alone, which take the
+/// selected-row fill: an accent frame round the plot fought the traces.
+pub fn pane_frame<R>(
+    ui: &mut Ui,
+    pane_id: PaneId,
+    marked: bool,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> R {
     let t = Tokens::get(ui.ctx());
     let rect = ui.available_rect_before_wrap();
+    if marked {
+        crate::strip::select_header_rows(ui.ctx(), rect);
+    }
     ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
     ui.painter().rect_stroke(
         rect,

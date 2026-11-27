@@ -1016,6 +1016,109 @@ fn a_press_activates_a_pane_and_its_analysis_row_moves_and_removes_it() {
     assert_eq!(panes(&window), [first]);
 }
 
+/// A document pane's analysis row as one frame draws it.
+#[cfg(not(target_arch = "wasm32"))]
+struct AnalysisRowMark {
+    /// Where it stands.
+    at: egui::Pos2,
+    /// It reports itself selected.
+    selected: bool,
+    /// It is painted with the kit's selected-row fill.
+    filled: bool,
+}
+
+/// The analysis rows the frame draws, top to bottom and left to right, with
+/// the texts the frame paints.
+#[cfg(not(target_arch = "wasm32"))]
+fn analysis_row_marks(window: &mut ResultsWindow) -> (Vec<AnalysisRowMark>, Vec<String>) {
+    fn fills(shape: &egui::Shape, color: egui::Color32, rects: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(rect) if rect.fill == color => rects.push(rect.rect),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    fills(shape, color, rects);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut output = window.frame(Vec::new());
+    for _ in 0..2 {
+        output = window.frame(Vec::new());
+    }
+    let selected_fill = rspice_ui_kit::tokens::Tokens::get(&window.ctx)
+        .color
+        .accent_dim;
+    let (mut filled, mut texts) = (Vec::new(), Vec::new());
+    for clipped in &output.shapes {
+        fills(&clipped.shape, selected_fill, &mut filled);
+        painted_texts(&clipped.shape, &mut texts);
+    }
+    let mut rows = output
+        .platform_output
+        .accesskit_update
+        .map(|update| update.nodes)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, node)| node.label() == Some("TR"))
+        .filter_map(|(_, node)| {
+            let bounds = node.bounds()?;
+            let row = egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            );
+            Some(AnalysisRowMark {
+                at: row.center(),
+                selected: node.is_selected() == Some(true),
+                filled: filled.iter().any(|fill| {
+                    (fill.min - row.min).length() < 0.5 && (fill.max - row.max).length() < 0.5
+                }),
+            })
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| a.at.y.total_cmp(&b.at.y).then(a.at.x.total_cmp(&b.at.x)));
+    (rows, texts)
+}
+
+/// The pane a reader works in, on a page of two, is the one whose analysis
+/// row takes the selected fill, and the inspector names it by its place: a
+/// press in the other pane moves both.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_press_in_another_pane_moves_the_selected_fill_and_the_inspectors_pane() {
+    let marks = |rows: &[AnalysisRowMark]| {
+        rows.iter()
+            .map(|row| (row.selected, row.filled))
+            .collect::<Vec<_>>()
+    };
+    let mut window = ResultsWindow::new();
+    window.create("Transient review").expect("document commits");
+
+    let (rows, texts) = analysis_row_marks(&mut window);
+    assert_eq!(
+        marks(&rows),
+        [(true, true), (false, false)],
+        "the first pane is the one worked in"
+    );
+    assert!(
+        texts.iter().any(|text| text == "Top \u{b7} analysis"),
+        "the inspector names the top pane: {texts:?}"
+    );
+
+    window.press(rows[1].at, egui::PointerButton::Primary);
+    let (rows, texts) = analysis_row_marks(&mut window);
+    assert_eq!(
+        marks(&rows),
+        [(false, false), (true, true)],
+        "the fill follows the press into the second pane"
+    );
+    assert!(
+        texts.iter().any(|text| text == "Bottom \u{b7} analysis"),
+        "the inspector names the bottom pane: {texts:?}"
+    );
+    assert!(!texts.iter().any(|text| text == "Top \u{b7} analysis"));
+}
+
 /// An edit to one of two saved documents puts the unsaved mark on that
 /// document's row in the data browser and not the other's, and saving the
 /// project clears the mark.

@@ -34,6 +34,32 @@ fn pane_slot_geometry_sanitizes_nonfinite_available_extents() {
     assert_slots_are_finite_and_bounded(stage, &slots, 4);
 }
 
+/// A pane is named by where it sits on its page, once the page has more
+/// than one.
+#[test]
+fn a_pane_is_named_by_its_place_on_the_page() {
+    let places = |layout, count| {
+        (0..count)
+            .map(|index| pane_place(layout, index, count))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(places(PageLayout::SinglePane, 1), [None]);
+    assert_eq!(
+        places(PageLayout::Rows, 2),
+        [Some("Top".to_owned()), Some("Bottom".to_owned())]
+    );
+    assert_eq!(
+        places(PageLayout::Grid { columns: 2 }, 4),
+        ["Top left", "Top right", "Bottom left", "Bottom right"]
+            .map(|place| Some(place.to_owned()))
+    );
+    assert_eq!(
+        places(PageLayout::Columns, 3),
+        ["Left", "Middle", "Right"].map(|place| Some(place.to_owned()))
+    );
+    assert_eq!(pane_place(PageLayout::Rows, 2, 5), Some("Row 3".to_owned()));
+}
+
 /// A kept measurement reads in engineering notation in its unit at the
 /// document's digits, never as a fixed six decimals that print a microvolt
 /// as 0.000001, and one that read nothing says why.

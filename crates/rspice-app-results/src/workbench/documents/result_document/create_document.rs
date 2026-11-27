@@ -227,7 +227,13 @@ pub fn choices(
                 spread
                     .iter()
                     .position(|pane| pane.contains(signal))
-                    .and_then(|index| draft.layout.pane_place(index))
+                    .and_then(|index| {
+                        rspice_results_ui::chrome::persistent::pane_place(
+                            draft.layout.page_layout(),
+                            index,
+                            draft.layout.pane_count(),
+                        )
+                    })
             })
             .collect()
     });

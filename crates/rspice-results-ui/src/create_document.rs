@@ -62,7 +62,7 @@ pub struct CreateDocumentChoices {
     pub signals: Vec<String>,
     /// Where each ticked signal lands, beside `signals`, when the layout has
     /// more than one pane.
-    pub places: Vec<Option<&'static str>>,
+    pub places: Vec<Option<String>>,
     /// Why Create is refused, when it is.
     pub refusal: Option<String>,
 }
@@ -177,7 +177,7 @@ pub fn show(
             let cell = Cell::text(signal.as_str()).check(ticked.contains(signal));
             // The pane a ticked signal lands in, when there is a choice of
             // pane: the panes take the signals by unit.
-            vec![match choices.places.get(row).copied().flatten() {
+            vec![match choices.places.get(row).and_then(Option::as_deref) {
                 Some(place) => cell.state(place, None),
                 None => cell,
             }]

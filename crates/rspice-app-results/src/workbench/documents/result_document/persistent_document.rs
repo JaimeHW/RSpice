@@ -658,6 +658,29 @@ pub fn projection(
     Some(DocumentProjection { pages })
 }
 
+/// Where the pane the reader works in sits on its page, in the reader's
+/// words, while a document with more than one pane on that page is shown.
+pub fn active_pane_place(state: &ResultsParts<'_>) -> Option<String> {
+    let session = &state.results.session;
+    let context = session.persistent_pane_context?;
+    let pane_id = session
+        .persistent_document_pane(context.document_id)
+        .unwrap_or(context.pane_id);
+    let document = state
+        .model
+        .workspace
+        .content
+        .visualization_document(context.document_id)?;
+    let pane = document.panes().iter().find(|pane| pane.id == pane_id)?;
+    let page = document
+        .pages()
+        .iter()
+        .find(|page| page.id == pane.page_id)?;
+    let panes = ordered_page_panes(document.panes(), page);
+    let index = panes.iter().position(|candidate| candidate.id == pane_id)?;
+    persistent::pane_place(page.layout, index, panes.len())
+}
+
 pub fn ordered_page_panes<'a>(panes: &'a [Pane], page: &Page) -> Vec<&'a Pane> {
     let mut panes = panes
         .iter()
@@ -692,6 +715,9 @@ fn render_page(
         return None;
     }
 
+    // Which pane is worked in is marked only where there is a choice of
+    // pane.
+    let marks_active = page.panes.len() > 1;
     persistent::page(
         ui,
         page.page.layout,
@@ -703,6 +729,7 @@ fn render_page(
                 run_controller,
                 &page.panes[index],
                 active_pane_id,
+                marks_active,
                 active_viewer,
             )
         },
@@ -715,13 +742,15 @@ fn render_pane(
     run_controller: &mut SimulationController,
     pane: &PaneProjection,
     active_pane_id: u64,
+    marks_active: bool,
     active_viewer: Option<ResultViewer>,
 ) -> Option<u64> {
     let is_active = pane.id.get() == active_pane_id;
     let viewer = pane_viewer(is_active, active_viewer, &pane.viewer_id);
-    persistent::pane_frame(ui, pane.id, |ui| {
-        // A press anywhere in a pane makes it the one worked in, which the
-        // inspector's Active pane names; the pane needs no band to be told by.
+    persistent::pane_frame(ui, pane.id, marks_active && is_active, |ui| {
+        // A press anywhere in a pane makes it the one worked in: its analysis
+        // rows take the selected fill, and the inspector's Active pane names
+        // its place.
         let rect = ui.max_rect();
         let activated_pane_id = (!is_active
             && persistent::pressed_in(ui, rect)
