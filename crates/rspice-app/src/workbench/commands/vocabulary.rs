@@ -670,6 +670,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::OpenTaskDeck.key(),
     ResultsCommand::RevealProducerLog.key(),
     ResultsCommand::CreateResultDocument.key(),
+    ResultsCommand::OpenResultDocument.key(),
     ResultsCommand::WaveformCalculator.key(),
     ResultsCommand::ExpressionDiagnostics.key(),
     ResultsCommand::CompareResultDatasets.key(),

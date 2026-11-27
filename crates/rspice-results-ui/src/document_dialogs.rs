@@ -10,6 +10,7 @@ pub mod add_pane;
 pub mod compare;
 pub mod family;
 pub mod measurement;
+pub mod open;
 pub mod properties;
 pub mod rename;
 
@@ -31,6 +32,8 @@ pub enum ResultDocumentDialog {
     Properties(properties::PropertiesDraft),
     /// Rename a saved result document.
     Rename(rename::RenameDraft),
+    /// Bring a saved result document forward as a tab.
+    Open(open::OpenDraft),
 }
 
 /// Option labels for a select row, and the label of the selected entry.

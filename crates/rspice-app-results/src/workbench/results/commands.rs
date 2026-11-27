@@ -44,6 +44,8 @@ pub enum ResultsCommand {
     /// row they were opened on.
     RevealProducerLog,
     CreateResultDocument,
+    /// Bring a saved result document forward as a tab of Results.
+    OpenResultDocument,
     WaveformCalculator,
     ExpressionDiagnostics,
     CompareResultDatasets,
@@ -190,7 +192,7 @@ const PROJECT_HOP: CommandFlags = PROJECT.with(CommandFlags::STATES_ITS_REFUSAL,
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 82] = [
+    pub const ALL: [Self; 83] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -203,6 +205,7 @@ impl ResultsCommand {
         Self::OpenTaskDeck,
         Self::RevealProducerLog,
         Self::CreateResultDocument,
+        Self::OpenResultDocument,
         Self::WaveformCalculator,
         Self::ExpressionDiagnostics,
         Self::CompareResultDatasets,
@@ -294,6 +297,7 @@ impl ResultsCommand {
             Self::OpenTaskDeck => CommandKey::new("open-task-deck"),
             Self::RevealProducerLog => CommandKey::new("reveal-producer-log"),
             Self::CreateResultDocument => CommandKey::new("create-result-document"),
+            Self::OpenResultDocument => CommandKey::new("open-result-document"),
             Self::WaveformCalculator => ids::CALCULATOR,
             Self::ExpressionDiagnostics => ids::EXPRESSION_DIAGNOSTICS,
             Self::CompareResultDatasets => CommandKey::new("compare-datasets"),
@@ -425,6 +429,13 @@ impl ResultsCommand {
                 "New result document…",
                 "Results",
                 PROJECT_TRANSACTION,
+                ShortcutContext::ResultsWorkspace,
+                NONE,
+            ),
+            Self::OpenResultDocument => (
+                "Open result document…",
+                "Results",
+                PROJECT,
                 ShortcutContext::ResultsWorkspace,
                 NONE,
             ),

@@ -13,7 +13,7 @@ use rspice_app_workbench::workbench::chrome::title_bar::application_menus::{
 /// Rows that go without an access key, each because its menu has no letter
 /// left to give it (see the menu's own note): a command's row by its id, a
 /// submenu's by its label.
-const KEYLESS_ROWS: [&str; 14] = [
+const KEYLESS_ROWS: [&str; 15] = [
     "new-deck",
     "save-all",
     "save-project-copy",
@@ -30,6 +30,8 @@ const KEYLESS_ROWS: [&str; 14] = [
     // Every letter of its label is taken on the Design menu.
     "symbol-from-model",
     "result-floquet",
+    // Every letter of its label is taken on the Results menu.
+    "open-result-document",
 ];
 
 fn key_press(key: Key, modifiers: Modifiers) -> egui::Event {

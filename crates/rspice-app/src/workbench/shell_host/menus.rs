@@ -678,13 +678,15 @@ const SETUP_MENU: &[MenuEntry] = &[
 /// Results: where results are read, what is built from them, then what is
 /// done on the plot in front, then the run history. Every Results command
 /// has a row here or in File (import, export) or Window (the split), each
-/// with its key.
+/// with its key but Open result document, every letter of which an earlier
+/// row holds.
 const RESULTS_MENU: &[MenuEntry] = &[
     results(ResultsCommand::DatasetManifestBrowser).access('B'),
     MenuEntry::command_as(viewer(ResultViewer::Waves), "Waveforms").access('W'),
     MenuEntry::submenu("View as", VIEW_AS_MENU).access('V'),
     Separator,
     results(ResultsCommand::CreateResultDocument).access('N'),
+    results(ResultsCommand::OpenResultDocument),
     results(ResultsCommand::SaveViewAsDocument).access('S'),
     MenuEntry::submenu("Document", DOCUMENT_MENU).access('T'),
     results(ResultsCommand::AddVisualizationPane).access('A'),

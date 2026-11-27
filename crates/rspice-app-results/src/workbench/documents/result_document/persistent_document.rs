@@ -1688,7 +1688,7 @@ pub fn select_pane_binding(state: &mut ResultsParts<'_>, pane: &Pane) -> Result<
     Ok(())
 }
 
-pub(super) fn resolve_binding(
+pub(crate) fn resolve_binding(
     state: ResultsReads<'_>,
     binding: PaneDataBinding,
 ) -> Result<(usize, usize), String> {

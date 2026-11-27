@@ -499,9 +499,76 @@ pub(in crate::workbench) fn duplicate_shown_document(
     Ok(format!("Duplicated {from} as {title}."))
 }
 
-/// Delete the saved document shown and go back to the run the browser's
-/// view showed before it: a step Undo takes back, so nothing asks first,
-/// unsaved edits or not. Returns what the status bar says.
+/// Every saved result document as Open result document lists it, the most
+/// recently made first, each with the run and analysis its first pane
+/// reads, beside the document it is.
+pub(in crate::workbench) fn open_rows(
+    state: ResultsReads<'_>,
+) -> Vec<(
+    crate::product::ResultDocumentId,
+    rspice_results_ui::document_dialogs::open::OpenRow,
+)> {
+    use crate::workbench::documents::result_document::persistent_document;
+    let content = &state.model.workspace.content;
+    let runs = &state.model.simulation.retained.runs;
+    saved_documents(state.model)
+        .into_iter()
+        .rev()
+        .map(|listed| {
+            let read = content
+                .visualization_document(listed.id)
+                .and_then(|document| {
+                    let page = document.pages().first()?;
+                    persistent_document::ordered_page_panes(document.panes(), page)
+                        .into_iter()
+                        .find_map(|pane| pane.binding)
+                })
+                .and_then(|binding| persistent_document::resolve_binding(state, binding).ok())
+                .and_then(|(run, analysis)| {
+                    let run = runs.get(run)?;
+                    Some((run.label.clone(), run.analyses.get(analysis)?.label.clone()))
+                });
+            let (run, analysis) =
+                read.unwrap_or_else(|| ("not in the run history".to_owned(), String::new()));
+            (
+                listed.id,
+                rspice_results_ui::document_dialogs::open::OpenRow {
+                    key: listed.id.as_uuid().to_string(),
+                    title: listed.title,
+                    run,
+                    analysis,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Open the form that brings a saved result document forward.
+pub(in crate::workbench) fn open_document_form(state: &mut ResultsParts<'_>) {
+    *state.result_document_dialog =
+        Some(rspice_results_ui::document_dialogs::ResultDocumentDialog::Open(Default::default()));
+}
+
+/// Show the document chosen in Open result document: its tab is added, or
+/// brought forward if it is open, and the form closes.
+pub(in crate::workbench) fn open_chosen(
+    state: &mut ResultsParts<'_>,
+    draft: &rspice_results_ui::document_dialogs::open::OpenDraft,
+) -> Result<Option<rspice_results_ui::document_dialogs::ResultDocumentDialog>, String> {
+    let rows = open_rows(state.results_reads());
+    let (document, _) = draft
+        .chosen()
+        .and_then(|row| rows.get(row))
+        .ok_or("Choose a document to open.")?;
+    if !show_visualization_document(state, document) {
+        return Err("Results is not the workspace showing".to_owned());
+    }
+    Ok(None)
+}
+
+/// Delete the saved document shown and show the tab beside it, as closing
+/// it would: a step Undo takes back, so nothing asks first, unsaved edits or
+/// not. Returns what the status bar says.
 pub(in crate::workbench) fn delete_shown_document(
     state: &mut ResultsParts<'_>,
 ) -> Result<String, String> {

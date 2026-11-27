@@ -608,6 +608,17 @@ impl CommandSet for ResultsCommand {
                 retained.has_results(),
                 "no retained result dataset is available",
             ),
+            Self::OpenResultDocument => {
+                if workbench.workspace != Workspace::Results {
+                    CommandAvailability::Disabled("open a result in Results")
+                } else {
+                    available_or(
+                        !crate::workbench::chrome::document_bar::results::saved_documents(model)
+                            .is_empty(),
+                        "the project has no saved result document",
+                    )
+                }
+            }
             // Both return edges are judged on the dataset, never on the
             // surface the reader is standing on: they exist precisely to be
             // taken from somewhere else.
@@ -899,6 +910,11 @@ impl CommandSet for ResultsCommand {
             }
             Self::DatasetManifestBrowser => open_dataset_browser(&mut results_parts(cx)),
             Self::CreateResultDocument => open_create_document(&mut results_parts(cx)),
+            Self::OpenResultDocument => {
+                crate::workbench::chrome::document_bar::results::open_document_form(
+                    &mut results_parts(cx),
+                );
+            }
             Self::WaveformCalculator => cx.state.waveform_calculator_dialog = true,
             Self::ExpressionDiagnostics => cx.state.expression_diagnostics_dialog = true,
             Self::CompareResultDatasets => {

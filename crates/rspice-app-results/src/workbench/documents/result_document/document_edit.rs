@@ -181,6 +181,13 @@ pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) -> Option<DialogRequest
             let choice = rspice_results_ui::document_dialogs::rename::show(ctx, &mut draft);
             (ResultDocumentDialog::Rename(draft), choice)
         }
+        ResultDocumentDialog::Open(mut draft) => {
+            let rows =
+                crate::workbench::chrome::document_bar::results::open_rows(state.results_reads());
+            let rows = rows.into_iter().map(|(_, row)| row).collect::<Vec<_>>();
+            let choice = rspice_results_ui::document_dialogs::open::show(ctx, &mut draft, &rows);
+            (ResultDocumentDialog::Open(draft), choice)
+        }
     };
     trace_pick::arm(
         state,
@@ -224,6 +231,9 @@ pub fn commit_open_dialog(state: &mut ResultsParts<'_>) {
         Some(ResultDocumentDialog::Properties(draft)) => properties::commit(state, draft),
         Some(ResultDocumentDialog::Rename(draft)) => {
             crate::workbench::chrome::document_bar::results::commit_rename(state, &draft)
+        }
+        Some(ResultDocumentDialog::Open(draft)) => {
+            crate::workbench::chrome::document_bar::results::open_chosen(state, &draft)
         }
         None => return,
     };
