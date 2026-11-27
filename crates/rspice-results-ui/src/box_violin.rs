@@ -472,9 +472,9 @@ pub fn show(
             glyph: strip::LegendGlyph::Line,
         });
     }
-    strip::StripHeader::new("DIST", &subtitle, &legend).show(ui);
+    strip::StripHeader::new("MC", &subtitle, &legend).show(ui);
 
-    let (y0, y1) = pinned.unwrap_or_else(|| ordinate_range(&columns, show_limits));
+    let (y0, y1) = pinned.unwrap_or_else(|| ordinate_range(&columns, show_limits, sheet.violin));
     let slots = columns.len() as f64;
     let mut x_axis = Axis::with_ticks(
         0.0,
@@ -494,11 +494,12 @@ pub fn show(
         .accessible_detail(&accessible);
 
     // The bounds drawn across each column's slot, by the measurement they
-    // bound: the same ones `PaintedColumns::draw_bounds` paints.
+    // bound: the same ones `PaintedColumns::draw_bounds` paints. With the
+    // overlay off there is no requirement line to follow.
     let lines = columns
         .iter()
         .enumerate()
-        .filter(|(_, column)| show_limits || column.normalized)
+        .filter(|_| show_limits)
         .flat_map(|(slot, column)| {
             column.bounds().into_iter().map(move |(y, _)| {
                 (
@@ -530,6 +531,7 @@ pub fn show(
             failing: c.err,
             limit: c.err,
             wash: c.err.gamma_multiply(0.09),
+            origin: c.text_faint,
         },
     };
     spec.underlay = Some(Box::new(move |painter, mapper| {
@@ -574,17 +576,26 @@ fn accessible_detail(columns: &[Column]) -> String {
     detail
 }
 
-/// The ordinate the columns share, padded, always taking in the bound.
-fn ordinate_range(columns: &[Column], show_limits: bool) -> (f64, f64) {
+/// The ordinate the columns share, padded, taking in every drawn bound and
+/// origin and every violin's closed tails.
+fn ordinate_range(columns: &[Column], show_limits: bool, violin: bool) -> (f64, f64) {
     let mut low = f64::INFINITY;
     let mut high = f64::NEG_INFINITY;
     for column in columns {
         low = low.min(column.statistics.minimum);
         high = high.max(column.statistics.maximum);
-        if show_limits {
+        if show_limits || column.normalized {
             for (bound, _) in column.bounds() {
                 low = low.min(bound);
                 high = high.max(bound);
+            }
+        }
+        if violin && let Some(profile) = violin_profile(column) {
+            if let Some((first, _)) = profile.first() {
+                low = low.min(*first);
+            }
+            if let Some((last, _)) = profile.last() {
+                high = high.max(*last);
             }
         }
     }
@@ -611,6 +622,8 @@ struct ColumnColors {
     failing: egui::Color32,
     limit: egui::Color32,
     wash: egui::Color32,
+    /// The zero of a normalized ordinate while the limit overlay is off.
+    origin: egui::Color32,
 }
 
 struct PaintedColumns {
@@ -623,7 +636,58 @@ struct PaintedColumns {
 }
 
 /// How many points the kernel density is evaluated at down one column.
-const VIOLIN_STEPS: usize = 64;
+const VIOLIN_STEPS: usize = 96;
+
+/// How far past the extreme samples the density is evaluated, in
+/// bandwidths. A Gaussian kernel three bandwidths out is about 1 % of its
+/// peak, so the tails close instead of being cut flat.
+const VIOLIN_TAIL_BANDWIDTHS: f64 = 3.0;
+
+/// The share of its peak below which a violin's tail is no longer drawn:
+/// under half a point wide on the widest column.
+const VIOLIN_TAIL_FLOOR: f64 = 0.005;
+
+/// A column's kernel density down the ordinate as `(ordinate, share of
+/// peak)`, trimmed to where the outline is still visible so each tail
+/// closes to a point inside the plot.
+fn violin_profile(column: &Column) -> Option<Vec<(f64, f64)>> {
+    let bandwidth = population::silverman_bandwidth(&column.sorted)?;
+    let reach = bandwidth * VIOLIN_TAIL_BANDWIDTHS;
+    let low = column.statistics.minimum - reach;
+    let high = column.statistics.maximum + reach;
+    let step = (high - low) / VIOLIN_STEPS as f64;
+    if !(step.is_finite() && step > 0.0) {
+        return None;
+    }
+    let densities = (0..=VIOLIN_STEPS)
+        .map(|index| {
+            let at = low + step * index as f64;
+            (
+                at,
+                population::kernel_density(&column.sorted, bandwidth, at),
+            )
+        })
+        .collect::<Vec<_>>();
+    let peak = densities
+        .iter()
+        .map(|(_, density)| *density)
+        .fold(0.0_f64, f64::max);
+    if !(peak > 0.0 && peak.is_finite()) {
+        return None;
+    }
+    let visible = |density: &f64| *density >= peak * VIOLIN_TAIL_FLOOR;
+    let first = densities.iter().position(|(_, density)| visible(density))?;
+    let last = densities
+        .iter()
+        .rposition(|(_, density)| visible(density))?;
+    let span = first.saturating_sub(1)..=(last + 1).min(VIOLIN_STEPS);
+    Some(
+        densities[span]
+            .iter()
+            .map(|(at, density)| (*at, density / peak))
+            .collect(),
+    )
+}
 
 /// The widest a single column is drawn, in points. Without it a lone
 /// measurement's violin spans the whole well.
@@ -638,11 +702,13 @@ impl PaintedColumns {
         let drawn = slot_width.min(COLUMN_MAX_WIDTH);
         for (slot, column) in self.columns.iter().enumerate() {
             let centre = mapper.rect.left() + slot_width * (slot as f32 + 0.5);
-            // In the normalized grouping the requirement is not an overlay:
-            // it is the origin of the ordinate every column is measured on,
-            // so it is drawn whether or not the limit overlay is armed.
-            if self.limits || column.normalized {
+            // In the normalized grouping the requirement is the origin of
+            // the ordinate every column is measured on: with the limit
+            // overlay off it stays as a plain zero line, with no wash.
+            if self.limits {
                 self.draw_bounds(painter, mapper, column, centre, slot_width);
+            } else if column.normalized {
+                self.draw_origin(painter, mapper, column, centre, slot_width);
             }
             if self.violin {
                 self.draw_violin(painter, mapper, column, centre, drawn);
@@ -688,6 +754,28 @@ impl PaintedColumns {
         }
     }
 
+    /// The zero of a normalized column, drawn as a reference line rather
+    /// than a requirement while the limit overlay is off.
+    fn draw_origin(
+        &self,
+        painter: &egui::Painter,
+        mapper: &plot::PlotMapper,
+        column: &Column,
+        centre: f32,
+        slot_width: f32,
+    ) {
+        let half = slot_width * 0.5;
+        for (bound, _) in column.bounds() {
+            let y = mapper.y(bound);
+            if mapper.rect.y_range().contains(y) {
+                painter.line_segment(
+                    [egui::pos2(centre - half, y), egui::pos2(centre + half, y)],
+                    egui::Stroke::new(1.0, self.colors.origin),
+                );
+            }
+        }
+    }
+
     fn draw_violin(
         &self,
         painter: &egui::Painter,
@@ -696,40 +784,18 @@ impl PaintedColumns {
         centre: f32,
         slot_width: f32,
     ) {
-        let Some(bandwidth) = population::silverman_bandwidth(&column.sorted) else {
+        let Some(profile) = violin_profile(column) else {
             return;
         };
-        let low = column.statistics.minimum - bandwidth;
-        let high = column.statistics.maximum + bandwidth;
-        let step = (high - low) / VIOLIN_STEPS as f64;
-        if !(step.is_finite() && step > 0.0) {
-            return;
-        }
-        let densities = (0..=VIOLIN_STEPS)
-            .map(|index| {
-                let at = low + step * index as f64;
-                (
-                    at,
-                    population::kernel_density(&column.sorted, bandwidth, at),
-                )
-            })
-            .collect::<Vec<_>>();
-        let peak = densities
-            .iter()
-            .map(|(_, density)| *density)
-            .fold(0.0_f64, f64::max);
-        if peak <= 0.0 {
-            return;
-        }
         let half = slot_width * 0.42;
         // One trapezoid per density step rather than one outline: a violin is
         // not convex, and `convex_polygon` fans its vertices, which draws a
         // chord straight across the waist.
-        for pair in densities.windows(2) {
-            let [(low_at, low_density), (high_at, high_density)] = [pair[0], pair[1]];
+        for pair in profile.windows(2) {
+            let [(low_at, low_share), (high_at, high_share)] = [pair[0], pair[1]];
             let (low_y, high_y) = (mapper.y(low_at), mapper.y(high_at));
-            let low_width = half * (low_density / peak) as f32;
-            let high_width = half * (high_density / peak) as f32;
+            let low_width = half * low_share as f32;
+            let high_width = half * high_share as f32;
             if low_width <= 0.05 && high_width <= 0.05 {
                 continue;
             }
