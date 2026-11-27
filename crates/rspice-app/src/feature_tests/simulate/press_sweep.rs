@@ -540,7 +540,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Variables", 2),
     ("Outputs", 0),
     ("RunSet", 30),
-    ("Models", 1),
+    ("Models", 0),
     ("ConnectRules", 2),
     ("Solver", 34),
     ("Save", 6),
@@ -629,7 +629,10 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// Create variable is disabled until a name and a value are typed, and a
 /// disabled control is not pressed; the tests that create a variable fill
 /// the draft in first (352).
-const PRESSED_FLOOR: usize = 352;
+///
+/// The Models page lost its model-qualification gate card, and with it the
+/// card's one button, the only control the sweep pressed there (351).
+const PRESSED_FLOOR: usize = 351;
 
 /// Controls that are wired to nothing.
 ///
