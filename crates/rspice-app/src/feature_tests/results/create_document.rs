@@ -114,24 +114,76 @@ fn the_sheets_offered_are_the_ones_that_draw_the_chosen_analysis() {
     assert!(!ac.contains(&"viewer-waveform"), "{ac:?}");
 }
 
+/// A PRBS-7 bit stream of `bits` bits, a nanosecond each, whose edges take
+/// the first fifth of a bit, sampled twenty times a bit.
+fn bit_stream(bits: usize) -> (Vec<f64>, Vec<f64>) {
+    const BIT: f64 = 1e-9;
+    const SAMPLES: usize = 20;
+    let mut register: u8 = 0x7f;
+    let levels: Vec<f64> = (0..bits)
+        .map(|_| {
+            let bit = ((register >> 6) ^ (register >> 5)) & 1;
+            register = ((register << 1) | bit) & 0x7f;
+            f64::from(bit)
+        })
+        .collect();
+    let mut time = Vec::with_capacity(bits * SAMPLES);
+    let mut value = Vec::with_capacity(bits * SAMPLES);
+    for (index, &level) in levels.iter().enumerate() {
+        let from = levels[index.saturating_sub(1)];
+        for sample in 0..SAMPLES {
+            let along = sample as f64 / SAMPLES as f64;
+            time.push((index as f64 + along) * BIT);
+            value.push(from + (level - from) * (along / 0.2).min(1.0));
+        }
+    }
+    (time, value)
+}
+
+/// The eye is offered only for a transient it folds, as its sheet folds one
+/// before it draws: a bit stream, never a step response, whose eye would
+/// only say it has no usable source; and the eye chosen is the sheet made.
 #[test]
-fn an_explicit_sheet_other_than_the_default_resolves_unchanged() {
+fn the_eye_is_offered_only_for_a_transient_it_folds() {
     let mut app = RSpiceApp::test_instance();
-    let run = retained_run_with(AnalysisType::Transient);
-    app.state.model.simulation.retained.runs = vec![run.clone()].into();
-    let form = draft(
-        "Eye review",
-        &run,
-        0,
-        "eye-viewer",
-        ResultDocumentLayout::SinglePane,
-        &["V(out)"],
+    let (time, data) = bit_stream(300);
+    let mut run = SimulationRun::new(7);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.analyses.push(
+        AnalysisResult::new(11, AnalysisType::Transient, "Link").with_waveforms(vec![
+            RetainedTrace::new("V(data)", time, data, String::new()),
+        ]),
     );
+    run.analyses
+        .push(analysis_of(12, AnalysisType::Transient, "Step response"));
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    let eye = |analysis: usize| {
+        draft(
+            "Eye review",
+            &run,
+            analysis,
+            "eye-viewer",
+            ResultDocumentLayout::SinglePane,
+            &[],
+        )
+    };
+    let offered = |analysis: usize| {
+        choices(app.state.results_reads(), &eye(analysis))
+            .viewers
+            .iter()
+            .any(|(id, _)| *id == "eye-viewer")
+    };
 
-    let resolved =
-        resolve_draft(app.state.results_reads(), &form).expect("explicit viewer resolves");
-
+    assert!(offered(0), "the bit stream's eye is offered");
+    assert!(!offered(1), "the step response's eye is not");
+    let bit_stream_eye = eye(0);
+    let resolved = resolve_draft(app.state.results_reads(), &bit_stream_eye)
+        .expect("the bit stream's eye resolves");
     assert_eq!(resolved.viewer.id, "eye-viewer");
+    assert!(
+        resolve_draft(app.state.results_reads(), &eye(1)).is_err(),
+        "the step response's eye is refused"
+    );
 }
 
 /// The form opens on what Results shows: the run, the analysis the data
@@ -238,6 +290,71 @@ fn the_document_plots_the_signals_ticked_in_the_form() {
     };
     assert_eq!(plotted(&mut app, "Inputs", &["V(in)"]), ["V(in)"]);
     assert_eq!(plotted(&mut app, "Empty", &[]), Vec::<String>::new());
+}
+
+/// Several panes spread the ticked signals by unit, as a run opens with a
+/// strip per unit: the voltages fill the first pane and the currents the
+/// next, and in four panes the two past the units start empty.
+#[test]
+fn panes_spread_the_ticked_signals_by_unit() {
+    let mut app = RSpiceApp::test_instance();
+    let signals = ["V(in)", "I(R1)", "V(out)", "I(C1)"];
+    let mut run = SimulationRun::new(7);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.analyses.push(
+        AnalysisResult::new(11, AnalysisType::Transient, "Step response").with_waveforms(
+            signals
+                .iter()
+                .map(|name| {
+                    RetainedTrace::new(
+                        *name,
+                        vec![0.0, 0.5, 1.0],
+                        vec![0.0, 1.0, 0.0],
+                        String::new(),
+                    )
+                })
+                .collect(),
+        ),
+    );
+    app.state.model.simulation.retained.runs = vec![run.clone()].into();
+    let mut panes = |layout: ResultDocumentLayout| {
+        app.state.results.create_result_document =
+            draft(layout.label(), &run, 0, "viewer-waveform", layout, &signals);
+        let document_id = commit(&mut app.state.results_parts()).expect("document commits");
+        let document = app
+            .state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .expect("the project owns it");
+        document
+            .panes()
+            .iter()
+            .map(|pane| {
+                document
+                    .traces()
+                    .iter()
+                    .filter(|trace| trace.pane_id == pane.id)
+                    .map(|trace| trace.label.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        panes(ResultDocumentLayout::TwoLinkedPanes),
+        [vec!["V(in)", "V(out)"], vec!["I(R1)", "I(C1)"]]
+    );
+    assert_eq!(
+        panes(ResultDocumentLayout::EngineeringGrid),
+        [
+            vec!["V(in)", "V(out)"],
+            vec!["I(R1)", "I(C1)"],
+            Vec::new(),
+            Vec::new()
+        ]
+    );
 }
 
 #[test]
@@ -1266,28 +1383,32 @@ fn shown_items(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> us
             .count()
 }
 
-/// That a document of `sheet` in `panes` panes drew the run's data: an item
-/// per pane at least. The eye folds a transient at a bit period, so for a
-/// run that is no bit stream it draws its own reason, as the quick view
-/// does.
+/// That a document in `panes` panes, plotting `plotted`, drew the run's
+/// data: an item at least in every pane it plots into. Signals spread by
+/// unit leave the panes past the units empty; a sheet that plots no
+/// signals of its own fills every pane.
 #[cfg(not(target_arch = "wasm32"))]
 fn assert_drawn(
     nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)],
-    sheet: &str,
     panes: usize,
+    plotted: &[(usize, String, bool)],
     combination: &str,
 ) {
+    let mut filled: Vec<usize> = plotted
+        .iter()
+        .filter(|(_, _, visible)| *visible)
+        .map(|(pane, _, _)| *pane)
+        .collect();
+    filled.dedup();
+    let filled = if filled.is_empty() {
+        panes
+    } else {
+        filled.len()
+    };
     let shown = shown_items(nodes);
-    let eye_refused = sheet == "eye-viewer"
-        && nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Status
-                && node
-                    .label()
-                    .is_some_and(|label| label.contains("usable source"))
-        });
     assert!(
-        shown >= panes || eye_refused,
-        "{combination}: {shown} items drawn over {panes} panes"
+        shown >= filled,
+        "{combination}: {shown} items drawn over {filled} of {panes} panes"
     );
 }
 
@@ -1371,15 +1492,9 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
                     let document_id = commit(&mut window.app.state.results_parts())
                         .unwrap_or_else(|error| panic!("{combination}: {error}"));
                     let nodes = window.settled_frames();
-                    assert_drawn(&nodes, sheet, layout.pane_count(), &combination);
                     let plotted = plotted_traces(&window.app.state, document_id);
-                    made.push((
-                        document_id,
-                        combination,
-                        sheet,
-                        layout.pane_count(),
-                        plotted,
-                    ));
+                    assert_drawn(&nodes, layout.pane_count(), &plotted, &combination);
+                    made.push((document_id, combination, layout.pane_count(), plotted));
                 }
             }
         }
@@ -1404,7 +1519,7 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
             "the project reopens"
         );
         reopened.app.state.workbench.activate(Workspace::Results);
-        for (document_id, combination, sheet, panes, plotted) in made {
+        for (document_id, combination, panes, plotted) in made {
             let document = reopened
                 .app
                 .state
@@ -1429,7 +1544,7 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
                 "{combination}: the reopened document plots what it plotted"
             );
             let nodes = reopened.settled_frames();
-            assert_drawn(&nodes, sheet, panes, &combination);
+            assert_drawn(&nodes, panes, &plotted, &combination);
         }
         let _ = std::fs::remove_dir_all(&root);
     }

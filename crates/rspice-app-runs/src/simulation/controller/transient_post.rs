@@ -461,14 +461,7 @@ impl SimulationController {
             .or_else(|| state.viewer_reading().fft_source);
         let (source_name, waveform) =
             Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_source.as_deref())?;
-        let eye_clock = eye_fold.clock.as_ref().map(|clock| {
-            analysis
-                .waveforms
-                .iter()
-                .find(|waveform| waveform.name == clock.signal)
-                .map(|waveform| (waveform.x.clone(), waveform.y.clone()))
-                .ok_or_else(|| format!("The clock signal {} is not in this result", clock.signal))
-        });
+        let eye_clock = eye_clock_of(analysis, &eye_fold);
 
         Some(DerivedWaveformSource {
             analysis: analysis_key,
@@ -484,6 +477,47 @@ impl SimulationController {
     pub fn analysis_supports_transient_derivation(analysis_type: AnalysisType) -> bool {
         analysis_type.is_time_domain()
     }
+
+    /// Whether the eye folds `analysis` into at least one acquisition, by
+    /// the fold the eye sheet makes of the result it shows before it draws:
+    /// the signal `fold` names, else `spectrum_source`, else the first
+    /// voltage the run saved, at `fold`'s bit period and clock. It reads
+    /// the source whole and waits, as the sheet's job does.
+    pub fn eye_folds(
+        analysis: &crate::state::AnalysisResult,
+        fold: &EyeFold,
+        spectrum_source: Option<&str>,
+    ) -> bool {
+        if !Self::analysis_supports_transient_derivation(analysis.analysis_type) {
+            return false;
+        }
+        let preferred = fold.source.as_deref().or(spectrum_source);
+        let Some((_, waveform)) =
+            Self::fft_source_waveform_from_state(&analysis.waveforms, preferred)
+        else {
+            return false;
+        };
+        let clock = eye_clock_of(analysis, fold);
+        fold_eye(&waveform.x, &waveform.y, clock.as_ref(), fold)
+            .0
+            .is_some()
+    }
+}
+
+/// The time and value columns of the clock signal `fold` triggers from,
+/// when it names one; `Err` names a clock `analysis` does not hold.
+fn eye_clock_of(
+    analysis: &crate::state::AnalysisResult,
+    fold: &EyeFold,
+) -> Option<Result<(SharedWaveformValues, SharedWaveformValues), String>> {
+    fold.clock.as_ref().map(|clock| {
+        analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == clock.signal)
+            .map(|waveform| (waveform.x.clone(), waveform.y.clone()))
+            .ok_or_else(|| format!("The clock signal {} is not in this result", clock.signal))
+    })
 }
 
 /// Does the eye currently on screen answer the bit period being asked for?
@@ -615,17 +649,34 @@ type SourceColumns = (HeldColumn, HeldColumn);
 /// Both columns of an eye's source. An eye folds every sample of the record, so the job asks the
 /// reader service for them whole and waits, off the frame; a record past the loaded-results
 /// budget is refused.
-fn whole_source(source: &DerivedWaveformSource) -> Result<SourceColumns, String> {
-    Ok((
-        source.time.fetch_whole_waiting()?,
-        source.values.fetch_whole_waiting()?,
-    ))
+fn whole_source(
+    time: &SharedWaveformValues,
+    values: &SharedWaveformValues,
+) -> Result<SourceColumns, String> {
+    Ok((time.fetch_whole_waiting()?, values.fetch_whole_waiting()?))
 }
 
 fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {
-    let (data, provenance) = match whole_source(source) {
-        Ok((time, values)) => match &source.eye_clock {
-            None => build_eye_on_ideal_clock(&time, &values, &source.eye_fold),
+    let (data, provenance) = fold_eye(
+        &source.time,
+        &source.values,
+        source.eye_clock.as_ref(),
+        &source.eye_fold,
+    );
+    EyeBuild { data, provenance }
+}
+
+/// Fold the record `time` and `values` hold at `fold`, on its ideal clock
+/// or on the clock signal `clock` holds.
+fn fold_eye(
+    time: &SharedWaveformValues,
+    values: &SharedWaveformValues,
+    clock: Option<&Result<(SharedWaveformValues, SharedWaveformValues), String>>,
+    fold: &EyeFold,
+) -> (Option<EyeData>, EyeTimebaseProvenance) {
+    match whole_source(time, values) {
+        Ok((time, values)) => match clock {
+            None => build_eye_on_ideal_clock(&time, &values, fold),
             Some(Err(reason)) => (None, EyeTimebaseProvenance::ClockRejected(reason.clone())),
             Some(Ok((clock_time, clock_values))) => {
                 match (
@@ -636,7 +687,7 @@ fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {
                         &time,
                         &values,
                         (&*clock_time, &*clock_values),
-                        &source.eye_fold,
+                        fold,
                     ),
                     (Err(reason), _) | (_, Err(reason)) => {
                         (None, EyeTimebaseProvenance::Unreadable(reason))
@@ -645,8 +696,7 @@ fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {
             }
         },
         Err(reason) => (None, EyeTimebaseProvenance::Unreadable(reason)),
-    };
-    EyeBuild { data, provenance }
+    }
 }
 
 /// Fold on an ideal clock: recovered or stated, from the offset the reader

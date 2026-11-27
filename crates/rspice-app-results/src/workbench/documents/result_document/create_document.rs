@@ -50,14 +50,60 @@ pub struct ResolvedDraft<'a> {
     analysis: &'a AnalysisResult,
     pub viewer: &'static ViewerDocumentDefinition,
     layout: ResultDocumentLayout,
-    /// What each pane plots, by signal name.
-    plotted: Vec<String>,
+    /// What each pane plots, by signal name, pane by pane.
+    panes: Vec<Vec<String>>,
 }
 
 /// Open the form on what Results shows: the run of the browser's view, the
 /// analysis the data browser picked, the sheet on the canvas and the
 /// signals it plots.
 pub fn open(state: &mut ResultsParts<'_>) {
+    open_shown(state);
+}
+
+/// Open the form on `analysis`, ticking `signals` in place of what Results
+/// plots of it, as a signal's menu in the data browser asks. The form opens
+/// on what Results shows when `analysis` is not of a finished run; a signal
+/// the analysis does not hold is left out.
+pub fn open_on(
+    state: &mut ResultsParts<'_>,
+    analysis: super::AnalysisPresentationKey,
+    signals: &[String],
+) {
+    let reads = state.results_reads();
+    let picked = retained_run(reads, analysis.dataset_id())
+        .filter(|run| finished(run))
+        .and_then(|run| {
+            run.analyses
+                .iter()
+                .position(|candidate| {
+                    super::AnalysisPresentationKey::new(run.dataset_id, candidate) == analysis
+                })
+                .map(|index| (run, index))
+        });
+    let Some((run, index)) = picked else {
+        open_shown(state);
+        return;
+    };
+    let mut draft = CreateResultDocumentDialogState {
+        open: true,
+        dataset_id: Some(run.dataset_id),
+        analysis: Some(index),
+        ..CreateResultDocumentDialogState::default()
+    };
+    let shown_sheet = reads.results.session.viewer.viewer_document_id();
+    settle(reads, &mut draft, Some(shown_sheet));
+    if viewer_document(&draft.viewer_id).is_some_and(plots_signals) {
+        let names = signal_names(&run.analyses[index]);
+        draft.signals = names
+            .into_iter()
+            .filter(|name| signals.contains(name))
+            .collect();
+    }
+    *state.create_result_document = draft;
+}
+
+fn open_shown(state: &mut ResultsParts<'_>) {
     let reads = state.results_reads();
     let simulation = &reads.model.simulation;
     let shown = crate::workbench::chrome::document_bar::results::browser_run(reads)
@@ -159,8 +205,8 @@ pub fn choices(
     let analysis = run
         .zip(draft.analysis)
         .and_then(|(run, index)| run.analyses.get(index));
-    let viewers = analysis.map_or_else(Vec::new, |analysis| {
-        sheets_of(analysis)
+    let viewers = run.zip(analysis).map_or_else(Vec::new, |(run, analysis)| {
+        sheets_of(state, run, analysis)
             .map(|viewer| (viewer.id, viewer.title.to_owned()))
             .collect()
     });
@@ -225,10 +271,13 @@ fn settle(
 ) {
     let analysis = chosen_analysis(state, draft);
     draft.viewer_id = analysis
-        .and_then(|(_, analysis)| {
+        .and_then(|(run, analysis)| {
             preferred
-                .and_then(|id| sheets_of(analysis).find(|viewer| viewer.id == id))
-                .or_else(|| view_pane_viewer(analysis))
+                .and_then(|id| sheets_of(state, run, analysis).find(|viewer| viewer.id == id))
+                .or_else(|| {
+                    view_pane_viewer(analysis).filter(|viewer| draws(state, run, viewer, analysis))
+                })
+                .or_else(|| sheets_of(state, run, analysis).next())
         })
         .map_or_else(String::new, |viewer| viewer.id.to_owned());
     draft.signals = default_signals(state, draft);
@@ -304,17 +353,66 @@ fn finished(run: &SimulationRun) -> bool {
     ) && !run.analyses.is_empty()
 }
 
-/// The sheets this build draws `analysis` on, in catalogue order.
-fn sheets_of(analysis: &AnalysisResult) -> impl Iterator<Item = &'static ViewerDocumentDefinition> {
+/// The sheets a pane draws `analysis` of `run` on, in catalogue order.
+fn sheets_of<'a>(
+    state: ResultsReads<'a>,
+    run: &'a SimulationRun,
+    analysis: &'a AnalysisResult,
+) -> impl Iterator<Item = &'static ViewerDocumentDefinition> + 'a {
     VIEWER_DOCUMENTS
         .iter()
-        .filter(|viewer| draws(viewer, analysis))
+        .filter(move |viewer| draws(state, run, viewer, analysis))
 }
 
-fn draws(viewer: &ViewerDocumentDefinition, analysis: &AnalysisResult) -> bool {
+/// Whether a pane of `viewer` draws `analysis` of `run`: a released sheet
+/// that renders its kind, and for the eye one that folds it, as the eye
+/// sheet folds before it draws. An eye that folds nothing draws only why.
+fn draws(
+    state: ResultsReads<'_>,
+    run: &SimulationRun,
+    viewer: &ViewerDocumentDefinition,
+    analysis: &AnalysisResult,
+) -> bool {
+    renders(viewer, analysis) && (viewer.art != ViewerArt::Eye || eye_folds(state, run, analysis))
+}
+
+/// Whether `viewer` is a released sheet that renders `analysis`' kind.
+fn renders(viewer: &ViewerDocumentDefinition, analysis: &AnalysisResult) -> bool {
     viewer.release == ViewerReleaseClass::ReleaseTarget
         && analysis_matches_viewer(viewer, analysis.analysis_type)
         && super::persistent_document::renderer_supports_analysis(viewer.id, analysis)
+}
+
+/// Whether the eye folds `analysis` of `run` as a pane of it would: at the
+/// settings the reader gave its eye, from the source its sheet would take.
+/// The fold reads the whole record, so the answer for the last result asked
+/// about is kept while the result and those settings stand.
+fn eye_folds(state: ResultsReads<'_>, run: &SimulationRun, analysis: &AnalysisResult) -> bool {
+    use crate::state::SpecializedViewerCacheProvenance;
+    use rspice_results_ui::eye_diagram::EyeFold;
+    type Asked = (SpecializedViewerCacheProvenance, EyeFold, Option<String>);
+    thread_local! {
+        static LAST: std::cell::RefCell<Option<(Asked, bool)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    let owner = SpecializedViewerCacheProvenance::for_analysis(run.dataset_id, analysis);
+    let fold = state.results.eye_fold_for(owner);
+    // The spectrum's source stands in for the eye's own only on the result
+    // Results shows, whose spectrum it is.
+    let spectrum = (state.model.active_specialized_viewer_cache_provenance() == Some(owner))
+        .then(|| state.viewer_reading().fft_source)
+        .flatten();
+    let asked = (owner, fold, spectrum);
+    if let Some(folds) = LAST.with_borrow(|last| {
+        last.as_ref()
+            .and_then(|(held, folds)| (*held == asked).then_some(*folds))
+    }) {
+        return folds;
+    }
+    let folds =
+        crate::simulation::SimulationController::eye_folds(analysis, &asked.1, asked.2.as_deref());
+    LAST.set(Some((asked, folds)));
+    folds
 }
 
 /// Whether a pane of `viewer` draws each signal the reader ticks as a trace
@@ -432,25 +530,27 @@ pub fn resolve_draft<'a>(
     let Some(analysis) = draft.analysis.and_then(|index| run.analyses.get(index)) else {
         return invalid("Choose an analysis.".to_owned());
     };
-    let Some(viewer) = viewer_document(&draft.viewer_id).filter(|viewer| draws(viewer, analysis))
+    let Some(viewer) =
+        viewer_document(&draft.viewer_id).filter(|viewer| draws(state, run, viewer, analysis))
     else {
-        return invalid(if sheets_of(analysis).next().is_none() {
+        return invalid(if sheets_of(state, run, analysis).next().is_none() {
             format!("No sheet draws {}.", analysis_name(analysis))
         } else {
             "Choose a sheet.".to_owned()
         });
     };
     // No tick gives an empty pane the reader plots into, as Add pane does.
-    let plotted = if plots_signals(viewer) {
+    let panes = if plots_signals(viewer) {
         let names = signal_names(analysis);
-        draft
+        let ticked = draft
             .signals
             .iter()
             .filter(|signal| names.contains(signal))
             .cloned()
-            .collect()
+            .collect();
+        spread_by_unit(analysis, ticked, draft.layout.pane_count())
     } else {
-        deck_plotted(analysis)
+        vec![deck_plotted(analysis); draft.layout.pane_count()]
     };
     Ok(ResolvedDraft {
         name,
@@ -458,8 +558,42 @@ pub fn resolve_draft<'a>(
         analysis,
         viewer,
         layout: draft.layout,
-        plotted,
+        panes,
     })
+}
+
+/// `ticked` spread over `panes` panes by unit, as a run opens with a strip
+/// per unit: each unit, in the order the ticked signals first show it,
+/// fills the next pane, the last pane taking every unit past the panes, and
+/// a pane past the units starts empty.
+fn spread_by_unit(
+    analysis: &AnalysisResult,
+    ticked: Vec<String>,
+    panes: usize,
+) -> Vec<Vec<String>> {
+    let analysis_unit = rspice_results_ui::waves::analysis_default_unit(analysis.analysis_type);
+    let unit_of = |name: &str| {
+        let retained = analysis
+            .waveforms
+            .iter()
+            .find(|waveform| waveform.name == name)
+            .and_then(|waveform| waveform.unit.as_deref());
+        rspice_results_ui::waves::browser_signal_unit(name, retained, analysis_unit).to_owned()
+    };
+    let mut units: Vec<(String, Vec<String>)> = Vec::new();
+    for signal in ticked {
+        let unit = unit_of(&signal);
+        match units.iter_mut().find(|(held, _)| *held == unit) {
+            Some((_, signals)) => signals.push(signal),
+            None => units.push((unit, vec![signal])),
+        }
+    }
+    let panes = panes.max(1);
+    let mut spread = vec![Vec::new(); panes];
+    for (index, (_, signals)) in units.into_iter().enumerate() {
+        spread[index.min(panes - 1)].extend(signals);
+    }
+    spread
 }
 
 /// The form over the first analysis of the run `dataset_id` names that the
@@ -478,7 +612,7 @@ pub fn draft_over(
         let viewer = viewer_document(&viewer_id)?;
         run.analyses
             .iter()
-            .position(|analysis| draws(viewer, analysis))
+            .position(|analysis| draws(state, run, viewer, analysis))
     });
     let mut draft = CreateResultDocumentDialogState {
         open: true,
@@ -605,7 +739,7 @@ fn build_document(
             kind: pane_kind(resolved.viewer.art),
             viewer_id: resolved.viewer.id.to_owned(),
             binding: Some(binding),
-            plotted: resolved.plotted.clone(),
+            plotted: resolved.panes[0].clone(),
         },
     )?;
     let page_id = document.pages()[0].id;
@@ -659,7 +793,7 @@ fn build_document(
                 viewer_id: resolved.viewer.id.to_owned(),
                 binding: Some(binding),
                 placement,
-                plotted: resolved.plotted.clone(),
+                plotted: resolved.panes[pane_index].clone(),
             })],
         )?;
         let pane_id = receipt
@@ -958,7 +1092,10 @@ mod tests {
             let analysis = AnalysisResult::new(1, analysis_type, "analysis").with_waveforms(vec![
                 RetainedTrace::new("V(out)", vec![1.0, 2.0], vec![0.0, 1.0], "#55aaff"),
             ]);
-            for viewer in sheets_of(&analysis) {
+            for viewer in VIEWER_DOCUMENTS
+                .iter()
+                .filter(|viewer| renders(viewer, &analysis))
+            {
                 assert_eq!(viewer.release, ViewerReleaseClass::ReleaseTarget);
                 assert!(
                     ResultViewer::from_viewer_document_id(viewer.id).is_some(),
