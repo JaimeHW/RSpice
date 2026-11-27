@@ -1181,24 +1181,19 @@ const SWEPT_DIVIDER_DECK: &str =
     "* swept divider\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.dc V1 0 1 0.1\n.end\n";
 
 /// What one pane-full of a document shows once it is drawn: its plots'
-/// traces for a sheet of signals, a raster such as an eye for a sheet that
-/// paints its own, else its table's rows.
+/// traces for a sheet of signals, else its table's rows. The inspector's
+/// measurement rows are not the document's.
 #[cfg(not(target_arch = "wasm32"))]
 fn shown_items(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)]) -> usize {
-    let rasters = nodes
-        .iter()
-        .filter(|(_, node)| {
-            node.role() == egui::accesskit::Role::GraphicsDocument
-                && node
-                    .label()
-                    .is_some_and(|label| label.contains("custom-rendered engineering data"))
-        })
-        .count();
     drawn_traces(nodes)
-        + rasters
         + nodes
             .iter()
-            .filter(|(_, node)| node.role() == egui::accesskit::Role::Row)
+            .filter(|(_, node)| {
+                node.role() == egui::accesskit::Role::Row
+                    && !node
+                        .label()
+                        .is_some_and(|label| label.starts_with("Measurement: "))
+            })
             .count()
 }
 
@@ -1257,8 +1252,16 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
                         .unwrap_or_else(|error| panic!("{combination}: {error}"));
                     let nodes = window.frames(Vec::new());
                     let shown = shown_items(&nodes);
+                    // The eye folds the transient at a bit period; a run
+                    // that is no bit stream draws the eye's own reason, as
+                    // the quick view does.
+                    let eye_refused = sheet == "eye-viewer"
+                        && nodes.iter().any(|(_, node)| {
+                            node.role() == egui::accesskit::Role::Status
+                                && node.label().is_some_and(|label| label.contains("usable source"))
+                        });
                     assert!(
-                        shown >= layout.pane_count(),
+                        shown >= layout.pane_count() || eye_refused,
                         "{combination}: {shown} items drawn over {} panes",
                         layout.pane_count()
                     );
@@ -1277,6 +1280,9 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
             window.app.state.save_project_to_path(&path),
             "the project saves"
         );
+        // The app that made them closes first, so the reopen reads the
+        // project as its own and not read-only beside an open copy.
+        drop(window);
         let mut reopened = ResultsWindow::new();
         reopened.app.state.model.simulation.retained.runs = Vec::new().into();
         assert!(
@@ -1295,19 +1301,14 @@ fn every_offered_combination_makes_a_drawn_document_that_a_reopen_brings_back() 
                 .unwrap_or_else(|| panic!("{combination}: the reopened project keeps it"));
             assert_eq!(document.title(), combination);
             assert_eq!(document.panes().len(), panes, "{combination}");
+            // Shown as choosing its tab shows it.
             assert!(
-                rspice_app_results::workbench::chrome::document_bar::results::activate_visualization_document(
-                    &mut reopened.app.state.results_parts(),
-                    &document_id,
+                rspice_app_workbench::workbench::chrome::document_bar::activate_document_by_id(
+                    &mut reopened.app.state,
+                    &WorkspaceDocumentId::VisualizationDocument(document_id),
                 ),
                 "{combination}: the reopened document shows"
             );
-            reopened
-                .app
-                .state
-                .workbench
-                .documents
-                .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
             let nodes = reopened.frames(Vec::new());
             assert_eq!(
                 shown_items(&nodes),

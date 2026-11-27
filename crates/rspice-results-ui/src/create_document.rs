@@ -137,6 +137,7 @@ pub fn show(
             &layouts,
         ) {
             draft.layout = ResultDocumentLayout::ALL[index];
+            draft.validation_error = None;
         }
         Some(name_id)
     };

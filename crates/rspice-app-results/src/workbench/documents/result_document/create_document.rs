@@ -119,14 +119,25 @@ pub fn choices(
     state: ResultsReads<'_>,
     draft: &CreateResultDocumentDialogState,
 ) -> CreateDocumentChoices {
-    let runs = state
+    // A run goes by its name, and by its label, as the data browser lists
+    // it, when another run shares the name.
+    let finished_runs: Vec<&SimulationRun> = state
         .model
         .simulation
         .retained
         .runs
         .iter()
         .filter(|run| finished(run))
-        .map(|run| (run.dataset_id, run.name().to_owned()))
+        .collect();
+    let runs = finished_runs
+        .iter()
+        .map(|run| {
+            let shared = finished_runs
+                .iter()
+                .any(|other| other.dataset_id != run.dataset_id && other.name() == run.name());
+            let label = if shared { run.label.as_str() } else { run.name() };
+            (run.dataset_id, label.to_owned())
+        })
         .collect();
     let run = draft.dataset_id.and_then(|id| retained_run(state, id));
     let analyses = run.map_or_else(Vec::new, |run| {
