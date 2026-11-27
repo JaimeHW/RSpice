@@ -5,6 +5,7 @@ use crate::product::DatasetId;
 use crate::state::{ComplexExpressionPolicy, SimulationRun};
 use rspice_results::calculator::datasets::{BASELINE, NamedRun, RunDatasets, named_runs};
 use rspice_results_ui::waves::lanes::EventLaneLayout;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(test)]
 pub(super) fn evaluate_expression(
@@ -175,19 +176,52 @@ pub(super) fn evaluate_expression_reading(
         .analyses
         .get(analysis_index)
         .ok_or("analysis no longer exists")?;
-    // A Waves document may contain several analysis strips. A pane selection
-    // applies only to the exact dataset and analysis it identifies.
-    let selection = selection.filter(|selection| {
-        selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
-    });
-    let expr =
-        calculator::parser::try_parse(text).map_err(|error| format!("parse error: {error}"))?;
     let datasets = RunDatasets {
         own: analysis.waveforms.as_slice(),
         coordinate_unit: analysis.waveform_coordinate_unit(),
         runs: other_runs(simulation, run, analysis, baseline),
     };
-    let lanes = (lanes, &datasets, places);
+    let reading = Reading {
+        analysis,
+        datasets: &datasets,
+        lanes,
+        places,
+        policy: complex_policy,
+        stop: &AtomicBool::new(false),
+    };
+    evaluate_reading(&reading, text, own_selection(selection, run, analysis))
+}
+
+/// A pane selection applies only to the exact dataset and analysis it
+/// identifies: a Waves document may contain several analysis strips.
+fn own_selection<'s>(
+    selection: Option<&'s SourceSampleSelection>,
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+) -> Option<&'s SourceSampleSelection> {
+    selection.filter(|selection| {
+        selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
+    })
+}
+
+/// What an expression is evaluated against: its analysis, the other runs
+/// it can name, the strip's buses and places, and the flag that stops it.
+struct Reading<'a> {
+    analysis: &'a AnalysisResult,
+    datasets: &'a RunDatasets<'a, crate::state::RetainedTrace>,
+    lanes: Option<&'a EventLaneLayout>,
+    places: &'a Places,
+    policy: ComplexExpressionPolicy,
+    stop: &'a AtomicBool,
+}
+
+fn evaluate_reading(
+    reading: &Reading<'_>,
+    text: &str,
+    selection: Option<&SourceSampleSelection>,
+) -> ExpressionSeriesResult {
+    let expr =
+        calculator::parser::try_parse(text).map_err(|error| format!("parse error: {error}"))?;
     if let Some(selection) = selection {
         if selection.source_indices.is_empty() {
             return Err("the expression selection contains no samples".to_owned());
@@ -198,10 +232,8 @@ pub(super) fn evaluate_expression_reading(
                 .iter()
                 .map(|group| {
                     evaluate_scope(
-                        (analysis, lanes),
-                        text,
-                        &expr,
-                        complex_policy,
+                        reading,
+                        (text, &expr),
                         ExpressionSource::FamilyMember {
                             ordinal: group.ordinal,
                         },
@@ -213,10 +245,8 @@ pub(super) fn evaluate_expression_reading(
                 .collect();
         }
         return evaluate_scope(
-            (analysis, lanes),
-            text,
-            &expr,
-            complex_policy,
+            reading,
+            (text, &expr),
             ExpressionSource::SelectedSamples,
             Some(&selection.source_indices),
             None,
@@ -224,10 +254,8 @@ pub(super) fn evaluate_expression_reading(
         .map(|output| vec![output]);
     }
     evaluate_scope(
-        (analysis, lanes),
-        text,
-        &expr,
-        complex_policy,
+        reading,
+        (text, &expr),
         ExpressionSource::Analysis,
         None,
         None,
@@ -235,24 +263,100 @@ pub(super) fn evaluate_expression_reading(
     .map(|output| vec![output])
 }
 
-fn evaluate_scope(
-    (analysis, (lanes, datasets, places)): (
-        &AnalysisResult,
-        (
-            Option<&EventLaneLayout>,
-            &RunDatasets<'_, crate::state::RetainedTrace>,
-            &Places,
-        ),
-    ),
-    text: &str,
-    expr: &calculator::ast::CalculatorExpr,
+/// What an expression over stored samples is evaluated from off the frame:
+/// its analysis and the other runs it can name, held by the job, with what
+/// it reads of the strip.
+pub(super) struct ExpressionWork {
+    analysis: AnalysisResult,
+    runs: Vec<OwnedRun>,
+    text: String,
+    selection: Option<SourceSampleSelection>,
     policy: ComplexExpressionPolicy,
+    lanes: Option<EventLaneLayout>,
+    places: Places,
+}
+
+/// Another run an expression can name, held by an [`ExpressionWork`]: its
+/// names, its matching analysis' waveforms and their X unit.
+struct OwnedRun {
+    names: Vec<String>,
+    waveforms: Vec<crate::state::RetainedTrace>,
+    coordinate_unit: Option<String>,
+}
+
+impl ExpressionWork {
+    /// What [`evaluate_expression_reading`] reads, held for a job: a stored
+    /// series is a window of its store, so holding it reads nothing.
+    pub(super) fn gather(
+        simulation: &SimulationState,
+        (analysis_index, baseline): (usize, Option<DatasetId>),
+        text: &str,
+        (selection, complex_policy): (Option<&SourceSampleSelection>, ComplexExpressionPolicy),
+        lanes: Option<&EventLaneLayout>,
+        places: &Places,
+    ) -> Result<Self, String> {
+        let run = simulation.active_run().ok_or("analysis no longer exists")?;
+        let analysis = run
+            .analyses
+            .get(analysis_index)
+            .ok_or("analysis no longer exists")?;
+        let runs = other_runs(simulation, run, analysis, baseline)
+            .into_iter()
+            .map(|named| OwnedRun {
+                names: named.names,
+                waveforms: named.waveforms.to_vec(),
+                coordinate_unit: named.coordinate_unit.map(str::to_owned),
+            })
+            .collect();
+        Ok(Self {
+            analysis: analysis.clone(),
+            runs,
+            text: text.to_owned(),
+            selection: own_selection(selection, run, analysis).cloned(),
+            policy: complex_policy,
+            lanes: lanes.cloned(),
+            places: places.clone(),
+        })
+    }
+
+    /// The expression's series, as [`evaluate_expression_reading`] reads
+    /// them, or an end once `stop` is raised.
+    pub(super) fn evaluate(&self, stop: &AtomicBool) -> ExpressionSeriesResult {
+        let datasets = RunDatasets {
+            own: self.analysis.waveforms.as_slice(),
+            coordinate_unit: self.analysis.waveform_coordinate_unit(),
+            runs: self
+                .runs
+                .iter()
+                .map(|run| NamedRun {
+                    names: run.names.clone(),
+                    waveforms: run.waveforms.as_slice(),
+                    coordinate_unit: run.coordinate_unit.as_deref(),
+                })
+                .collect(),
+        };
+        let reading = Reading {
+            analysis: &self.analysis,
+            datasets: &datasets,
+            lanes: self.lanes.as_ref(),
+            places: &self.places,
+            policy: self.policy,
+            stop,
+        };
+        evaluate_reading(&reading, &self.text, self.selection.as_ref())
+    }
+}
+
+fn evaluate_scope(
+    reading: &Reading<'_>,
+    (text, expr): (&str, &calculator::ast::CalculatorExpr),
     source: ExpressionSource,
     indices: Option<&[usize]>,
     axis: Option<&[f64]>,
 ) -> Result<ExpressionWaveform, String> {
-    let mut ctx = calculator::WaveformsContext::with_policy(&analysis.waveforms, policy)
-        .with_datasets(datasets);
+    let analysis = reading.analysis;
+    let mut ctx = calculator::WaveformsContext::with_policy(&analysis.waveforms, reading.policy)
+        .with_datasets(reading.datasets);
     if let Some(indices) = indices {
         ctx = ctx
             .with_sample_projection(indices, axis)
@@ -284,9 +388,29 @@ fn evaluate_scope(
     let ctx = EventWords {
         values: ctx,
         analysis,
-        lanes,
-        places,
+        lanes: reading.lanes,
+        places: reading.places,
     };
+    // Over the analysis' own rows, an expression read sample by sample reads
+    // its stored operands a block at a time, never whole.
+    if indices.is_none()
+        && let Some(axis) = analysis.waveforms.first().map(|waveform| &waveform.x)
+        && let Some(values) = calculator::pointwise::evaluate_in_blocks(
+            expr,
+            &ctx,
+            axis,
+            rspice_results::waveform::BLOCK_SAMPLES,
+            |_, _| !reading.stop.load(Ordering::Relaxed),
+        )
+    {
+        let values = values.map_err(|error| error.to_string())?;
+        let value = rspice_results::waveform::RetainedWaveform::new(text, axis.clone(), values);
+        return Ok(ExpressionWaveform {
+            source,
+            waveform: calculator::evaluated_trace(value),
+            reading: None,
+        });
+    }
     let value = calculator::evaluator::evaluate(expr, &ctx).map_err(|error| error.to_string())?;
     let scalar_axis = rspice_results::waveform::WaveformValues::from(scalar_axis);
     let waveform = calculator::evaluated_waveform(value, text, Some(&scalar_axis))?;
@@ -297,7 +421,7 @@ fn evaluate_scope(
     // so the trace says which run and how.
     let readings = named_runs(expr)
         .iter()
-        .filter_map(|(signal, run)| datasets.reading(signal, run))
+        .filter_map(|(signal, run)| reading.datasets.reading(signal, run))
         .collect::<Vec<_>>();
     Ok(ExpressionWaveform {
         source,
@@ -332,6 +456,17 @@ impl<C: calculator::evaluator::EvaluationContext> calculator::evaluator::Evaluat
         dataset: Option<&str>,
     ) -> Result<calculator::evaluator::CalcValue, calculator::evaluator::EvaluationError> {
         self.values.get_magnitude(signal, dataset)
+    }
+
+    fn stored_columns(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Option<(
+        &rspice_results::waveform::WaveformValues,
+        &rspice_results::waveform::WaveformValues,
+    )> {
+        self.values.stored_columns(signal, dataset)
     }
 
     fn drawn_x_scale(&self) -> Option<XScale> {

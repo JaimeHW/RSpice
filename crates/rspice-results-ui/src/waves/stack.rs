@@ -54,6 +54,11 @@ pub trait StackHost {
     fn session(&self) -> &ResultViewerState;
     fn session_mut(&mut self) -> &mut ResultViewerState;
     fn expression_is_complex(&self, analysis: AnalysisPresentationKey, text: &str) -> bool;
+    /// Whether the expression is still being evaluated off the frame, so its
+    /// pane names it as pending rather than leaving it out.
+    fn expression_pending(&self, _analysis: AnalysisPresentationKey, _text: &str) -> bool {
+        false
+    }
     fn edit_expression(&mut self, ui: &mut Ui, model: &StripModel);
     fn resolve_expressions(&mut self, model: &StripModel, tokens: &Tokens) -> Vec<ResolvedExpr>;
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String);
@@ -1849,6 +1854,33 @@ fn pane_expressions(
             values: first.y.clone(),
         })
     });
+    // One still being evaluated off the frame draws nothing yet; its entry
+    // says so.
+    let pending = pane
+        .expressions
+        .iter()
+        .chain(
+            pane.secondary
+                .iter()
+                .flat_map(|axis| axis.expressions.iter()),
+        )
+        .filter(|&&slot| !exprs.iter().any(|drawn| drawn.slot == slot))
+        .filter_map(|&slot| {
+            let expr = list.get(slot)?;
+            host.expression_pending(model.analysis_key, &expr.text)
+                .then(|| pane_header::PaneExpression {
+                    slot,
+                    text: expr.text.clone(),
+                    label: format!("{} \u{b7} evaluating\u{2026}", label(expr)),
+                    color: expr_color(t, expr_palette_slot(model, slot)),
+                    swatch: swatch(slot, None),
+                    visible: true,
+                    at_cursor: None,
+                    curves: 0,
+                    values: Default::default(),
+                })
+        })
+        .collect::<Vec<_>>();
     let hidden = pane.hidden_expressions.iter().filter_map(|&slot| {
         let expr = list.get(slot)?;
         Some(pane_header::PaneExpression {
@@ -1863,7 +1895,7 @@ fn pane_expressions(
             values: Default::default(),
         })
     });
-    drawn.chain(hidden).collect()
+    drawn.chain(pending).chain(hidden).collect()
 }
 
 /// The hue an expression's curve takes among the palette's, which also

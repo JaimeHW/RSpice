@@ -43,7 +43,7 @@ mod viewport;
 pub use super::document_edit::measurement_table::{measurements_count, measurements_page};
 #[cfg(test)]
 use expression_evaluation::evaluate_expression;
-use expression_evaluation::{Places, evaluate_expression_reading};
+use expression_evaluation::{ExpressionWork, Places, evaluate_expression_reading};
 pub(crate) use expressions::*;
 pub use expressions::{toggle_visibility, waveform_plotted};
 pub(crate) use readout::*;
@@ -570,6 +570,11 @@ fn show_strips(ui: &mut Ui, state: &mut ResultsParts<'_>, stack: Stack) {
     // The Cursors page's Snap stands A and B on samples however they moved.
     if rspice_results_ui::waves::cursor_table::snap_cursors(&mut state.results.session, &models) {
         ui.ctx().request_repaint();
+    }
+    // An expression evaluated off the frame lands on a frame after it is in.
+    if expressions::expressions_evaluating(state.results) {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(30));
     }
 }
 

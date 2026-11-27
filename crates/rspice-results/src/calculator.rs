@@ -17,6 +17,7 @@ mod levels;
 mod measures;
 mod network_functions;
 pub mod parser;
+pub mod pointwise;
 pub mod retained;
 mod series;
 // The spectral scalars run the FFT pipeline, which only engine evidence builds.

@@ -529,6 +529,13 @@ impl ResultsState {
         self.network_matrix.retain_datasets(retained);
         self.analysis_expr_cache
             .retain(|(analysis, _), _| live(*analysis));
+        self.expression_jobs.retain(|(analysis, _), evaluating| {
+            let kept = live(*analysis);
+            if !kept {
+                evaluating.job.cancel();
+            }
+            kept
+        });
         self.retained_evidence_validity
             .retain(|analysis, _| live(*analysis));
         self.dataset_digests

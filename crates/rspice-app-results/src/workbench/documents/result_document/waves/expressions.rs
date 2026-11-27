@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::state::ComplexExpressionPolicy;
-use crate::workbench::documents::result_document::ResultsParts;
+use crate::workbench::documents::result_document::{ExpressionJob, ResultsParts};
 use rspice_results_ui::waves::cache::apply_waveform_visibility;
 use rspice_results_ui::waves::expression_editor::Action;
 use rspice_results_ui::waves::lanes::EventLaneLayout;
@@ -108,28 +108,40 @@ pub(super) fn expr_editor_row(
             let sample_selection = state.results.session.sample_selection.clone();
             let (baseline, pin) = pinned(state.results_reads());
             let places = Places::of(state, (analysis_key, analysis_index), None);
-            let series = evaluate_expression_reading(
-                &state.model.simulation,
-                (analysis_index, baseline),
-                &text,
-                sample_selection.as_ref(),
-                ComplexExpressionPolicy::Rectangular,
-                state.results.session.event_lanes.get(&analysis_key),
-                &places,
-            );
+            // An expression over stored samples is only read here: the strip
+            // evaluates it off the frame once it is added, and says there
+            // why it could not be, as it says for any other.
+            let series = if expression_reads_store(&state.model.simulation, analysis_index, &text) {
+                calculator::parser::try_parse(&text)
+                    .map(|_| None)
+                    .map_err(|error| format!("parse error: {error}"))
+            } else {
+                evaluate_expression_reading(
+                    &state.model.simulation,
+                    (analysis_index, baseline),
+                    &text,
+                    sample_selection.as_ref(),
+                    ComplexExpressionPolicy::Rectangular,
+                    state.results.session.event_lanes.get(&analysis_key),
+                    &places,
+                )
+                .map(Some)
+            };
             match series {
                 Ok(series) => {
-                    state.results.analysis_expr_cache.insert(
-                        (analysis_key, text.clone()),
-                        ExprSeries {
-                            version: expression_version(
-                                state.model.simulation.view.data_version,
-                                sample_selection.as_ref(),
-                                ComplexExpressionPolicy::Rectangular,
-                            ) ^ pin,
-                            series: Ok(series),
-                        },
-                    );
+                    if let Some(series) = series {
+                        state.results.analysis_expr_cache.insert(
+                            (analysis_key, text.clone()),
+                            ExprSeries {
+                                version: expression_version(
+                                    state.model.simulation.view.data_version,
+                                    sample_selection.as_ref(),
+                                    ComplexExpressionPolicy::Rectangular,
+                                ) ^ pin,
+                                series: Ok(series),
+                            },
+                        );
+                    }
                     let declared = state.results.session.expr_editor_unit.trim().to_owned();
                     let units = &mut state.results.session.expression_units;
                     let unit_changed = if declared.is_empty() {
@@ -222,12 +234,31 @@ pub(super) fn resolve_strip_exprs(
             ^ pin
             ^ places.version_for(&expr.text).rotate_left(7);
         let key = (model.analysis_key, expr.text.clone());
+        land_expression_job(state, &key);
         let fresh = state
             .results
             .analysis_expr_cache
             .get(&key)
             .is_some_and(|s| s.version == version);
-        if !fresh {
+        let evaluating = state
+            .results
+            .expression_jobs
+            .get(&key)
+            .is_some_and(|job| job.version == version);
+        if !fresh
+            && !evaluating
+            && expression_reads_store(&state.model.simulation, model.analysis_index, &expr.text)
+        {
+            let work = ExpressionWork::gather(
+                &state.model.simulation,
+                (model.analysis_index, baseline),
+                &expr.text,
+                (sample_selection.as_ref(), expr.complex_policy),
+                lanes.as_ref(),
+                &places,
+            );
+            start_expression_job(state, key.clone(), version, work);
+        } else if !fresh && !evaluating {
             let series = evaluate_expression_reading(
                 &state.model.simulation,
                 (model.analysis_index, baseline),
@@ -330,6 +361,121 @@ pub(super) fn resolve_strip_exprs(
         }
     }
     resolved
+}
+
+/// Whether evaluating `text` over analysis `analysis_index` of the active run
+/// reads samples a results store keeps: that analysis', or another run's it
+/// names with `@`. Such an expression is evaluated off the frame.
+pub(super) fn expression_reads_store(
+    simulation: &SimulationState,
+    analysis_index: usize,
+    text: &str,
+) -> bool {
+    let stored = |analysis: &AnalysisResult| {
+        analysis
+            .waveforms
+            .iter()
+            .any(|waveform| waveform.x.is_stored() || waveform.y.is_stored())
+    };
+    let Some(run) = simulation.active_run() else {
+        return false;
+    };
+    if run.analyses.get(analysis_index).is_some_and(stored) {
+        return true;
+    }
+    calculator::parser::try_parse(text)
+        .is_ok_and(|expr| !rspice_results::calculator::datasets::named_runs(&expr).is_empty())
+        && simulation
+            .retained
+            .runs
+            .iter()
+            .any(|run| run.analyses.iter().any(stored))
+}
+
+/// Evaluate an expression on a Results job: the curve of an earlier version
+/// is not this one's, so it goes, and the pane shows the expression pending
+/// until the job lands it.
+fn start_expression_job(
+    state: &mut ResultsParts<'_>,
+    key: (AnalysisPresentationKey, String),
+    version: u64,
+    work: Result<super::expression_evaluation::ExpressionWork, String>,
+) {
+    if let Some(earlier) = state.results.expression_jobs.remove(&key) {
+        earlier.job.cancel();
+    }
+    state.results.analysis_expr_cache.remove(&key);
+    match work {
+        Ok(work) => {
+            let job = crate::workbench::results_job::ResultsJob::start(
+                "results-expression",
+                move |job| Ok(work.evaluate(job.cancel_flag())),
+            );
+            state
+                .results
+                .expression_jobs
+                .insert(key, ExpressionJob { version, job });
+        }
+        Err(error) => {
+            state.record(
+                crate::diagnostics::LogSeverity::Warning,
+                crate::diagnostics::LogSource::Studio,
+                format!("Could not evaluate {}: {error}", key.1),
+            );
+            state.results.analysis_expr_cache.insert(
+                key,
+                ExprSeries {
+                    version,
+                    series: Err(error),
+                },
+            );
+        }
+    }
+}
+
+/// Put what a finished job evaluated for `key` in the expression cache, as
+/// of the version it evaluated.
+fn land_expression_job(state: &mut ResultsParts<'_>, key: &(AnalysisPresentationKey, String)) {
+    use crate::workbench::results_job::JobOutcome;
+    if !state
+        .results
+        .expression_jobs
+        .get(key)
+        .is_some_and(|job| job.job.is_finished())
+    {
+        return;
+    }
+    let Some(job) = state.results.expression_jobs.remove(key) else {
+        return;
+    };
+    let series = match job.job.take_outcome() {
+        Some(JobOutcome::Done(series)) => series,
+        Some(JobOutcome::Failed(reason)) => Err(reason),
+        Some(JobOutcome::Cancelled) | None => return,
+    };
+    if let Err(error) = &series {
+        state.record(
+            crate::diagnostics::LogSeverity::Warning,
+            crate::diagnostics::LogSource::Studio,
+            format!("Could not evaluate {}: {error}", key.1),
+        );
+    }
+    state.results.analysis_expr_cache.insert(
+        key.clone(),
+        ExprSeries {
+            version: job.version,
+            series,
+        },
+    );
+}
+
+/// Whether an expression is being evaluated off the frame, for a frame to
+/// draw again until it lands.
+pub(crate) fn expressions_evaluating(results: &ResultsState) -> bool {
+    results
+        .expression_jobs
+        .values()
+        .any(|job| !job.job.is_finished())
 }
 
 /// Evaluate `text` as the abscissa a pane is drawn against: once per family

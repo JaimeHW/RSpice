@@ -9,7 +9,9 @@
 //! - Automatic interpolation for mismatched time bases
 
 pub(crate) use rspice_results::calculator::spice_parser as parser;
-pub(crate) use rspice_results::calculator::{ast, catalogue, evaluator, functions, value};
+pub(crate) use rspice_results::calculator::{
+    ast, catalogue, evaluator, functions, pointwise, value,
+};
 
 use rspice_results::calculator::retained::{canonical_ground_value, find_waveform};
 pub use rspice_results::calculator::retained::{magnitude_value, waveform_value};
@@ -28,11 +30,18 @@ pub(crate) fn evaluated_waveform(
     name: &str,
     scalar_axis: Option<&rspice_results::waveform::WaveformValues>,
 ) -> Result<RetainedTrace, String> {
-    Ok(RetainedTrace {
-        data: rspice_results::calculator::retained::evaluated_waveform(value, name, scalar_axis)?,
+    Ok(evaluated_trace(
+        rspice_results::calculator::retained::evaluated_waveform(value, name, scalar_axis)?,
+    ))
+}
+
+/// An expression's evaluated samples, with the application's presentation.
+pub(crate) fn evaluated_trace(data: RetainedWaveform) -> RetainedTrace {
+    RetainedTrace {
+        data,
         color: "#f5b700".to_owned(),
         visible: true,
-    })
+    }
 }
 
 // =============================================================================

@@ -41,8 +41,18 @@ impl StackHost for WaveStackHost<'_, '_> {
     ) -> Result<rspice_results_ui::waves::xy::ResolvedAbscissa, String> {
         super::expressions::resolve_abscissa_expression(self.0, model, text)
     }
+    fn expression_pending(&self, analysis: AnalysisPresentationKey, text: &str) -> bool {
+        self.0
+            .results
+            .expression_jobs
+            .contains_key(&(analysis, text.to_owned()))
+    }
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String) {
-        self.0.results.analysis_expr_cache.remove(&(analysis, text));
+        let key = (analysis, text);
+        if let Some(evaluating) = self.0.results.expression_jobs.remove(&key) {
+            evaluating.job.cancel();
+        }
+        self.0.results.analysis_expr_cache.remove(&key);
     }
     fn add_expression(&mut self, model: &StripModel, text: String) {
         super::expressions::add_strip_expression(self.0, model.analysis_key, text);

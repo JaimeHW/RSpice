@@ -1999,6 +1999,11 @@ pub struct ResultsState {
     /// refreshed when the simulation data version advances.
     pub analysis_expr_cache:
         std::collections::HashMap<(AnalysisPresentationKey, String), ExprSeries>,
+    /// Expressions over stored samples being evaluated off the frame, by the
+    /// same keys; each lands in `analysis_expr_cache` once it is in.
+    /// Transient.
+    pub(crate) expression_jobs:
+        std::collections::HashMap<(AnalysisPresentationKey, String), ExpressionJob>,
     /// The run whose attributed failure sites are currently marked on the
     /// drawing, if any.
     ///
@@ -2062,6 +2067,14 @@ pub struct ExprSeries {
     pub version: u64,
     /// Evaluation result, or the error to show on the strip.
     pub series: ExpressionSeriesResult,
+}
+
+/// An expression being evaluated off the frame: the version it evaluates
+/// and the Results job evaluating it.
+#[derive(Debug, Clone)]
+pub(crate) struct ExpressionJob {
+    pub(crate) version: u64,
+    pub(crate) job: crate::workbench::results_job::ResultsJob<ExpressionSeriesResult>,
 }
 
 /// Memoized stability metrics for the selected AC waveform.
