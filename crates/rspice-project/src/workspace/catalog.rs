@@ -424,6 +424,28 @@ impl ProjectWorkspace {
             .retain(|document_id, _| held.contains(document_id));
     }
 
+    /// Give the result document `document_id` the time it last changed as
+    /// `changed_at` has it, in place of a stamp of the next frame's: a
+    /// deleted document put back keeps the time it had, or none if it had
+    /// none.
+    pub fn restore_visualization_document_changed_at(
+        &mut self,
+        document_id: ResultDocumentId,
+        changed_at: Option<u64>,
+    ) {
+        self.visualization_documents_unstamped.remove(&document_id);
+        match changed_at {
+            Some(unix_ms) => {
+                self.visualization_documents_changed_at
+                    .insert(document_id.as_uuid(), unix_ms);
+            }
+            None => {
+                self.visualization_documents_changed_at
+                    .remove(&document_id.as_uuid());
+            }
+        }
+    }
+
     /// When the result document `document_id` last changed, in milliseconds
     /// since the Unix epoch, if its change was stamped.
     #[must_use]

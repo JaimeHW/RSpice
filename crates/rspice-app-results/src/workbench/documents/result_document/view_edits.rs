@@ -104,12 +104,13 @@ enum DocumentStep {
         document: ResultDocumentId,
         show: Option<ResultDocumentId>,
     },
-    /// Put `document` back at place `at` with its view's own steps; taking
-    /// it out again shows `then`.
+    /// Put `document` back at place `at` with its view's own steps and the
+    /// time it last changed; taking it out again shows `then`.
     Insert {
         document: Box<VisualizationDocument>,
         at: usize,
         history: Option<ViewHistory>,
+        changed_at: Option<u64>,
         then: Option<ResultDocumentId>,
     },
 }
@@ -456,12 +457,14 @@ fn take_out(
         .position(|document| document.id() == document_id)
         .ok_or_else(|| GONE.to_owned())?;
     let document = Box::new(content.visualization_documents[at].clone());
+    let changed_at = content.visualization_document_changed_at(document_id);
     content.remove_visualization_document(document_id);
     let history = state.results.view_edits.views.remove(&document_id);
     Ok(DocumentStep::Insert {
         document,
         at,
         history,
+        changed_at,
         then,
     })
 }
@@ -524,14 +527,15 @@ fn take_document_step(
             document,
             at,
             history,
+            changed_at,
             then,
         } => {
-            let document_id = state
-                .model
-                .workspace
-                .content
+            let content = &mut state.model.workspace.content;
+            let document_id = content
                 .insert_visualization_document_at(*document, at)
                 .map_err(|error| error.to_string())?;
+            // Put back, it is the document it was, changed when it was.
+            content.restore_visualization_document_changed_at(document_id, changed_at);
             if let Some(history) = history {
                 state.results.view_edits.views.insert(document_id, history);
             }

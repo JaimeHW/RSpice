@@ -917,6 +917,14 @@ fn a_document_tabs_menu_renames_closes_and_deletes_it() {
     let document = WorkspaceDocumentId::VisualizationDocument(saved);
     assert!(activate_document(&mut desk.app.state, &document));
     let tab = strip_tabs::tab(&desk.nodes(), "Bias sweep");
+    let changed = desk
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .visualization_document_changed_at(saved)
+        .expect("the renamed document has a time");
     desk.right_click(tab.centre);
     desk.choose_below("Delete", tab.centre.y);
     let content = &desk.app.state.model.workspace.content;
@@ -937,6 +945,16 @@ fn a_document_tabs_menu_renames_closes_and_deletes_it() {
     assert_eq!(
         strip_tabs::labels(&desk.nodes()),
         [run.as_str(), "Bias sweep"]
+    );
+    assert_eq!(
+        desk.app
+            .state
+            .model
+            .workspace
+            .content
+            .visualization_document_changed_at(saved),
+        Some(changed),
+        "the document put back took a new time"
     );
 }
 
