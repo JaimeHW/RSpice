@@ -1180,12 +1180,7 @@ impl HardcopyRenderer {
         {
             return Err(HardcopyRenderError::ExtentMismatch);
         }
-        let scene = scene_from_resolved(
-            source,
-            plan.setup().print_mapping(),
-            plan.setup().schematic(),
-            metadata,
-        )?;
+        let scene = scene_for_setup(source, plan.setup(), metadata)?;
         Self::render_scene(plan, &scene)
     }
 
@@ -1255,12 +1250,7 @@ impl HardcopyRenderer {
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let scene = scene_from_resolved(
-            source,
-            plan.setup().print_mapping(),
-            plan.setup().schematic(),
-            metadata,
-        )?;
+        let scene = scene_for_setup(source, plan.setup(), metadata)?;
         scene.validate()?;
         validate_plan_font_coverage(plan)?;
         validate_aggregate_pagination(plan, &scene)?;
@@ -1332,12 +1322,7 @@ impl HardcopyRenderer {
         {
             return Err(HardcopyRenderError::ExtentMismatch);
         }
-        let scene = scene_from_resolved(
-            source,
-            plan.setup().print_mapping(),
-            plan.setup().schematic(),
-            metadata,
-        )?;
+        let scene = scene_for_setup(source, plan.setup(), metadata)?;
         Self::render_printer_scene(plan, &scene, device_dpi)
     }
 
@@ -1843,7 +1828,7 @@ pub(super) fn header_page_line(plan: &HardcopyPlan, page: &PreviewPage) -> Strin
         "rev {} · page {} of {}",
         plan.source().revision().get(),
         page.number(),
-        pages.len()
+        plan.pagination().total_page_count()
     );
     let tiled = pages.iter().any(|other| {
         other.section_ordinal() == page.section_ordinal() && other.coordinate() != page.coordinate()

@@ -568,6 +568,23 @@ pub struct DecorationSetup {
     include_project_revision_sheet_date_page_header: bool,
     include_result_manifest_model_digest_run_provenance: bool,
     watermark: Watermark,
+    /// A plot's cursors and markers, drawn over its traces.
+    #[serde(default = "shown", skip_serializing_if = "is_shown")]
+    include_cursors_and_markers: bool,
+    /// The notes pinned to a plot.
+    #[serde(default = "shown", skip_serializing_if = "is_shown")]
+    include_notes: bool,
+}
+
+/// What a decoration that was not stated does: it is shown.
+const fn shown() -> bool {
+    true
+}
+
+/// A decoration left at its default says nothing, so a setup that never
+/// touched it keeps the digest it had before the decoration existed.
+const fn is_shown(value: &bool) -> bool {
+    *value
 }
 
 impl DecorationSetup {
@@ -583,7 +600,28 @@ impl DecorationSetup {
             include_project_revision_sheet_date_page_header,
             include_result_manifest_model_digest_run_provenance,
             watermark,
+            include_cursors_and_markers: true,
+            include_notes: true,
         })
+    }
+
+    /// The same decorations, with a plot's cursors and markers, and its
+    /// notes, each shown or left off.
+    #[must_use]
+    pub const fn with_plot_overlays(mut self, cursors_and_markers: bool, notes: bool) -> Self {
+        self.include_cursors_and_markers = cursors_and_markers;
+        self.include_notes = notes;
+        self
+    }
+
+    #[must_use]
+    pub const fn includes_cursors_and_markers(&self) -> bool {
+        self.include_cursors_and_markers
+    }
+
+    #[must_use]
+    pub const fn includes_notes(&self) -> bool {
+        self.include_notes
     }
 
     fn validate(&self) -> Result<(), HardcopyError> {
@@ -744,6 +782,9 @@ pub struct HardcopySetup {
     decorations: DecorationSetup,
     schematic: SchematicHardcopySetup,
     print_mapping: PrintMappingTable,
+    /// The pages published, where not all of them are.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    page_range: Option<PageRange>,
 }
 
 #[derive(Deserialize)]
@@ -755,6 +796,44 @@ struct HardcopySetupWire {
     decorations: DecorationSetup,
     schematic: SchematicHardcopySetup,
     print_mapping: PrintMappingTable,
+    #[serde(default)]
+    page_range: Option<PageRange>,
+}
+
+/// The pages of a hardcopy to publish, numbered from one, both ends
+/// included. A range past the last page is held to the pages there are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PageRange {
+    first: u32,
+    last: u32,
+}
+
+impl PageRange {
+    pub fn try_new(first: u32, last: u32) -> Result<Self, HardcopyError> {
+        let value = Self { first, last };
+        value.validate()?;
+        Ok(value)
+    }
+
+    fn validate(self) -> Result<(), HardcopyError> {
+        if self.first == 0 || self.last < self.first {
+            return Err(HardcopyError::InvalidPageRange {
+                first: self.first,
+                last: self.last,
+            });
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn first(self) -> u32 {
+        self.first
+    }
+
+    #[must_use]
+    pub const fn last(self) -> u32 {
+        self.last
+    }
 }
 
 impl<'de> Deserialize<'de> for HardcopySetup {
@@ -772,6 +851,7 @@ impl<'de> Deserialize<'de> for HardcopySetup {
             wire.schematic,
             wire.print_mapping,
         )
+        .and_then(|setup| setup.with_page_range(wire.page_range))
         .map_err(serde::de::Error::custom)
     }
 }
@@ -813,9 +893,19 @@ impl HardcopySetup {
             decorations,
             schematic,
             print_mapping,
+            page_range: None,
         };
         value.validate()?;
         Ok(value)
+    }
+
+    /// The same setup publishing only `range`'s pages, or every page.
+    pub fn with_page_range(mut self, range: Option<PageRange>) -> Result<Self, HardcopyError> {
+        if let Some(range) = range {
+            range.validate()?;
+        }
+        self.page_range = range;
+        Ok(self)
     }
 
     fn validate(&self) -> Result<(), HardcopyError> {
@@ -824,7 +914,15 @@ impl HardcopySetup {
         self.tiling.validate()?;
         self.render.validate()?;
         self.decorations.validate()?;
+        if let Some(range) = self.page_range {
+            range.validate()?;
+        }
         self.print_mapping.validate()
+    }
+
+    #[must_use]
+    pub const fn page_range(&self) -> Option<PageRange> {
+        self.page_range
     }
 
     #[must_use]
@@ -888,7 +986,7 @@ impl Default for HardcopySetup {
                 ColorMapping::PrintSafeEngineeringPalette,
                 BackgroundMode::White,
                 FontPolicy::new(true, true),
-                true,
+                false,
             )
             .expect("default rendering"),
             DecorationSetup::try_new(true, true, true, Watermark::None)
@@ -1314,9 +1412,39 @@ pub struct PreviewPagination {
     row_step: Length,
     pages: Vec<PreviewPage>,
     sections: Vec<HardcopyContentSection>,
+    /// How many pages the drawing takes, where a page range keeps fewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unranged_pages: Option<u32>,
 }
 
 impl PreviewPagination {
+    /// Keep only the pages `range` names, held to the pages there are. Each
+    /// page keeps its number, so page 3 of 4 is still page 3 when it is the
+    /// only one published.
+    fn keep_range(mut self, range: Option<PageRange>) -> Self {
+        let Some(range) = range else {
+            return self;
+        };
+        let total = u32::try_from(self.pages.len()).unwrap_or(u32::MAX);
+        let last = range.last.min(total);
+        let first = range.first.min(last);
+        if first <= 1 && last == total {
+            return self;
+        }
+        self.pages
+            .retain(|page| (first..=last).contains(&page.number));
+        self.unranged_pages = Some(total);
+        self
+    }
+
+    /// How many pages the drawing takes, whether or not a page range
+    /// publishes all of them.
+    #[must_use]
+    pub fn total_page_count(&self) -> u32 {
+        self.unranged_pages
+            .unwrap_or_else(|| u32::try_from(self.pages.len()).unwrap_or(u32::MAX))
+    }
+
     fn build(setup: &HardcopySetup, content: ContentExtent) -> Result<Self, HardcopyError> {
         Self::build_for_section(setup, content, 0)
     }
@@ -1441,6 +1569,7 @@ impl PreviewPagination {
             row_step: Length(step_y),
             pages,
             sections: Vec::new(),
+            unranged_pages: None,
         })
     }
 
@@ -1547,6 +1676,7 @@ impl PreviewPagination {
             row_step: first_step.1,
             pages,
             sections: sections.to_vec(),
+            unranged_pages: None,
         })
     }
 
@@ -1653,7 +1783,8 @@ impl HardcopyPlan {
                 ));
             }
         }
-        let pagination = PreviewPagination::build(&setup, content_extent)?;
+        let pagination =
+            PreviewPagination::build(&setup, content_extent)?.keep_range(setup.page_range);
         let material = HardcopyPlanMaterial {
             schema_version: HARDCOPY_SCHEMA_VERSION,
             id,
@@ -1708,7 +1839,8 @@ impl HardcopyPlan {
                 ));
             }
         }
-        let pagination = PreviewPagination::build_sections(&setup, content_extent, &sections)?;
+        let pagination = PreviewPagination::build_sections(&setup, content_extent, &sections)?
+            .keep_range(setup.page_range);
         let material = HardcopyPlanMaterial {
             schema_version: HARDCOPY_SCHEMA_VERSION,
             id,
@@ -2169,6 +2301,8 @@ pub enum HardcopyError {
     InvalidPrinterResolution(u16),
     #[error("native printer raster geometry is empty or lies outside the physical page")]
     InvalidPrinterRasterGeometry,
+    #[error("pages {first} to {last} are not a range of pages")]
+    InvalidPageRange { first: u32, last: u32 },
     #[error("copy count {0} is outside 1..=999")]
     InvalidCopyCount(u16),
     #[error("collation requires at least two copies")]

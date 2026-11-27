@@ -20,6 +20,10 @@ pub(super) struct SemanticSceneCompiler<'a> {
     pub(super) coordinate_offset: ScenePoint,
     pub(super) aggregate_sections: Vec<AggregateSection>,
     pub(super) mapping_ordinal: Option<u32>,
+    /// Whether a plot's cursors and markers are drawn.
+    pub(super) cursors_and_markers: bool,
+    /// Whether a plot's notes are drawn.
+    pub(super) notes: bool,
 }
 
 impl<'a> SemanticSceneCompiler<'a> {
@@ -39,6 +43,8 @@ impl<'a> SemanticSceneCompiler<'a> {
             coordinate_offset: ScenePoint::new(Length::ZERO, Length::ZERO),
             aggregate_sections: Vec::new(),
             mapping_ordinal: None,
+            cursors_and_markers: true,
+            notes: true,
         }
     }
 
@@ -143,6 +149,8 @@ impl<'a> SemanticSceneCompiler<'a> {
                 ),
                 aggregate_sections: Vec::new(),
                 mapping_ordinal: Some(child.ordinal),
+                cursors_and_markers: self.cursors_and_markers,
+                notes: self.notes,
             };
             match (
                 child.document.as_ref(),
@@ -1396,7 +1404,12 @@ impl<'a> SemanticSceneCompiler<'a> {
                     .push(LegendEntry::try_new(trace.key_label(), stroke)?);
             }
         }
-        for cursor in &plot.cursors {
+        let (cursors, markers): (&[_], &[_]) = if self.cursors_and_markers {
+            (&plot.cursors, &plot.markers)
+        } else {
+            (&[], &[])
+        };
+        for cursor in cursors {
             let start = self.semantic_point(cursor.start)?;
             let end = self.semantic_point(cursor.end)?;
             let stable_id = format!("cursor:{}", cursor.cursor_id);
@@ -1426,7 +1439,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             )?;
             self.add_mapping_legend(PrintObjectKind::Marker, &stable_id, stroke)?;
         }
-        for marker in &plot.markers {
+        for marker in markers {
             let position = marker.position.ok_or_else(|| {
                 conversion_error(format!(
                     "plot marker {} has no authenticated physical position",
@@ -1520,7 +1533,8 @@ impl<'a> SemanticSceneCompiler<'a> {
                 (anchor, SceneTextRotation::Upright),
             )?;
         }
-        for annotation in &plot.annotations {
+        let annotations: &[_] = if self.notes { &plot.annotations } else { &[] };
+        for annotation in annotations {
             let position = annotation.position.ok_or_else(|| {
                 conversion_error(format!(
                     "plot annotation {} has no authenticated physical position",

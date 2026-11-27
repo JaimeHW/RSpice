@@ -742,6 +742,58 @@ pub fn scene_from_resolved(
     schematic_output: SchematicHardcopySetup,
     metadata: HardcopySceneMetadata,
 ) -> Result<HardcopyScene, HardcopyRenderError> {
+    scene_with_overlays(
+        source,
+        mapping,
+        schematic_output,
+        metadata,
+        PlotOverlays::default(),
+    )
+}
+
+/// The scene a planned hardcopy draws: its mapping, its sheet output, and
+/// the plot overlays its decorations keep.
+pub fn scene_for_setup(
+    source: &ResolvedHardcopyDocument,
+    setup: &rspice_hardcopy_contract::HardcopySetup,
+    metadata: HardcopySceneMetadata,
+) -> Result<HardcopyScene, HardcopyRenderError> {
+    let decorations = setup.decorations();
+    scene_with_overlays(
+        source,
+        setup.print_mapping(),
+        setup.schematic(),
+        metadata,
+        PlotOverlays {
+            cursors_and_markers: decorations.includes_cursors_and_markers(),
+            notes: decorations.includes_notes(),
+        },
+    )
+}
+
+/// What a plot draws over its traces, each shown or left off.
+#[derive(Clone, Copy)]
+struct PlotOverlays {
+    cursors_and_markers: bool,
+    notes: bool,
+}
+
+impl Default for PlotOverlays {
+    fn default() -> Self {
+        Self {
+            cursors_and_markers: true,
+            notes: true,
+        }
+    }
+}
+
+fn scene_with_overlays(
+    source: &ResolvedHardcopyDocument,
+    mapping: &PrintMappingTable,
+    schematic_output: SchematicHardcopySetup,
+    metadata: HardcopySceneMetadata,
+    overlays: PlotOverlays,
+) -> Result<HardcopyScene, HardcopyRenderError> {
     let drawing_sheet_has_outside_content = source
         .schematic_drawing_sheet_has_outside_content()
         .map_err(|error| HardcopyRenderError::SourceConversion(error.to_string()))?;
@@ -757,7 +809,14 @@ pub fn scene_from_resolved(
         && schematic_output.extent() == SchematicHardcopyExtent::AuthoredDrawingSheet
         && schematic_output.outside_content() == OutsideSheetContentPolicy::ClipToAuthoredSheet
     {
-        return scene_from_clipped_aggregate(source, mapping, schematic_output, metadata, layout);
+        return scene_from_clipped_aggregate(
+            source,
+            mapping,
+            schematic_output,
+            metadata,
+            layout,
+            overlays,
+        );
     }
     let clipped_sheet_bounds = source
         .authored_sheet_bounds(schematic_output)
@@ -771,6 +830,8 @@ pub fn scene_from_resolved(
         mapping,
         schematic_output,
     );
+    compiler.cursors_and_markers = overlays.cursors_and_markers;
+    compiler.notes = overlays.notes;
     match source.semantic_document() {
         HardcopySemanticDocument::Schematic(schematic) => compiler.schematic(schematic)?,
         HardcopySemanticDocument::Symbol(symbol) => {
@@ -842,6 +903,7 @@ fn scene_from_clipped_aggregate(
         ContentExtent,
         SemanticPoint,
     )>,
+    overlays: PlotOverlays,
 ) -> Result<HardcopyScene, HardcopyRenderError> {
     let extent = source
         .content_extent_for_setup(schematic_output)
@@ -861,6 +923,8 @@ fn scene_from_clipped_aggregate(
             schematic_output,
         );
         compiler.mapping_ordinal = Some(child.ordinal);
+        compiler.cursors_and_markers = overlays.cursors_and_markers;
+        compiler.notes = overlays.notes;
         match child.document.as_ref() {
             HardcopySemanticDocument::Schematic(schematic) => compiler
                 .schematic_with_page_label(schematic, child.publication_page_label.as_deref())?,
