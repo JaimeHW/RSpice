@@ -1107,7 +1107,10 @@ fn quick_histogram_plot<W: AsRef<RetainedWaveform>>(
     ));
     captions.push(SemanticPlotCaption {
         text: QuickAbscissa::new(&variable.name, "", AxisScale::Linear).caption(),
-        position: SemanticPoint::new(PLOT_INSET_UM - 1_000, PLOT_INSET_UM + height + 2_600),
+        position: SemanticPoint::new(
+            PLOT_INSET_UM - X_CAPTION_GAP_UM,
+            PLOT_INSET_UM + height + 2_600,
+        ),
         anchor: SemanticCaptionAnchor::End,
     });
     let mut paths = Vec::new();

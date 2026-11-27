@@ -408,7 +408,7 @@ fn strip_axes(
     let foot = rects[last].bottom();
     captions.push(SemanticPlotCaption {
         text: abscissa.caption(),
-        position: SemanticPoint::new(PLOT_INSET_UM - 1_000, foot + 2_600),
+        position: SemanticPoint::new(PLOT_INSET_UM - X_CAPTION_GAP_UM, foot + 2_600),
         anchor: SemanticCaptionAnchor::End,
     });
     if let Some(anchor) = x_anchor {

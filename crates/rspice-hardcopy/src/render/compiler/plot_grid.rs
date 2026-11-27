@@ -13,7 +13,9 @@ use rspice_fonts::Role;
 const VALUE_TEXT_UM: u64 = 2_300;
 /// The room left of a frame a value can take: the inset, less the space
 /// before the frame and a little air at the edge.
-const VALUE_GUTTER_UM: u64 = crate::sources::PLOT_INSET_UM.unsigned_abs() - 1_700;
+const VALUE_GUTTER_UM: u64 = crate::sources::PLOT_INSET_UM.unsigned_abs()
+    - crate::sources::Y_VALUE_GAP_UM.unsigned_abs()
+    - 700;
 /// How far a unit set on its own line stands above its value's baseline.
 const UNIT_RISE_UM: i64 = 3_100;
 /// How far a value label's baseline stands below its tick.
@@ -107,16 +109,17 @@ impl SemanticSceneCompiler<'_> {
                         to
                     };
                     // A value at either end of the axis stands inside it, as
-                    // the sheet nudges it, clear of the abscissa's caption.
+                    // the sheet holds it in, clear of the abscissa's caption.
                     let (left, x) = (frame.x.micrometres(), foot.x.micrometres());
-                    let anchor = if x <= left + 1 {
-                        TextAnchor::Start
+                    let inset = crate::sources::X_EDGE_VALUE_INSET_UM;
+                    let (anchor, inset) = if x <= left + 1 {
+                        (TextAnchor::Start, inset)
                     } else if x + 1 >= left + frame.width.micrometres() {
-                        TextAnchor::End
+                        (TextAnchor::End, -inset)
                     } else {
-                        TextAnchor::Middle
+                        (TextAnchor::Middle, 0)
                     };
-                    (self.offset_scene_point(foot, 0, 2_600)?, anchor)
+                    (self.offset_scene_point(foot, inset, 2_600)?, anchor)
                 }
                 crate::sources::SemanticAxisKind::Vertical => {
                     let foot = if from.x.micrometres() < to.x.micrometres() {
@@ -140,7 +143,11 @@ impl SemanticSceneCompiler<'_> {
                         i64::try_from(inside).unwrap_or(0) - i64::try_from(y).unwrap_or(0)
                     });
                     (
-                        self.offset_scene_point(foot, -1_000, VALUE_DROP_UM as i64 + nudge)?,
+                        self.offset_scene_point(
+                            foot,
+                            -crate::sources::Y_VALUE_GAP_UM,
+                            VALUE_DROP_UM as i64 + nudge,
+                        )?,
                         TextAnchor::End,
                     )
                 }

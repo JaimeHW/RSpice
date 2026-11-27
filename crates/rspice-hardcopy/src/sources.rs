@@ -118,6 +118,18 @@ pub(crate) const SYMBOL_VIEW_PIN_NAME_OFFSET_UM: (i64, i64) = (1_000, -800);
 /// The height of the sans face a symbol printed alone letters pin names in.
 pub(crate) const SYMBOL_VIEW_PIN_NAME_SIZE_UM: u64 = 2_300;
 pub const PLOT_INSET_UM: i64 = 12_700;
+/// The screen's axis grammar in page measure: the screen letters a plot's
+/// values 11 px high and the page letters them 2.3 mm, so a pixel of the
+/// screen's axis row is this much of the page.
+const AXIS_PIXEL_UM: i64 = 2_300 / 11;
+/// The gutter's values end this far left of the frame: the screen's 7 px.
+pub const Y_VALUE_GAP_UM: i64 = 7 * AXIS_PIXEL_UM;
+/// The abscissa's caption ends this far left of the frame, in the gutter
+/// beside the values under it: the screen's 8 px.
+pub const X_CAPTION_GAP_UM: i64 = 8 * AXIS_PIXEL_UM;
+/// A value at either end of the abscissa stands this far inside the frame,
+/// as the screen holds it 2 px in, clear of the caption.
+pub const X_EDGE_VALUE_INSET_UM: i64 = 2 * AXIS_PIXEL_UM;
 
 /// Active result-document pane together with the immutable reference
 /// manifest that names its exact document revision and retained datasets.
