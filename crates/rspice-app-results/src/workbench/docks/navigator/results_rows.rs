@@ -2544,15 +2544,18 @@ fn paint_row_line(
     name_color: egui::Color32,
     right: Option<(&str, egui::Color32, bool)>,
 ) {
-    // The least room a row's detail is drawn in: a few characters and the
-    // ellipsis, under which it says nothing a reader could use.
-    const MIN_DETAIL_ROOM: f32 = 40.0;
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let mut name_right = rect.right() - 8.0;
     // A value yields to the name past half the row: a long bus member list
-    // must not push the identity out of its own row. A detail yields to the
-    // whole name and takes only the room it leaves, or none.
+    // must not push the identity out of its own row. A detail is drawn whole
+    // in the room the whole name leaves, or not at all: cut short, it reads
+    // as a fault rather than a fact.
     let right = right.and_then(|(text, color, reading)| {
+        let width = ui
+            .painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), color)
+            .size()
+            .x;
         let room = if reading {
             (name_right - left) * 0.5
         } else {
@@ -2563,13 +2566,10 @@ fn paint_row_line(
                 .x;
             name_right - left - name_width - 8.0
         };
-        (reading || room >= MIN_DETAIL_ROOM).then_some((text, color, reading, room.max(0.0)))
+        (reading || width <= room).then_some((text, color, reading, width, room.max(0.0)))
     });
-    if let Some((text, color, reading, room)) = right {
-        let galley = ui
-            .painter()
-            .layout_no_wrap(text.to_owned(), font.clone(), color);
-        let shown = if galley.size().x <= room {
+    if let Some((text, color, reading, width, room)) = right {
+        let shown = if width <= room {
             text.to_owned()
         } else {
             super::super::super::design_system::elide_text(ui, text, &font, room)
