@@ -294,7 +294,8 @@ fn the_document_plots_the_signals_ticked_in_the_form() {
 
 /// Several panes spread the ticked signals by unit, as a run opens with a
 /// strip per unit: the voltages fill the first pane and the currents the
-/// next, and in four panes the two past the units start empty.
+/// next, in the order the page lays them out, and in four panes the two
+/// past the units start empty: top left, top right, then the bottom row.
 #[test]
 fn panes_spread_the_ticked_signals_by_unit() {
     let mut app = RSpiceApp::test_instance();
@@ -328,9 +329,10 @@ fn panes_spread_the_ticked_signals_by_unit() {
             .content
             .visualization_document(document_id)
             .expect("the project owns it");
-        document
-            .panes()
-            .iter()
+        let mut ordered = document.panes().iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|pane| pane.order);
+        ordered
+            .into_iter()
             .map(|pane| {
                 document
                     .traces()

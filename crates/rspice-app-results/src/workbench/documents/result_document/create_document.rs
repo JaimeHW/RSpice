@@ -824,6 +824,19 @@ fn build_document(
             .expect("AddBoundPane transaction returns its stable pane identity");
         pane_ids.push(pane_id);
     }
+    // A page lays its panes out in their order, so the grid's panes are put
+    // in reading order: each was placed after its anchor, and the third,
+    // placed below the first, came before the second.
+    if resolved.layout == ResultDocumentLayout::EngineeringGrid {
+        document.transact(
+            document.revision(),
+            vec![DocumentEdit::ReorderPagePanes {
+                page_id,
+                pane_ids: pane_ids.clone(),
+            }],
+        )?;
+    }
+
     let horizontal_axes = pane_ids
         .iter()
         .filter_map(|pane_id| {
