@@ -47,6 +47,10 @@ pub enum Icon {
     ZoomOut,
     /// Zoom to fit.
     ZoomFit,
+    /// Maximize: two arrows pointing out to opposite corners.
+    Maximize,
+    /// Restore from maximized: two arrows pointing in from opposite corners.
+    Restore,
     /// Box-zoom tool: drag a region to magnify it.
     BoxZoom,
     /// Pan tool: drag the viewport.
@@ -113,6 +117,8 @@ impl Icon {
             Self::ZoomIn => "Zoom in",
             Self::ZoomOut => "Zoom out",
             Self::ZoomFit => "Zoom to fit",
+            Self::Maximize => "Maximize",
+            Self::Restore => "Restore",
             Self::BoxZoom => "Box zoom",
             Self::Pan => "Pan viewport",
             Self::Grid => "Grid",
@@ -187,6 +193,21 @@ impl Icon {
                 Line(&[[20.0, 9.0], [20.0, 4.0], [15.0, 4.0]]),
                 Line(&[[4.0, 15.0], [4.0, 20.0], [9.0, 20.0]]),
                 Line(&[[20.0, 15.0], [20.0, 20.0], [15.0, 20.0]]),
+            ],
+            // Arrows out to the top-right and bottom-left corners: unlike
+            // ZoomFit's four corner brackets, which frame what is drawn.
+            Icon::Maximize => &[
+                Line(&[[14.0, 4.0], [20.0, 4.0], [20.0, 10.0]]),
+                Line(&[[20.0, 4.0], [13.5, 10.5]]),
+                Line(&[[10.0, 20.0], [4.0, 20.0], [4.0, 14.0]]),
+                Line(&[[4.0, 20.0], [10.5, 13.5]]),
+            ],
+            // The same arrows turned in, their heads meeting near the middle.
+            Icon::Restore => &[
+                Line(&[[13.5, 4.5], [13.5, 10.5], [19.5, 10.5]]),
+                Line(&[[13.5, 10.5], [20.0, 4.0]]),
+                Line(&[[10.5, 19.5], [10.5, 13.5], [4.5, 13.5]]),
+                Line(&[[10.5, 13.5], [4.0, 20.0]]),
             ],
             // A marquee holding the region it captured: the outline is the
             // rubber band, the solid block the span it magnifies to.
