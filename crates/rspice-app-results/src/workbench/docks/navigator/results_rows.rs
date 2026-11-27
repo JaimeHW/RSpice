@@ -309,26 +309,17 @@ pub fn retained_result_artifacts(
                 None,
                 ResultViewer::Op,
             ),
-            AnalysisResultPayload::PoleZero {
-                poles,
-                zeros,
-                pole_evidence,
-                zero_evidence,
-                gain,
-            } => (
+            // The gain and each root set's qualification are the details
+            // pane's; the row says how many roots the plane draws.
+            AnalysisResultPayload::PoleZero { poles, zeros, .. } => (
                 "payload/pole-zero",
                 "Poles and zeros",
                 ResultArtifactKind::Array,
                 poles.len() + zeros.len() + 3,
-                Some(format!(
-                    "{} · poles {} · zeros {}",
-                    gain.map(|gain| {
-                        format!("gain {}", crate::ui::plot::fmt_si_significant(gain, "", 4))
-                    })
-                    .unwrap_or_else(|| "gain unavailable".to_owned()),
-                    pole_evidence.label(),
-                    zero_evidence.label()
-                )),
+                Some(match poles.len() + zeros.len() {
+                    1 => "1 root".to_owned(),
+                    roots => format!("{roots} roots"),
+                }),
                 ResultViewer::PoleZero,
             ),
             AnalysisResultPayload::PssFloquet {
