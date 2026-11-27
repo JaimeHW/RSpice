@@ -2,14 +2,13 @@
   "source_repository": "JaimeHW/RSpice-Cloud",
   "source_sha": "4a34fa0c0d1fbed906e56f701d499d6a0b1a5866",
   "crates": [
-    "rspice-pack",
     "rspice-cloud-domain",
     "rspice-cloud-contract",
     "rspice-cloud-client"
   ],
   "patch": {
     "path": "tools/cloud/vendor.patch",
-    "sha256": "30acc3f6efbc0491bc623198cbf3cba72f85d0bf13ea4b4bc4ebb253bc9fafcf"
+    "sha256": "9df16f0b4933b74091060d0ab59f30c631b4ac52f4d9b85290fb57d6548ad8c5"
   },
   "upstream_files": {
     "crates/rspice-cloud-client/Cargo.toml": "c8810b17e6b6b73779466491f53e5fe70cc7fab11150b12aa0eb1dfdb14aac04",
@@ -51,21 +50,7 @@
     "crates/rspice-cloud-domain/src/lib.rs": "a8d980e867d5e224b1561c3615267c2e07cc288f2519face326dbcf9e8588bae",
     "crates/rspice-cloud-domain/src/policy.rs": "a5760e2074cdee7bd0060ea0d4009ae9393f22a7361cd8c7c09d7725751fb6c1",
     "crates/rspice-cloud-domain/src/revision.rs": "df8ac9a9b8c9080a80db44a34374adbaed6bf3d1cd34a205c70f84c88d5fede7",
-    "crates/rspice-cloud-domain/src/simulation.rs": "88eac156a31b600faa69598d6c660b79966e3e02d5e1df4c083935e4c4c84971",
-    "crates/rspice-pack/Cargo.toml": "c9919ae3dddc6f91d0c675ff7dbfa56369619337c1a38f61328184e967a30d8c",
-    "crates/rspice-pack/src/canonical.rs": "ace2515e31072145372cd3e866fcd99396ea7079096d78563d8f1d2cb70180fc",
-    "crates/rspice-pack/src/error.rs": "3eaffe51c9fedf99478b72896ff2c4052306da6a3374eb51fe5e67cba91e8d44",
-    "crates/rspice-pack/src/lib.rs": "bcc09bb713596f9cf6700fab4602dadc451f06e09b666dea0546c1aab88030bd",
-    "crates/rspice-pack/src/limits.rs": "47dfee9478ead5f372449377d7e9b144482c512688c7e373376c6c30f1b491ce",
-    "crates/rspice-pack/src/main.rs": "8a1de90af92947db8e0b921d0d01024fc9df9afc964ac259aecfd8a0c8698281",
-    "crates/rspice-pack/src/manifest.rs": "7fe5ad98723c0c99dea6c348144cad249aadf91a1a728ce7d40d7e89a1757d1d",
-    "crates/rspice-pack/src/pack.rs": "0f54ce50d0944b9465531a6feaf824263674928c0f69f3f638d5859aad69ed59",
-    "crates/rspice-pack/src/packer.rs": "9c54910fcb60a7ba6e31310c81732fcfb9a57114a98c6a0738be64865b15aa1e",
-    "crates/rspice-pack/src/path.rs": "0fa3705d29a06d62c5f999bc4d364a40db3584ba4e3224ef8774206273a17181",
-    "crates/rspice-pack/src/signing.rs": "b915df03ccd77a1150ca05cf372a9909b401a84432de64ac15bddb05346c61d0",
-    "crates/rspice-pack/src/snapshot.rs": "2bcc0ce575bf8e98c4434f65d7473a92140871cca15c313cc6b25828a03e876e",
-    "crates/rspice-pack/src/testing.rs": "18906b71fda09b15382d08665c67aec0545da5742cc910745637d80009553cab",
-    "crates/rspice-pack/src/zip.rs": "49da02edde051a12e15ed1e0228357fbaaa4d418eb8e36f93d7046d87f1f0318"
+    "crates/rspice-cloud-domain/src/simulation.rs": "88eac156a31b600faa69598d6c660b79966e3e02d5e1df4c083935e4c4c84971"
   },
   "files": {
     "crates/rspice-cloud-client/Cargo.toml": "fcb1288b6866b4aa7f74ed5b9498647abcca6736d786677b7932f52db65670c8",
@@ -110,21 +95,6 @@
     "crates/rspice-cloud-domain/src/lib.rs": "a8d980e867d5e224b1561c3615267c2e07cc288f2519face326dbcf9e8588bae",
     "crates/rspice-cloud-domain/src/policy.rs": "a5760e2074cdee7bd0060ea0d4009ae9393f22a7361cd8c7c09d7725751fb6c1",
     "crates/rspice-cloud-domain/src/revision.rs": "df8ac9a9b8c9080a80db44a34374adbaed6bf3d1cd34a205c70f84c88d5fede7",
-    "crates/rspice-cloud-domain/src/simulation.rs": "88eac156a31b600faa69598d6c660b79966e3e02d5e1df4c083935e4c4c84971",
-    "crates/rspice-pack/Cargo.toml": "c9919ae3dddc6f91d0c675ff7dbfa56369619337c1a38f61328184e967a30d8c",
-    "crates/rspice-pack/README.md": "25e3dcac3779fe64ff83ed0d350bbe9f67fe622af06b92353ead86ac44e3a45a",
-    "crates/rspice-pack/src/canonical.rs": "ace2515e31072145372cd3e866fcd99396ea7079096d78563d8f1d2cb70180fc",
-    "crates/rspice-pack/src/error.rs": "3eaffe51c9fedf99478b72896ff2c4052306da6a3374eb51fe5e67cba91e8d44",
-    "crates/rspice-pack/src/lib.rs": "bcc09bb713596f9cf6700fab4602dadc451f06e09b666dea0546c1aab88030bd",
-    "crates/rspice-pack/src/limits.rs": "47dfee9478ead5f372449377d7e9b144482c512688c7e373376c6c30f1b491ce",
-    "crates/rspice-pack/src/main.rs": "8a1de90af92947db8e0b921d0d01024fc9df9afc964ac259aecfd8a0c8698281",
-    "crates/rspice-pack/src/manifest.rs": "7fe5ad98723c0c99dea6c348144cad249aadf91a1a728ce7d40d7e89a1757d1d",
-    "crates/rspice-pack/src/pack.rs": "0f54ce50d0944b9465531a6feaf824263674928c0f69f3f638d5859aad69ed59",
-    "crates/rspice-pack/src/packer.rs": "9c54910fcb60a7ba6e31310c81732fcfb9a57114a98c6a0738be64865b15aa1e",
-    "crates/rspice-pack/src/path.rs": "0fa3705d29a06d62c5f999bc4d364a40db3584ba4e3224ef8774206273a17181",
-    "crates/rspice-pack/src/signing.rs": "b915df03ccd77a1150ca05cf372a9909b401a84432de64ac15bddb05346c61d0",
-    "crates/rspice-pack/src/snapshot.rs": "2bcc0ce575bf8e98c4434f65d7473a92140871cca15c313cc6b25828a03e876e",
-    "crates/rspice-pack/src/testing.rs": "18906b71fda09b15382d08665c67aec0545da5742cc910745637d80009553cab",
-    "crates/rspice-pack/src/zip.rs": "49da02edde051a12e15ed1e0228357fbaaa4d418eb8e36f93d7046d87f1f0318"
+    "crates/rspice-cloud-domain/src/simulation.rs": "88eac156a31b600faa69598d6c660b79966e3e02d5e1df4c083935e4c4c84971"
   }
 }

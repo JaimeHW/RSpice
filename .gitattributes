@@ -65,7 +65,6 @@ crates/rspice-veriloga-runtime/src/** text eol=lf
 # Vendored RSpice Cloud trees are fingerprinted by
 # tools/cloud/vendor-manifest.json (LF bytes); a CRLF checkout would fail the
 # integrity gate.
-crates/rspice-pack/** text eol=lf
 crates/rspice-cloud-domain/** text eol=lf
 crates/rspice-cloud-contract/** text eol=lf
 crates/rspice-cloud-client/** text eol=lf

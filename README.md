@@ -512,7 +512,6 @@ use faer.
 | Crate | Purpose |
 | :--- | :--- |
 | [`rspice-engine-adapter`](crates/rspice-engine-adapter) | Engine executor for the cloud worker protocol |
-| [`rspice-pack`](crates/rspice-pack) | Signed, immutable model pack format |
 | [`rspice-cloud-domain`](crates/rspice-cloud-domain), [`rspice-cloud-contract`](crates/rspice-cloud-contract), [`rspice-cloud-client`](crates/rspice-cloud-client) | The RSpice Cloud client, vendored from its own repository |
 | [`rspice-publication-contract`](crates/rspice-publication-contract) | Versioned schema for sealed circuit publications |
 | [`rspice-publish`](crates/rspice-publish) | Renderer from publication snapshots to page bundles |

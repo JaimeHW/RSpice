@@ -1,6 +1,6 @@
 """The vendored RSpice Cloud crates must match their sync manifest.
 
-crates/rspice-pack and crates/rspice-cloud-{domain,contract,client} are exact
+crates/rspice-cloud-{domain,contract,client} are exact
 copies from the RSpice-Cloud repository plus a reviewed downstream patch,
 pinned by tools/cloud/vendor-manifest.json. API integration tests live in RSpice-Cloud,
 where they run against the real API handlers; this workspace only compiles and
@@ -55,7 +55,6 @@ class CloudClientVendorTests(unittest.TestCase):
         self.assertEqual(
             self.manifest["crates"],
             [
-                "rspice-pack",
                 "rspice-cloud-domain",
                 "rspice-cloud-contract",
                 "rspice-cloud-client",
