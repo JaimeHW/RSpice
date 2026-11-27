@@ -90,8 +90,6 @@ use browser_history::{
     initialize_browser_surface_navigation, synchronize_browser_surface_navigation,
 };
 #[cfg(target_arch = "wasm32")]
-use rspice_app_models::workbench::models::pack_persistence;
-#[cfg(target_arch = "wasm32")]
 use rspice_app_models::workbench::models::pdk_persistence;
 
 pub(crate) use dialogs::state::HelpCenterPage;
@@ -382,11 +380,6 @@ impl RSpiceApp {
         initialize_browser_surface_navigation(&mut state, &cc.egui_ctx);
         #[cfg(target_arch = "wasm32")]
         pdk_persistence::initialize_browser_pdk_persistence(&cc.egui_ctx);
-        // Started here and taken by a later frame. The store this reads into
-        // is opened empty below, because a session that waited for storage to
-        // answer would be a blank workspace for as long as it took.
-        #[cfg(target_arch = "wasm32")]
-        pack_persistence::initialize_browser_pack_restore(&cc.egui_ctx);
 
         // A license file on disk backfills a session that holds none.
         #[cfg(not(target_arch = "wasm32"))]
