@@ -1287,6 +1287,28 @@ def import_workers(browser):
     return browser.script("return window.__rspiceImportWorkers || null;")
 
 
+def capture_console_and_notifications(browser, name):
+    """Keep the Console's log and the open notifications as `name`-console and
+    `name`-notifications, for a step that stalled with nothing on the screen saying why. What
+    cannot be opened is skipped: the stall is the failure reported."""
+    try:
+        shown = controls(browser.snapshot())
+        if any(c["label"] == "Expand console" and c["role"] == "button" for c in shown):
+            browser.click("Expand console", "button")
+        console = wait_for(lambda: [c for c in controls(browser.snapshot())
+                                    if c["role"] == "tab" and c["label"] == "Console"],
+                           "the Console tab")
+        click_control(browser, console[0])
+        browser.capture(f"{name}-console")
+        bell = [c for c in controls(browser.snapshot())
+                if c["role"] == "button" and c["label"].startswith("Notifications")]
+        if bell:
+            click_control(browser, bell[0])
+            browser.capture(f"{name}-notifications")
+    except Exception as error:
+        print(f"{name}: the Console and notifications were not kept: {error}")
+
+
 def rawfile_import_streams(browser):
     """A binary rawfile import streams in an import worker of its own: the page starts it when
     the import starts, relays the rows it reads to the results store, and lets it go when the
@@ -1355,7 +1377,8 @@ def rawfile_import_streams(browser):
             browser.click(step, "button")
     finally:
         browser.cdp("Page.setInterceptFileChooserDialog", {"enabled": False})
-    wait_for(lambda: not any(c["label"] == "Import result dataset" and c["role"] == "dialog"
+    # The review is a window, and stays open, showing the commit, until the run is added.
+    wait_for(lambda: not any(c["label"] == "Import result dataset" and c["role"] == "window"
                              for c in controls(browser.snapshot())), "the import committed", 60)
     browser.capture("rawfile-imported")
     workers = import_workers(browser)
@@ -1375,7 +1398,14 @@ def rawfile_import_streams(browser):
         raise AssertionError(f"The import worker outlived its import: {running}")
     browser.click("Schematic", "button")
     choose_command(browser, "Save all")
-    wait_for(lambda: not unsaved(browser.snapshot()), "the project saved with the imported run", 60)
+    try:
+        wait_for(lambda: not unsaved(browser.snapshot()), "the project saved with the imported run",
+                 60)
+    except AssertionError:
+        # Main's CI stalled here on 11-27 with one notification nothing kept; keep what the
+        # Console and the notifications say.
+        capture_console_and_notifications(browser, "rawfile-save-stalled")
+        raise
     project = json.loads(next(iter(canonical_projects(browser).values())))
     if len(segments_named(project)) != 1:
         raise AssertionError("The imported run does not read one results store segment")
