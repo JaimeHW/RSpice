@@ -513,11 +513,9 @@ pub fn show(
     // The map fills its region with σ and jω on one scale. Twice: the Y
     // gutter is as wide as the labels of the range it shows.
     let mut ranges = ((x0, x1), (y0, y1));
-    // The linear plane names its ordinate above it as the abscissa is named
+    // Either plane names its ordinate above it as the abscissa is named
     // beside its values, quantity then unit, so both axes read alike.
-    if matches!(plane, Plane::Linear) {
-        spec = spec.with_y_without_unit("jω · rad/s");
-    }
+    spec = spec.with_y_without_unit("jω · rad/s");
     for _ in 0..2 {
         let plot = plot::plot_rect(&plot_ui, &spec).size();
         ranges = plot::equal_scale_ranges(plot, (x0, x1), (y0, y1));
@@ -528,10 +526,11 @@ pub fn show(
                 let (sigma, omega) = crate::presentation::plane_axes(ranges, ("rad/s", ""));
                 (sigma.with_label("σ"), omega.with_label("jω"))
             }
-            Plane::Logarithmic { .. } => (
-                plane.axis(ranges.0.0, ranges.0.1, "σ"),
-                plane.axis(ranges.1.0, ranges.1.1, "jω"),
-            ),
+            Plane::Logarithmic { .. } => {
+                let mut omega = plane.axis(ranges.1.0, ranges.1.1, "jω");
+                omega.unit.clear();
+                (plane.axis(ranges.0.0, ranges.0.1, "σ"), omega)
+            }
         };
     }
     spec.bands = vec![plot::Band {
@@ -540,12 +539,10 @@ pub fn show(
     }];
 
     let mut response = plot::show(&mut plot_ui, &spec, cache, None, None);
-    // The linear plane's ordinate is in rad/s as its abscissa is; its
-    // caption says so rather than its ticks, so the plot reports the unit
-    // for the range field to write.
-    if plane == Plane::Linear {
-        response.units.1 = "rad/s".to_owned();
-    }
+    // The ordinate is in rad/s as the abscissa is; its caption says so
+    // rather than its ticks, so the plot reports the unit for the range
+    // field to write.
+    response.units.1 = "rad/s".to_owned();
     if response.view.any() {
         let change = crate::presentation::equal_scale_view_change(
             ranges.0,
