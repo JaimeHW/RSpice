@@ -248,16 +248,18 @@ impl DerivedSeries {
     /// was refused, keeping nothing: a build after it has arrived asks again. While an axis held
     /// in memory is classified away from the frame, the curve keeps the shape it had before the
     /// data changed, when that shape lies within the axis, and has none otherwise: a running
-    /// transient's axis grown by a tick draws what it drew until its new shape arrives.
+    /// transient's axis grown by a tick draws what it drew until its new shape arrives. `held`
+    /// as for [`Self::axis_shape`].
     pub fn axis_shape_or(
         &mut self,
         key: u64,
         x: &SharedWaveformValues,
+        held: bool,
     ) -> Option<std::sync::Arc<rspice_results::sampling::SweepShape>> {
         if let Some(hit) = self.shapes.get(&key) {
             return Some(std::sync::Arc::clone(hit));
         }
-        let Some(shape) = self.axis_shape(x) else {
+        let Some(shape) = self.axis_shape(x, held) else {
             if x.is_stored() {
                 return None;
             }
@@ -275,11 +277,16 @@ impl DerivedSeries {
     /// [`Self::axis_shape_or`] finds it, kept for the build alone: every
     /// curve of the build that shares the axis shares its structure. An axis
     /// held in memory is classified here while the build has classified fewer
-    /// than [`FRAME_AXIS_SAMPLES`], and on a thread past them: `None` until it
-    /// has arrived.
+    /// than [`FRAME_AXIS_SAMPLES`], and past them on a thread, `None` until it
+    /// has arrived, when it is `held`, a column of the run, the same from one
+    /// build to the next, so that a later build finds its shape, and at least
+    /// a block of the store long. An axis a build projects is new to every
+    /// build, as are the short columns of the sheets that derive an analysis
+    /// as they draw it: each is classified where it is met.
     pub fn axis_shape(
         &mut self,
         x: &SharedWaveformValues,
+        held: bool,
     ) -> Option<std::sync::Arc<rspice_results::sampling::SweepShape>> {
         use rspice_results::sampling::SweepShape;
         let sharing = x.sharing_key();
@@ -291,7 +298,9 @@ impl DerivedSeries {
         } else if let Some(samples) = x.in_memory() {
             if let Some(shape) = self.classifying.arrived(x) {
                 shape
-            } else if self.classified_here + samples.len() <= FRAME_AXIS_SAMPLES
+            } else if !held
+                || samples.len() < rspice_results::waveform::BLOCK_SAMPLES
+                || self.classified_here + samples.len() <= FRAME_AXIS_SAMPLES
                 || !self.classifying.ask(x)
             {
                 self.classified_here += samples.len();

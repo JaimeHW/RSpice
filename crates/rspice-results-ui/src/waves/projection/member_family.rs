@@ -343,6 +343,7 @@ pub(super) fn member_traces<A: AsRef<AnalysisResult<RetainedTrace>>>(
                     false,
                 ),
                 &x,
+                true,
             );
             traces.push(StripTrace {
                 waveform_index: trace.waveform_index,

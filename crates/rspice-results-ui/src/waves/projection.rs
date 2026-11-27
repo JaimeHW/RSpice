@@ -327,6 +327,7 @@ fn append_projected_traces(
                 false,
             ),
             &projection.x,
+            SharedWaveformValues::ptr_eq(&projection.x, source.source_x),
         );
         traces.push(projected_trace(
             context,
@@ -446,7 +447,9 @@ fn column_traces(
             {
                 return Arc::clone(shape);
             }
-            let shape = derived.axis_shape(x).unwrap_or_else(|| Arc::clone(&empty));
+            let shape = derived
+                .axis_shape(x, true)
+                .unwrap_or_else(|| Arc::clone(&empty));
             before = Some((x, Arc::clone(&shape)));
             shape
         })
@@ -1146,6 +1149,7 @@ pub fn build_models<A: AsRef<AnalysisResult<RetainedTrace>>, R: AsRef<Simulation
                         true,
                     ),
                     &projected.0,
+                    SharedWaveformValues::ptr_eq(&projected.0, &overlay_waveform.x),
                 );
                 projected_overlay_traces.push(StripTrace {
                     waveform_index: overlay_index,
@@ -1384,10 +1388,16 @@ fn displayed_phase_series(
 /// The structure of `x`, the axis of the curve `key` names. A stored axis still being read off
 /// the frame has none yet, nor has a long axis held in memory while it is classified away from
 /// it, and the curve stands as empty, or as it stood before the data changed, until a build
-/// after it has arrived ([`crate::derived::DerivedSeries::axis_shape_or`]).
-fn curve_shape(derived: &mut DerivedSeries, key: u64, x: &SharedWaveformValues) -> Arc<SweepShape> {
+/// after it has arrived ([`crate::derived::DerivedSeries::axis_shape_or`]). `held` when `x` is
+/// the run's own column rather than a projection the build made of it.
+fn curve_shape(
+    derived: &mut DerivedSeries,
+    key: u64,
+    x: &SharedWaveformValues,
+    held: bool,
+) -> Arc<SweepShape> {
     derived
-        .axis_shape_or(key, x)
+        .axis_shape_or(key, x, held)
         .unwrap_or_else(|| Arc::new(SweepShape::of(&[])))
 }
 

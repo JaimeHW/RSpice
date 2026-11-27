@@ -349,7 +349,9 @@ fn idle_workspace_work(
     let settled = (0..3_000).any(|_| {
         workspace_frame(&ctx, state, &mut controller, document_id);
         let busy = rspice_ui_kit::plot::drawing_off_frame(&ctx)
-            || rspice_results_ui::waves::readout::measuring_off_frame(&ctx);
+            || rspice_results_ui::waves::readout::measuring_off_frame(&ctx)
+            || rspice_results_ui::derived::classifying_off_frame()
+            || state.results.results.validating_off_frame();
         if busy {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }

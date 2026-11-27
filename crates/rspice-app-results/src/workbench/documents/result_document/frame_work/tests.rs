@@ -561,8 +561,27 @@ fn steady_state_work(
 ) -> WorkCounts {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    // The first frame is allowed to build the memos the rest read.
-    frame(&ctx, state, &mut surface);
+    // The first frame is allowed to build the memos the rest read, and so
+    // are the frames that take what it handed away: a long axis classified,
+    // or a large analysis validated, off the frame, and what taking one hands
+    // away in turn. The idle frames start after a few frames in a row with
+    // nothing under way before or after them.
+    let busy = |state: &ResultsTestHost| {
+        rspice_results_ui::derived::classifying_off_frame()
+            || state.results.results.validating_off_frame()
+    };
+    let mut quiet = 0;
+    for _ in 0..3_000 {
+        let before = busy(state);
+        frame(&ctx, state, &mut surface);
+        quiet = if before || busy(state) { 0 } else { quiet + 1 };
+        if quiet == 3 {
+            break;
+        }
+        if quiet == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
     let baseline = WorkCounts::reset();
     for _ in 0..IDLE_FRAMES {
         frame(&ctx, state, &mut surface);

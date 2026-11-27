@@ -3,9 +3,11 @@
 //! A curve's shape is one pass over its X axis, about ten nanoseconds a sample unoptimized. A run
 //! held in memory with an axis of a million samples to each of its signals spent the frame that
 //! plotted it classifying them: a build classifies the axes it meets itself until it has passed
-//! over [`FRAME_AXIS_SAMPLES`], and hands the rest to a thread, which wakes the window when each
-//! is classified. Their curves stand empty until a build after that, as the curves on a stored
-//! axis do while the reader service reads it.
+//! over [`FRAME_AXIS_SAMPLES`], and hands the rest of the run's own axes to a thread, which wakes
+//! the window when each is classified. Their curves stand empty until a build after that, as the
+//! curves on a stored axis do while the reader service reads it. An axis a build projects is new
+//! to every build, so no later build could find its shape, and an axis shorter than a block of
+//! the store costs less than the thread: each is classified where it is met.
 
 use rspice_results::sampling::SweepShape;
 use rspice_results::waveform::{SharedWaveformValues, SharingKey};
