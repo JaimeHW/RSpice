@@ -17,7 +17,7 @@
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
 use rspice_results::number_format::{
-    fmt_register_change, fmt_register_reading, with_explicit_sign,
+    fmt_register_change, fmt_register_reading, snapped_to_spread, with_explicit_sign,
 };
 use rspice_results::renderability::{
     PolarQuantitySource, polar_quantity_source, polar_reference_impedances,
@@ -1259,9 +1259,7 @@ pub fn right_panel(
 fn row_hover(name: &str) -> Option<&'static str> {
     match name {
         "Phase" => Some("Principal value; the Δ column unwraps it before differencing."),
-        "Group delay" => Some(
-            "At A and B, −dφ/2πdf from the neighbouring samples; Δ is the A→B secant −Δφ/2πΔf.",
-        ),
+        "Group delay" => Some("At A and B, −dφ/2πdf from the neighbouring samples; Δ is B − A."),
         _ => None,
     }
 }
@@ -1327,9 +1325,14 @@ fn register_rows(
         let delta = unwrapped_phase_delta(locus, a, b);
         with_explicit_sign(delta, angle_readout(policy, delta, digits))
     });
+    // B − A as on every other row; a constant delay differs by its rounding.
     let group_delay = pair.map_or_else(dash, |(a, b)| {
-        group_delay_seconds(locus, a, b)
-            .map_or_else(dash, |value| fmt_column_reading(value, "s", digits))
+        group_delay_at(locus, a)
+            .zip(group_delay_at(locus, b))
+            .map_or_else(dash, |(first, second)| {
+                let spread = first.abs().max(second.abs());
+                change(snapped_to_spread(second - first, spread), "s")
+            })
     });
 
     vec![
@@ -1804,7 +1807,7 @@ mod tests {
     }
 
     /// Group delay at each cursor is the local phase slope, so a constant
-    /// delay reads the same at A, at B and across them.
+    /// delay reads the same at A and at B, and no change across them.
     #[test]
     fn group_delay_is_read_at_each_cursor_from_the_local_phase_slope() {
         let locus = ramp_locus(3.0, 601);
@@ -1826,7 +1829,7 @@ mod tests {
         let group = rows.iter().find(|row| row.0 == "Group delay").expect("row");
         assert_eq!(group.1, fmt_column_reading(expected, "s", 4));
         assert_eq!(group.2, group.1);
-        assert_eq!(group.3, group.1);
+        assert_eq!(group.3, fmt_column_reading(0.0, "s", 4));
     }
 
     fn ramp_locus(turns: f64, points: usize) -> PolarLocus {
