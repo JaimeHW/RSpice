@@ -732,7 +732,13 @@ fn render_pane(
     let is_active = pane.id.get() == active_pane_id;
     let viewer = pane_viewer(is_active, active_viewer, &pane.viewer_id);
     persistent::pane_frame(ui, pane.id, |ui| {
-        let activated_pane_id = pane_header(ui, state, pane, viewer, is_active);
+        // A press anywhere in a pane makes it the one worked in, which the
+        // inspector's Active pane names; the pane needs no band to be told by.
+        let rect = ui.max_rect();
+        let activated_pane_id = (!is_active
+            && persistent::pressed_in(ui, rect)
+            && select_pane_context(state, pane).is_ok())
+        .then_some(pane.id.get());
         let digits = state
             .model
             .workspace
@@ -762,6 +768,7 @@ fn render_pane(
             Layout::top_down(Align::Min),
             |ui| render_pane_viewer(ui, state, run_controller, pane, viewer),
         );
+        pane_menu(ui, state, pane, rect);
         activated_pane_id
     })
 }
@@ -837,59 +844,27 @@ fn pane_viewer(
     }
 }
 
-/// Draw one pane's header and carry out what the reader asked of it. Returns
-/// the pane's serial when the reader activated it.
-fn pane_header(
-    ui: &mut Ui,
-    state: &mut ResultsParts<'_>,
-    pane: &PaneProjection,
-    viewer: Option<ResultViewer>,
-    is_active: bool,
-) -> Option<u64> {
+/// Carry out what the reader asked of the pane through the menu on the rows
+/// of the strips it drew within `rect`.
+fn pane_menu(ui: &Ui, state: &mut ResultsParts<'_>, pane: &PaneProjection, rect: egui::Rect) {
     let menu = super::document_edit::pane_menu(state.results_reads(), pane.document_id, pane.id);
-    let viewer_title = viewer.map_or_else(
-        || pane.viewer_id.as_str(),
-        |viewer| {
-            viewer_document(viewer.viewer_document_id())
-                .map_or(viewer.tab_label(), |document| document.title)
-        },
-    );
-    let action = persistent::pane_header(
-        ui,
-        &pane.title,
-        viewer_title,
-        is_active,
-        persistent::PaneCounts {
-            axes: pane.axes.len(),
-            traces: pane.traces.len(),
-            cursors: pane.cursors.len(),
-            markers: pane.markers.len(),
-            measurements: pane.measurements.len(),
-            annotations: pane.annotations.len(),
-        },
-        menu,
-    );
-    match action? {
-        persistent::PaneHeaderAction::Activate => select_pane_context(state, pane)
-            .is_ok()
-            .then_some(pane.id.get()),
-        persistent::PaneHeaderAction::MoveEarlier => {
+    let Some(action) = persistent::pane_menu(ui, rect, menu) else {
+        return;
+    };
+    match action {
+        persistent::PaneAction::MoveEarlier => {
             let direction = super::document_edit::PaneMove::Earlier;
             super::document_edit::move_pane(state, pane.document_id, pane.id, direction);
-            None
         }
-        persistent::PaneHeaderAction::MoveLater => {
+        persistent::PaneAction::MoveLater => {
             let direction = super::document_edit::PaneMove::Later;
             super::document_edit::move_pane(state, pane.document_id, pane.id, direction);
-            None
         }
-        persistent::PaneHeaderAction::ToggleLinkX => {
+        persistent::PaneAction::ToggleLinkX => {
             super::document_edit::toggle_pane_x_link(state, pane.document_id, pane.id);
-            None
         }
-        persistent::PaneHeaderAction::Remove => {
+        persistent::PaneAction::Remove => {
             super::document_edit::remove_pane(state, pane.document_id, pane.id);
-            None
         }
     }
 }

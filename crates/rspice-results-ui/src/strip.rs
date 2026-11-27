@@ -308,6 +308,48 @@ impl LegendGlyph {
     }
 }
 
+/// Where the strip header rows drawn in one pass stand, by the id each row
+/// answers to.
+#[derive(Clone, Default)]
+struct HeaderRows {
+    pass: u64,
+    rows: Vec<(egui::Id, Rect)>,
+}
+
+/// The memory key the rows of a pass are kept under.
+const HEADER_ROWS: &str = "rspice.results.strip-header-rows";
+
+fn note_header_row(ctx: &egui::Context, id: egui::Id, rect: Rect) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| {
+        let noted = data.get_temp_mut_or_default::<HeaderRows>(egui::Id::new(HEADER_ROWS));
+        if noted.pass != pass {
+            *noted = HeaderRows {
+                pass,
+                rows: Vec::new(),
+            };
+        }
+        noted.rows.push((id, rect));
+    });
+}
+
+/// The rows of the strip headers drawn this pass within `within`, each with
+/// what the reader did to it: where whatever holds the strips gives their
+/// rows a menu of its own. A row answers behind its chips and actions, so a
+/// right-click on its analysis chip or between its controls is the row's.
+pub fn header_rows(ctx: &egui::Context, within: Rect) -> Vec<egui::Response> {
+    let pass = ctx.cumulative_pass_nr();
+    let rows = ctx
+        .data(|data| data.get_temp::<HeaderRows>(egui::Id::new(HEADER_ROWS)))
+        .filter(|noted| noted.pass == pass)
+        .map(|noted| noted.rows)
+        .unwrap_or_default();
+    rows.into_iter()
+        .filter(|(_, rect)| within.contains(rect.center()))
+        .filter_map(|(id, _)| ctx.read_response(id))
+        .collect()
+}
+
 /// What strip-header interactions happened this frame.
 #[derive(Default)]
 pub struct StripHeaderResponse {
@@ -497,6 +539,11 @@ impl<'a> StripHeader<'a> {
         if !ui.is_rect_visible(rect) {
             return out;
         }
+        // The row takes presses of its own, under everything drawn on it
+        // and out of the keyboard's way: see [`header_rows`].
+        let row = ui.interact(rect, self.id_salt.with("strip-header-row"), Sense::CLICK);
+        row.widget_info(|| WidgetInfo::labeled(WidgetType::Other, ui.is_enabled(), self.kind));
+        note_header_row(ui.ctx(), row.id, rect);
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, c.bg_panel);
         painter.hline(

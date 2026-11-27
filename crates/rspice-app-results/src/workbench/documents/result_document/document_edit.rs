@@ -1,6 +1,6 @@
 //! Edits the result viewer makes to the project result document it shows.
 //!
-//! The pane header's context menu and the docbar's pickers lead here, as do
+//! A pane's menu and the docbar's pickers lead here, as do
 //! the small forms of [`rspice_results_ui::document_dialogs`]. Every edit is
 //! one transaction against the document at its current revision. A form keeps
 //! only its draft: what it offers is resolved from the retained datasets on
@@ -437,7 +437,7 @@ fn add_pane(state: &mut ResultsParts<'_>, draft: &AddPaneDraft) -> Result<(), St
     Ok(())
 }
 
-/// The context-menu edits one pane's header offers.
+/// The edits one pane's menu, on its strips' rows, offers.
 pub fn pane_menu(
     state: ResultsReads<'_>,
     document_id: ResultDocumentId,

@@ -6,7 +6,6 @@ use rspice_results::visualization_document::{
     Annotation, FamilyMeasurementSummary, FamilyStatistic, PageLayout, PaneId,
 };
 use rspice_ui_kit::{
-    panels::painted_label,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
 };
@@ -295,22 +294,9 @@ fn percent(share: f64) -> String {
     }
 }
 
-/// Retained entity counts shown in the pane header's detail.
-#[derive(Clone, Copy)]
-pub struct PaneCounts {
-    pub axes: usize,
-    pub traces: usize,
-    pub cursors: usize,
-    pub markers: usize,
-    pub measurements: usize,
-    pub annotations: usize,
-}
-
-/// What the reader asked of one pane through its header.
+/// What the reader asked of one pane through its menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaneHeaderAction {
-    /// Work in this pane.
-    Activate,
+pub enum PaneAction {
     /// Move this pane one place earlier in its page's order.
     MoveEarlier,
     /// Move this pane one place later in its page's order.
@@ -321,7 +307,7 @@ pub enum PaneHeaderAction {
     Remove,
 }
 
-/// Which of the header's context-menu edits the host can carry out.
+/// Which of the pane menu's edits the host can carry out.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PaneMenu {
     /// The pane has a predecessor on its page to change places with.
@@ -335,113 +321,49 @@ pub struct PaneMenu {
     pub removable: bool,
 }
 
-/// Return the reader's request; the host validates and applies it.
-pub fn pane_header(
-    ui: &mut Ui,
-    display_title: &str,
-    viewer_title: &str,
-    is_active: bool,
-    counts: PaneCounts,
-    menu: PaneMenu,
-) -> Option<PaneHeaderAction> {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 25.0), Sense::click());
-    // The header is interface chrome on the canvas-filled pane: an opaque
-    // panel, the same for every pane. The active pane's title reads in full
-    // text and the others' dim, which is mark enough without a wash.
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
-    ui.scope_builder(
-        UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(8.0, 3.0)))
-            .layout(Layout::left_to_right(Align::Center)),
-        |ui| {
-            // Painted, not labels: a label over the tab takes the presses on its text.
-            painted_label(
-                ui,
-                RichText::new(display_title)
-                    .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                    .color(if is_active {
-                        t.color.text
-                    } else {
-                        t.color.text_dim
-                    }),
-                egui::TextWrapMode::Extend,
-            );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                painted_label(
-                    ui,
-                    // Secondary text: the tertiary tone reads too faint on
-                    // the header panel in the dark interface.
-                    RichText::new(viewer_title)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                    egui::TextWrapMode::Extend,
-                );
-            });
-        },
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    let tab_label = format!("{display_title}, {viewer_title}");
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            ui.is_enabled(),
-            is_active,
-            tab_label.clone(),
-        )
-    });
+/// The pane's menu, on the row of every strip the pane drew inside `rect`:
+/// a right-click on the row, or on the analysis chip it starts with, offers
+/// to move the pane, link its X axis, or remove it. Returns what the reader
+/// chose; the host validates and applies it.
+pub fn pane_menu(ui: &Ui, rect: Rect, menu: PaneMenu) -> Option<PaneAction> {
     let mut action = None;
-    crate::context_menu::context_menu(&response, |ui| {
-        let mut item = |ui: &mut Ui, enabled: bool, label: &str, chosen: PaneHeaderAction| {
-            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                action = Some(chosen);
-                ui.close();
-            }
-        };
-        item(
-            ui,
-            menu.earlier,
-            "Move pane earlier",
-            PaneHeaderAction::MoveEarlier,
-        );
-        item(
-            ui,
-            menu.later,
-            "Move pane later",
-            PaneHeaderAction::MoveLater,
-        );
-        ui.separator();
-        item(
-            ui,
-            menu.x_link.is_some(),
-            if menu.x_link == Some(true) {
-                "Unlink X axis"
-            } else {
-                "Link X axis"
-            },
-            PaneHeaderAction::ToggleLinkX,
-        );
-        ui.separator();
-        item(ui, menu.removable, "Remove pane", PaneHeaderAction::Remove);
-    });
-    let clicked = response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(format!(
-            "{} axes · {} traces · {} cursors · {} markers · {} measurements · {} annotations",
-            counts.axes,
-            counts.traces,
-            counts.cursors,
-            counts.markers,
-            counts.measurements,
-            counts.annotations
-        ))
-        .clicked();
-    action.or(clicked.then_some(PaneHeaderAction::Activate))
+    for row in crate::strip::header_rows(ui.ctx(), rect) {
+        crate::context_menu::context_menu(&row, |ui| {
+            let mut item = |ui: &mut Ui, enabled: bool, label: &str, chosen: PaneAction| {
+                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                    action = Some(chosen);
+                    ui.close();
+                }
+            };
+            item(
+                ui,
+                menu.earlier,
+                "Move pane earlier",
+                PaneAction::MoveEarlier,
+            );
+            item(ui, menu.later, "Move pane later", PaneAction::MoveLater);
+            ui.separator();
+            item(
+                ui,
+                menu.x_link.is_some(),
+                if menu.x_link == Some(true) {
+                    "Unlink X axis"
+                } else {
+                    "Link X axis"
+                },
+                PaneAction::ToggleLinkX,
+            );
+            ui.separator();
+            item(ui, menu.removable, "Remove pane", PaneAction::Remove);
+        });
+    }
+    action
+}
+
+/// Whether a press this frame landed in the pane at `rect` with nothing
+/// over it there: the press that makes a pane the one worked in.
+pub fn pressed_in(ui: &Ui, rect: Rect) -> bool {
+    ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(rect)
 }
 
 /// State why Latest tracking cannot advance while preserving the retained view.
