@@ -341,7 +341,8 @@ fn run_input_facts(ui: &mut Ui, reads: &SourceInspector<'_>, run: u64, point: Op
         } else {
             receipt
                 .simulation_plan_id()
-                .and_then(|id| plan_name(reads.model, id))
+                .and_then(|id| reads.model.sim_setup.plan_name(id))
+                .map(|name| name.as_str().to_owned())
                 .unwrap_or_else(|| messages.text(MessageId::NetlistInspectorRanPlan))
         };
         property_row(ui, &messages.text(MessageId::NetlistInspectorRan), &ran);
@@ -355,23 +356,6 @@ fn run_input_facts(ui: &mut Ui, reads: &SourceInspector<'_>, run: u64, point: Op
             &finished,
         );
     }
-}
-
-/// The name of the plan `id`, the active one or one put away; `None` when
-/// the project no longer has it.
-fn plan_name(model: &Model, id: crate::product::SimulationPlanId) -> Option<String> {
-    let setup = &model.sim_setup;
-    if setup
-        .stable_analysis_plan()
-        .is_ok_and(|plan| plan.id() == id)
-    {
-        return Some(setup.active_plan_name().as_str().to_owned());
-    }
-    setup
-        .inactive_plans()
-        .iter()
-        .find(|plan| plan.id() == id)
-        .map(|plan| plan.name().as_str().to_owned())
 }
 
 /// An instant on the reader's clock, `2026-10-16 14:03:12`; `None` when the

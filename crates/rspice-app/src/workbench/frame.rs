@@ -712,7 +712,8 @@ fn run_notice(state: &AppState, run_id: rspice_app_state::product::RunId) -> Opt
     let plan = run
         .prepared_receipt()
         .and_then(|receipt| receipt.simulation_plan_id())
-        .and_then(|plan_id| plan_name(state, plan_id));
+        .and_then(|plan_id| state.model.sim_setup.plan_name(plan_id))
+        .map(|name| name.as_str().to_owned());
     // A campaign member's plan is in its title instead.
     let saved = saved_detail(
         plan.as_deref().filter(|_| membership.is_none()),
@@ -899,30 +900,6 @@ fn saved_detail(plan: Option<&str>, retained: usize, elapsed_seconds: f64) -> St
         ])
         .collect::<Vec<_>>()
         .join(" \u{b7} ")
-}
-
-/// The name a plan goes by in the plan manager, active or not. `None` once
-/// the plan is gone.
-fn plan_name(
-    state: &AppState,
-    plan_id: rspice_app_state::product::SimulationPlanId,
-) -> Option<String> {
-    if state
-        .model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .is_some_and(|plan| plan.id() == plan_id)
-    {
-        return Some(state.model.sim_setup.active_plan_name().as_str().to_owned());
-    }
-    state
-        .model
-        .sim_setup
-        .inactive_plans()
-        .iter()
-        .find(|plan| plan.id() == plan_id)
-        .map(|plan| plan.name().as_str().to_owned())
 }
 
 fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
