@@ -71,6 +71,48 @@ fn the_current_tolerance_is_one_stored_number_the_engine_reads() {
     );
 }
 
+/// A plan states no step ceiling until one is typed: a 100 s transient with a
+/// 10 ms step steps at up to 10 ms, not at a hidden 1 ms. A typed value is a
+/// real ceiling.
+#[test]
+fn a_plan_states_no_step_ceiling_until_one_is_typed() {
+    const DECK: &str = "start-up\nV1 in 0 PULSE(0 1 0 1 1 100 200)\nR1 in out 1k\nC1 out 0 1m\n.tran 10m 100\n.end\n";
+    let mut harness = SimulateTestHost::harness();
+    assert_eq!(
+        harness.model.sim_setup.session.options_draft.max_timestep,
+        ""
+    );
+
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
+        DECK,
+        &harness.model.sim_setup.options,
+    );
+    assert!(!deck.contains("MAXTIMESTEP"), "{deck}");
+    let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    let config = rspice_simulation::netlist_preparation::build_engine_config(&parsed, None);
+    assert!(
+        config.max_timestep.is_infinite(),
+        "the engine's ceiling is the transient's own step, got {}",
+        config.max_timestep
+    );
+
+    harness.model.sim_setup.session.options_draft.max_timestep = "2m".to_owned();
+    page_solver::commit_draft(&mut harness.cx());
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
+        DECK,
+        &harness.model.sim_setup.options,
+    );
+    assert!(
+        deck.lines().any(|line| line.trim() == "+ MAXTIMESTEP=2e-3"),
+        "{deck}"
+    );
+    let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    assert_eq!(
+        rspice_simulation::netlist_preparation::build_engine_config(&parsed, None).max_timestep,
+        2e-3
+    );
+}
+
 #[test]
 fn solver_options_iteration_edit_preserves_precise_temperatures() {
     let mut harness = SimulateTestHost::harness();

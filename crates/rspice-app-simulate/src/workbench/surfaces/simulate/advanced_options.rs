@@ -353,9 +353,8 @@ pub(super) fn refused_effective(
                 if ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto") {
                     // Not the plan's ceiling. `auto` leaves the deck's `.tran`
                     // max-step carrying the analysis's own output step time,
-                    // and the engine mins that with the plan's — so a stock
-                    // transient under a 1 ms plan ceiling steps at 10 ns, and
-                    // this cell used to print the 1 ms.
+                    // and the engine mins that with the plan's ceiling when
+                    // the plan states one.
                     super::page_solver::inherited_step_ceiling(&setup.step, options.max_timestep)
                         .map_or_else(|| NO_REFUSED_VALUE.to_owned(), |(value, _)| value)
                 } else {

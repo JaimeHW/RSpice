@@ -1118,7 +1118,10 @@ const PLAN_TIGHTER_THAN_STEP_ORIGIN: &str = "plan preset \u{b7} tighter than the
 /// Visible to the Advanced options section, which reports the same option for
 /// one analysis and used to show the authored number: two surfaces disagreeing
 /// about the ceiling the same run would step at.
-pub(super) fn resolved_step_ceiling(authored: &str, plan_ceiling: f64) -> (String, &'static str) {
+pub(super) fn resolved_step_ceiling(
+    authored: &str,
+    plan_ceiling: Option<f64>,
+) -> (String, &'static str) {
     match step_ceiling(authored, plan_ceiling) {
         Some((value, true)) => (value, PLAN_TIGHTER_THAN_OVERRIDE_ORIGIN),
         Some((value, false)) => (value, OVERRIDE_ORIGIN),
@@ -1134,14 +1137,14 @@ pub(super) fn resolved_step_ceiling(authored: &str, plan_ceiling: f64) -> (Strin
 /// that argument as `config.max_timestep.unwrap_or(config.step_time)` — so the
 /// analysis's own output step time arrives as the ceiling, and the engine then
 /// mins *that* with the plan's `MAXTIMESTEP` exactly as it mins an authored
-/// one. The run steps at `min(step time, plan preset)`, which for the stock
-/// transient is 10 ns rather than the plan's 1 ms.
+/// one. The run steps at `min(step time, plan ceiling)`, and at the step time
+/// alone when the plan states no ceiling.
 ///
 /// `None` where the step time does not parse: such a plan has no ceiling to
 /// state, and its run is refused before it acquires one.
 pub(super) fn inherited_step_ceiling(
     step_time: &str,
-    plan_ceiling: f64,
+    plan_ceiling: Option<f64>,
 ) -> Option<(String, &'static str)> {
     step_ceiling(step_time, plan_ceiling).map(|(value, from_plan)| {
         if from_plan {
@@ -1156,12 +1159,14 @@ pub(super) fn inherited_step_ceiling(
 ///
 /// One owner for the arithmetic; the two callers above differ only in what they
 /// call each side. `None` where the candidate does not parse at all.
-fn step_ceiling(candidate: &str, plan_ceiling: f64) -> Option<(String, bool)> {
+fn step_ceiling(candidate: &str, plan_ceiling: Option<f64>) -> Option<(String, bool)> {
     let value = crate::simulation::dialog::parse_si_value(candidate).ok()?;
-    if !plan_ceiling.is_finite() || plan_ceiling <= 0.0 || value <= plan_ceiling {
-        return Some((candidate.trim().to_owned(), false));
+    match plan_ceiling {
+        Some(ceiling) if ceiling.is_finite() && ceiling > 0.0 && value > ceiling => {
+            Some((format_value(ceiling), true))
+        }
+        _ => Some((candidate.trim().to_owned(), false)),
     }
-    Some((format_value(plan_ceiling), true))
 }
 
 /// One statement of what an analysis actually resolves to.
@@ -1400,7 +1405,10 @@ pub(super) fn plan_preset_value(
         O::LteReltol => optional_preset(options.transient_lte_reltol),
         O::LteAbstol => optional_preset(options.transient_lte_abstol),
         O::MinTimestep => format_value(options.min_timestep),
-        O::MaximumTimestep => format_value(options.max_timestep),
+        // A plan without a ceiling leaves each transient its own step time.
+        O::MaximumTimestep => options
+            .max_timestep
+            .map_or_else(|| "step time".to_owned(), format_value),
         O::Pivrel => format_value(options.pivrel),
         O::Pivtol => format_value(options.pivtol),
         O::Solver => options.solver.display_name().to_owned(),
@@ -1712,7 +1720,7 @@ mod ledger_head_tests {
     /// The default plan is the case, and it authors no override at all: the
     /// head counted the rows it can *remove*, found none, and printed "every
     /// analysis resolves to the plan policy" directly above `Transient · Step
-    /// ceiling · 1m → 10n`. Add an operating point and a second row disagrees
+    /// ceiling · step time → 10n`. Add an operating point and a second row disagrees
     /// with it — `ITL1 · 50 → 150 · Balanced` — and the head still said none.
     #[test]
     fn the_ledger_head_counts_the_analyses_its_rows_show_departing() {
@@ -1729,7 +1737,7 @@ mod ledger_head_tests {
         );
         assert_eq!(
             departures(&rows),
-            vec!["Transient \u{b7} Step ceiling \u{b7} 1m \u{2192} 10n".to_owned()]
+            vec!["Transient \u{b7} Step ceiling \u{b7} step time \u{2192} 10n".to_owned()]
         );
         assert_eq!(
             resolution_summary(&rows),
@@ -1756,7 +1764,7 @@ mod ledger_head_tests {
             vec![
                 "Operating point \u{b7} Newton budget \u{b7} ITL1 \u{b7} 50 \u{2192} 150 \u{b7} Balanced"
                     .to_owned(),
-                "Transient \u{b7} Step ceiling \u{b7} 1m \u{2192} 10n".to_owned(),
+                "Transient \u{b7} Step ceiling \u{b7} step time \u{2192} 10n".to_owned(),
             ]
         );
         assert_eq!(

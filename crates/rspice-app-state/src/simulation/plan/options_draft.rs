@@ -123,7 +123,7 @@ impl OptionsDialogState {
             bypass_reltol: format_si_value(opts.bypass_reltol),
             bypass_abstol: format_si_value(opts.bypass_abstol),
             min_timestep: format_si_value(opts.min_timestep),
-            max_timestep: format_si_value(opts.max_timestep),
+            max_timestep: opts.max_timestep.map(format_si_value).unwrap_or_default(),
             temp: opts.temp.to_string(),
             tnom: opts.tnom.to_string(),
         }
@@ -141,7 +141,7 @@ impl OptionsDialogState {
         let chgtol = parse_field(&self.chgtol, "chgtol", 1e-14, &mut errors);
         let gmin = parse_field(&self.gmin, "gmin", 1e-12, &mut errors);
         let min_timestep = parse_field(&self.min_timestep, "min_timestep", 1e-15, &mut errors);
-        let max_timestep = parse_field(&self.max_timestep, "max_timestep", 1e-3, &mut errors);
+        let max_timestep = parse_optional_field(&self.max_timestep, "max_timestep", &mut errors);
         let bypass_reltol = parse_field(&self.bypass_reltol, "bypass_reltol", 1e-3, &mut errors);
         let bypass_abstol = parse_field(&self.bypass_abstol, "bypass_abstol", 1e-6, &mut errors);
         let pivrel = parse_field(&self.pivrel, "pivrel", 1e-3, &mut errors);

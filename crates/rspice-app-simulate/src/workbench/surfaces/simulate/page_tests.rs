@@ -1025,7 +1025,7 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
     let mut harness = SimulateTestHost::harness();
     // The plan's own ceiling, so the two bounds can be compared against a
     // stated value rather than against whatever the default happens to be.
-    harness.model.sim_setup.options.max_timestep = 1.0e-6;
+    harness.model.sim_setup.options.max_timestep = Some(1.0e-6);
 
     author_ceiling(&mut harness, "5n");
     let (preset, effective, origin) = ceiling_row(&harness);

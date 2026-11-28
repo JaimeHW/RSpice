@@ -409,7 +409,6 @@ fn validate_solver_options(plan: &SimulationSetup) -> Result<(), String> {
         ("bypass_reltol", options.bypass_reltol),
         ("bypass_abstol", options.bypass_abstol),
         ("min_timestep", options.min_timestep),
-        ("max_timestep", options.max_timestep),
         ("temp", options.temp),
         ("tnom", options.tnom),
     ];

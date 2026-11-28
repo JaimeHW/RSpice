@@ -256,9 +256,10 @@ fn shipping_solver_policy_reaches_the_engine_even_where_core_defaults_differ() {
         resolved.min_timestep.to_bits(),
         options.min_timestep.to_bits()
     );
-    assert_eq!(
-        resolved.max_timestep.to_bits(),
-        options.max_timestep.to_bits()
+    assert_eq!(options.max_timestep, None);
+    assert!(
+        resolved.max_timestep.is_infinite(),
+        "a plan without a ceiling leaves each transient its own step time"
     );
 }
 
@@ -316,7 +317,7 @@ fn a_step_floor_alone_still_reaches_the_deck() {
 
     assert_eq!(
         options.to_spice_options(),
-        ".OPTIONS\n+ PIVTOL=1e-13\n+ ITL4=6\n+ MAXTIMESTEP=1e-3\n.OPTIONS TIMEINT\n+ MINTIMESTEP=2e-18"
+        ".OPTIONS\n+ PIVTOL=1e-13\n+ ITL4=6\n.OPTIONS TIMEINT\n+ MINTIMESTEP=2e-18"
     );
     assert_eq!(resolve_through_the_deck(&options).min_timestep, 2.0e-18);
 }
@@ -340,7 +341,7 @@ fn every_offered_integration_method_names_one_the_engine_knows() {
 #[test]
 fn the_run_step_ceiling_reaches_the_engine_through_the_deck() {
     let options = SimulationOptions {
-        max_timestep: 4.0e-9,
+        max_timestep: Some(4.0e-9),
         ..SimulationOptions::default()
     };
 
@@ -359,7 +360,7 @@ fn the_plan_ceiling_and_an_analysis_step_ceiling_bound_the_step_separately() {
     // whole: a key that overwrote the other would silently drop a bound
     // the page and the ledger both still report.
     let options = SimulationOptions {
-        max_timestep: 4.0e-9,
+        max_timestep: Some(4.0e-9),
         ..SimulationOptions::default()
     };
     let mut record = crate::simulation::plan::AnalysisNumericOverride::default();
@@ -392,7 +393,7 @@ fn the_plan_ceiling_and_an_analysis_step_ceiling_bound_the_step_separately() {
 #[test]
 fn a_plan_ceiling_alone_leaves_the_integrators_ceiling_unstated() {
     let options = SimulationOptions {
-        max_timestep: 4.0e-9,
+        max_timestep: Some(4.0e-9),
         ..SimulationOptions::default()
     };
 
@@ -437,7 +438,7 @@ fn an_authored_option_wins_over_the_plan_block_that_states_the_same_key() {
         itl4: 9,
         trtol: 3.5,
         min_timestep: 2.0e-17,
-        max_timestep: 4.0e-9,
+        max_timestep: Some(4.0e-9),
         transient_lte_reltol: Some(1.0e-6),
         transient_lte_abstol: Some(2.0e-11),
         bypass_enabled: true,
@@ -606,7 +607,7 @@ fn solver_options_preserve_full_precision_through_the_deck() {
         pivtol: 1.234_567_891_234e-14,
         gmin: 9.123_456_789_123e-13,
         min_timestep: 1.234_567_891_234e-18,
-        max_timestep: 1.234_567_891_234e-4,
+        max_timestep: Some(1.234_567_891_234e-4),
         transient_lte_reltol: Some(1.234_567_891_234e-7),
         transient_lte_abstol: Some(2.345_678_912_345e-11),
         bypass_enabled: true,
@@ -637,7 +638,11 @@ fn solver_options_preserve_full_precision_through_the_deck() {
             resolved.matrix_absolute_pivot_tolerance,
         ),
         ("MINTIMESTEP", options.min_timestep, resolved.min_timestep),
-        ("MAXTIMESTEP", options.max_timestep, resolved.max_timestep),
+        (
+            "MAXTIMESTEP",
+            options.max_timestep.unwrap(),
+            resolved.max_timestep,
+        ),
         (
             "TIMEINT RELTOL",
             options.transient_lte_reltol.unwrap(),

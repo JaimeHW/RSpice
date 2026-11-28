@@ -497,7 +497,7 @@ fn a_refused_option_with_no_owner_states_no_value() {
 #[test]
 fn a_refused_step_ceiling_reads_the_transient_form_it_names() {
     let options = SimulationOptions {
-        max_timestep: 1.0e-6,
+        max_timestep: Some(1.0e-6),
         ..SimulationOptions::default()
     };
 
@@ -567,7 +567,7 @@ fn a_refused_step_ceiling_reads_the_transient_form_it_names() {
 #[test]
 fn an_authored_step_ceiling_is_reported_after_the_plan_clamps_it() {
     let options = SimulationOptions {
-        max_timestep: 1.0e-9,
+        max_timestep: Some(1.0e-9),
         ..SimulationOptions::default()
     };
 

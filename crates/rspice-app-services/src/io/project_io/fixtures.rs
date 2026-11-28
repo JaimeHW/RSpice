@@ -114,7 +114,7 @@ pub fn project_with_execution_context() -> ProjectSnapshot {
     setup.options.bypass_reltol = 5e-4;
     setup.options.bypass_abstol = 5e-7;
     setup.options.min_timestep = 2e-15;
-    setup.options.max_timestep = 2e-3;
+    setup.options.max_timestep = Some(2e-3);
     setup.options.tnom = 25.0;
 
     let mut model_manager = ModelLibraryManager::new();

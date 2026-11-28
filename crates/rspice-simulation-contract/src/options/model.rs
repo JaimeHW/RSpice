@@ -110,7 +110,9 @@ pub struct SimulationOptions {
     pub bypass_reltol: f64,
     pub bypass_abstol: f64,
     pub min_timestep: f64,
-    pub max_timestep: f64,
+    /// The run's step ceiling. `None` states none, so each transient steps at
+    /// up to its own step time.
+    pub max_timestep: Option<f64>,
     pub temp: f64,
     pub tnom: f64,
 }
@@ -182,7 +184,7 @@ struct PersistedSimulationOptions {
     bypass_reltol: f64,
     bypass_abstol: f64,
     min_timestep: f64,
-    max_timestep: f64,
+    max_timestep: Option<f64>,
     temp: f64,
     tnom: f64,
 }
@@ -264,7 +266,7 @@ impl Default for SimulationOptions {
             bypass_reltol: 1e-3,
             bypass_abstol: 1e-6,
             min_timestep: 1e-15,
-            max_timestep: 1e-3,
+            max_timestep: None,
             temp: 27.0,
             tnom: 27.0,
         }
@@ -419,7 +421,7 @@ impl SimulationOptions {
             temperature_kelvin: Some(self.temp_kelvin()),
             max_iterations: Some(self.itl1),
             min_timestep: Some(self.min_timestep),
-            max_timestep: Some(self.max_timestep),
+            max_timestep: self.max_timestep,
             integration_method: Some(self.method.core()),
             transient_trtol: Some(self.trtol),
             transient_event_flux_abstol: None,
@@ -542,19 +544,17 @@ impl SimulationOptions {
                 errors.push(ValidationError::InvalidIteration(name, value));
             }
         }
-        for (name, value) in [
-            ("min_timestep", self.min_timestep),
+        let stated_steps = [
+            ("min_timestep", Some(self.min_timestep)),
             ("max_timestep", self.max_timestep),
-        ] {
-            if !value.is_finite() || value <= 0.0 {
+        ];
+        for (name, value) in stated_steps {
+            if let Some(value) = value.filter(|value| !value.is_finite() || *value <= 0.0) {
                 errors.push(ValidationError::InvalidTimestep(name, value));
             }
         }
-        if self.min_timestep >= self.max_timestep {
-            errors.push(ValidationError::TimestepOrder(
-                self.min_timestep,
-                self.max_timestep,
-            ));
+        if let Some(max) = self.max_timestep.filter(|max| self.min_timestep >= *max) {
+            errors.push(ValidationError::TimestepOrder(self.min_timestep, max));
         }
         for (name, value) in [("temp", self.temp), ("tnom", self.tnom)] {
             if !value.is_finite() || value <= -273.15 {
@@ -718,9 +718,11 @@ impl SimulationOptions {
         // The run's step ceiling is unscoped. `TIMEINT DELMAX` is the time
         // integrator's own ceiling and belongs to the per-analysis override
         // record; stating the plan's ceiling under that key would make one of
-        // the two bounds unstatable.
-        // The core fallback is unbounded; Studio's product policy is not.
-        lines.push(format!("+ MAXTIMESTEP={:e}", self.max_timestep));
+        // the two bounds unstatable. A plan that states none leaves each
+        // transient's own step time as its ceiling.
+        if let Some(max_timestep) = self.max_timestep {
+            lines.push(format!("+ MAXTIMESTEP={max_timestep:e}"));
+        }
 
         // The parser's package selector stays in force for the rest of the
         // `.OPTIONS` command it appears on, so a scoped key placed among the
