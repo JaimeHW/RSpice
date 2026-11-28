@@ -1207,7 +1207,7 @@ fn bar_tool(
         })
 }
 
-/// The active strip's tools, + Expression, log X and maximize, stand on the
+/// The active strip's tools, + Calculated trace, log X and maximize, stand on the
 /// document's bar, each once and centred on the band above the bar's rule.
 /// No row of the strip's own stands over its panes: nothing but the bar
 /// offers them, and no control row names the analysis.
@@ -1220,7 +1220,7 @@ fn the_strips_tools_stand_on_the_bar_and_no_control_row_is_drawn() {
     let nodes = window.settled_frames();
     let (_, bar) =
         labelled(&nodes, Role::Toolbar, "Plot instrument controls").expect("the document's bar");
-    for tool in ["+ Expression", "Logarithmic X axis", "Maximize strip"] {
+    for tool in ["+ Calculated trace", "Logarithmic X axis", "Maximize strip"] {
         let offered: Vec<egui::Rect> = nodes
             .iter()
             .filter(|(_, node)| node.role() != Role::Label && node.label() == Some(tool))
@@ -1254,7 +1254,7 @@ fn the_strips_tools_stand_on_the_bar_and_no_control_row_is_drawn() {
 
 /// The bar's strip tools act on the document's active pane: log X turns its
 /// X axis to decades, which the document keeps, and reads lit; maximize
-/// trades its glyph for restore and back; + Expression opens the expression
+/// trades its glyph for restore and back; + Calculated trace opens the expression
 /// editor on the strip.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
@@ -1305,7 +1305,8 @@ fn the_bars_strip_tools_act_on_the_documents_active_pane() {
         "restored, the strips offer maximize again"
     );
 
-    let (expression, _, _) = bar_tool(&nodes, "+ Expression").expect("the bar offers + Expression");
+    let (expression, _, _) =
+        bar_tool(&nodes, "+ Calculated trace").expect("the bar offers + Calculated trace");
     window.click(expression);
     assert!(
         window
@@ -1316,7 +1317,7 @@ fn the_bars_strip_tools_act_on_the_documents_active_pane() {
             .session
             .expr_editor
             .is_some(),
-        "+ Expression opens the expression editor"
+        "+ Calculated trace opens the expression editor"
     );
 }
 
