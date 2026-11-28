@@ -332,7 +332,6 @@ fn a_default_pss_plan_prepares_a_receipt_instead_of_being_refused_at_dispatch() 
     assert_eq!(
         tags,
         vec![
-            CanonicalAnalysisKind::DcOp.tag(),
             CanonicalAnalysisKind::Pss.tag(),
             CanonicalAnalysisKind::PssSpectrum.tag(),
         ],

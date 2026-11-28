@@ -12,7 +12,10 @@ use rspice_simulation_contract::periodic_network_draft::{
 };
 use rspice_simulation_contract::pss_draft::{PssConfig, PssDialogState};
 
-fn network(hb: bool) -> RunTestHost {
+/// Two RF ports through 50 ohm: a shooting PSS (or HB) and the periodic
+/// S-parameter analysis built on it, the solve seeded from an operating point
+/// when `start_from_operating_point` asks for one.
+pub(super) fn network(hb: bool, start_from_operating_point: bool) -> RunTestHost {
     let mut state = RunTestHost::default();
     state.model.sim_setup.run_set =
         rspice_simulation_contract::run_set::RunSetState::reference_only();
@@ -73,7 +76,8 @@ fn network(hb: bool) -> RunTestHost {
     {
         plan.set_enabled(id, false).unwrap();
     }
-    let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+    let op =
+        start_from_operating_point.then(|| plan.insert(AnalysisKind::OperatingPoint).unwrap().0);
     let carrier_kind = if hb {
         AnalysisKind::HarmonicBalance
     } else {
@@ -98,8 +102,10 @@ fn network(hb: bool) -> RunTestHost {
         };
     })
     .unwrap();
-    plan.bind_dependency(carrier, AnalysisKind::OperatingPoint, op)
-        .unwrap();
+    if let Some(op) = op {
+        plan.bind_dependency(carrier, AnalysisKind::OperatingPoint, op)
+            .unwrap();
+    }
     let (consumer, _) = plan
         .insert(if hb {
             AnalysisKind::Hbsp
@@ -153,7 +159,7 @@ fn network(hb: bool) -> RunTestHost {
 fn periodic_port_noise_project_round_trip_preserves_covariance_and_temperature_units() {
     for hb in [false, true] {
         let run = crate::simulation::controller::test_execution::run_generated_batch(
-            network(hb),
+            network(hb, true),
             rspice_results::run::SimulationRunLifecycle::Completed,
         );
         let kind = if hb {

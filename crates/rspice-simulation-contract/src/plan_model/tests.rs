@@ -824,7 +824,8 @@ fn quasi_periodic_dependencies_form_a_stable_explicit_graph() {
         .insert_at(AnalysisKind::OperatingPoint, 0)
         .expect("OP inserts");
     let (qpss, _) = plan.insert(AnalysisKind::Qpss).expect("QPSS inserts");
-    plan.auto_bind_dependencies(qpss).expect("QPSS binds to OP");
+    plan.bind_dependency(qpss, AnalysisKind::OperatingPoint, op)
+        .expect("QPSS starts from the OP");
     let (qpac, _) = plan.insert(AnalysisKind::Qpac).expect("QPAC inserts");
     plan.auto_bind_dependencies(qpac)
         .expect("QPAC binds to QPSS");
@@ -838,6 +839,75 @@ fn quasi_periodic_dependencies_form_a_stable_explicit_graph() {
         &[AnalysisDependency::new(AnalysisKind::Qpss, qpss)]
     );
     assert!(plan.freeze().is_ok());
+}
+
+#[test]
+fn a_periodic_solve_starts_from_its_own_dc_solve_unless_told_an_operating_point() {
+    for kind in [
+        AnalysisKind::Pss,
+        AnalysisKind::HarmonicBalance,
+        AnalysisKind::Qpss,
+    ] {
+        let mut plan = SimulationPlan::empty();
+        let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
+        let (solve, _) = plan.insert(kind).unwrap();
+        plan.auto_bind_dependencies(solve).unwrap();
+        assert!(
+            plan.instance(solve).unwrap().dependencies().is_empty(),
+            "{kind} starts from its own DC solve by default"
+        );
+        assert!(plan.required_prerequisite_roles(solve).is_empty(), "{kind}");
+        assert!(
+            !plan
+                .validation_issues()
+                .iter()
+                .any(|issue| matches!(issue, AnalysisPlanIssue::MissingPrerequisite { .. })),
+            "{kind}: {:?}",
+            plan.validation_issues()
+        );
+
+        plan.bind_dependency(solve, AnalysisKind::OperatingPoint, op)
+            .unwrap();
+        assert_eq!(
+            plan.instance(solve).unwrap().dependencies(),
+            &[AnalysisDependency::new(AnalysisKind::OperatingPoint, op)]
+        );
+        assert_eq!(
+            plan.required_prerequisite_roles(solve),
+            vec![AnalysisKind::OperatingPoint],
+            "{kind} needs the operating point it was told to start from"
+        );
+        assert!(plan.validation_issues().iter().all(|issue| !matches!(
+            issue,
+            AnalysisPlanIssue::UnexpectedDependencyRole { .. }
+        )));
+        assert!(
+            plan.reorder(op, 1).is_err(),
+            "{kind}'s chosen operating point keeps running before it"
+        );
+
+        plan.unbind_optional_dependency(solve, AnalysisKind::OperatingPoint)
+            .unwrap();
+        assert!(plan.instance(solve).unwrap().dependencies().is_empty());
+        assert!(plan.required_prerequisite_roles(solve).is_empty());
+        assert!(matches!(
+            plan.unbind_optional_dependency(solve, AnalysisKind::Transient),
+            Err(AnalysisPlanError::UnexpectedDependencyRole { .. })
+        ));
+    }
+
+    let mut plan = SimulationPlan::empty();
+    let (transient, _) = plan.insert(AnalysisKind::Transient).unwrap();
+    let (fft, _) = plan.insert(AnalysisKind::Fft).unwrap();
+    plan.bind_dependency(fft, AnalysisKind::Transient, transient)
+        .unwrap();
+    assert!(
+        matches!(
+            plan.unbind_optional_dependency(fft, AnalysisKind::Transient),
+            Err(AnalysisPlanError::UnexpectedDependencyRole { .. })
+        ),
+        "a required role cannot be unbound"
+    );
 }
 
 #[test]
@@ -913,7 +983,7 @@ fn dependency_repair_moves_a_later_prerequisite_without_replacing_its_identity()
 }
 
 #[test]
-fn dependency_repair_builds_the_complete_multi_level_prerequisite_closure() {
+fn dependency_repair_adds_the_quasi_periodic_solve_its_consumer_reads() {
     let mut plan = SimulationPlan::empty();
     let (qpac, _) = plan.insert(AnalysisKind::Qpac).expect("QPAC inserts");
 
@@ -921,26 +991,19 @@ fn dependency_repair_builds_the_complete_multi_level_prerequisite_closure() {
         .repair_dependencies(qpac)
         .expect("QPAC closure repairs");
 
-    assert_eq!(repair.inserted().len(), 2);
-    assert_eq!(repair.bound().len(), 2);
+    // The QPSS finds its own DC point, so nothing is added beneath it.
+    assert_eq!(repair.inserted().len(), 1);
+    assert_eq!(repair.bound().len(), 1);
     assert_eq!(receipt.committed_revision(), plan.revision());
     assert_eq!(
         plan.instances()
             .iter()
             .map(AnalysisInstance::kind)
             .collect::<Vec<_>>(),
-        vec![
-            AnalysisKind::OperatingPoint,
-            AnalysisKind::Qpss,
-            AnalysisKind::Qpac,
-        ]
+        vec![AnalysisKind::Qpss, AnalysisKind::Qpac]
     );
-    let op = plan.instances()[0].id();
-    let qpss = plan.instances()[1].id();
-    assert_eq!(
-        plan.instance(qpss).unwrap().dependencies(),
-        &[AnalysisDependency::new(AnalysisKind::OperatingPoint, op)]
-    );
+    let qpss = plan.instances()[0].id();
+    assert!(plan.instance(qpss).unwrap().dependencies().is_empty());
     assert_eq!(
         plan.instance(qpac).unwrap().dependencies(),
         &[AnalysisDependency::new(AnalysisKind::Qpss, qpss)]

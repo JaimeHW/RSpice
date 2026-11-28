@@ -535,8 +535,18 @@ fn a_dependent_may_not_run_where_its_prerequisite_does_not() {
     let points = enable_only_the_temperature_axis(&mut app.state);
     assert!(points > 1, "the fixture space must actually multiply");
     put_the_reference_on_a_declared_temperature(&mut app.state);
-    // The PSS is the operating point's dependent in this fixture, so narrowing
-    // the operating point strands the PSS at every other point.
+    // The PSS is told to start from the operating point, so narrowing the
+    // operating point strands the PSS at every other point.
+    let op = instance_of(&app.state, AnalysisKind::OperatingPoint);
+    let pss = instance_of(&app.state, AnalysisKind::Pss);
+    app.state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan")
+        .bind_dependency(pss, AnalysisKind::OperatingPoint, op)
+        .expect("the PSS starts from the operating point");
     scope_to_the_nominal_point(&mut app.state, AnalysisKind::OperatingPoint);
 
     let frozen = app.state.clone();

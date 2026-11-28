@@ -87,7 +87,13 @@ pub(super) fn selected_analysis(
         contextual_dependency_error(plan, id, &closure_ids, dependency_sources);
     let repair_context = dependency_sources.dependency_repair_context();
     let prerequisite_roles = plan.required_prerequisite_roles(id);
-    let prerequisite_candidates = prerequisite_roles
+    let mut candidate_roles = prerequisite_roles.clone();
+    for optional in instance.kind().optional_prerequisites() {
+        if !candidate_roles.contains(optional) {
+            candidate_roles.push(*optional);
+        }
+    }
+    let prerequisite_candidates = candidate_roles
         .iter()
         .map(|prerequisite| {
             let candidates = plan.instances()[..position]
@@ -102,17 +108,10 @@ pub(super) fn selected_analysis(
                             &repair_context,
                         )
                 })
-                .map(|(candidate_position, candidate)| DependencyCandidate {
+                .map(|(_, candidate)| DependencyCandidate {
                     id: candidate.id(),
-                    // Position, kind, then what it is called. Two candidates
-                    // of one kind were previously told apart only by the
-                    // UUID they were labelled with.
-                    label: format!(
-                        "{:02} · {} · {}",
-                        candidate_position + 1,
-                        candidate.kind().stable_id().to_uppercase(),
-                        candidate.display_name()
-                    ),
+                    // What it is called, as the list beside it names it.
+                    label: candidate.display_name().to_owned(),
                 })
                 .collect();
             (*prerequisite, candidates)
@@ -307,6 +306,21 @@ pub fn apply_analysis_action(
                     record_receipt(cx, &receipt);
                 }
                 Err(error) => record_failure(cx, "Bind prerequisite", &error),
+            }
+        }
+        AnalysisAction::StartFromOwnSolve { prerequisite } => {
+            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
+            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
+                Ok(plan) => plan
+                    .unbind_optional_dependency(id, prerequisite)
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(error),
+            };
+            cx.model
+                .record_setup_change(SimulationPage::Analyses.label(), step);
+            match result {
+                Ok(()) => refresh_analysis_projections(cx),
+                Err(error) => record_failure(cx, "Start from its own DC solve", &error),
             }
         }
         AnalysisAction::RepairDependencies => {

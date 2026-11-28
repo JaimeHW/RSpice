@@ -464,6 +464,15 @@ pub(crate) fn bind_prepared_task_dependencies(
             });
         }
         ensure_not_aborted(abort)?;
+        if producers.is_empty()
+            && crate::prepared_dependency::artifact_is_optional(
+                &task.queued_analysis().spec,
+                &task.queued_analysis().spec_options,
+            )
+        {
+            all_bindings.push(producers);
+            continue;
+        }
         if producers.len() != 1 {
             errors.push(format!(
                 "{} must bind exactly one prepared {} task, found {}",
@@ -715,6 +724,17 @@ pub(crate) fn prepare_manual_tasks(
                 (*kind, producers, binding)
             })
             .collect::<Vec<_>>();
+        // A periodic solve in a deck with no `.OP` finds its own DC point.
+        if candidates
+            .iter()
+            .all(|(_, producers, _)| producers.is_empty())
+            && crate::prepared_dependency::artifact_is_optional(
+                &task.queued_analysis().spec,
+                &task.queued_analysis().spec_options,
+            )
+        {
+            continue;
+        }
         let Some((_, producers, binding)) = candidates
             .iter()
             .copied()

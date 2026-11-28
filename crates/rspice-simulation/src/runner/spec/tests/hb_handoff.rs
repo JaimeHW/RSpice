@@ -44,15 +44,13 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
             &rspice_core::NoAbort,
         )
     };
-    assert!(
-        run(
-            producer.clone(),
-            Default::default(),
-            &hb_deck,
-            &ResolvedExecutionDependencies::default()
-        )
-        .is_err()
-    );
+    run(
+        producer.clone(),
+        Default::default(),
+        &hb_deck,
+        &ResolvedExecutionDependencies::default(),
+    )
+    .expect("an HB told no operating point finds its own DC point");
     let mut result = None;
     for mode in [None, Some(0), Some(1), Some(2)] {
         let deck = mode

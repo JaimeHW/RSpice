@@ -37,7 +37,8 @@ impl SimulationPlan {
             move |candidate, revision| {
                 let dependent_index = candidate.index_of(dependent)?;
                 candidate.ensure_editable(dependent_index)?;
-                if !Self::resolved_prerequisite_roles(&candidate.instances, dependent_index)
+                if !candidate
+                    .bindable_prerequisite_roles(dependent)
                     .contains(&prerequisite)
                 {
                     return Err(AnalysisPlanError::UnexpectedDependencyRole {
@@ -99,6 +100,91 @@ impl SimulationPlan {
             },
         )?;
         Ok(receipt)
+    }
+
+    /// Unbind an optional role, so the dependent solves for itself what the
+    /// bound analysis handed it: a PSS, HB or QPSS told to start from its own
+    /// DC solve instead of an operating point's.
+    pub fn unbind_optional_dependency(
+        &mut self,
+        dependent: AnalysisInstanceId,
+        prerequisite: AnalysisKind,
+    ) -> Result<(), AnalysisPlanError> {
+        let dependent_instance = self
+            .instance(dependent)
+            .ok_or(AnalysisPlanError::InstanceNotFound(dependent))?;
+        if !dependent_instance
+            .kind()
+            .optional_prerequisites()
+            .contains(&prerequisite)
+        {
+            return Err(AnalysisPlanError::UnexpectedDependencyRole {
+                dependent,
+                prerequisite,
+            });
+        }
+        let name = dependent_instance.display_name().to_owned();
+        let outcome = if dependent_instance.enabled() {
+            AnalysisLifecycleState::Draft
+        } else {
+            AnalysisLifecycleState::Disabled
+        };
+        let ((), _) = self.transact(
+            AnalysisLifecycleCommand::Dependency,
+            dependent,
+            None,
+            outcome,
+            format!("{name} starts from its own DC solve."),
+            move |candidate, revision| {
+                let dependent_index = candidate.index_of(dependent)?;
+                candidate.ensure_editable(dependent_index)?;
+                let instance = &mut candidate.instances[dependent_index];
+                instance
+                    .dependencies
+                    .retain(|dependency| dependency.prerequisite() != prerequisite);
+                instance.modified_revision = revision;
+                instance.lifecycle = if instance.enabled {
+                    AnalysisLifecycleState::Draft
+                } else {
+                    AnalysisLifecycleState::Disabled
+                };
+                Ok(())
+            },
+        )?;
+        Ok(())
+    }
+
+    /// The roles a binding may fill: the required ones and every optional one.
+    pub(super) fn bindable_prerequisite_roles(
+        &self,
+        dependent: AnalysisInstanceId,
+    ) -> Vec<AnalysisKind> {
+        let Ok(index) = self.index_of(dependent) else {
+            return Vec::new();
+        };
+        let mut roles = Self::resolved_prerequisite_roles(&self.instances, index);
+        for optional in self.instances[index].kind.optional_prerequisites() {
+            if !roles.contains(optional) {
+                roles.push(*optional);
+            }
+        }
+        roles
+    }
+
+    /// `roles`, followed by each optional role the instance has bound.
+    pub(super) fn with_bound_optional_roles(
+        instance: &AnalysisInstance,
+        mut roles: Vec<AnalysisKind>,
+    ) -> Vec<AnalysisKind> {
+        for dependency in &instance.dependencies {
+            let prerequisite = dependency.prerequisite();
+            if instance.kind.optional_prerequisites().contains(&prerequisite)
+                && !roles.contains(&prerequisite)
+            {
+                roles.push(prerequisite);
+            }
+        }
+        roles
     }
 
     /// Deterministically bind every required role to the latest matching,

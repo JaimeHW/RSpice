@@ -107,30 +107,37 @@ pub(super) fn run_periodic_spec(
         }
         spec @ AnalysisSpec::Qpss { .. } => {
             let config = spec.qpss_config().map_err(SimulationError::InvalidConfig)?;
-            let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
-                SimulationError::InvalidConfig(format!(
-                    "QPSS operating-point dependency is unavailable: {error}"
-                ))
-            })?;
-            let seed = if config.initial_state
-                == rspice_core::engine::QpssInitialState::DcOperatingPoint
-            {
-                Some(
-                    artifact
-                        .core_seed()
-                        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
-                )
-            } else {
-                None
+            let artifact = dependencies
+                .chosen_dc_operating_point_seed()
+                .map_err(|error| {
+                    SimulationError::InvalidConfig(format!(
+                        "QPSS operating-point dependency is unavailable: {error}"
+                    ))
+                })?;
+            let seed = match artifact {
+                Some(artifact)
+                    if config.initial_state
+                        == rspice_core::engine::QpssInitialState::DcOperatingPoint =>
+                {
+                    Some(
+                        artifact
+                            .core_seed()
+                            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
+                    )
+                }
+                _ => None,
             };
             let data = super::run_abort_aware_service(abort, || {
-                let circuit = artifact.environment().materialize_with_resource_limits(
-                    netlist,
-                    source_path,
-                    dependencies,
-                    context.limits,
-                    abort,
-                )?;
+                let circuit = match artifact {
+                    Some(artifact) => artifact.environment().materialize_with_resource_limits(
+                        netlist,
+                        source_path,
+                        dependencies,
+                        context.limits,
+                        abort,
+                    )?,
+                    None => own_dc_solve_circuit(netlist, dependencies, context)?,
+                };
                 svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
                     &circuit,
                     config,
@@ -696,11 +703,19 @@ fn run_pss(
     context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
     let abort = context.abort;
-    let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
-        SimulationError::InvalidConfig(format!(
-            "shooting PSS operating-point dependency is unavailable: {error}"
-        ))
-    })?;
+    let artifact = dependencies
+        .chosen_dc_operating_point_seed()
+        .map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "shooting PSS operating-point dependency is unavailable: {error}"
+            ))
+        })?;
+    let Some(artifact) = artifact else {
+        let data = super::run_abort_aware_service(abort, || {
+            svc_runner::run_pss_analysis_with_context(netlist, &config, context)
+        })?;
+        return project_pss_data(data, abort);
+    };
     dependencies
         .validate_source_basis(netlist, artifact.effective_source_content_digest())
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
@@ -921,31 +936,57 @@ fn run_harmonic_balance(
     context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
     let abort = context.abort;
-    let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
-        SimulationError::InvalidConfig(format!(
-            "HB operating-point dependency is unavailable: {error}"
-        ))
-    })?;
+    let artifact = dependencies
+        .chosen_dc_operating_point_seed()
+        .map_err(|error| {
+            SimulationError::InvalidConfig(format!(
+                "HB operating-point dependency is unavailable: {error}"
+            ))
+        })?;
     let seed = artifact
-        .core_seed()
+        .map(|artifact| artifact.core_seed())
+        .transpose()
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        let circuit = artifact.environment().materialize_with_resource_limits(
-            netlist,
-            context.source_path,
-            dependencies,
-            context.limits,
-            abort,
-        )?;
+        let circuit = match artifact {
+            Some(artifact) => artifact.environment().materialize_with_resource_limits(
+                netlist,
+                context.source_path,
+                dependencies,
+                context.limits,
+                abort,
+            )?,
+            None => own_dc_solve_circuit(netlist, dependencies, context)?,
+        };
         svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_context(
             &circuit,
             hb_cfg,
-            Some(&seed),
+            seed.as_ref(),
             context,
         )
     })?;
 
     project_hb_data(data, retain_harmonics, abort)
+}
+
+/// The deck as composed, for a periodic solve the test started from no
+/// operating point: it finds its own DC point at the conditions the deck
+/// states, as every other analysis that reads no artifact does.
+fn own_dc_solve_circuit(
+    netlist: &str,
+    dependencies: &ResolvedExecutionDependencies,
+    context: svc_runner::ServiceContext<'_>,
+) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
+    let mut circuit = materialize_periodic_consumer(
+        None,
+        netlist,
+        context.source_path,
+        dependencies,
+        context.limits,
+        context.abort,
+    )?;
+    circuit.source_text = Some(netlist.to_owned());
+    Ok(circuit)
 }
 
 fn project_hb_data(

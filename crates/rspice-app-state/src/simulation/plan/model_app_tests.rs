@@ -38,7 +38,7 @@ fn every_declared_prerequisite_kind_repairs_to_an_exact_frozen_closure() {
         .into_iter()
         .filter(|kind| !kind.prerequisites().is_empty())
         .collect::<Vec<_>>();
-    assert_eq!(dependent_kinds.len(), 15);
+    assert_eq!(dependent_kinds.len(), 12);
 
     // The carrier positions the three periodic small-signal kinds offer are
     // part of this closure, not an exemption from it: each position declares a
@@ -366,7 +366,7 @@ fn guided_prerequisite_configuration_is_atomic_bound_and_fail_closed() {
         )
         .expect("guided prerequisite is retained atomically");
 
-    assert_eq!(plan.instances().len(), before_len + 2);
+    assert_eq!(plan.instances().len(), before_len + 1);
     assert_eq!(receipt.related_instance_id(), Some(pnoise));
     assert_eq!(receipt.outcome(), AnalysisLifecycleState::Disabled);
     let prepared_position = plan
@@ -379,18 +379,12 @@ fn guided_prerequisite_configuration_is_atomic_bound_and_fail_closed() {
         AnalysisKind::Pss
     );
     assert!(!plan.instances()[prepared_position].enabled());
-    let op_dependency = plan.instances()[prepared_position].dependencies()[0];
-    let op_position = plan
-        .instances()
-        .iter()
-        .position(|instance| instance.id() == op_dependency.target())
-        .expect("machine-inferable OP prerequisite is prepared");
-    assert!(op_position < prepared_position);
-    assert_eq!(
-        plan.instances()[op_position].kind(),
-        AnalysisKind::OperatingPoint
+    assert!(
+        plan.instances()[prepared_position]
+            .dependencies()
+            .is_empty(),
+        "the prepared PSS starts from its own DC solve"
     );
-    assert!(plan.instances()[op_position].enabled());
     assert!(plan.instance(pnoise).unwrap().dependencies().is_empty());
     assert!(plan.validation_issues().iter().any(|issue| matches!(
         issue,

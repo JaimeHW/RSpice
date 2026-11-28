@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::execution_options::SpecExecutionOptions;
-use crate::prepared_dependency::required_artifact_kinds;
+use crate::prepared_dependency::{artifact_is_optional, required_artifact_kinds};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ResolvedExecutionDependencies {
@@ -89,7 +89,12 @@ impl ResolvedExecutionDependencies {
         options: &SpecExecutionOptions,
     ) -> Result<(), ExecutionArtifactError> {
         let expected_kinds = required_artifact_kinds(spec, options);
-        let expected_count = usize::from(!expected_kinds.is_empty());
+        // A periodic solve told no operating point finds its own DC point and
+        // carries nothing.
+        let unseeded = self.bindings.is_empty()
+            && self.artifacts.is_empty()
+            && artifact_is_optional(spec, options);
+        let expected_count = usize::from(!expected_kinds.is_empty() && !unseeded);
         if self.bindings.len() != expected_count || self.artifacts.len() != expected_count {
             return Err(ExecutionArtifactError::ContractMismatch(format!(
                 "{} requires {expected_count} typed execution artifact(s), received {} binding(s) and {} artifact(s)",
@@ -216,6 +221,17 @@ impl ResolvedExecutionDependencies {
                 "resolved HB dependency has no numerical state payload".to_owned(),
             )
         })
+    }
+
+    /// The DC seed of the operating point a periodic solve was told to start
+    /// from, or `None` when it was told to solve its own DC point.
+    pub fn chosen_dc_operating_point_seed(
+        &self,
+    ) -> Result<Option<&DcOperatingPointSeedArtifact>, ExecutionArtifactError> {
+        if self.bindings.is_empty() && self.artifacts.is_empty() {
+            return Ok(None);
+        }
+        self.dc_operating_point_seed().map(Some)
     }
 
     pub fn dc_operating_point_seed(

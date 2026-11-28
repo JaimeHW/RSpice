@@ -45,6 +45,15 @@ pub(crate) fn run_pss_analysis_with_dc_seed_and_context(
     run_pss_analysis_internal(netlist_text, config, Some(seed_environment), context)
 }
 
+/// Run shooting PSS on the deck as composed, finding its own DC point.
+pub(crate) fn run_pss_analysis_with_context(
+    netlist_text: &str,
+    config: &PssRunConfig,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<PssData> {
+    run_pss_analysis_internal(netlist_text, config, None, context)
+}
+
 pub(crate) struct PssSeedEnvironment<'a> {
     pub(crate) dc_seed: &'a PssDcOperatingPointSeed,
     pub(crate) temperature_celsius: Value,

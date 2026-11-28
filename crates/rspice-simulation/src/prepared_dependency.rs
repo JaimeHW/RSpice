@@ -107,6 +107,17 @@ pub fn required_artifact_kinds(
     }
 }
 
+/// Whether a task may run with none of the artifacts
+/// [`required_artifact_kinds`] names. A PSS, HB or QPSS seeds its solve with
+/// the DC solution of an operating point the test chose, and solves its own DC
+/// point when the test chose none.
+pub fn artifact_is_optional(spec: &AnalysisSpec, options: &SpecExecutionOptions) -> bool {
+    matches!(
+        required_artifact_kinds(spec, options),
+        [ExecutionArtifactKind::DcOperatingPointSeed]
+    )
+}
+
 pub fn validate_prepared_dependency_contract_with_options(
     consumer: &AnalysisSpec,
     consumer_options: &SpecExecutionOptions,

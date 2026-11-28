@@ -915,7 +915,7 @@ impl SimulationPlan {
         prerequisite: AnalysisKind,
         target: AnalysisInstanceId,
     ) -> bool {
-        let roles = self.required_prerequisite_roles(dependent);
+        let roles = self.bindable_prerequisite_roles(dependent);
         let (Some(dependent), Some(target)) = (self.instance(dependent), self.instance(target))
         else {
             return false;
@@ -934,7 +934,7 @@ impl SimulationPlan {
         target: AnalysisInstanceId,
         context: &impl PlanDependencySourceContext,
     ) -> bool {
-        let roles = self.required_prerequisite_roles(dependent);
+        let roles = self.bindable_prerequisite_roles(dependent);
         let (Some(dependent), Some(target)) = (self.instance(dependent), self.instance(target))
         else {
             return false;
@@ -999,6 +999,9 @@ impl SimulationPlan {
     /// carrier an operator bound explicitly is not retargeted by inserting
     /// another solve above it, and a plan edit cannot silently move a run onto
     /// a different large-signal solution than the one it reported last.
+    ///
+    /// An optional role is required while it is bound: a PSS told to start
+    /// from an operating point needs that operating point to run first.
     #[must_use]
     pub fn required_prerequisite_roles(&self, dependent: AnalysisInstanceId) -> Vec<AnalysisKind> {
         self.index_of(dependent)
@@ -1014,7 +1017,7 @@ impl SimulationPlan {
         let declared = instance.draft.prerequisite_roles();
         let alternatives = instance.draft.prerequisite_alternatives();
         if alternatives.is_empty() {
-            return declared.to_vec();
+            return Self::with_bound_optional_roles(instance, declared.to_vec());
         }
         let bound = instance
             .dependencies
@@ -1028,12 +1031,15 @@ impl SimulationPlan {
             .map(|candidate| candidate.kind);
         // The declaration is the fallback, so a request with nothing to bind
         // is still missing a named role and still has an "Add ..." to offer.
-        vec![
-            bound
-                .or(nearest)
-                .or_else(|| declared.first().copied())
-                .unwrap_or(AnalysisKind::Pss),
-        ]
+        Self::with_bound_optional_roles(
+            instance,
+            vec![
+                bound
+                    .or(nearest)
+                    .or_else(|| declared.first().copied())
+                    .unwrap_or(AnalysisKind::Pss),
+            ],
+        )
     }
 
     fn dependency_candidate_compatibility(

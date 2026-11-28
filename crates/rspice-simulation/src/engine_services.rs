@@ -104,7 +104,9 @@ pub(crate) use psp::{
 };
 pub use pss::PssRunConfig;
 pub(crate) use pss::{PssData, run_pss_analysis_on_materialized_with_context};
-pub(crate) use pss::{PssSeedEnvironment, run_pss_analysis_with_dc_seed_and_context};
+pub(crate) use pss::{
+    PssSeedEnvironment, run_pss_analysis_with_context, run_pss_analysis_with_dc_seed_and_context,
+};
 pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_context};
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
 // the module boundary rather than an omission. The seven fundamental analyses

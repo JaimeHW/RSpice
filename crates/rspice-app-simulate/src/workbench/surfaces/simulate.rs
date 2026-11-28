@@ -121,6 +121,11 @@ pub enum AnalysisAction {
         prerequisite: AnalysisKind,
         target: AnalysisInstanceId,
     },
+    /// Solve for itself what an optional prerequisite would hand it: a PSS,
+    /// HB or QPSS starting from its own DC solve.
+    StartFromOwnSolve {
+        prerequisite: AnalysisKind,
+    },
     RepairDependencies,
     PrepareAutonomousPss,
     Validate,

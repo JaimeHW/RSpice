@@ -1082,7 +1082,6 @@ fn commit_plan(
             ));
         }
     }
-    bind_implied_operating_point(&mut analyses, notices);
     if analyses.instances().is_empty() {
         notices.push((
             ForeignNoticeSeverity::Notice,
@@ -1175,48 +1174,6 @@ fn commit_plan(
                 format!("The schematic's analyses could not become a simulation plan: {error}"),
             ));
             None
-        }
-    }
-}
-
-/// A deck's `.pss`, `.hb` or `.qpss` finds its own DC point; a plan states
-/// it, so the analyses that need one get one ahead of them and bind it.
-fn bind_implied_operating_point(
-    analyses: &mut rspice_simulation_contract::plan_model::SimulationPlan,
-    notices: &mut Vec<(ForeignNoticeSeverity, String)>,
-) {
-    use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
-    let dependents = analyses
-        .instances()
-        .iter()
-        .map(|instance| instance.id())
-        .filter(|id| {
-            analyses
-                .required_prerequisite_roles(*id)
-                .contains(&AnalysisKind::OperatingPoint)
-        })
-        .collect::<Vec<_>>();
-    if dependents.is_empty() {
-        return;
-    }
-    if let Err(error) = analyses.insert_draft_with_id(
-        rspice_vocabulary::product::AnalysisInstanceId::new(),
-        AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
-        true,
-        0,
-    ) {
-        notices.push((
-            ForeignNoticeSeverity::Refusal,
-            format!("The plan's operating point could not be added: {error}"),
-        ));
-        return;
-    }
-    for id in dependents {
-        if let Err(error) = analyses.auto_bind_dependencies(id) {
-            notices.push((
-                ForeignNoticeSeverity::Refusal,
-                format!("An imported analysis could not bind its operating point: {error}"),
-            ));
         }
     }
 }

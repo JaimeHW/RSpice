@@ -42,7 +42,9 @@ impl PreparedArtifactProducer {
                     ..
                 }
         ) {
-            Some(dependencies.dc_operating_point_seed()?.environment())
+            dependencies
+                .chosen_dc_operating_point_seed()?
+                .map(|seed| seed.environment())
         } else {
             None
         };

@@ -511,7 +511,8 @@ fn qpss_op_handoff_preserves_environment_and_consumers_across_worker_transport()
     dependencies
         .validate_for_spec(&producer, &Default::default())
         .unwrap();
-    assert!(run(producer.clone(), &qp_deck, &Default::default()).is_err());
+    run(producer.clone(), &qp_deck, &Default::default())
+        .expect("a QPSS told no operating point finds its own DC point");
     assert!(
         run(
             producer.clone(),

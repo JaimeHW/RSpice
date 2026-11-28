@@ -98,8 +98,7 @@ fn run_set_workload_counts_generated_pss_spectrum_task() {
         .expect("workload is valid")
         .expect("reference-only Run Set has an exact workload");
 
-    // The default plan already owns the OP prerequisite, so this adds one PSS
-    // solve and its generated spectrum task.
+    // One PSS solve, from its own DC point, and its generated spectrum task.
     assert_eq!(tasks - before, 2);
 }
 
@@ -413,7 +412,7 @@ fn every_declared_prerequisite_kind_has_a_contextual_add_action() {
         .into_iter()
         .filter(|kind| !kind.prerequisites().is_empty())
         .collect::<Vec<_>>();
-    assert_eq!(dependent_kinds.len(), 15);
+    assert_eq!(dependent_kinds.len(), 12);
 
     for kind in dependent_kinds {
         let mut plan = crate::simulation::plan::SimulationPlan::empty();
@@ -555,15 +554,33 @@ fn fourier_dependency_cta_requires_a_valid_compatible_transient() {
 #[test]
 fn dependent_surfaces_include_transitive_prerequisite_failures() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
+    let (op, _) = plan
+        .insert(AnalysisKind::OperatingPoint)
+        .expect("OP inserts");
     let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
     name_pss_tone(&mut plan, pss);
+    plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
+        .expect("PSS starts from the OP");
     let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
     plan.bind_dependency(pac, AnalysisKind::Pss, pss)
         .expect("PAC binds the exact PSS");
+    // A saved plan whose operating point was switched off beneath its PSS.
+    let mut encoded = serde_json::to_value(&plan).expect("plan serializes");
+    let op_instance = encoded["instances"]
+        .as_array_mut()
+        .expect("instances serialize as an array")
+        .iter_mut()
+        .find(|instance| instance["id"] == serde_json::json!(op))
+        .expect("the OP is serialized");
+    op_instance["enabled"] = serde_json::json!(false);
+    op_instance["lifecycle"] = serde_json::json!("disabled");
+    let plan = serde_json::from_value::<crate::simulation::plan::SimulationPlan>(encoded)
+        .expect("raw corrupt fixture deserializes");
 
     let closure = dependency_closure_ids(&plan, pac);
     assert!(closure.contains(&pac));
     assert!(closure.contains(&pss));
+    assert!(closure.contains(&op));
     let issues = plan
         .validation_issues()
         .into_iter()
@@ -573,14 +590,14 @@ fn dependent_surfaces_include_transitive_prerequisite_failures() {
                 .any(|instance| issue_applies_to(issue, *instance))
         })
         .collect::<Vec<_>>();
-    assert!(issues.contains(&AnalysisPlanIssue::MissingPrerequisite {
+    assert!(issues.contains(&AnalysisPlanIssue::DisabledDependency {
         dependent: pss,
-        prerequisite: AnalysisKind::OperatingPoint,
+        target: op,
     }));
     assert_eq!(
         dependency_repair_cta(&plan, &issues, plan.instance(pac).unwrap().dependencies())
             .as_deref(),
-        Some("Add Operating point")
+        Some("Enable Operating point")
     );
 }
 

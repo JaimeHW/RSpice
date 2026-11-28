@@ -1582,7 +1582,12 @@ impl PreparedRunSnapshot {
                 &task.task.spec_options,
             );
             let expected_binding_count = usize::from(!expected_artifact_kinds.is_empty());
-            if task.dependency_bindings.len() != expected_binding_count {
+            let unbound_and_optional = task.dependency_bindings.is_empty()
+                && crate::prepared_dependency::artifact_is_optional(
+                    &task.task.spec,
+                    &task.task.spec_options,
+                );
+            if task.dependency_bindings.len() != expected_binding_count && !unbound_and_optional {
                 return Err(PreparationError::new(
                     PreparationStage::AnalysisPlan,
                     format!(

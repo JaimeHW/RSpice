@@ -678,12 +678,11 @@ impl AnalysisKind {
 
     /// The analyses whose result this kind reads, which a test therefore runs
     /// before it and hands over: the periodic steady state a periodic
-    /// small-signal analysis linearizes about, the transient a Fourier or FFT
-    /// analysis reads, and the DC solution a periodic solve starts from. Every
-    /// other kind solves its own operating point, as Spectre's do, so an AC,
-    /// noise or transfer-function analysis needs nothing before it.
+    /// small-signal analysis linearizes about, and the transient a Fourier or
+    /// FFT analysis reads. Every other kind solves its own operating point, as
+    /// Spectre's do, so an AC, noise or transfer-function analysis needs
+    /// nothing before it.
     pub const fn prerequisites(self) -> &'static [Self] {
-        const OP: &[AnalysisKind] = &[AnalysisKind::OperatingPoint];
         const TRAN: &[AnalysisKind] = &[AnalysisKind::Transient];
         const PSS: &[AnalysisKind] = &[AnalysisKind::Pss];
         const HB: &[AnalysisKind] = &[AnalysisKind::HarmonicBalance];
@@ -695,7 +694,6 @@ impl AnalysisKind {
             Self::Hbsp | Self::Hbnoise => HB,
             Self::Qpac | Self::Qpnoise | Self::Qpxf => QPSS,
             Self::Fourier | Self::Fft => TRAN,
-            Self::Pss | Self::HarmonicBalance | Self::Qpss => OP,
             Self::OperatingPoint
             | Self::Transient
             | Self::Ac
@@ -715,7 +713,23 @@ impl AnalysisKind {
             | Self::Soa
             | Self::Disto
             | Self::TransientNoise
-            | Self::DcMismatch => NONE,
+            | Self::DcMismatch
+            | Self::Pss
+            | Self::HarmonicBalance
+            | Self::Qpss => NONE,
+        }
+    }
+
+    /// The analyses this kind may start from without needing one: PSS, HB and
+    /// QPSS seed their solve with the DC solution of an operating point the
+    /// test chose, and solve their own DC point when it chose none.
+    pub const fn optional_prerequisites(self) -> &'static [Self] {
+        const OP: &[AnalysisKind] = &[AnalysisKind::OperatingPoint];
+        const NONE: &[AnalysisKind] = &[];
+
+        match self {
+            Self::Pss | Self::HarmonicBalance | Self::Qpss => OP,
+            _ => NONE,
         }
     }
 
@@ -829,9 +843,6 @@ mod tests {
             (AnalysisKind::Qpxf, AnalysisKind::Qpss),
             (AnalysisKind::Fourier, AnalysisKind::Transient),
             (AnalysisKind::Fft, AnalysisKind::Transient),
-            (AnalysisKind::Pss, AnalysisKind::OperatingPoint),
-            (AnalysisKind::HarmonicBalance, AnalysisKind::OperatingPoint),
-            (AnalysisKind::Qpss, AnalysisKind::OperatingPoint),
         ];
         for (kind, prerequisite) in expected {
             assert_eq!(kind.prerequisites(), &[prerequisite], "{kind}");
@@ -855,8 +866,24 @@ mod tests {
             AnalysisKind::DcMismatch,
             AnalysisKind::Disto,
             AnalysisKind::TransientNoise,
+            AnalysisKind::Pss,
+            AnalysisKind::HarmonicBalance,
+            AnalysisKind::Qpss,
         ] {
             assert!(kind.prerequisites().is_empty(), "{kind} needs nothing");
+        }
+    }
+
+    #[test]
+    fn periodic_solves_may_start_from_an_operating_point() {
+        for kind in AnalysisKind::ALL {
+            let expected: &[AnalysisKind] = match kind {
+                AnalysisKind::Pss | AnalysisKind::HarmonicBalance | AnalysisKind::Qpss => {
+                    &[AnalysisKind::OperatingPoint]
+                }
+                _ => &[],
+            };
+            assert_eq!(kind.optional_prerequisites(), expected, "{kind}");
         }
     }
 
