@@ -2285,9 +2285,12 @@ fn show_with_chrome(
         .analysis_plan
         .as_ref()
         .map(|plan| (plan.id(), plan.revision()));
-    show_docbar(ui, state);
-    if result_stage_bar_visible(state.results_reads()) {
-        show_sheet_bar(ui, state);
+    let stage_bar = result_stage_bar_visible(state.results_reads());
+    let folded = show_docbar(ui, state, stage_bar)
+        .then_some(chrome::bars::FoldedDocumentBar { document: None });
+    if stage_bar {
+        let actions = show_sheet_bar(ui, state, folded);
+        apply_document_actions(state, &actions);
     }
     crate::ui::plot::set_interaction_mode(
         ui.ctx(),
@@ -2919,37 +2922,30 @@ fn viewer_well_is_open(ui: &mut Ui, state: &mut ResultsParts<'_>) -> bool {
     true
 }
 
-fn show_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    show_docbar_for(ui, state, chrome::bars::DocumentBarSource::QuickView);
+/// The quick view's docbar, or, with `foldable` and one view to offer,
+/// nothing: true when it folded into the sheet bar, which then carries
+/// its actions.
+fn show_docbar(ui: &mut Ui, state: &mut ResultsParts<'_>, foldable: bool) -> bool {
+    show_docbar_for(
+        ui,
+        state,
+        chrome::bars::DocumentBarSource::QuickView,
+        foldable,
+    )
+    .1
 }
 
 /// The docbar over a project result document. Returns the index of the page
-/// the reader picked, when they picked one.
+/// the reader picked, when they picked one, and whether the docbar folded
+/// into the sheet bar, drawing nothing (see [`show_docbar`]).
 pub(super) fn show_persistent_docbar(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     pages: &[String],
     page: usize,
-) -> Option<usize> {
-    use crate::workbench::documents::result_document::persistent_document::sources::{
-        ArchiveAvailability, archive_availability,
-    };
-    use chrome::bars::{DocumentArchive, DocumentStanding};
-    let document = shown_saved_document(state.results_reads());
-    let archive = document.map(|document| archive_availability(state.results_reads(), document));
-    let standing = DocumentStanding {
-        tracking: document.map_or(chrome::bars::DocumentTracking::Untracked, |document| {
-            document_tracking(state.results_reads(), document)
-        }),
-        archive: match &archive {
-            Some(ArchiveAvailability::Available) => DocumentArchive::Available,
-            Some(ArchiveAvailability::Archived) => DocumentArchive::Archived,
-            Some(ArchiveAvailability::Unavailable(reason)) => {
-                DocumentArchive::Unavailable(reason.as_str())
-            }
-            None => DocumentArchive::Unavailable("Show a saved result document."),
-        },
-    };
+    standing: chrome::bars::DocumentStanding<'_>,
+    foldable: bool,
+) -> (Option<usize>, bool) {
     show_docbar_for(
         ui,
         state,
@@ -2958,6 +2954,7 @@ pub(super) fn show_persistent_docbar(
             page,
             standing,
         },
+        foldable,
     )
 }
 
@@ -2965,13 +2962,31 @@ fn show_docbar_for(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     source: chrome::bars::DocumentBarSource<'_>,
-) -> Option<usize> {
-    let available = ResultViewer::all()
-        .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available);
-    let actions = chrome::bars::document_bar(ui, state.results.session.viewer, available, source);
+    foldable: bool,
+) -> (Option<usize>, bool) {
+    let available: Vec<ResultViewer> = ResultViewer::all()
+        .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available)
+        .collect();
+    let current = state.results.session.viewer;
+    // A strip of one tab offers nothing to pick: the sheet bar carries the
+    // document's actions instead, and the row goes to the sheet.
+    if foldable && chrome::bars::folded_document_bar(current, &available, source).is_some() {
+        return (None, true);
+    }
+    let actions = chrome::bars::document_bar(ui, current, available, source);
     if let Some(viewer) = actions.viewer {
         state.results.session.viewer = viewer;
     }
+    apply_document_actions(state, &actions);
+    (actions.page, false)
+}
+
+/// Open what the document's actions asked for, from its docbar or from the
+/// sheet bar a docbar folded into.
+pub(super) fn apply_document_actions(
+    state: &mut ResultsParts<'_>,
+    actions: &chrome::bars::DocumentBarActions,
+) {
     if actions.add_pane {
         document_edit::open_add_pane(state);
     } else if actions.open_properties {
@@ -2987,7 +3002,45 @@ fn show_docbar_for(
             state.workbench.prompt(error);
         }
     }
-    actions.page
+}
+
+/// What the bar of the saved document in front says of it: which run it
+/// reads, and whether it can hold its runs' samples, for
+/// [`document_standing`] to name.
+pub(super) fn document_standing_facts(
+    state: ResultsReads<'_>,
+) -> (
+    chrome::bars::DocumentTracking,
+    Option<persistent_document::sources::ArchiveAvailability>,
+) {
+    let document = shown_saved_document(state);
+    let archive = document
+        .map(|document| persistent_document::sources::archive_availability(state, document));
+    let tracking = document.map_or(chrome::bars::DocumentTracking::Untracked, |document| {
+        document_tracking(state, document)
+    });
+    (tracking, archive)
+}
+
+/// The standing [`document_standing_facts`] read, as the document's bar
+/// takes it.
+pub(super) fn document_standing(
+    tracking: chrome::bars::DocumentTracking,
+    archive: Option<&persistent_document::sources::ArchiveAvailability>,
+) -> chrome::bars::DocumentStanding<'_> {
+    use chrome::bars::DocumentArchive;
+    use persistent_document::sources::ArchiveAvailability;
+    chrome::bars::DocumentStanding {
+        tracking,
+        archive: match archive {
+            Some(ArchiveAvailability::Available) => DocumentArchive::Available,
+            Some(ArchiveAvailability::Archived) => DocumentArchive::Archived,
+            Some(ArchiveAvailability::Unavailable(reason)) => {
+                DocumentArchive::Unavailable(reason.as_str())
+            }
+            None => DocumentArchive::Unavailable("Show a saved result document."),
+        },
+    }
 }
 
 /// The saved result document Results shows, if its tab is in front.

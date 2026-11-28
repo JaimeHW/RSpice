@@ -214,55 +214,6 @@ fn viewer_tab_overflow_chevron(ui: &mut Ui, direction: f32, enabled: bool) -> bo
     enabled && response.clicked()
 }
 
-pub fn viewer_picker(
-    ui: &mut Ui,
-    icon: WorkbenchIcon,
-    label: &str,
-    accessible_label: &str,
-) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let galley = ui.painter().layout_no_wrap(
-        label.to_owned(),
-        theme::sans(tokens::FS_1, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    let width = galley.size().x + 36.0;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(width, ResultBarMetrics::of(ui).viewer_tab),
-        egui::Sense::click(),
-    );
-    response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), accessible_label));
-    if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
-        if hovered {
-            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-        }
-        let color = if hovered {
-            t.color.text
-        } else {
-            t.color.text_dim
-        };
-        icon.paint(
-            ui.painter(),
-            egui::Rect::from_center_size(
-                egui::pos2(rect.left() + 14.0, rect.center().y),
-                egui::vec2(13.0, 13.0),
-            ),
-            color,
-        );
-        ui.painter().galley(
-            egui::pos2(rect.left() + 26.0, rect.center().y - galley.size().y * 0.5),
-            galley,
-            color,
-        );
-        theme::paint_focus_ring(ui, &response, rect);
-    }
-    response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
-}
-
 pub fn viewer_picker_separator(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(1.0, ResultBarMetrics::of(ui).viewer_tab),

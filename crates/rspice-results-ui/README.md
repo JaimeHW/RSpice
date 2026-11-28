@@ -56,7 +56,7 @@ closure.
   which paints the inspector: `fft::view`, `nyquist::view`,
   `smith_chart::view`, `histogram::view`, `eye_diagram::view` and
   `op_inspector`.
-- `chrome::viewer_tab` and `chrome::viewer_picker` for the viewer strip.
+- `chrome::viewer_tab` for the viewer strip.
 - `create_document::show` with a `CreateDocumentHost`, which returns a create
   request the host revalidates and commits.
 

@@ -9,8 +9,14 @@ use rspice_results_ui::chrome::{
     bars::{self, SheetBarHost},
 };
 
-pub(super) fn show(ui: &mut Ui, state: &mut ResultsParts<'_>) {
-    bars::show(ui, &mut Host(state, ui.ctx().clone()));
+/// The sheet's one bar, carrying the document's actions when its docbar
+/// folded into it; returns what they asked for.
+pub(super) fn show(
+    ui: &mut Ui,
+    state: &mut ResultsParts<'_>,
+    folded: Option<bars::FoldedDocumentBar<'_>>,
+) -> bars::DocumentBarActions {
+    bars::show(ui, &mut Host(state, ui.ctx().clone()), folded)
 }
 
 /// Carry out what a result document's export control asked for. Copying

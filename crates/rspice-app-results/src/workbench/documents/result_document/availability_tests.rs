@@ -889,6 +889,104 @@ fn every_tab_the_strip_draws_can_be_opened() {
     }
 }
 
+/// The labels the quick view's chrome publishes, each with whether it is a
+/// tab, on the frame after the one that settles its sheet.
+fn quick_view_labels(state: &mut ResultsTestHost) -> Vec<(bool, String)> {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut controller = SimulationController::new();
+    let mut output = None;
+    for _ in 0..2 {
+        output = Some(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_600.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show(ui, &mut state.results_parts(), &mut controller)
+                });
+            },
+        ));
+    }
+    output
+        .and_then(|output| output.platform_output.accesskit_update)
+        .expect("the quick view publishes an accessibility tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| {
+            let tab = node.role() == egui::accesskit::Role::Tab;
+            node.label().map(|label| (tab, label.to_owned()))
+        })
+        .collect()
+}
+
+/// A dataset with one view to offer draws no strip of one tab: the sheet's
+/// one bar carries the document's actions, the row goes to the sheet, and
+/// the view is named by its pane header alone. A dataset that feeds two
+/// views keeps its strip, with the actions on it once.
+#[test]
+fn one_view_draws_no_tab_strip_and_its_bar_carries_the_document() {
+    use crate::state::{ComplexResultValue, PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
+    let evidence = |count: u64| PoleZeroRootSetEvidence::Qualified {
+        certificate: PoleZeroSpectrumCertificate {
+            asymptotically_stable: None,
+            problem_order: count,
+            infinite_count: 0,
+            max_backward_error: 1.0e-14,
+            qualification_tolerance:
+                PoleZeroSpectrumCertificate::canonical_qualification_tolerance(count).unwrap(),
+        },
+    };
+    let root = |real: f64| ComplexResultValue {
+        real,
+        imaginary: 0.0,
+    };
+    let mut state = state_with_analysis(
+        AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+            AnalysisResultPayload::PoleZero {
+                poles: vec![root(-1.0e3)],
+                zeros: vec![root(-4.0e3)],
+                pole_evidence: evidence(1),
+                zero_evidence: evidence(1),
+                gain: Some(2.0),
+            },
+        ),
+    );
+    let count = |labels: &[(bool, String)], wanted: &str| {
+        labels.iter().filter(|(_, label)| label == wanted).count()
+    };
+    let labels = quick_view_labels(&mut state);
+    assert_eq!(state.results.results.session.viewer, ResultViewer::PoleZero);
+    assert!(!labels.iter().any(|(tab, _)| *tab), "{labels:?}");
+    assert_eq!(
+        count(&labels, "PZ"),
+        0,
+        "the pane header names the view; the bar adds no name: {labels:?}"
+    );
+    assert_eq!(count(&labels, "Plot properties"), 1, "{labels:?}");
+    assert_eq!(
+        count(&labels, "New result document…"),
+        0,
+        "a quick view makes its document from Results' tabs: {labels:?}"
+    );
+
+    let mut state = transient_state();
+    let labels = quick_view_labels(&mut state);
+    let tabs = labels.iter().filter(|(tab, _)| *tab).count();
+    assert!(tabs > 1, "two views keep their strip: {labels:?}");
+    assert_eq!(count(&labels, "Plot properties"), 1, "{labels:?}");
+    assert_eq!(
+        count(&labels, "New result document…"),
+        0,
+        "a quick view makes its document from Results' tabs: {labels:?}"
+    );
+}
+
 fn transient_state() -> ResultsTestHost {
     state_with_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![

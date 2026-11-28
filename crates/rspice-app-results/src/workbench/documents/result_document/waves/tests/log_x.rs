@@ -49,7 +49,7 @@ fn x_log_toggle(state: &mut ResultsTestHost) -> Option<(bool, bool)> {
     ctx.enable_accesskit();
     let output = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            super::super::super::show_sheet_bar(ui, &mut state.results_parts());
+            super::super::super::show_sheet_bar(ui, &mut state.results_parts(), None);
             show(ui, &mut state.results_parts());
         });
     });

@@ -97,3 +97,54 @@ fn the_clear_mark_empties_the_filter_and_leaves_the_reader_in_it() {
     assert!(ctx.memory(|memory| memory.has_focus(operating_point_filter_id())));
     assert_eq!(field_rect(&ctx), field);
 }
+
+/// A strip of one tab folds into the sheet bar; two tabs, a page picker, or
+/// a tab that is not the sheet being shown keep the strip.
+#[test]
+fn only_a_strip_of_the_one_view_shown_folds_into_the_sheet_bar() {
+    let pz = ResultViewer::PoleZero;
+    let standing = DocumentStanding {
+        tracking: DocumentTracking::Latest,
+        archive: DocumentArchive::Available,
+    };
+    assert_eq!(
+        folded_document_bar(pz, &[pz], DocumentBarSource::QuickView),
+        Some(FoldedDocumentBar { document: None })
+    );
+    let one_page = ["Page 1".to_owned()];
+    assert_eq!(
+        folded_document_bar(
+            pz,
+            &[pz],
+            DocumentBarSource::Document {
+                pages: &one_page,
+                page: 0,
+                standing,
+            },
+        ),
+        Some(FoldedDocumentBar {
+            document: Some(standing)
+        })
+    );
+    let two_pages = ["Page 1".to_owned(), "Page 2".to_owned()];
+    assert_eq!(
+        folded_document_bar(
+            pz,
+            &[pz],
+            DocumentBarSource::Document {
+                pages: &two_pages,
+                page: 0,
+                standing,
+            },
+        ),
+        None
+    );
+    assert_eq!(
+        folded_document_bar(pz, &[pz, ResultViewer::Table], DocumentBarSource::QuickView),
+        None
+    );
+    assert_eq!(
+        folded_document_bar(ResultViewer::Table, &[pz], DocumentBarSource::QuickView),
+        None
+    );
+}

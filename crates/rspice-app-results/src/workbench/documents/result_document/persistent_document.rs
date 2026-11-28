@@ -157,7 +157,8 @@ pub fn show(
         return;
     }
     super::prepare_viewer_state(state);
-    if let Some(viewer) = compatible_active_viewer(state.results_reads(), active_pane) {
+    let shows_a_sheet = compatible_active_viewer(state.results_reads(), active_pane);
+    if let Some(viewer) = shows_a_sheet {
         state.results.session.viewer = viewer;
     }
     let page_titles = document
@@ -170,7 +171,18 @@ pub fn show(
         .iter()
         .position(|candidate| candidate.page.id == selected_page_id)
         .unwrap_or_default();
-    if let Some(picked) = super::show_persistent_docbar(ui, state, &page_titles, page_index)
+    let (tracking, archive) = super::document_standing_facts(state.results_reads());
+    let standing = super::document_standing(tracking, archive.as_ref());
+    // The docbar folds into the sheet bar only over a sheet that draws one.
+    let (picked, folded) = super::show_persistent_docbar(
+        ui,
+        state,
+        &page_titles,
+        page_index,
+        standing,
+        shows_a_sheet.is_some(),
+    );
+    if let Some(picked) = picked
         && picked != page_index
     {
         select_page(state, document_id, picked);
@@ -189,7 +201,11 @@ pub fn show(
             unavailable_surface(ui, &active_pane.title, &reason);
             return;
         }
-        super::show_sheet_bar(ui, state);
+        let folded = folded.then_some(rspice_results_ui::chrome::bars::FoldedDocumentBar {
+            document: Some(standing),
+        });
+        let actions = super::show_sheet_bar(ui, state, folded);
+        super::apply_document_actions(state, &actions);
         // What the bar did to the active pane's view, a zoom or a fit, is the
         // document's at once: each pane projects the document's view over the
         // session's before it draws, which would undo it.
