@@ -421,7 +421,9 @@ pub(super) fn analysis_editor(
         Stroke::new(1.0, t.color.border_strong),
     );
 
-    if let Some(anchor_y) = cx.state.simulation_surface_editor_anchor_y.take() {
+    if let Some((anchor_id, anchor_y)) = cx.state.simulation_surface_editor_anchor_y.take()
+        && anchor_id == selected.id
+    {
         cx.state.simulation_surface_pending_scroll_delta_y +=
             editor_anchor_scroll_delta(anchor_y, form_anchor_content_y);
     }
@@ -429,7 +431,7 @@ pub(super) fn analysis_editor(
     // dependency bind, enable toggle, insertion, removal, or repair that changes
     // content above it is then compensated on the next frame without maintaining
     // a fragile action whitelist.
-    cx.state.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
+    cx.state.simulation_surface_editor_anchor_y = Some((selected.id, form_anchor_content_y));
 
     if settle_fields(ui, cx, &selected, draft, open_field, option_fields.open) {
         cx.state.form_committed = true;

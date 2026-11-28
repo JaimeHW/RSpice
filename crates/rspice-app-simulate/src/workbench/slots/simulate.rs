@@ -30,10 +30,13 @@ pub struct SimulateState {
     /// editor. It is consumed after egui reports the current ScrollArea offset.
     pub simulation_surface_pending_scroll_delta_y: f32,
     /// Screen-space top edge of the selected analysis form immediately before
-    /// a stacked structural edit. The next frame measures the actual displaced
-    /// position so scroll compensation follows egui's rendered geometry and
-    /// status-message height changes cannot move the editable controls.
-    pub simulation_surface_editor_anchor_y: Option<f32>,
+    /// a stacked structural edit, and the analysis it was measured on. The
+    /// next frame measures the actual displaced position so scroll
+    /// compensation follows egui's rendered geometry and status-message
+    /// height changes cannot move the editable controls. Another analysis's
+    /// form is not a displacement of this one, so a new selection is never
+    /// scrolled by the difference between the two forms' headers.
+    pub simulation_surface_editor_anchor_y: Option<(crate::product::AnalysisInstanceId, f32)>,
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
     pub simulation_workflow: Option<crate::workbench::state::SimulationWorkflowDialog>,
