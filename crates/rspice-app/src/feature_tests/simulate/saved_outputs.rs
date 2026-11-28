@@ -363,60 +363,6 @@ fn a_name_the_design_lacks_is_flagged_on_its_row_and_by_check() {
     );
 }
 
-/// Lowering "Datasets kept" below the runs a plan holds asks first, naming
-/// how many go, and Cancel changes nothing; the yes keeps the newest.
-/// Raising it applies at once.
-#[test]
-fn lowering_datasets_kept_asks_before_it_deletes_runs() {
-    let mut engineer = Engineer::new_project("kept");
-    let e = &mut engineer;
-    divider(e);
-    for _ in 0..20 {
-        e.run();
-    }
-    let state = |e: &Engineer| {
-        let model = &e.replay.app.state.model;
-        let plan = model.sim_setup.analysis_plan.as_ref().expect("a plan").id();
-        (
-            model
-                .simulation
-                .retained
-                .runs
-                .retained_plan_dataset_count(plan),
-            model.sim_setup.save_policy.retained_dataset_limit,
-        )
-    };
-    assert_eq!(state(e), (20, 20));
-
-    let lower = |e: &mut Engineer, to: &str| {
-        e.setup_page("Save, streaming & retention policy");
-        e.press("Datasets kept", Role::ComboBox);
-        e.press(to, Role::ListBoxOption);
-    };
-    lower(e, "5 datasets");
-    let painted = e.painted();
-    assert!(
-        painted.contains("Keep 5 runs?")
-            && painted.contains("15 older runs of this test will be deleted."),
-        "lowering the limit asks first:\n{painted}"
-    );
-    assert_eq!(state(e), (20, 20), "nothing is deleted before the yes");
-    e.press("Cancel", Role::Button);
-    assert_eq!(state(e), (20, 20), "Cancel changes nothing");
-    assert!(e.replay.app.state.simulate.retention_confirmation.is_none());
-
-    lower(e, "5 datasets");
-    e.press("Delete 15 runs", Role::Button);
-    assert_eq!(state(e), (5, 5), "the yes keeps the newest five");
-
-    lower(e, "50 datasets");
-    assert!(
-        e.replay.app.state.simulate.retention_confirmation.is_none(),
-        "raising the limit asks nothing"
-    );
-    assert_eq!(state(e), (5, 50));
-}
-
 /// The plan's output check is built once for the plan as it stands: two frames
 /// of Outputs build it once, Save reads the same one, and an edit builds it
 /// again. The two pages count what a run captures from the same ledger.
@@ -484,5 +430,59 @@ fn the_output_check_is_built_once_until_the_plan_changes() {
         take_output_checks_built(),
         0,
         "and the frames after read it"
+    );
+}
+
+/// Lowering "Datasets kept" below the runs a plan holds deletes none of them;
+/// the next run brings the plan to the new limit, keeping the newest.
+#[test]
+fn lowering_datasets_kept_deletes_no_run_until_the_next_run() {
+    let mut engineer = Engineer::new_project("kept");
+    let e = &mut engineer;
+    divider(e);
+    for _ in 0..8 {
+        e.run();
+    }
+    let state = |e: &Engineer| {
+        let model = &e.replay.app.state.model;
+        let plan = model.sim_setup.analysis_plan.as_ref().expect("a plan").id();
+        let sequences: Vec<u64> = model
+            .simulation
+            .retained
+            .runs
+            .iter()
+            .filter(|run| {
+                run.prepared_receipt()
+                    .and_then(rspice_app_state::state::PreparedRunReceipt::simulation_plan_id)
+                    == Some(plan)
+            })
+            .map(|run| run.id)
+            .collect();
+        (
+            sequences,
+            model.sim_setup.save_policy.retained_dataset_limit,
+        )
+    };
+    let (held, limit) = state(e);
+    assert_eq!((held.len(), limit), (8, 20));
+
+    e.setup_page("Save, streaming & retention policy");
+    e.press("Datasets kept", Role::ComboBox);
+    e.press("5 datasets", Role::ListBoxOption);
+    e.painted();
+    assert_eq!(
+        state(e),
+        (held.clone(), 5),
+        "the limit is set and no run is deleted on the click"
+    );
+
+    e.run();
+    let (after, limit) = state(e);
+    assert_eq!(limit, 5);
+    assert_eq!(after.len(), 5, "the next run brings the plan to its limit");
+    let newest = *held.iter().max().expect("runs");
+    assert!(
+        after.iter().all(|sequence| *sequence + 3 >= newest),
+        "the newest runs are the ones kept: {after:?} after {held:?}"
     );
 }

@@ -62,9 +62,6 @@ pub struct SimulateState {
     pub selected_design_variable: Option<String>,
     /// Selected saved-output row on the outputs page, by exact name.
     pub selected_saved_output: Option<String>,
-    /// A lower "Datasets kept" that would discard runs, waiting on the
-    /// reader's yes: the limit it would set.
-    pub retention_confirmation: Option<usize>,
     /// Selected capture group on the Save page, by its stable identity.
     ///
     /// By identity rather than by name because the page offers reordering, and
@@ -127,7 +124,6 @@ impl Default for SimulateState {
             selected_specification: None,
             selected_design_variable: None,
             selected_saved_output: None,
-            retention_confirmation: None,
             selected_capture_group: None,
             selected_run_set_dimension: None,
             run_set_values_draft: None,

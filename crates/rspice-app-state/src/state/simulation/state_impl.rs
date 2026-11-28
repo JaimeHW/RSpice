@@ -960,34 +960,6 @@ impl SimulationState {
         self.prune_yield_evidence_provenance();
     }
 
-    /// How many of this plan's runs [`Self::prune_plan_runs`] would discard
-    /// at `limit`: the oldest beyond it, never the selected run, a baseline or
-    /// a run a saved result document reads.
-    pub fn plan_runs_pruned_at(
-        &self,
-        plan_id: crate::product::SimulationPlanId,
-        limit: usize,
-    ) -> usize {
-        let selected_run_id = self.active_run().map(|run| run.run_id);
-        let held = &self.retained.held_by_documents;
-        let runs = &self.retained.runs;
-        let pruneable = runs
-            .iter()
-            .filter(|run| {
-                run.retention().is_pruneable()
-                    && !held.contains(&run.dataset_id)
-                    && Some(run.run_id) != selected_run_id
-                    && run
-                        .prepared_receipt()
-                        .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
-                        == Some(plan_id)
-            })
-            .count();
-        runs.retained_plan_dataset_count(plan_id)
-            .saturating_sub(limit.max(1))
-            .min(pruneable)
-    }
-
     pub fn prune_plan_runs(&mut self, plan_id: crate::product::SimulationPlanId, limit: usize) {
         let selected_run_id = self.active_run().map(|run| run.run_id);
         let held = &self.retained.held_by_documents;
