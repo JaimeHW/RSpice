@@ -21,7 +21,7 @@ use rspice_model_library::{
 };
 use rspice_simulation_contract::setup_state::SimulationSetup;
 
-pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 21;
+pub const PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION: u32 = 22;
 
 /// Versioned, project-owned inputs required to reproduce a simulation plan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
