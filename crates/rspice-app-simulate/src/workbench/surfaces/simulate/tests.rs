@@ -789,32 +789,55 @@ fn selected_pac(
 #[test]
 fn the_uses_field_lists_the_carriers_by_name_and_rebinds() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
+    let (spectral, _) = plan
+        .insert(AnalysisKind::HarmonicBalance)
+        .expect("HB inserts");
     let (first, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
     let (second, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
     name_every_pss_tone(&mut plan);
+    plan.set_instance_name(spectral, "Spectral").unwrap();
     plan.set_instance_name(first, "Carrier A").unwrap();
     plan.set_instance_name(second, "Carrier B").unwrap();
     let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
-    plan.bind_dependency(pac, AnalysisKind::Pss, first)
-        .expect("PAC binds the first PSS");
+    plan.bind_dependency(pac, AnalysisKind::Pss, second)
+        .expect("PAC binds the nearer PSS");
 
-    let field = analysis_form::uses_field(&selected_pac(plan, pac), AnalysisKind::Pss);
-    assert_eq!(field.current, "Carrier A");
+    // Every periodic solve above it, of either family, by name.
+    let field = analysis_form::uses_field(&selected_pac(plan.clone(), pac), AnalysisKind::Pss);
+    assert_eq!(field.current, "Carrier B");
     assert_eq!(
         field
             .options
             .iter()
             .map(|(label, _)| label.as_str())
             .collect::<Vec<_>>(),
-        ["Carrier A", "Carrier B"]
+        ["Carrier A", "Carrier B", "Spectral"]
     );
     assert!(matches!(
-        field.options[1].1,
+        field.options[0].1,
         AnalysisAction::BindDependency {
             prerequisite: AnalysisKind::Pss,
             target,
-        } if target == second
+        } if target == first
     ));
+    // Picking the harmonic balance picks its family.
+    let AnalysisAction::BindDependency {
+        prerequisite,
+        target,
+    } = field.options[2].1
+    else {
+        panic!("{:?}", field.options[2].1);
+    };
+    assert_eq!(
+        (prerequisite, target),
+        (AnalysisKind::HarmonicBalance, spectral)
+    );
+    plan.bind_dependency(pac, prerequisite, target)
+        .expect("PAC binds the harmonic balance");
+    let selected = selected_pac(plan, pac);
+    assert_eq!(selected.prerequisite_roles, [AnalysisKind::HarmonicBalance]);
+    let field = analysis_form::uses_field(&selected, AnalysisKind::HarmonicBalance);
+    assert_eq!(field.current, "Spectral");
 }
 
 #[test]

@@ -8,7 +8,7 @@ use crate::simulation::dialog::PnoiseDialogState;
 
 use super::{
     QuantityPresentationPolicy, SWEEP_KINDS, UiNumberLocale, choice_row, input_row,
-    periodic_carrier_row, quantity_input_row, sweep_point_field_label, switch_row,
+    quantity_input_row, sweep_point_field_label, switch_row,
 };
 
 /// Render the periodic noise fields.
@@ -91,7 +91,6 @@ pub(super) fn fields(
     ui.scope(|ui| { switch_row(ui, "Integrated noise", &mut setup.integrated_noise); }).response
         .on_hover_text("Edge and delay modes retain timing jitter in seconds. Phase noise retains RMS phase error and timing jitter. Voltage sampling retains voltage RMS; input-referred RMS follows the selected source's units.");
     switch_row(ui, "Noise summary", &mut setup.noise_summary);
-    periodic_carrier_row(ui, &mut setup.carrier_idx);
 }
 
 fn edge_fields(

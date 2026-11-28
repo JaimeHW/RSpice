@@ -1213,6 +1213,7 @@ fn issue_analysis(
         | AnalysisPlanIssue::WrongDependencyKind { dependent, .. }
         | AnalysisPlanIssue::DisabledDependency { dependent, .. }
         | AnalysisPlanIssue::DependencyNotEarlier { dependent, .. }
+        | AnalysisPlanIssue::NearerCarrier { dependent, .. }
         | AnalysisPlanIssue::IncompatibleDependencyConfiguration { dependent, .. } => {
             Some(*dependent)
         }

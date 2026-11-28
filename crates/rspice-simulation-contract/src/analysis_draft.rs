@@ -357,6 +357,54 @@ impl AnalysisDraft {
         }
     }
 
+    /// The periodic solves a periodic small-signal draft can read: a shooting
+    /// `.PSS` or a `.HB`, the two families the engine's `FROM=` names. Empty
+    /// for every other draft, `.PSTB` included.
+    #[must_use]
+    pub fn periodic_carrier_kinds(&self) -> &'static [AnalysisKind] {
+        const EITHER_PERIODIC_SOLVE: &[AnalysisKind] =
+            &[AnalysisKind::Pss, AnalysisKind::HarmonicBalance];
+        if self.periodic_carrier().is_some() {
+            EITHER_PERIODIC_SOLVE
+        } else {
+            &[]
+        }
+    }
+
+    /// Make the family of `prerequisite` this draft's carrier, so its card
+    /// states `FROM=` for the solve it is bound to: choosing a harmonic-balance
+    /// analysis is choosing `FROM=HB`. Nothing changes for a draft that names
+    /// no carrier, or for a prerequisite that is not a periodic solve.
+    pub fn follow_carrier(&mut self, prerequisite: AnalysisKind) {
+        let carrier = match prerequisite {
+            AnalysisKind::Pss => PeriodicCarrier::Pss,
+            AnalysisKind::HarmonicBalance => PeriodicCarrier::Hb,
+            _ => return,
+        };
+        match self {
+            Self::Pac(draft) => draft.carrier_idx = carrier.index(),
+            Self::Pxf(draft) => draft.carrier_idx = carrier.index(),
+            Self::Pnoise(draft) => draft.carrier_idx = carrier.index(),
+            _ => {}
+        }
+    }
+
+    /// The kinds a deck reads this draft's carrier from by order: the card
+    /// takes the nearest preceding solve of these, not a named one
+    /// (`resolve_periodic_source` in `rspice-core/src/execution/plan.rs`).
+    /// Empty for a draft that names no carrier.
+    #[must_use]
+    pub fn order_bound_carrier_kinds(&self) -> &'static [AnalysisKind] {
+        const PSS: &[AnalysisKind] = &[AnalysisKind::Pss];
+        const HB: &[AnalysisKind] = &[AnalysisKind::HarmonicBalance];
+        match self.periodic_carrier() {
+            Some(PeriodicCarrier::Preceding) => self.periodic_carrier_kinds(),
+            Some(PeriodicCarrier::Pss) => PSS,
+            Some(PeriodicCarrier::Hb) => HB,
+            None => &[],
+        }
+    }
+
     /// The carrier a periodic small-signal draft linearizes around, or `None`
     /// for every draft that names no carrier.
     ///

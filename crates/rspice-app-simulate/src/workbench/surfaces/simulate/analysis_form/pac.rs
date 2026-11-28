@@ -8,8 +8,8 @@ use crate::simulation::dialog::PacDialogState;
 
 use super::{
     QuantityPresentationPolicy, SWEEP_KINDS, UiNumberLocale, choice_row, hinted_input_row,
-    hinted_input_row_enabled, input_row, periodic_carrier_row, plan_policy_tolerance_row,
-    quantity_input_row, sweep_point_field_label, switch_row,
+    hinted_input_row_enabled, input_row, plan_policy_tolerance_row, quantity_input_row,
+    sweep_point_field_label, switch_row,
 };
 
 /// Render the periodic AC fields.
@@ -72,8 +72,4 @@ pub(super) fn fields(
     switch_row(ui, "Include DC", &mut setup.include_dc);
     plan_policy_tolerance_row(ui, "Relative tolerance", &mut setup.reltol);
     plan_policy_tolerance_row(ui, "Absolute tolerance", &mut setup.abstol);
-    // Last, because it is the only row that is about something outside this
-    // analysis: every field above describes the small signal, and this one
-    // names the large-signal solve the whole measurement sits on.
-    periodic_carrier_row(ui, &mut setup.carrier_idx);
 }

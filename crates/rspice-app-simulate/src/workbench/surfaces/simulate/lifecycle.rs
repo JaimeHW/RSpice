@@ -86,9 +86,16 @@ pub(super) fn selected_analysis(
     let repair_context = dependency_sources.dependency_repair_context();
     let prerequisite_roles = plan.required_prerequisite_roles(id);
     let mut candidate_roles = prerequisite_roles.clone();
-    for optional in instance.kind().optional_prerequisites() {
-        if !candidate_roles.contains(optional) {
-            candidate_roles.push(*optional);
+    // A periodic small-signal analysis lists the periodic solves of both
+    // families: choosing a harmonic-balance analysis is choosing HB.
+    for bindable in instance
+        .kind()
+        .optional_prerequisites()
+        .iter()
+        .chain(instance.draft().periodic_carrier_kinds())
+    {
+        if !candidate_roles.contains(bindable) {
+            candidate_roles.push(*bindable);
         }
     }
     let prerequisite_candidates = candidate_roles
@@ -714,6 +721,7 @@ pub(super) fn issue_applies_to(issue: &AnalysisPlanIssue, id: AnalysisInstanceId
         | AnalysisPlanIssue::WrongDependencyKind { dependent, .. }
         | AnalysisPlanIssue::DisabledDependency { dependent, .. }
         | AnalysisPlanIssue::DependencyNotEarlier { dependent, .. }
+        | AnalysisPlanIssue::NearerCarrier { dependent, .. }
         | AnalysisPlanIssue::IncompatibleDependencyConfiguration { dependent, .. } => {
             *dependent == id
         }

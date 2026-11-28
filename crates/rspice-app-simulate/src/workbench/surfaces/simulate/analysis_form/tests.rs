@@ -202,35 +202,6 @@ fn pss_integration_methods_are_the_engines_own() {
     );
 }
 
-/// The three periodic small-signal forms name their carrier, in the engine's
-/// own vocabulary, and every position they name is one they run.
-///
-/// The words are the enum's, read off it rather than repeated here, because
-/// the chooser list and the card keyword are two halves of one vocabulary: a
-/// label that drifted from the carrier it selects would paint a choice the
-/// deck does not make.
-///
-/// There is no disabled position left to assert. There was one — harmonic
-/// balance, painted with "no Studio route" beside it — and a disabled choice
-/// on a card the engine runs is a standing admission rather than a fact about
-/// the analysis, so the runners took the carrier instead.
-#[test]
-fn the_periodic_carrier_row_offers_the_carriers_the_engine_has() {
-    use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
-
-    assert_eq!(
-        PERIODIC_CARRIER_CHOICES.len(),
-        PeriodicCarrier::ALL.len(),
-        "the chooser paints one position per carrier the engine's FROM= has"
-    );
-    for (label, carrier) in PERIODIC_CARRIER_CHOICES
-        .iter()
-        .zip(PeriodicCarrier::ALL.iter())
-    {
-        assert_eq!(*label, carrier.display_name());
-    }
-}
-
 /// Every solver control the form owns is painted, once.
 ///
 /// Read off the render rather than off [`HB_FIELD_LABELS`]: a form that

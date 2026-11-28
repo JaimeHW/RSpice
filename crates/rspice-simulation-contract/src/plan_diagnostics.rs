@@ -87,6 +87,14 @@ pub enum AnalysisPlanIssue {
         dependent: AnalysisInstanceId,
         target: AnalysisInstanceId,
     },
+    /// A periodic small-signal analysis bound to a periodic solve a deck would
+    /// not hand it: its card takes the nearest solve above it of the family it
+    /// names, and `nearer` is that one.
+    NearerCarrier {
+        dependent: AnalysisInstanceId,
+        target: AnalysisInstanceId,
+        nearer: AnalysisInstanceId,
+    },
     IncompatibleDependencyConfiguration {
         dependent: AnalysisInstanceId,
         prerequisite: AnalysisKind,
@@ -110,6 +118,7 @@ impl AnalysisPlanIssue {
             self,
             Self::NoEnabledInstances
                 | Self::MissingPrerequisite { .. }
+                | Self::NearerCarrier { .. }
                 | Self::IncompatibleDependencyConfiguration { .. }
         )
     }
@@ -204,6 +213,14 @@ impl fmt::Display for AnalysisPlanIssue {
             Self::DependencyNotEarlier { dependent, target } => write!(
                 formatter,
                 "Analysis {dependent} must follow prerequisite {target}."
+            ),
+            Self::NearerCarrier {
+                dependent,
+                target,
+                nearer,
+            } => write!(
+                formatter,
+                "Analysis {dependent} is bound to periodic solve {target}, but its card reads the nearer {nearer}."
             ),
             Self::IncompatibleDependencyConfiguration {
                 dependent,

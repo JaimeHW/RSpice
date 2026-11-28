@@ -57,6 +57,7 @@ pub const fn issue_is_damage(issue: &AnalysisPlanIssue) -> bool {
             | AnalysisPlanIssue::MissingPrerequisite { .. }
             | AnalysisPlanIssue::DisabledDependency { .. }
             | AnalysisPlanIssue::DependencyNotEarlier { .. }
+            | AnalysisPlanIssue::NearerCarrier { .. }
             | AnalysisPlanIssue::IncompatibleDependencyConfiguration { .. }
     )
 }
@@ -92,6 +93,25 @@ pub fn issue_sentence(plan: &SimulationPlan, issue: &AnalysisPlanIssue) -> Strin
             plan.instance(*target)
                 .map_or("it", |instance| instance.display_name())
         ),
+        AnalysisPlanIssue::NearerCarrier {
+            dependent,
+            target,
+            nearer,
+        } => {
+            let name = |id| {
+                plan.instance(id)
+                    .map_or("it", |instance| instance.display_name())
+            };
+            format!(
+                "{} uses {}, but {} is nearer above it, and a netlist of this test hands it the \
+                 nearer one; use {} or move {} below it.",
+                title(*dependent),
+                name(*target),
+                name(*nearer),
+                name(*nearer),
+                name(*target)
+            )
+        }
         AnalysisPlanIssue::IncompatibleDependencyConfiguration {
             dependent,
             target,
@@ -178,6 +198,9 @@ pub fn issue_reason(plan: &SimulationPlan, issue: &AnalysisPlanIssue) -> String 
         AnalysisPlanIssue::DependencyNotEarlier { target, .. } => {
             format!("uses {}, which runs after it", name(*target))
         }
+        AnalysisPlanIssue::NearerCarrier { target, nearer, .. } => {
+            format!("uses {}, but {} is nearer", name(*target), name(*nearer))
+        }
         AnalysisPlanIssue::IncompatibleDependencyConfiguration { target, .. } => {
             format!("cannot use {}", name(*target))
         }
@@ -263,6 +286,11 @@ mod tests {
             },
             AnalysisPlanIssue::DisabledDependency { dependent, target },
             AnalysisPlanIssue::DependencyNotEarlier { dependent, target },
+            AnalysisPlanIssue::NearerCarrier {
+                dependent,
+                target,
+                nearer: target,
+            },
             AnalysisPlanIssue::IncompatibleDependencyConfiguration {
                 dependent,
                 prerequisite: Pss,

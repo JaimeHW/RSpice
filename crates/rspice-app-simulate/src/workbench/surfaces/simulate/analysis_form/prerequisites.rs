@@ -90,17 +90,25 @@ pub(in crate::workbench::surfaces::simulate) struct UsesField {
 
 /// The compatible analyses in this test by name, each rebinding the role,
 /// and the one action that makes the analysis runnable where picking one of
-/// them does not ("Add Periodic steady state", "Enable PSS 1").
+/// them does not ("Add Periodic steady state", "Enable PSS 1"). A periodic
+/// small-signal analysis lists the periodic solves of both families in one
+/// field, and picking one picks its family.
 pub(in crate::workbench::surfaces::simulate) fn uses_field(
     selected: &super::super::SelectedAnalysis,
     prerequisite: crate::simulation::plan::AnalysisKind,
 ) -> UsesField {
+    let carriers = selected.draft.periodic_carrier_kinds();
+    let kinds = if carriers.contains(&prerequisite) {
+        carriers
+    } else {
+        std::slice::from_ref(&prerequisite)
+    };
     // A binding whose analysis is gone reads as no binding: the field is empty
     // and says what the analysis needs.
     let bound = selected
         .dependencies
         .iter()
-        .find(|dependency| dependency.prerequisite() == prerequisite)
+        .find(|dependency| kinds.contains(&dependency.prerequisite()))
         .and_then(|dependency| {
             selected
                 .dependency_names
@@ -111,27 +119,27 @@ pub(in crate::workbench::surfaces::simulate) fn uses_field(
     let current = bound
         .clone()
         .unwrap_or_else(|| format!("needs {}", super::super::prerequisite_need(prerequisite)));
-    let candidates = selected
+    let mut options = selected
         .prerequisite_candidates
         .iter()
-        .find_map(|(kind, candidates)| (*kind == prerequisite).then_some(candidates.as_slice()))
-        .unwrap_or_default();
-    let mut options = candidates
-        .iter()
-        .map(|candidate| {
-            (
-                candidate.label.clone(),
-                super::super::AnalysisAction::BindDependency {
-                    prerequisite,
-                    target: candidate.id,
-                },
-            )
+        .filter(|(kind, _)| kinds.contains(kind))
+        .flat_map(|(kind, candidates)| {
+            candidates.iter().map(|candidate| {
+                (
+                    candidate.label.clone(),
+                    super::super::AnalysisAction::BindDependency {
+                        prerequisite: *kind,
+                        target: candidate.id,
+                    },
+                )
+            })
         })
         .collect::<Vec<_>>();
+    let candidates_empty = options.is_empty();
     // Picking a listed analysis is the fix while none is bound; otherwise the
     // repair is offered beside them: add, enable or move one, or switch on
     // what the one it uses needs itself.
-    if (bound.is_some() || candidates.is_empty())
+    if (bound.is_some() || candidates_empty)
         && let Some(label) = &selected.repair_label
     {
         options.push((

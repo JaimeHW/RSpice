@@ -82,15 +82,24 @@ impl SimulationPlan {
                     });
                 }
                 let instance = &mut candidate.instances[dependent_index];
+                // A periodic small-signal analysis reads one periodic solve of
+                // either family, so binding one replaces the other.
+                let carriers = instance.draft.periodic_carrier_kinds();
+                let replaced = if carriers.contains(&prerequisite) {
+                    carriers
+                } else {
+                    std::slice::from_ref(&prerequisite)
+                };
                 instance
                     .dependencies
-                    .retain(|dependency| dependency.prerequisite() != prerequisite);
+                    .retain(|dependency| !replaced.contains(&dependency.prerequisite()));
                 instance
                     .dependencies
                     .push(AnalysisDependency::new(prerequisite, target));
                 instance
                     .dependencies
                     .sort_by_key(|dependency| dependency.prerequisite().singleton_index());
+                Self::follow_bound_carrier(instance);
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -197,12 +206,33 @@ impl SimulationPlan {
             return Vec::new();
         };
         let mut roles = Self::resolved_prerequisite_roles(&self.instances, index);
-        for optional in self.instances[index].kind.optional_prerequisites() {
-            if !roles.contains(optional) {
-                roles.push(*optional);
+        let instance = &self.instances[index];
+        for bindable in instance
+            .kind
+            .optional_prerequisites()
+            .iter()
+            .chain(instance.draft.periodic_carrier_kinds())
+        {
+            if !roles.contains(bindable) {
+                roles.push(*bindable);
             }
         }
         roles
+    }
+
+    /// Point a periodic small-signal draft's carrier at the family of the
+    /// periodic solve it is bound to, so its card's `FROM=` names what it
+    /// reads.
+    pub(super) fn follow_bound_carrier(instance: &mut AnalysisInstance) {
+        let carriers = instance.draft.periodic_carrier_kinds();
+        if let Some(prerequisite) = instance
+            .dependencies
+            .iter()
+            .map(|dependency| dependency.prerequisite())
+            .find(|prerequisite| carriers.contains(prerequisite))
+        {
+            instance.draft.follow_carrier(prerequisite);
+        }
     }
 
     /// `roles`, followed by each optional role the instance has bound.
@@ -302,6 +332,7 @@ impl SimulationPlan {
                     .collect();
                 let instance = &mut candidate.instances[dependent_index];
                 instance.dependencies = dependencies;
+                Self::follow_bound_carrier(instance);
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft
@@ -524,6 +555,7 @@ impl SimulationPlan {
                 instance
                     .dependencies
                     .sort_by_key(|dependency| dependency.prerequisite().singleton_index());
+                Self::follow_bound_carrier(instance);
                 instance.modified_revision = revision;
                 instance.lifecycle = if instance.enabled {
                     AnalysisLifecycleState::Draft

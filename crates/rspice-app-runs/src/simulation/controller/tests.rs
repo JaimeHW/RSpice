@@ -1088,6 +1088,7 @@ mod monte_carlo_checkpoint;
 mod transient_checkpoint;
 
 mod autonomous_periodic;
+mod periodic_ac_carrier;
 mod periodic_own_dc_solve;
 mod periodic_port_noise;
 mod run_checks;

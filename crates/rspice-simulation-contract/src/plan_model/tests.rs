@@ -1599,3 +1599,80 @@ fn frozen_projection_is_deterministic_and_excludes_disabled_positions() {
     assert_eq!(frozen_a.instances()[0].id(), transient);
     assert_eq!(frozen_a.instances()[0].order(), 1);
 }
+
+#[test]
+fn a_periodic_ac_reads_the_family_of_the_solve_it_is_bound_to() {
+    let mut plan = SimulationPlan::empty();
+    let (hb, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
+    let mut shooting = Vec::new();
+    for name in ["Carrier A", "Carrier B"] {
+        let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
+        plan.edit(pss, |draft| {
+            if let AnalysisDraft::Pss(draft) = draft {
+                draft.tone_sources = "VLO".to_owned();
+            }
+        })
+        .unwrap();
+        plan.set_instance_name(pss, name).unwrap();
+        shooting.push(pss);
+    }
+    let [far, near] = shooting[..] else {
+        unreachable!()
+    };
+    let (pac, _) = plan.insert(AnalysisKind::Pac).unwrap();
+    let read = |plan: &SimulationPlan| {
+        let instance = plan.instance(pac).unwrap();
+        (
+            instance.draft().order_bound_carrier_kinds(),
+            instance.dependencies().to_vec(),
+        )
+    };
+
+    // Choosing a harmonic-balance analysis is choosing FROM=HB, and choosing a
+    // PSS afterwards replaces it rather than adding a second carrier.
+    plan.bind_dependency(pac, AnalysisKind::HarmonicBalance, hb)
+        .unwrap();
+    assert_eq!(
+        read(&plan),
+        (
+            &[AnalysisKind::HarmonicBalance][..],
+            vec![AnalysisDependency::new(AnalysisKind::HarmonicBalance, hb)]
+        )
+    );
+    assert!(
+        plan.validation_issues().is_empty(),
+        "{:?}",
+        plan.validation_issues()
+    );
+    plan.bind_dependency(pac, AnalysisKind::Pss, near).unwrap();
+    assert_eq!(
+        read(&plan),
+        (
+            &[AnalysisKind::Pss][..],
+            vec![AnalysisDependency::new(AnalysisKind::Pss, near)]
+        )
+    );
+    assert!(plan.validation_issues().is_empty());
+
+    // A netlist hands the card the nearest PSS above it, so a binding to the
+    // farther one is refused, in plain words, until the nearer one is off.
+    plan.bind_dependency(pac, AnalysisKind::Pss, far).unwrap();
+    let nearer = AnalysisPlanIssue::NearerCarrier {
+        dependent: pac,
+        target: far,
+        nearer: near,
+    };
+    assert_eq!(plan.validation_issues(), vec![nearer.clone()]);
+    assert!(plan.freeze().is_err());
+    assert_eq!(
+        crate::plan_dependency::issue_sentence(&plan, &nearer),
+        "Periodic AC uses Carrier A, but Carrier B is nearer above it, and a netlist of this \
+         test hands it the nearer one; use Carrier B or move Carrier A below it."
+    );
+    plan.set_enabled(near, false).unwrap();
+    assert!(
+        plan.validation_issues().is_empty(),
+        "{:?}",
+        plan.validation_issues()
+    );
+}

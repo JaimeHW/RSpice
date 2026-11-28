@@ -4,18 +4,6 @@
 use super::*;
 
 const XF_ENABLED_CHOICES: &[&str] = &["Enabled", "Disabled"];
-/// The carrier positions the engine's `FROM=` keyword has, in its order.
-///
-/// Held here rather than built from [`PeriodicCarrier`] at paint time because
-/// `choice_row` takes `&[&str]`, and one static list is what keeps the three
-/// periodic small-signal forms offering the same words in the same order.
-/// `the_periodic_carrier_row_offers_the_carriers_the_engine_has` pins it
-/// against the enum.
-pub(super) const PERIODIC_CARRIER_CHOICES: &[&str] = &[
-    "preceding solve",
-    "periodic steady state",
-    "harmonic balance",
-];
 const FIELD_COLUMN_GAP: f32 = 14.0;
 const FIELD_LABEL_HEIGHT: f32 = 15.0;
 /// Clear space between a field's caption and the helper on its right.
@@ -367,17 +355,6 @@ pub(super) fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut
 
 /// The carrier row the three periodic small-signal forms share.
 ///
-/// One row, because the question is one question: which large-signal periodic
-/// solve does this small signal sit on. The positions are the engine's own
-/// `FROM=` vocabulary, and every one of them is selectable: each names a
-/// prerequisite family the plan can bind and a runner this crate has. The
-/// harmonic-balance position was painted disabled until the three runners took
-/// a harmonic-balance operating point, which made the chooser state a
-/// limitation of the Studio rather than of the analysis.
-pub(super) fn periodic_carrier_row(ui: &mut Ui, value: &mut usize) -> bool {
-    choice_row(ui, "Carrier", PERIODIC_CARRIER_CHOICES, value)
-}
-
 /// A tolerance well whose emptiness selects the plan's own policy.
 ///
 /// A blank well here is not an omission, it is the selection "whatever the

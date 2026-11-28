@@ -1042,6 +1042,28 @@ impl SimulationPlan {
         )
     }
 
+    /// The solve a deck would hand the periodic small-signal analysis at
+    /// `index` in place of `target`, when that is another one: its card names
+    /// a family, not an analysis, and takes the nearest switched-on solve of
+    /// that family above it. The Studio hands it `target` itself; the two
+    /// agree only while `target` is that nearest one.
+    fn nearer_carrier(
+        instances: &[AnalysisInstance],
+        index: usize,
+        target: &AnalysisInstance,
+    ) -> Option<AnalysisInstanceId> {
+        let families = instances[index].draft.order_bound_carrier_kinds();
+        if !families.contains(&target.kind) || !target.enabled {
+            return None;
+        }
+        instances[..index]
+            .iter()
+            .rev()
+            .find(|candidate| candidate.enabled && families.contains(&candidate.kind))
+            .map(|nearest| nearest.id)
+            .filter(|nearest| *nearest != target.id)
+    }
+
     fn dependency_candidate_compatibility(
         dependent: &AnalysisInstance,
         dependent_roles: &[AnalysisKind],
@@ -1300,6 +1322,14 @@ impl SimulationPlan {
                         issues.push(AnalysisPlanIssue::DependencyNotEarlier {
                             dependent: instance.id,
                             target: target.id,
+                        });
+                    } else if let Some(nearer) =
+                        Self::nearer_carrier(&self.instances, index, target)
+                    {
+                        issues.push(AnalysisPlanIssue::NearerCarrier {
+                            dependent: instance.id,
+                            target: target.id,
+                            nearer,
                         });
                     }
                 }

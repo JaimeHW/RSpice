@@ -830,7 +830,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
         .unwrap();
     }
     let (pac, _) = plan.insert(AnalysisKind::Pac).unwrap();
-    plan.bind_dependency(pac, AnalysisKind::HarmonicBalance, first)
+    plan.bind_dependency(pac, AnalysisKind::HarmonicBalance, second)
         .unwrap();
     let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
     plan.edit(mc, |draft| {
@@ -842,7 +842,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
     })
     .unwrap();
     let frozen = plan.freeze().unwrap();
-    plan.edit(first, |draft| {
+    plan.edit(second, |draft| {
         let AnalysisDraft::HarmonicBalance(draft) = draft else {
             unreachable!()
         };
@@ -864,7 +864,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
         .pac
         .as_ref()
         .unwrap();
-    assert_eq!(pac_options.pss_fundamental_freq, 1e6);
+    assert_eq!(pac_options.pss_fundamental_freq, 2e6);
     let study = queue
         .iter()
         .find(|task| task.instance_id() == mc)
@@ -875,7 +875,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
         .as_ref()
         .unwrap();
     let post = study.postprocess.as_ref().unwrap();
-    assert_eq!(post.producer_instance_id, first);
+    assert_eq!(post.producer_instance_id, second);
     let Some(StudyPeriodicOptions::Pac(study_options)) = &post.periodic_options else {
         panic!("PAC study options")
     };
@@ -1791,8 +1791,10 @@ fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks(
     plan.bind_dependency(second_pss, AnalysisKind::OperatingPoint, op)
         .expect("second PSS binds OP");
     let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
-    plan.bind_dependency(pac, AnalysisKind::Pss, first_pss)
-        .expect("PAC binds exact first PSS");
+    // The nearest PSS above it, as a netlist of this test would hand it; the
+    // other one is the solve it must not read.
+    plan.bind_dependency(pac, AnalysisKind::Pss, second_pss)
+        .expect("PAC binds exact second PSS");
     let expected_revision = plan.revision();
 
     let frozen =
@@ -1810,15 +1812,15 @@ fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks(
         .expect("PAC task is present");
 
     assert_eq!(pac_task.source_revision(), expected_revision);
-    assert_eq!(pac_task.dependencies(), &[first_pss]);
+    assert_eq!(pac_task.dependencies(), &[second_pss]);
     let pac_options = pac_task
         .queued_analysis()
         .spec_options
         .pac
         .as_ref()
         .expect("PAC options compile");
-    assert!((pac_options.pss_fundamental_freq - 1.0e6).abs() < 1.0e-6);
-    assert!((pac_options.pss_fundamental_freq - 2.0e6).abs() > 1.0);
+    assert!((pac_options.pss_fundamental_freq - 2.0e6).abs() < 1.0e-6);
+    assert!((pac_options.pss_fundamental_freq - 1.0e6).abs() > 1.0);
 }
 
 #[test]
