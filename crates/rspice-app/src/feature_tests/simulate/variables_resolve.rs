@@ -5,8 +5,7 @@
 use super::page_contracts::render_with;
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
 use rspice_app_state::state::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-    DesignVariableSweepEligibility, SimulationPage,
+    DesignVariable, DesignVariableQuantity, DesignVariableSweepEligibility, SimulationPage,
 };
 
 /// The Variables page over a plan holding `rows`, each added through the
@@ -26,7 +25,6 @@ fn page_with(rows: &[(&str, &str, DesignVariableQuantity)]) -> String {
                 "",
                 None,
                 DesignVariableSweepEligibility::NestedSweepAndOptimization,
-                DesignVariableOverridePolicy::ExplicitTestLocalOverride,
             )
             .expect("a well-formed variable");
             app.state

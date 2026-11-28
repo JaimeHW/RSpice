@@ -5,12 +5,11 @@
 //! about that would be friction, and friction is how a reader learns to
 //! dismiss a dialog without reading it. What is worth stopping for is the
 //! removal that silently orphans retained results, unbinds an analysis another
-//! one needs to run at all, leaves an expression naming a variable the plan no
-//! longer declares, or drops a capture policy the outputs under it were being
-//! stored by.
+//! one needs to run at all, or drops a capture policy the outputs under it were
+//! being stored by.
 //!
-//! One review, four registries. The analysis stack asked before it removed and
-//! the variable, output and capture-group registries did not, which made the
+//! One review, three registries. The analysis stack asked before it removed and
+//! the output and capture-group registries did not, which made the
 //! same irreversible class of edit — a plan mutation, not undoable from
 //! schematic history — cost a confirmation on one page and a single click on
 //! the next three.
@@ -34,7 +33,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
 
 /// What one staged plan removal is about to take out of the plan.
 ///
-/// Four registries, one review. Each variant carries the plan the review was
+/// Three registries, one review. Each variant carries the plan the review was
 /// staged against as well as the record, so a confirmation answered while the
 /// active plan changed underneath the modal applies to nothing rather than to
 /// whatever now holds that position. The analysis stack is the exception only
@@ -42,10 +41,6 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanRemovalTarget {
     Analysis(crate::product::AnalysisInstanceId),
-    Variable {
-        plan: crate::product::SimulationPlanId,
-        id: crate::product::DesignVariableId,
-    },
     Output {
         plan: crate::product::SimulationPlanId,
         id: crate::product::SavedOutputId,
@@ -99,11 +94,11 @@ impl PlanRemovalConsequence {
 /// Destructive review for removing one record from the analysis plan.
 ///
 /// Only raised where removal actually costs something: an analysis with
-/// retained results or dependents, a variable the plan resolves into an
-/// analysis, an output a capture group holds or a specification names, a
-/// capture group that holds outputs. Removing a freshly-added record that
-/// nothing depends on is not a decision worth a modal, and asking anyway
-/// teaches the reader to dismiss the dialog without reading it.
+/// retained results or dependents, an output a capture group holds or a
+/// specification names, a capture group that holds outputs. Removing a
+/// freshly-added record that nothing depends on is not a decision worth a
+/// modal, and asking anyway teaches the reader to dismiss the dialog without
+/// reading it.
 ///
 /// Plan mutations are not undoable from schematic history, which is exactly
 /// why the four registries share one review instead of three of them
@@ -140,17 +135,6 @@ impl PlanRemovalReview {
     pub fn take_confirmed_analysis(&mut self) -> Option<crate::product::AnalysisInstanceId> {
         self.take_confirmed(|target| match target {
             PlanRemovalTarget::Analysis(id) => Some(id),
-            _ => None,
-        })
-    }
-
-    /// The design variable the reader confirmed removing from `plan`.
-    pub fn take_confirmed_variable(
-        &mut self,
-        plan: crate::product::SimulationPlanId,
-    ) -> Option<crate::product::DesignVariableId> {
-        self.take_confirmed(|target| match target {
-            PlanRemovalTarget::Variable { plan: staged, id } if staged == plan => Some(id),
             _ => None,
         })
     }
@@ -265,7 +249,6 @@ impl PlanRemovalTarget {
     const fn title(self) -> &'static str {
         match self {
             Self::Analysis(_) => "Remove analysis",
-            Self::Variable { .. } => "Remove design variable",
             Self::Output { .. } => "Remove saved output",
             Self::CaptureGroup { .. } => "Remove capture group",
         }
@@ -275,7 +258,6 @@ impl PlanRemovalTarget {
     const fn subject(self) -> &'static str {
         match self {
             Self::Analysis(_) => "Analysis",
-            Self::Variable { .. } => "Variable",
             Self::Output { .. } => "Saved output",
             Self::CaptureGroup { .. } => "Capture group",
         }
@@ -292,10 +274,6 @@ impl PlanRemovalTarget {
             Self::Analysis(_) => {
                 "Remove this analysis from the plan. Retained datasets are not deleted, but they \
                  stop being attributable to a configured analysis."
-            }
-            Self::Variable { .. } => {
-                "Remove this variable from the plan. Nothing already measured changes, but every \
-                 expression that resolved through this name stops resolving."
             }
             Self::Output { .. } => {
                 "Remove this output from the plan. Datasets already captured under it are not \

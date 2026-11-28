@@ -464,7 +464,6 @@ pub struct DesignVariableDraft {
     pub description: String,
     pub allowed_range: String,
     pub sweep_eligibility: usize,
-    pub override_policy: usize,
     pub validation_error: Option<String>,
 }
 
@@ -479,7 +478,6 @@ impl Default for DesignVariableDraft {
             description: String::new(),
             allowed_range: String::new(),
             sweep_eligibility: 0,
-            override_policy: 0,
             validation_error: None,
         }
     }

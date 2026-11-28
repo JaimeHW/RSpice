@@ -235,8 +235,7 @@ impl Registry {
 /// refused" rule promises.
 fn bounded_variable() -> rspice_app_state::state::DesignVariable {
     use rspice_app_state::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
-        DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableQuantity, DesignVariableRange, DesignVariableSweepEligibility,
     };
 
     DesignVariable::new(
@@ -249,7 +248,6 @@ fn bounded_variable() -> rspice_app_state::state::DesignVariable {
             maximum: "10kohm".to_owned(),
         }),
         DesignVariableSweepEligibility::FixedParameter,
-        DesignVariableOverridePolicy::InheritOwnerOnly,
     )
     .expect("a bounded design variable")
 }

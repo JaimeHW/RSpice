@@ -1,8 +1,9 @@
 //! Destructive review before a plan removal that orphans something, pressed
 //! on the drawn registries: a removal with dependents stops for review, a
 //! confirmed one commits with the receipt the immediate route writes, one
-//! that orphans nothing opens no modal, and an analysis something is bound to
-//! is refused rather than reviewed.
+//! that orphans nothing opens no modal, an analysis something is bound to is
+//! refused rather than reviewed, and a design variable is removed in one
+//! click that Undo takes back.
 
 use super::stage::show_on_stage;
 use crate::workbench::{AppState, RSpiceApp};
@@ -13,10 +14,9 @@ use rspice_app_simulate::workbench::surfaces::simulate::lifecycle;
 use rspice_app_state::product::SimulationPlanId;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{
-    CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableOverridePolicy,
-    DesignVariableQuantity, DesignVariableSweepEligibility, InstancePath, SavedOutput,
-    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, SpecEntry,
+    CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableQuantity,
+    DesignVariableSweepEligibility, InstancePath, SavedOutput, SavedOutputCompatibility,
+    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
 };
 
 /// One setup page, rendered with its controls announced so a test can press
@@ -25,6 +25,8 @@ struct Registry {
     ctx: egui::Context,
     app: RSpiceApp,
     controls: Vec<(String, egui::Rect)>,
+    /// Every text the last frame painted, one per line.
+    painted: String,
 }
 
 impl Registry {
@@ -39,6 +41,7 @@ impl Registry {
             ctx,
             app,
             controls: Vec::new(),
+            painted: String::new(),
         };
         // Twice: the first pass builds the font set and the second lays out
         // against it, and a rectangle measured before the fonts exist is not
@@ -67,6 +70,24 @@ impl Registry {
                     });
             },
         );
+        fn collect(shape: &egui::epaint::Shape, painted: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    painted.push_str(&text.galley.job.text);
+                    painted.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, painted);
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.painted.clear();
+        for clipped in &output.shapes {
+            collect(&clipped.shape, &mut self.painted);
+        }
         self.controls = output
             .platform_output
             .accesskit_update
@@ -161,6 +182,19 @@ impl Registry {
         plan_id(&self.app.state.model)
     }
 
+    fn variable_expression(&self, name: &str) -> Option<String> {
+        self.app
+            .state
+            .model
+            .workspace
+            .content
+            .plan_data(self.plan())?
+            .design_variables
+            .iter()
+            .find(|variable| variable.name == name)
+            .map(|variable| variable.expression.clone())
+    }
+
     fn variables(&self) -> Vec<String> {
         self.app
             .state
@@ -227,17 +261,16 @@ fn plan_of(state: &AppState) -> SimulationPlanId {
         .id()
 }
 
-/// A plan-scoped variable named `name`, selected in the registry.
-fn seed_variable(state: &mut AppState, name: &str) {
+/// A variable named `name` with the value `value`, selected in the registry.
+fn seed_variable(state: &mut AppState, name: &str, value: &str) {
     let id = plan_of(state);
     let variable = DesignVariable::new(
         name,
-        "1kohm",
-        DesignVariableQuantity::Resistance,
-        "load resistance",
+        value,
+        DesignVariableQuantity::Dimensionless,
+        "",
         None,
         DesignVariableSweepEligibility::FixedParameter,
-        DesignVariableOverridePolicy::InheritOwnerOnly,
     )
     .expect("valid design variable");
     state
@@ -271,106 +304,47 @@ fn seed_output(state: &mut AppState, name: &str, expression: &str) {
     state.simulate.selected_saved_output = Some(name.to_owned());
 }
 
-/// Switch every analysis off, so the plan resolves a variable into nothing.
-fn disable_every_analysis(state: &mut AppState) {
-    let ids = state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("stable plan")
-        .instances()
-        .iter()
-        .map(|instance| instance.id())
-        .collect::<Vec<_>>();
-    let plan = state
-        .model
-        .sim_setup
-        .stable_analysis_plan_mut()
-        .expect("stable plan");
-    for id in ids {
-        plan.set_enabled(id, false).expect("the plan accepts it");
-    }
-}
-
-/// Removing a variable the plan resolves is stopped, and cancelling keeps it.
+/// Removing a variable is one click and one step of Undo.
 ///
-/// It committed on the first click. A design variable is read by every analysis
-/// the plan resolves it into, and nothing about the registry row said so at the
-/// moment of the click — the reader lost the declaration and the expressions
-/// naming it in one press, with no undo behind it.
+/// The review it used to raise named every enabled analysis as reading the
+/// variable, whatever actually named it. Nothing is hidden by removing it at
+/// once: a variable whose value named the removed one says so on its own row,
+/// Check refuses the run naming it, and Undo brings the variable back as it
+/// was typed.
 #[test]
-fn removing_a_variable_the_plan_resolves_opens_the_review() {
+fn removing_a_variable_is_one_click_and_undo_brings_it_back() {
     let mut registry = Registry::open(SimulationPage::Variables, |state| {
-        seed_variable(state, "vref")
-    });
-    registry.click("Remove");
-
-    assert!(
-        registry.review_open(),
-        "a variable an enabled analysis resolves must be reviewed before it is removed"
-    );
-    assert_eq!(
-        registry.variables(),
-        vec!["vref".to_owned()],
-        "staging a review must not remove the variable"
-    );
-
-    registry.cancel();
-    assert_eq!(
-        registry.variables(),
-        vec!["vref".to_owned()],
-        "cancelling the review must leave the registry exactly as it was"
-    );
-}
-
-/// Confirming it commits the removal, through the same plan transaction.
-#[test]
-fn a_confirmed_variable_removal_commits_with_its_receipt() {
-    let mut registry = Registry::open(SimulationPage::Variables, |state| {
-        seed_variable(state, "vref")
-    });
-    registry.click("Remove");
-    registry.confirm();
-
-    assert!(
-        registry.variables().is_empty(),
-        "a confirmed removal must actually remove the variable"
-    );
-    assert!(
-        registry.receipt().contains("Removed design variable vref"),
-        "the confirmed removal must produce the registry's own receipt, got: {}",
-        registry.receipt()
-    );
-    assert!(
-        !registry.review_open(),
-        "the review must close once its answer has been applied"
-    );
-}
-
-/// A variable no analysis resolves is removed on the click that asks for it.
-///
-/// The review exists for removals that cost something. Stopping for one that
-/// orphans nothing is how a reader learns to click through the ones that do.
-#[test]
-fn removing_a_variable_nothing_resolves_needs_no_review() {
-    let mut registry = Registry::open(SimulationPage::Variables, |state| {
-        disable_every_analysis(state);
-        seed_variable(state, "vref");
+        seed_variable(state, "W2", "2*W1");
+        seed_variable(state, "W1", "4u");
     });
     registry.click("Remove");
 
     assert!(
         !registry.review_open(),
-        "a variable no enabled analysis resolves must not raise a modal"
+        "removing a variable must not raise a modal"
     );
+    assert_eq!(registry.variables(), vec!["W2".to_owned()]);
     assert!(
-        registry.variables().is_empty(),
-        "it must be removed by the click that asked for it"
-    );
-    assert!(
-        registry.receipt().contains("Removed design variable vref"),
-        "the immediate removal keeps its receipt, got: {}",
+        registry.receipt().contains("Removed design variable W1"),
+        "the removal keeps its receipt, got: {}",
         registry.receipt()
+    );
+    assert!(
+        registry.painted.contains("W1 is not defined"),
+        "W2's row must say the name it lost:\n{}",
+        registry.painted
+    );
+
+    assert!(matches!(
+        registry.app.state.model.undo_simulation_setup(),
+        Some(Ok(_))
+    ));
+    registry.pass(Vec::new());
+    assert_eq!(registry.variable_expression("W1").as_deref(), Some("4u"));
+    assert!(
+        !registry.painted.contains("W1 is not defined"),
+        "with W1 back, W2 resolves again:\n{}",
+        registry.painted
     );
 }
 
@@ -782,13 +756,13 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
 fn a_registry_only_takes_the_answer_it_staged() {
     let mut app = RSpiceApp::test_instance();
     let plan = plan_id(&app.state.model);
-    let variable = rspice_app_state::product::DesignVariableId::new();
+    let group = rspice_app_state::product::CaptureGroupId::new();
     app.state.simulate.plan_removal_review.open(
-        rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget::Variable {
+        rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget::CaptureGroup {
             plan,
-            id: variable,
+            id: group,
         },
-        "vref".to_owned(),
+        "filter signals".to_owned(),
         Vec::new(),
     );
     app.state.simulate.plan_removal_review.confirmed = true;
@@ -799,23 +773,23 @@ fn a_registry_only_takes_the_answer_it_staged() {
             .plan_removal_review
             .take_confirmed_analysis()
             .is_none(),
-        "the analysis stack must not claim a variable's answer"
+        "the analysis stack must not claim a capture group's answer"
     );
     assert!(
         app.state
             .simulate
             .plan_removal_review
-            .take_confirmed_capture_group(plan)
+            .take_confirmed_capture_group(SimulationPlanId::new())
             .is_none(),
-        "the capture-group card must not claim a variable's answer"
+        "a capture-group card of another plan must not claim this plan's answer"
     );
     assert_eq!(
         app.state
             .simulate
             .plan_removal_review
-            .take_confirmed_variable(plan),
-        Some(variable),
-        "the registry that staged it must still find its answer"
+            .take_confirmed_capture_group(plan),
+        Some(group),
+        "the card that staged it must still find its answer"
     );
     assert!(
         app.state.simulate.plan_removal_review.target.is_none(),

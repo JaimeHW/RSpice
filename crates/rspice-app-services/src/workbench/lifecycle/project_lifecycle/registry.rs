@@ -29,9 +29,8 @@ mod tests {
     use super::*;
     use crate::state::{
         BusDeclaration, BusSlice, BusTapOrientation, ComponentType, DesignNote, DesignNoteKind,
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-        DesignVariableSweepEligibility, DocumentationShape, DocumentationShapeGeometry, Point,
-        SimulationPlanPayloadRecord,
+        DesignVariable, DesignVariableQuantity, DesignVariableSweepEligibility, DocumentationShape,
+        DocumentationShapeGeometry, Point, SimulationPlanPayloadRecord,
     };
     use crate::workbench::lifecycle::project_lifecycle::test_host::ServicesHost;
 
@@ -243,7 +242,6 @@ mod tests {
             "Load resistance",
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
         )
         .unwrap();
         state

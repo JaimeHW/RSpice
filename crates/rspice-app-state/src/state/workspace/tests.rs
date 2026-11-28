@@ -72,7 +72,6 @@ fn resistance_variable(name: &str, expression: &str) -> DesignVariable {
             maximum: "1 Mohm".to_owned(),
         }),
         DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
     )
     .expect("fixture variable is valid")
 }
@@ -265,7 +264,6 @@ fn design_variable_expression_update_preserves_identity_and_metadata() {
     assert_eq!(updated.description, original.description);
     assert_eq!(updated.allowed_range, original.allowed_range);
     assert_eq!(updated.sweep_eligibility, original.sweep_eligibility);
-    assert_eq!(updated.override_policy, original.override_policy);
 }
 
 #[test]

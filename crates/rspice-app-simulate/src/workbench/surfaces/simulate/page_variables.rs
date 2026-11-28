@@ -9,11 +9,8 @@ use egui::Ui;
 
 use crate::product::{DesignVariableId, SimulationPlanId};
 use crate::state::workspace::SimulationPlanPayload;
-use crate::state::{
-    DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableSweepEligibility,
-};
+use crate::state::{DesignVariableQuantity, DesignVariableSweepEligibility};
 use crate::ui::widgets::Button;
-use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
@@ -21,12 +18,12 @@ use crate::workbench::simulate::SimulateFeature;
 use crate::ui::widgets::{mono_input, select};
 
 use super::page_kit::{
-    RowPress, Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head,
-    ledger_row, rule_row,
+    RowPress, Tone, card, card_body, card_head_row, card_note, field_pair, ledger_head, ledger_row,
+    rule_row,
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
-const REGISTRY_COLUMNS: [f32; 7] = [0.12, 0.11, 0.15, 0.19, 0.14, 0.15, 0.14];
+const REGISTRY_COLUMNS: [f32; 6] = [0.14, 0.12, 0.18, 0.20, 0.18, 0.18];
 
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let Some((plan_id, payload)) = plan_payload(cx.model) else {
@@ -45,12 +42,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         return;
     };
     registry(ui, cx, plan_id, &payload);
-    card_row(
-        ui,
-        cx,
-        |ui, cx| selected_record(ui, cx, &payload),
-        |ui, cx| change_impact(ui, cx.model, &payload),
-    );
+    selected_record(ui, cx, &payload);
 }
 
 fn plan_payload(model: &Model) -> Option<(SimulationPlanId, SimulationPlanPayload)> {
@@ -141,7 +133,6 @@ fn registry(
                     "Expression",
                     "Resolved",
                     "Bounds",
-                    "Used by",
                     "Sweep role",
                 ],
             );
@@ -151,7 +142,6 @@ fn registry(
                     &REGISTRY_COLUMNS,
                     &[
                         ("No design variables", Tone::Neutral),
-                        ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
@@ -167,7 +157,6 @@ fn registry(
                     || "unbounded".to_owned(),
                     |range| format!("{} … {}", range.minimum, range.maximum),
                 );
-                let used_by = super::workflows::design_variable_consumers_scoped(cx.model, None);
                 let (value, value_tone) = match resolved.value(index) {
                     Some(Ok(value)) => (
                         resolved_text(*value, variable.quantity, digits),
@@ -185,7 +174,6 @@ fn registry(
                         (variable.expression.as_str(), Tone::Neutral),
                         (value.as_str(), value_tone),
                         (bounds.as_str(), Tone::Neutral),
-                        (used_by.as_str(), Tone::Neutral),
                         (variable.sweep_eligibility.label(), Tone::Neutral),
                     ],
                     selected_index == Some(index),
@@ -225,26 +213,7 @@ fn registry(
     if import {
         super::variable_import::import_from_file(ui.ctx(), cx);
     }
-    // A removal the reader confirmed in the destructive review is applied here,
-    // by the page that staged it: this is the registry the row is in, so the
-    // one route that can commit it is the one route that can show the reader it
-    // happened. Taken before the button is read so a confirmed answer is never
-    // left standing behind a click in the same frame.
-    //
-    // The table above was already drawn from the payload this is about to
-    // change, so the frame is asked to run again: the confirming click landed
-    // in the modal, and nothing else is coming to repaint the row it removed.
-    let mut removal = cx
-        .state
-        .plan_removal_review
-        .take_confirmed_variable(plan_id)
-        .inspect(|_| ui.ctx().request_repaint())
-        .and_then(|id| {
-            variables
-                .iter()
-                .find(|variable| variable.id == id)
-                .map(|variable| (id, variable.name.clone()))
-        });
+    let mut removal = None;
     if let Some(index) = selected_index {
         let name = variables[index].name.clone();
         let id = variables[index].id;
@@ -271,18 +240,9 @@ fn registry(
                 cx.state.selected_design_variable = Some(committed);
             }
         } else if remove {
-            // Removing a variable the plan resolves into an analysis is a
-            // removal that costs something: the expressions that named it are
-            // left naming nothing. Removing one nothing reads costs nothing, so
-            // it is not worth a modal.
-            match removal_consequences(cx.model) {
-                Some(consequences) => cx.state.plan_removal_review.open(
-                    PlanRemovalTarget::Variable { plan: plan_id, id },
-                    name,
-                    consequences,
-                ),
-                None => removal = Some((id, name)),
-            }
+            // One click and one step of Undo. A variable whose value named
+            // this one says so on its own row, and Check says the same.
+            removal = Some((id, name));
         }
     }
     if let Some((id, name)) = removal {
@@ -322,30 +282,6 @@ fn resolved_text(value: f64, quantity: DesignVariableQuantity, digits: usize) ->
     }
 }
 
-/// What removing this variable orphans, or `None` when nothing reads it.
-///
-/// The readers come from [`design_variable_consumers_scoped`], which is the
-/// same derivation the registry's "Used by" column and the Create-variable
-/// dialog's preview both state — so what the review says is about to lose this
-/// variable is exactly what the row said was using it. The two sentences that
-/// derivation answers with when there is no reader are its own vocabulary, and
-/// matching them here is what keeps the gate and the column from disagreeing
-/// about the same plan.
-///
-/// [`design_variable_consumers_scoped`]: super::workflows::design_variable_consumers_scoped
-fn removal_consequences(model: &Model) -> Option<Vec<PlanRemovalConsequence>> {
-    let readers = super::workflows::design_variable_consumers_scoped(model, None);
-    if readers == "no enabled analysis consumers" || readers == "plan unavailable" {
-        return None;
-    }
-    Some(vec![
-        PlanRemovalConsequence::stated("Analyses resolving it", readers).explained(
-            PlanRemovalTone::Warn,
-            "These analyses will not run until the name is removed or declared again.",
-        ),
-    ])
-}
-
 fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &SimulationPlanPayload) {
     let selected = cx.state.selected_design_variable.as_ref().and_then(|name| {
         payload
@@ -361,8 +297,8 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
             |ui| {
                 card_note(
                     ui,
-                    "Select a row above to see its complete record: quantity, bounds, and \
-                     the policy that decides whether an analysis may override it.",
+                    "Select a row above to see its complete record: value, quantity, bounds \
+                     and sweep role.",
                 );
             },
         );
@@ -392,10 +328,6 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
     let sweep_roles: Vec<String> = DesignVariableSweepEligibility::ALL
         .iter()
         .map(|role| role.label().to_owned())
-        .collect();
-    let override_policies: Vec<String> = DesignVariableOverridePolicy::ALL
-        .iter()
-        .map(|policy| policy.label().to_owned())
         .collect();
 
     // One slot for the whole card: `field_pair` holds two controls at once,
@@ -447,20 +379,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                         )));
                     }
                 }),
-                Some(("Override policy", &mut |ui: &mut Ui, width: f32| {
-                    if let Some(index) = select(
-                        ui,
-                        "simulation.variables.override",
-                        "Override policy",
-                        variable.override_policy.label(),
-                        &override_policies,
-                        width,
-                    ) {
-                        edit.set(Some(VariableEdit::OverridePolicy(
-                            DesignVariableOverridePolicy::ALL[index],
-                        )));
-                    }
-                })),
+                None,
             );
             // Bounds are expressions, not numbers, so suffixes and owner
             // variables survive the round trip. Clearing both makes the
@@ -549,7 +468,6 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
 enum VariableEdit {
     Quantity(DesignVariableQuantity),
     SweepRole(DesignVariableSweepEligibility),
-    OverridePolicy(DesignVariableOverridePolicy),
 }
 
 impl VariableEdit {
@@ -557,7 +475,6 @@ impl VariableEdit {
         match self {
             Self::Quantity(quantity) => target.quantity = quantity,
             Self::SweepRole(role) => target.sweep_eligibility = role,
-            Self::OverridePolicy(policy) => target.override_policy = policy,
         }
     }
 
@@ -570,10 +487,6 @@ impl VariableEdit {
             Self::SweepRole(role) => format!(
                 "Set design variable {name} to {}.",
                 role.label().to_lowercase()
-            ),
-            Self::OverridePolicy(policy) => format!(
-                "Set design variable {name} to {}.",
-                policy.label().to_lowercase()
             ),
         }
     }
@@ -692,124 +605,4 @@ fn commit_expression(
             .map(|_| ())
             .map_err(|error| error.to_string())
     })
-}
-
-/// What the Change impact card says about who resolves these values.
-///
-/// Enabled instances are the readers. A disabled one is still declared, so it
-/// is counted separately rather than dropped: the reader who wonders where the
-/// other six went has to be told, and told that a disabled analysis is not
-/// waiting to be re-run.
-///
-/// The verb agrees with the count it follows: a plan with one enabled analysis
-/// of ten read "1 of 10 enabled · those resolve these values", which names a
-/// group where there is one.
-fn enabled_reader_summary(enabled: usize, disabled: usize) -> String {
-    if disabled == 0 {
-        format!("{enabled} \u{b7} every one resolves these values")
-    } else {
-        format!(
-            "{enabled} of {} enabled \u{b7} {} these values",
-            enabled + disabled,
-            if enabled == 1 {
-                "that one resolves"
-            } else {
-                "those resolve"
-            }
-        )
-    }
-}
-
-fn change_impact(ui: &mut Ui, model: &Model, payload: &SimulationPlanPayload) {
-    let variables = &payload.design_variables;
-    // Enabled instances only. A disabled analysis resolves nothing: it is not
-    // in the run this plan would dispatch, so counting it here said "10
-    // analyses resolve these values" over a plan that would resolve them for
-    // four -- the same over-count the placed-source list stopped making when
-    // it started asking whether a consumer reads.
-    let (analyses, disabled) = model
-        .sim_setup
-        .stable_analysis_plan()
-        .map_or((0, 0), |plan| {
-            let enabled = plan
-                .instances()
-                .iter()
-                .filter(|instance| instance.enabled())
-                .count();
-            (enabled, plan.instances().len() - enabled)
-        });
-    let referenced: Vec<&crate::state::DesignVariable> = variables
-        .iter()
-        .filter(|variable| {
-            payload
-                .saved_outputs
-                .iter()
-                .any(|output| output.source_expression.contains(&variable.name))
-        })
-        .collect();
-    card(
-        ui,
-        "Change impact",
-        Some(("rerun required", Tone::Dim)),
-        |ui| {
-            card_body(ui, |ui| {
-                rule_row(
-                    ui,
-                    "Analyses in this plan",
-                    &enabled_reader_summary(analyses, disabled),
-                );
-                rule_row(
-                    ui,
-                    "Referenced by a saved output",
-                    &if referenced.is_empty() {
-                        "none".to_owned()
-                    } else {
-                        referenced
-                            .iter()
-                            .map(|variable| variable.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" · ")
-                    },
-                );
-                rule_row(
-                    ui,
-                    "Retained results",
-                    "unchanged · a finished run's results cannot change",
-                );
-            });
-            card_note(
-                ui,
-                "Editing a variable changes what the next run resolves; it never rewrites a \
-                 dataset already committed. Comparing across a variable change is a regression \
-                 comparison, not a refresh.",
-            );
-        },
-    );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::enabled_reader_summary;
-
-    /// The Change impact card counts the analyses that would run.
-    ///
-    /// It counted every declared instance, so a plan holding ten analyses with
-    /// six switched off told the reader that ten of them resolve these values.
-    /// A disabled analysis resolves nothing and is not waiting to be re-run,
-    /// which is the whole point of a card headed "rerun required".
-    #[test]
-    fn the_change_impact_card_counts_only_the_analyses_that_would_run() {
-        assert_eq!(
-            enabled_reader_summary(4, 0),
-            "4 \u{b7} every one resolves these values"
-        );
-        assert_eq!(
-            enabled_reader_summary(4, 6),
-            "4 of 10 enabled \u{b7} those resolve these values"
-        );
-        assert_eq!(
-            enabled_reader_summary(0, 3),
-            "0 of 3 enabled \u{b7} those resolve these values"
-        );
-    }
 }

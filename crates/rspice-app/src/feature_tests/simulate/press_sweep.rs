@@ -558,7 +558,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("plan manager", 11),
     ("rename analysis", 4),
     ("run points", 12),
-    ("design variable", 9),
+    ("design variable", 8),
     ("saved output", 9),
     ("clone plan", 8),
     ("capture group", 7),
@@ -638,9 +638,9 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// conductance-floor field it carried for exactly that case; an AC or noise
 /// analysis no longer needs an operating point before it, so their forms lost
 /// the prerequisite row and its bind control, three presses between them; and
-/// a design variable is plan-wide, so the add-variable dialog's Ownership
-/// scope select went (346).
-const PRESSED_FLOOR: usize = 346;
+/// a design variable is plan-wide and nothing implemented its override
+/// policy, so the add-variable dialog's scope and policy selects went (345).
+const PRESSED_FLOOR: usize = 345;
 
 /// Controls that are wired to nothing.
 ///

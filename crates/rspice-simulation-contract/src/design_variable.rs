@@ -41,24 +41,6 @@ impl DesignVariableSweepEligibility {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DesignVariableOverridePolicy {
-    ExplicitTestLocalOverride,
-    InheritOwnerOnly,
-}
-
-impl DesignVariableOverridePolicy {
-    pub const ALL: [Self; 2] = [Self::ExplicitTestLocalOverride, Self::InheritOwnerOnly];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::ExplicitTestLocalOverride => "Explicit test-local override",
-            Self::InheritOwnerOnly => "Inherit owner only",
-        }
-    }
-}
-
 /// Persisted, typed simulation-plan parameter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,7 +56,6 @@ pub struct DesignVariable {
     #[serde(default)]
     pub allowed_range: Option<DesignVariableRange>,
     pub sweep_eligibility: DesignVariableSweepEligibility,
-    pub override_policy: DesignVariableOverridePolicy,
 }
 
 /// Which contract a design variable failed.
@@ -105,7 +86,6 @@ impl DesignVariable {
         description: impl Into<String>,
         allowed_range: Option<DesignVariableRange>,
         sweep_eligibility: DesignVariableSweepEligibility,
-        override_policy: DesignVariableOverridePolicy,
     ) -> Result<Self, String> {
         Self::new_defect(
             name,
@@ -114,7 +94,6 @@ impl DesignVariable {
             description,
             allowed_range,
             sweep_eligibility,
-            override_policy,
         )
         .map_err(|(_, message)| message)
     }
@@ -128,7 +107,6 @@ impl DesignVariable {
         description: impl Into<String>,
         allowed_range: Option<DesignVariableRange>,
         sweep_eligibility: DesignVariableSweepEligibility,
-        override_policy: DesignVariableOverridePolicy,
     ) -> Result<Self, (DesignVariableDefect, String)> {
         let variable = Self {
             id: DesignVariableId::new(),
@@ -139,7 +117,6 @@ impl DesignVariable {
             description: description.into(),
             allowed_range,
             sweep_eligibility,
-            override_policy,
         };
         variable.validate_defect()?;
         Ok(variable)
@@ -287,7 +264,6 @@ mod tests {
                 maximum: "1 Mohm".to_owned(),
             }),
             DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
         )
         .expect("fixture variable is valid")
     }

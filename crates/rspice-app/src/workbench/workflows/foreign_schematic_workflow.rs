@@ -27,9 +27,7 @@ use rspice_design::foreign_schematic::{
     foreign_directive_cards, import_foreign_schematic, parse_asc, parse_qsch,
 };
 use rspice_design::schematic::document::SchematicDocument;
-use rspice_simulation_contract::design_variable::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
-};
+use rspice_simulation_contract::design_variable::{DesignVariable, DesignVariableSweepEligibility};
 use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 use rspice_simulation_contract::run_set::{RunSetDimensionKind, RunSetState, value_id};
 
@@ -1106,7 +1104,6 @@ fn commit_plan(
             String::new(),
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
         ) {
             Ok(variable) => variables.push(variable),
             Err(error) => notices.push((

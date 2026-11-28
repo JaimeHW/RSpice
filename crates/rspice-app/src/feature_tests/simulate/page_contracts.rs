@@ -85,9 +85,9 @@ pub(super) fn render_with(
 #[test]
 fn a_selected_record_paints_every_field_of_its_contract() {
     use rspice_app_state::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-        DesignVariableSweepEligibility, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+        DesignVariable, DesignVariableQuantity, DesignVariableSweepEligibility, SavedOutput,
+        SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+        SavedOutputStreaming,
     };
 
     let rendered = render_with(SimulationPage::Outputs, 1200.0, |app| {
@@ -133,7 +133,6 @@ fn a_selected_record_paints_every_field_of_its_contract() {
             "load resistance",
             None,
             DesignVariableSweepEligibility::FixedParameter,
-            DesignVariableOverridePolicy::InheritOwnerOnly,
         )
         .expect("valid design variable");
         app.state
@@ -144,14 +143,7 @@ fn a_selected_record_paints_every_field_of_its_contract() {
             .expect("the plan accepts it");
         app.state.simulate.selected_design_variable = Some("rload".to_owned());
     });
-    for field in [
-        "Expression",
-        "Quantity",
-        "Sweep role",
-        "Override policy",
-        "Minimum",
-        "Maximum",
-    ] {
+    for field in ["Expression", "Quantity", "Sweep role", "Minimum", "Maximum"] {
         assert!(
             rendered.contains(field),
             "the selected variable's {field} control did not reach the screen:\n{rendered}"

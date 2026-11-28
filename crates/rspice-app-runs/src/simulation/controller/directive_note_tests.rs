@@ -229,7 +229,6 @@ fn a_param_the_plan_also_defines_stops_the_run_on_the_notes_line() {
             String::new(),
             None,
             rspice_simulation_contract::design_variable::DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            rspice_simulation_contract::design_variable::DesignVariableOverridePolicy::ExplicitTestLocalOverride,
         )
         .expect("a design variable"),
     );

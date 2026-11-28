@@ -1,8 +1,8 @@
 use rspice_app::{
-    AnalysisInstanceId, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-    DesignVariableRange, DesignVariableSweepEligibility, ProjectWorkspace, SavedOutput,
-    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, SimulationPlanId, SimulationPlanPayload, SimulationPlanPayloadRecord,
+    AnalysisInstanceId, DesignVariable, DesignVariableQuantity, DesignVariableRange,
+    DesignVariableSweepEligibility, ProjectWorkspace, SavedOutput, SavedOutputCompatibility,
+    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SimulationPlanId, SimulationPlanPayload, SimulationPlanPayloadRecord,
 };
 use rspice_simulation::netlist_gen::design_variable_parameter_lines;
 
@@ -17,7 +17,6 @@ fn resistance_variable(name: &str, expression: &str) -> DesignVariable {
             maximum: "100 kohm".to_owned(),
         }),
         DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
     )
     .unwrap()
 }

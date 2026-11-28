@@ -142,9 +142,7 @@ fn split_number(text: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::design_variable::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
-    };
+    use crate::design_variable::{DesignVariable, DesignVariableSweepEligibility};
     use crate::design_variable_resolution::resolve_design_variables;
 
     fn resolved(text: &str, quantity: DesignVariableQuantity) -> f64 {
@@ -155,7 +153,6 @@ mod tests {
             "",
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
         )
         .unwrap_or_else(|error| panic!("{text} is refused: {error}"));
         *resolve_design_variables(&[variable])

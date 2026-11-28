@@ -5,8 +5,8 @@ use crate::workbench::RSpiceApp;
 use rspice_app_results::workbench::documents::result_document::apply_best_to_design;
 use rspice_app_results::workbench::documents::result_document::test_fixtures::optimization_analysis;
 use rspice_app_state::state::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-    DesignVariableSweepEligibility, SimulationRun, SimulationRunLifecycle,
+    DesignVariable, DesignVariableQuantity, DesignVariableSweepEligibility, SimulationRun,
+    SimulationRunLifecycle,
 };
 
 /// The test instance's plan, holding `variables` as width variables at
@@ -29,7 +29,6 @@ fn app_with(variables: &[&str]) -> RSpiceApp {
             "channel width",
             None,
             DesignVariableSweepEligibility::FixedParameter,
-            DesignVariableOverridePolicy::InheritOwnerOnly,
         )
         .expect("valid design variable");
         app.state

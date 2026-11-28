@@ -10,9 +10,7 @@ use rspice_app_runs::simulation::controller::test_execution::{
 use rspice_app_state::simulation::plan::{AnalysisDraft, AnalysisKind};
 use rspice_app_state::state::SimulationRun;
 use rspice_results::run::SimulationRunLifecycle;
-use rspice_simulation_contract::design_variable::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
-};
+use rspice_simulation_contract::design_variable::{DesignVariable, DesignVariableSweepEligibility};
 use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 use rspice_simulation_contract::run_set::{RunSetDimension, RunSetDimensionKind};
 
@@ -173,7 +171,6 @@ fn add_design_variable(
             String::new(),
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
         )
         .unwrap(),
     );

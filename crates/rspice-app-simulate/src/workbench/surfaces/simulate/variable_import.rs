@@ -32,10 +32,7 @@ use egui::Ui;
 
 use crate::io::file_exchange::{self, FileKind};
 use crate::product::SimulationPlanId;
-use crate::state::{
-    DesignVariableDefect, DesignVariableOverridePolicy, DesignVariableQuantity,
-    DesignVariableSweepEligibility,
-};
+use crate::state::{DesignVariableDefect, DesignVariableQuantity, DesignVariableSweepEligibility};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, select};
@@ -83,14 +80,13 @@ fn exchange_id() -> egui::Id {
 /// the rest fall back to the values the create dialog opens with, which is
 /// what makes a two-column sheet a complete import rather than a partial one.
 /// A row with no quantity is a plain number, because the quantity is a label.
-const COLUMNS: [&str; 8] = [
+const COLUMNS: [&str; 7] = [
     "name",
     "quantity",
     "expression",
     "minimum",
     "maximum",
     "sweep role",
-    "override policy",
     "description",
 ];
 
@@ -100,8 +96,7 @@ const EXPRESSION: usize = 2;
 const MINIMUM: usize = 3;
 const MAXIMUM: usize = 4;
 const SWEEP_ROLE: usize = 5;
-const OVERRIDE_POLICY: usize = 6;
-const DESCRIPTION: usize = 7;
+const DESCRIPTION: usize = 6;
 
 const REQUIRED: [usize; 2] = [NAME, EXPRESSION];
 
@@ -880,13 +875,6 @@ fn draft_from_row(
             Some(0),
         )
         .map_err(unknown_option)?,
-        override_policy: enumerated(
-            "override policy",
-            cell(OVERRIDE_POLICY),
-            &override_policy_choices(),
-            Some(0),
-        )
-        .map_err(unknown_option)?,
         validation_error: None,
     })
 }
@@ -983,13 +971,6 @@ fn sweep_role_choices() -> Vec<(&'static str, usize)> {
     )
 }
 
-fn override_policy_choices() -> Vec<(&'static str, usize)> {
-    spellings(
-        &DesignVariableOverridePolicy::ALL.map(DesignVariableOverridePolicy::label),
-        &[("override", 0), ("inherit", 1)],
-    )
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::fixtures::{open, plan};
@@ -997,10 +978,10 @@ pub(crate) mod tests {
     use crate::workbench::framework::feature::harness::FeatureHarness;
     use crate::workbench::simulate::test_host::SimulateTestHost;
 
-    const SHEET: &str = "name,quantity,expression,minimum,maximum,sweep role,override policy,description\n\
-         RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,sweep,override,Output load\n\
-         CFILT,Capacitance,4.7 nF,1 nF,10 nF,fixed,inherit,Filter cap\n\
-         VBIAS,Voltage,1.8 V,,,,,\n";
+    const SHEET: &str = "name,quantity,expression,minimum,maximum,sweep role,description\n\
+         RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,sweep,Output load\n\
+         CFILT,Capacitance,4.7 nF,1 nF,10 nF,fixed,Filter cap\n\
+         VBIAS,Voltage,1.8 V,,,,\n";
 
     fn registry(
         harness: &FeatureHarness<SimulateFeature>,

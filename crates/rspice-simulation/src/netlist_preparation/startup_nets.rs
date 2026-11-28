@@ -174,7 +174,7 @@ pub fn check_startup_nets(
 mod tests {
     use super::startup_value;
     use rspice_simulation_contract::design_variable::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableSweepEligibility,
     };
     use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 
@@ -186,7 +186,6 @@ mod tests {
             "supply",
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            DesignVariableOverridePolicy::InheritOwnerOnly,
         )
         .expect("a valid design variable")
     }

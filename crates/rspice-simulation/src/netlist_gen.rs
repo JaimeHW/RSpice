@@ -777,7 +777,6 @@ mod tests {
             "netlist fixture",
             None,
             rspice_simulation_contract::design_variable::DesignVariableSweepEligibility::FixedParameter,
-            rspice_simulation_contract::design_variable::DesignVariableOverridePolicy::InheritOwnerOnly,
         )
         .expect("fixture variable is valid")
     }

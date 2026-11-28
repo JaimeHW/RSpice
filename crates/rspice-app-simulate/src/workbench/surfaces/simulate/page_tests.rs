@@ -570,10 +570,7 @@ fn a_run_space_change_moves_the_plan_revision() {
 /// An expression an engineer cannot change is a create-only registry.
 #[test]
 fn a_design_variable_expression_can_be_edited_in_place() {
-    use crate::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-        DesignVariableSweepEligibility,
-    };
+    use crate::state::{DesignVariable, DesignVariableQuantity, DesignVariableSweepEligibility};
 
     let mut harness = SimulateTestHost::harness();
     let plan_id = harness
@@ -589,7 +586,6 @@ fn a_design_variable_expression_can_be_edited_in_place() {
         "load resistance",
         None,
         DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
     )
     .expect("valid design variable");
     let variable_id = variable.id;
@@ -628,15 +624,13 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     );
 }
 
-/// A variable's typed contract — quantity, sweep role, override policy and
-/// bounds — decides what a sweep may do with it and what preflight may
+/// A variable's typed contract — quantity, sweep role and bounds — decides what a sweep may do with it and what preflight may
 /// reject. All of it has to be reachable after authoring, and an unbounded
 /// variable has to be able to become bounded.
 #[test]
 fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() {
     use crate::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
-        DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableQuantity, DesignVariableRange, DesignVariableSweepEligibility,
     };
 
     let mut harness = SimulateTestHost::harness();
@@ -653,7 +647,6 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
         "load resistance",
         None,
         DesignVariableSweepEligibility::FixedParameter,
-        DesignVariableOverridePolicy::InheritOwnerOnly,
     )
     .expect("valid design variable");
     let variable_id = variable.id;
@@ -670,7 +663,6 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
 
     let mut replacement = variable.clone();
     replacement.sweep_eligibility = DesignVariableSweepEligibility::NestedSweepAndOptimization;
-    replacement.override_policy = DesignVariableOverridePolicy::ExplicitTestLocalOverride;
     replacement.allowed_range = Some(DesignVariableRange {
         minimum: "500ohm".to_owned(),
         maximum: "2kohm".to_owned(),
@@ -696,10 +688,6 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     assert_eq!(
         stored.sweep_eligibility,
         DesignVariableSweepEligibility::NestedSweepAndOptimization
-    );
-    assert_eq!(
-        stored.override_policy,
-        DesignVariableOverridePolicy::ExplicitTestLocalOverride
     );
     assert_eq!(
         stored
@@ -884,8 +872,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
 #[test]
 fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
     use crate::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
-        DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableQuantity, DesignVariableRange, DesignVariableSweepEligibility,
     };
     use rspice_simulation::netlist_gen::design_variable_parameter_lines;
 
@@ -900,7 +887,6 @@ fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
                 maximum: "10kohm".to_owned(),
             }),
             DesignVariableSweepEligibility::FixedParameter,
-            DesignVariableOverridePolicy::InheritOwnerOnly,
         )
     };
 

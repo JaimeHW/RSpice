@@ -1,4 +1,4 @@
-//! Adding or editing a design variable, and finding the analyses that read one.
+//! Adding or editing a design variable.
 
 use super::*;
 
@@ -9,7 +9,6 @@ pub(super) fn design_variable_dialog(
 ) {
     draft.validation_error = validate_design_variable_draft(cx, &draft).err();
     let enabled = draft.validation_error.is_none();
-    let consumer_summary = design_variable_consumers(cx);
     let resolved_value = design_variable_from_draft(&draft)
         .and_then(|variable| resolved_in_plan(cx.model, variable))
         .map_or_else(
@@ -64,7 +63,7 @@ pub(super) fn design_variable_dialog(
             );
             workflow_text_field(ui, "Description", &mut draft.description, false);
         }, |ui| {
-            workflow_section_heading(ui, "Constraints and consumers");
+            workflow_section_heading(ui, "Constraints");
             workflow_text_field(ui, "Allowed range", &mut draft.allowed_range, true);
             workflow_select_field(
                 ui,
@@ -73,17 +72,9 @@ pub(super) fn design_variable_dialog(
                 &mut draft.sweep_eligibility,
                 &["Nested sweep + optimization", "Optimization only", "Fixed parameter"],
             );
-            workflow_select_field(
-                ui,
-                "design-variable-override",
-                "Override policy",
-                &mut draft.override_policy,
-                &["Explicit test-local override", "Inherit owner only"],
-            );
             ui.add_space(8.0);
             property_row(ui, "Resolved value", &resolved_value);
             property_row(ui, "Name conflicts", name_conflicts);
-            property_row_wrapped(ui, "Prospective consumers", &consumer_summary);
             property_row(ui, "Result effect", "dependent future runs only");
         });
         workflow_validation_message(ui, draft.validation_error.as_deref());
@@ -129,8 +120,8 @@ pub(crate) fn design_variable_from_draft_categorized(
     draft: &DesignVariableDraft,
 ) -> Result<crate::state::DesignVariable, (crate::state::DesignVariableDefect, String)> {
     use crate::state::{
-        DesignVariable, DesignVariableDefect as Defect, DesignVariableOverridePolicy,
-        DesignVariableQuantity, DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableDefect as Defect, DesignVariableQuantity,
+        DesignVariableSweepEligibility,
     };
 
     let record = |message: String| (Defect::Record, message);
@@ -144,10 +135,6 @@ pub(crate) fn design_variable_from_draft_categorized(
         .get(draft.sweep_eligibility)
         .copied()
         .ok_or_else(|| record("Sweep eligibility selection is invalid.".to_owned()))?;
-    let override_policy = DesignVariableOverridePolicy::ALL
-        .get(draft.override_policy)
-        .copied()
-        .ok_or_else(|| record("Override policy selection is invalid.".to_owned()))?;
     DesignVariable::new_defect(
         draft.name.clone(),
         draft.expression.clone(),
@@ -155,7 +142,6 @@ pub(crate) fn design_variable_from_draft_categorized(
         draft.description.clone(),
         allowed_range,
         sweep_eligibility,
-        override_policy,
     )
 }
 
@@ -234,43 +220,4 @@ pub(crate) fn commit_design_variable(
         "Created design variable {variable_name} in plan {}.",
         cx.model.sim_setup.active_plan_name()
     ))
-}
-
-pub(super) fn design_variable_consumers(cx: &Cx<'_, SimulateFeature>) -> String {
-    design_variable_consumers_scoped(cx.model, None)
-}
-
-/// Which enabled analyses resolve a variable of this scope.
-///
-/// `narrowed_to` is `Some(instance)` for a variable scoped to one analysis and
-/// `None` for one the whole plan resolves. One derivation for both the
-/// Create-variable dialog's preview and the registry's "Used by" column: the
-/// two answer the same question about the same plan, and a column deriving it
-/// separately would be free to disagree with the dialog that authored it.
-pub(crate) fn design_variable_consumers_scoped(
-    model: &Model,
-    narrowed_to: Option<Option<crate::product::AnalysisInstanceId>>,
-) -> String {
-    let Ok(plan) = model.sim_setup.stable_analysis_plan() else {
-        return "plan unavailable".to_owned();
-    };
-    let selected_only = narrowed_to;
-    let labels = plan
-        .instances()
-        .iter()
-        .enumerate()
-        .filter(|(_, instance)| instance.enabled())
-        .filter(|(_, instance)| {
-            selected_only.is_none_or(|selected| selected == Some(instance.id()))
-        })
-        .map(|(index, instance)| {
-            plan.instance_list_label(index)
-                .unwrap_or_else(|| instance.display_name().to_owned())
-        })
-        .collect::<Vec<_>>();
-    if labels.is_empty() {
-        "no enabled analysis consumers".to_owned()
-    } else {
-        labels.join(" · ")
-    }
 }

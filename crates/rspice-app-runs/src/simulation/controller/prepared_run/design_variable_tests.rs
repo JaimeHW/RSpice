@@ -8,9 +8,7 @@ use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::SimulationRun;
 use rspice_results::run::SimulationRunLifecycle;
-use rspice_simulation_contract::design_variable::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
-};
+use rspice_simulation_contract::design_variable::{DesignVariable, DesignVariableSweepEligibility};
 use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 
 /// The divider with its source at `{VCM}` and its upper resistor at
@@ -59,7 +57,6 @@ fn add(state: &mut RunTestHost, name: &str, expression: &str, quantity: DesignVa
         "",
         None,
         DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
     )
     .expect("a well-formed variable");
     state
@@ -171,4 +168,57 @@ fn a_loop_or_an_unknown_name_stops_the_run_naming_it() {
     let refused = refusal(&mut state);
     assert!(refused.contains("W1 and W2 name each other"), "{refused}");
     assert!(refused.contains("VDD is not defined"), "{refused}");
+}
+
+/// Removing a variable another one names leaves the other with no value, and
+/// Check refuses the run naming the variable it lost.
+#[test]
+fn removing_a_variable_another_names_is_refused_by_check_naming_it() {
+    let mut state = divider_reading_variables();
+    add(
+        &mut state,
+        "W1",
+        "4u",
+        DesignVariableQuantity::Dimensionless,
+    );
+    add(
+        &mut state,
+        "W2",
+        "2*W1",
+        DesignVariableQuantity::Dimensionless,
+    );
+    add(&mut state, "VCM", "0.5", DesignVariableQuantity::Voltage);
+    let plan = state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("a plan")
+        .id();
+    let w1 = state
+        .model
+        .workspace
+        .content
+        .plan_data(plan)
+        .and_then(|payload| {
+            payload
+                .design_variables
+                .iter()
+                .find(|variable| variable.name == "W1")
+                .map(|variable| variable.id)
+        })
+        .expect("W1 is in the plan");
+    state
+        .model
+        .workspace
+        .content
+        .remove_design_variable(plan, w1)
+        .expect("the store removes W1");
+
+    state.model.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
+    state.sync_active_schematic_to_workspace();
+    let refused = SimulationController::new()
+        .preflight_run_set(&state)
+        .expect_err("Check refuses the run")
+        .to_string();
+    assert!(refused.contains("W2: W1 is not defined"), "{refused}");
 }

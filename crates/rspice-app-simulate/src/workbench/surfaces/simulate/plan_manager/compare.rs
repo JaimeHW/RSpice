@@ -782,7 +782,6 @@ mod tests {
                     "comparison fixture",
                     None,
                     crate::state::DesignVariableSweepEligibility::FixedParameter,
-                    crate::state::DesignVariableOverridePolicy::InheritOwnerOnly,
                 )
                 .expect("a valid project variable"),
             )

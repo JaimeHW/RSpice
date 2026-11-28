@@ -311,9 +311,7 @@ fn deck_order(variables: &[DesignVariable], needs: &[BTreeSet<usize>]) -> Vec<us
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::design_variable::{
-        DesignVariableOverridePolicy, DesignVariableRange, DesignVariableSweepEligibility,
-    };
+    use crate::design_variable::{DesignVariableRange, DesignVariableSweepEligibility};
     use crate::design_variable_quantity::DesignVariableQuantity;
 
     fn variable(name: &str, expression: &str) -> DesignVariable {
@@ -324,7 +322,6 @@ mod tests {
             "",
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            DesignVariableOverridePolicy::ExplicitTestLocalOverride,
         )
         .expect("a well-formed variable")
     }
