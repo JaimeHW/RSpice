@@ -342,7 +342,7 @@ fn deferred_dc_family_shares_each_exact_source() {
             analysis
                 .validate_retained_evidence()
                 .unwrap_err()
-                .contains("retained solved primary axis")
+                .contains("solved primary sweep axis")
         );
     }
 }

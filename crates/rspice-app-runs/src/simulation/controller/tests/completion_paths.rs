@@ -659,7 +659,7 @@ fn incomplete_soa_results_fail_closed_without_retained_payloads() {
     assert!(
         soa.error_message
             .as_deref()
-            .is_some_and(|message| message.contains("no evaluated-rule evidence"))
+            .is_some_and(|message| message.contains("no evaluated rules"))
     );
 }
 
