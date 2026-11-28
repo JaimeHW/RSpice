@@ -136,6 +136,12 @@ pub struct PlacedSource {
     pub family: &'static str,
     /// The one number that identifies this source at a glance.
     pub key_figure: String,
+    /// The small-signal magnitude an AC analysis drives this source at, as
+    /// the deck writes it after `AC`; empty when the source carries none.
+    pub ac_magnitude: String,
+    /// The phase of that drive in degrees, as the deck writes it; empty when
+    /// the source carries no AC magnitude.
+    pub ac_phase: String,
     /// The Definition column, as [`StimulusLibrary::studio_definition_cell`]
     /// writes it: which definition this instance copied, and where it stands.
     pub definition_cell: String,
@@ -733,6 +739,7 @@ fn placed_source(
     let family = source_family(component.kind)?;
     let params = crate::state::parse_params_string(&component.params);
     let terminals = terminal_nets(component, nets);
+    let (ac_magnitude, ac_phase) = ac_drive(component, &params);
     let card = crate::simulation::stimulus_realize::source_card_text(
         component,
         [
@@ -748,6 +755,8 @@ fn placed_source(
             is_voltage: is_voltage_source(component.kind),
             family,
             key_figure: key_figure(component, &params, deck_spelling),
+            ac_magnitude,
+            ac_phase,
             definition_cell: stimulus_library.studio_definition_cell(component),
             provenance: stimulus_library.provenance_state(component),
             definition: component
@@ -1045,6 +1054,43 @@ fn carries_ac_excitation(params: &HashMap<String, String>, kind: ComponentType) 
         return true;
     }
     carries_value(params.get("ac").map(String::as_str))
+}
+
+/// The AC magnitude and phase this source carries, as the netlist generator
+/// writes them after `AC`, or two empty strings when it carries none.
+///
+/// An AC source always carries a magnitude: its value, `1` when unwritten,
+/// at its `acphase` (or `phase`). Any other source carries one only when its
+/// `ac` is set to something that is not zero — the test
+/// [`carries_ac_excitation`] applies — at its `acphase`. An unwritten phase
+/// is the `0` the card writes.
+fn ac_drive(component: &Component, params: &HashMap<String, String>) -> (String, String) {
+    let written = |key: &str| {
+        params
+            .get(key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+    };
+    let (magnitude, phase) = if matches!(
+        component.kind,
+        ComponentType::VoltageSourceAc | ComponentType::CurrentSourceAc
+    ) {
+        (
+            Some(match component.value.trim() {
+                "" => "1",
+                value => value,
+            }),
+            written("acphase").or_else(|| written("phase")),
+        )
+    } else {
+        (
+            written("ac").filter(|magnitude| carries_value(Some(*magnitude))),
+            written("acphase"),
+        )
+    };
+    magnitude.map_or_else(Default::default, |magnitude| {
+        (magnitude.to_owned(), phase.unwrap_or("0").to_owned())
+    })
 }
 
 /// The waveform family label, or `None` for anything that is not an
@@ -1650,6 +1696,56 @@ mod tests {
             &HashMap::new(),
             ComponentType::VoltageSourceAc
         ));
+    }
+
+    /// A source states the AC magnitude and phase it carries, as the card the
+    /// run reads writes them: a DC supply with `ac=1` is a small-signal drive
+    /// of 1 at 0 degrees, not a supply only.
+    #[test]
+    fn a_source_states_the_ac_magnitude_and_phase_its_card_carries() {
+        let mut ac_source = Component::new(4, ComponentType::VoltageSourceAc, Point::origin())
+            .with_name_value("VAC", "2");
+        ac_source.params = "phase=45".to_owned();
+        let schematic = schematic_with(vec![
+            source(1, ComponentType::VoltageSource, "VDD", ""),
+            source(2, ComponentType::VoltageSource, "VIN", "ac=1"),
+            source(
+                3,
+                ComponentType::VoltageSourceSin,
+                "VS",
+                "freq=1k ac=10m acphase=90",
+            ),
+            ac_source,
+            source(5, ComponentType::VoltageSource, "VZ", "ac=0"),
+        ]);
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), None);
+        let source = |reference: &str| {
+            listed
+                .iter()
+                .find(|source| source.reference == reference)
+                .expect("the fixture places the source")
+        };
+        let drive = |reference: &str| {
+            let source = source(reference);
+            (source.ac_magnitude.as_str(), source.ac_phase.as_str())
+        };
+
+        assert_eq!(drive("VDD"), ("", ""));
+        assert_eq!(drive("VZ"), ("", ""), "a zero magnitude is no AC drive");
+        assert_eq!(drive("VIN"), ("1", "0"));
+        assert_eq!(drive("VS"), ("10m", "90"));
+        assert_eq!(drive("VAC"), ("2", "45"));
+        for reference in ["VIN", "VS", "VAC"] {
+            let (magnitude, phase) = drive(reference);
+            let card = source(reference)
+                .card
+                .as_deref()
+                .expect("the source writes a card");
+            assert!(
+                card.contains(&format!("AC {magnitude} {phase}")),
+                "{reference}: {card}"
+            );
+        }
     }
 
     /// A distortion run is not an AC run with harmonics bolted on.
