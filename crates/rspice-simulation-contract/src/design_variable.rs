@@ -6,7 +6,7 @@ use rspice_design_model::cell_view::CellViewRef;
 use rspice_vocabulary::product::{AnalysisInstanceId, DesignVariableId, ObjectRevision};
 use serde::{Deserialize, Serialize};
 
-use crate::design_variable_quantity::{DesignVariableQuantity, parse_design_quantity};
+use crate::design_variable_quantity::{DesignVariableQuantity, number_written_with_unit};
 use rspice_vocabulary::text_validation::{
     validate_bounded_text, validate_parameter_name, validate_single_line_expression,
 };
@@ -290,13 +290,12 @@ impl DesignVariable {
 }
 
 /// `text` as the engine reads it for a variable labelled `quantity`: a number
-/// written with the label's unit is that number, and anything else is an
-/// expression, without the braces a deck would wrap it in.
+/// written with a unit is that number, and anything else is an expression,
+/// without the braces a deck would wrap it in. The unit is a label and never
+/// a reason to refuse a number.
 pub(crate) fn deck_text(text: &str, quantity: DesignVariableQuantity) -> String {
-    match parse_design_quantity(text, quantity) {
-        Ok(value) => format!("{value:.17e}"),
-        Err(_) => expression_text(text),
-    }
+    let text = expression_text(text);
+    number_written_with_unit(&text, quantity).unwrap_or(text)
 }
 
 /// `text` without surrounding blanks or the one pair of braces a deck wraps

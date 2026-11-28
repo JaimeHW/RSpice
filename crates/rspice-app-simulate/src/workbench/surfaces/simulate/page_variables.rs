@@ -528,17 +528,14 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                     );
                 })),
             );
-            // Unit handling and out-of-bounds handling are stated, not
-            // offered. Each has exactly one implementation and no second one
-            // worth building: there is no unit algebra that could compute a
-            // conversion factor — the check is a required suffix on a typed
-            // quantity — and silently moving a value its author bounded is not
-            // a policy a signed-off result could be built on.
+            // Units and out-of-bounds handling are stated, not offered. The
+            // quantity is a label, so a unit is read when typed and never
+            // required, and silently moving a value its author bounded is not
+            // something a signed-off result could be built on.
             rule_row(
                 ui,
-                "Unit policy",
-                "strict · a value whose unit does not match its quantity is rejected, never \
-                 converted",
+                "Unit",
+                "optional · 1.8, 1.8V and 1.8 V are the same number; the quantity only labels it",
             );
             rule_row(
                 ui,

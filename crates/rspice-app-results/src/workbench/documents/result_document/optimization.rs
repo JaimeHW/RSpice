@@ -15,7 +15,7 @@ use crate::workbench::design_system::section_header;
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use rspice_app_state::workbench::app_state::design_history::SetupParts;
 use rspice_app_state::workbench::app_state::model::Model;
-use rspice_simulation_contract::design_variable_quantity::parse_design_quantity;
+use rspice_simulation_contract::design_variable_resolution::resolve_design_variables;
 
 use std::sync::Arc;
 
@@ -169,16 +169,18 @@ fn best_application(model: &Model, analysis: &AnalysisResult) -> Result<BestAppl
     let mut assignments = Vec::with_capacity(best_variables.len());
     let mut missing = Vec::new();
     let mut unchanged = 0;
+    let resolved = resolve_design_variables(&payload.design_variables);
     for (name, &value) in best_variables {
-        let Some(variable) = payload
+        let Some((index, variable)) = payload
             .design_variables
             .iter()
-            .find(|variable| variable.name.eq_ignore_ascii_case(name))
+            .enumerate()
+            .find(|(_, variable)| variable.name.eq_ignore_ascii_case(name))
         else {
             missing.push(name.as_str());
             continue;
         };
-        let held = parse_design_quantity(&variable.expression, variable.quantity).ok();
+        let held = resolved.value(index).and_then(|held| held.as_ref().ok());
         if held.is_some_and(|held| held.to_bits() == value.to_bits()) {
             unchanged += 1;
         }

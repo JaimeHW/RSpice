@@ -80,9 +80,10 @@ fn exchange_id() -> egui::Id {
 /// The columns a spec sheet may name.
 ///
 /// A header row binds each column to a field, so the order they appear in the
-/// file is not load-bearing. Only the first three are required: the rest fall
-/// back to the values the create dialog opens with, which is what makes a
-/// three-column sheet a complete import rather than a partial one.
+/// file is not load-bearing. Only the name and the expression are required:
+/// the rest fall back to the values the create dialog opens with, which is
+/// what makes a two-column sheet a complete import rather than a partial one.
+/// A row with no quantity is a plain number, because the quantity is a label.
 const COLUMNS: [&str; 9] = [
     "name",
     "quantity",
@@ -105,7 +106,7 @@ const SWEEP_ROLE: usize = 6;
 const OVERRIDE_POLICY: usize = 7;
 const DESCRIPTION: usize = 8;
 
-const REQUIRED: [usize; 3] = [NAME, QUANTITY, EXPRESSION];
+const REQUIRED: [usize; 2] = [NAME, EXPRESSION];
 
 /// The ownership scopes, spelled as `design_variable_from_draft` indexes them.
 /// `cell` and `analysis` resolve against the active view and the selected
@@ -968,8 +969,13 @@ fn draft_from_row(
     Ok(DesignVariableDraft {
         name: name.to_owned(),
         expression: expression.to_owned(),
-        quantity: enumerated("quantity", cell(QUANTITY), &quantity_choices(), None)
-            .map_err(unknown_option)?,
+        quantity: enumerated(
+            "quantity",
+            cell(QUANTITY),
+            &quantity_choices(),
+            Some(unlabelled()),
+        )
+        .map_err(unknown_option)?,
         scope: enumerated("scope", cell(SCOPE), &SCOPE_CHOICES, Some(0)).map_err(unknown_option)?,
         description: cell(DESCRIPTION).to_owned(),
         allowed_range: allowed_range(cell(MINIMUM), cell(MAXIMUM)).map_err(|detail| {
@@ -1072,6 +1078,14 @@ fn quantity_choices() -> Vec<(&'static str, usize)> {
         &DesignVariableQuantity::ALL.map(DesignVariableQuantity::label),
         &[],
     )
+}
+
+/// The quantity a row with none takes: a plain number.
+fn unlabelled() -> usize {
+    DesignVariableQuantity::ALL
+        .iter()
+        .position(|quantity| *quantity == DesignVariableQuantity::Dimensionless)
+        .unwrap_or_default()
 }
 
 fn sweep_role_choices() -> Vec<(&'static str, usize)> {
@@ -1379,6 +1393,40 @@ pub(crate) mod tests {
 
         assert_eq!(row_ids(&draft), [None]);
         assert_eq!(draft.rows[0].draft.allowed_range, "1 kohm \u{2026} 1 Mohm");
+    }
+
+    /// A voltage written as a plain number, and a row with no quantity at
+    /// all, both adopt: the unit and the quantity are labels.
+    #[test]
+    fn a_plain_number_and_a_missing_quantity_adopt() {
+        let mut harness = SimulateTestHost::harness();
+        let plan_id = plan(&harness.model);
+        let draft = open(
+            &harness.model,
+            &mut harness.state,
+            plan_id,
+            "name,quantity,expression\nVDD,Voltage,1.8\nW1,,4u\n",
+        );
+        assert_eq!(row_ids(&draft), [None, None]);
+        commit_selected_rows(&mut harness.cx(), &draft).expect("both rows adopt");
+        let payload = harness
+            .model
+            .workspace
+            .content
+            .plan_data(plan_id)
+            .expect("plan payload");
+        let quantities = payload
+            .design_variables
+            .iter()
+            .map(|variable| (variable.expression.as_str(), variable.quantity))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            quantities,
+            [
+                ("1.8", DesignVariableQuantity::Voltage),
+                ("4u", DesignVariableQuantity::Dimensionless),
+            ]
+        );
     }
 
     /// A required field with nothing bound to it is a refusal about the sheet,
