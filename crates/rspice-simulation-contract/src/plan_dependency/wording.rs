@@ -163,14 +163,8 @@ pub fn issue_sentence(plan: &SimulationPlan, issue: &AnalysisPlanIssue) -> Strin
             title(*id)
         ),
         AnalysisPlanIssue::DuplicateTombstoneId { .. }
-        | AnalysisPlanIssue::InvalidTombstoneRevision { .. }
-        | AnalysisPlanIssue::InvalidReceiptSequence { .. }
-        | AnalysisPlanIssue::InvalidReceiptRevision { .. }
-        | AnalysisPlanIssue::DanglingReceiptInstance { .. }
-        | AnalysisPlanIssue::ReceiptKindMismatch { .. }
-        | AnalysisPlanIssue::EmptyReceiptDetail { .. }
-        | AnalysisPlanIssue::InvalidNextReceiptSequence { .. } => {
-            "This test's saved edit history is damaged.".to_owned()
+        | AnalysisPlanIssue::InvalidTombstoneRevision { .. } => {
+            "This test's saved analysis list is damaged.".to_owned()
         }
     }
 }
@@ -301,22 +295,6 @@ mod tests {
                 members: vec![dependent, target],
             },
             AnalysisPlanIssue::InvalidTombstoneRevision { id: target },
-            AnalysisPlanIssue::InvalidReceiptSequence { sequence: 3 },
-            AnalysisPlanIssue::InvalidReceiptRevision { sequence: 3 },
-            AnalysisPlanIssue::DanglingReceiptInstance {
-                sequence: 3,
-                id: target,
-            },
-            AnalysisPlanIssue::ReceiptKindMismatch {
-                sequence: 3,
-                expected: Pac,
-                actual: Pss,
-            },
-            AnalysisPlanIssue::EmptyReceiptDetail { sequence: 3 },
-            AnalysisPlanIssue::InvalidNextReceiptSequence {
-                expected: 4,
-                actual: 5,
-            },
         ]
     }
 
