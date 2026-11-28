@@ -212,14 +212,12 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
     let busy = parts.dialog.busy;
     let plan_valid = parts.dialog.preview_plan.is_some();
     let description = match page {
-        HardcopyDialogPage::Main => None,
+        HardcopyDialogPage::Main => parts.dialog.workflow.purpose(),
         HardcopyDialogPage::PrinterProperties => {
-            Some("Check the paper, resolution and options the selected printer offers.")
+            "Check the paper, resolution and options the selected printer offers."
         }
-        HardcopyDialogPage::CustomPaperMargins => Some("Set a paper size and margins of your own."),
-        HardcopyDialogPage::PrintMapping => {
-            Some("Choose how layers, traces and markers look on paper.")
-        }
+        HardcopyDialogPage::CustomPaperMargins => "Set a paper size and margins of your own.",
+        HardcopyDialogPage::PrintMapping => "Choose how layers, traces and markers look on paper.",
     };
     let mut body_scroll_offset = parts.dialog.body_scroll_offset;
     let mut body_action = BodyAction::None;
@@ -230,12 +228,10 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
         .size(DialogSize::DrawingSheetWorkflow)
         .fixed_height(DIALOG_HEIGHT)
         .flush_body()
+        .description(description)
         .primary_on_enter(false)
         .primary_enabled(!busy && (plan_valid || page != HardcopyDialogPage::Main))
         .secondary("Cancel");
-    if let Some(description) = description {
-        dialog = dialog.description(description);
-    }
     if page == HardcopyDialogPage::Main
         && let Some(warning) = parts.dialog.printer_margin_warning()
     {

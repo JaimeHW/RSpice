@@ -297,6 +297,16 @@ impl HardcopyWorkflow {
             Self::Export => "Save…",
         }
     }
+
+    /// The dialog's purpose, for assistive technology.
+    pub(crate) const fn purpose(self) -> &'static str {
+        match self {
+            Self::Print => {
+                "Print the document on a printer or to a PDF or SVG file, with a preview of each page."
+            }
+            Self::Export => "Save the document as a PDF or SVG file, with a preview of each page.",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
