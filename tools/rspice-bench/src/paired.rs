@@ -562,6 +562,16 @@ mod tests {
         let mut permissions = std::fs::metadata(&script).expect("metadata").permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(&script, permissions).expect("chmod");
+        // A process another test thread forks while the write above is open
+        // inherits that handle until its own exec, and running a file that is
+        // open for writing fails with "Text file busy". Once one run gets
+        // through, no writer is left, so the benchmark's launches cannot hit it.
+        while matches!(
+            std::process::Command::new(&script).status(),
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+        ) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         script
     }
 
