@@ -87,10 +87,15 @@ fn read_stated(facts: &mut RunFacts, deck: &str) {
 }
 
 /// `value` as a reader writes it. A plan's design variable reaches the deck
-/// as its value in seventeen-digit scientific notation, `2.00000000000000000e3`,
-/// which is read back in SPICE's own notation, `2k`; any other value stands
-/// as its deck spells it.
+/// in braces, `{2k}` or `{2*W1}`, which reads as it was typed; a number in
+/// seventeen-digit scientific notation, `2.00000000000000000e3`, reads in
+/// SPICE's own notation, `2k`; any other value stands as its deck spells it.
 fn readable(value: &str) -> String {
+    let value = value
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .filter(|inner| !inner.contains(['{', '}']))
+        .unwrap_or(value);
     match value.parse::<f64>() {
         Ok(number) if format!("{number:.17e}") == value => {
             rspice_results::number_format::spice_coordinate(number, "")
@@ -260,7 +265,7 @@ mod tests {
                 .map(|setting| format!("{}={}", setting.name, setting.value))
                 .collect::<Vec<_>>()
         };
-        assert_eq!(pairs(&facts.variables), ["rload=3k", "cl={2*1p}"]);
+        assert_eq!(pairs(&facts.variables), ["rload=3k", "cl=2*1p"]);
         assert_eq!(pairs(&facts.options), ["RELTOL=1e-4", "ABSTOL=1e-10"]);
     }
 
