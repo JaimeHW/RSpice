@@ -231,8 +231,7 @@ impl Registry {
 
 /// A design variable bounded to 1k…10k, so an expression outside that range is
 /// refused by the workspace's own validation rather than by anything this test
-/// arranges — the exact refusal the page's "Out of bounds · the edit is
-/// refused" rule promises.
+/// arranges.
 fn bounded_variable() -> rspice_app_state::state::DesignVariable {
     use rspice_app_state::state::{DesignVariable, DesignVariableQuantity, DesignVariableRange};
 

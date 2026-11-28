@@ -150,8 +150,7 @@ fn a_selected_record_paints_every_field_of_its_contract() {
     }
     assert!(
         rendered.contains("unbounded"),
-        "an unbounded variable must say that preflight cannot reject an out-of-range value:\n\
-         {rendered}"
+        "an unbounded variable's Bounds column must say so:\n{rendered}"
     );
 }
 

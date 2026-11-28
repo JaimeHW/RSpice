@@ -185,16 +185,6 @@ fn registry(
                     pick = Some(variable.name.clone());
                 }
             }
-            card_note(
-                ui,
-                "Every analysis in this plan reads the same value. A bound is hard and is never \
-                 clamped: \
-                 the same check refuses the record at construction, refuses to emit the \
-                 deck's parameter lines and refuses to validate the stored simulation \
-                 configuration. An out-of-range value therefore cannot reach a run by any route. \
-                 The optimizer tunes only a variable ticked Tunable, within its bounds; a run-set \
-                 axis may sweep any variable.",
-            );
         },
     );
 
@@ -379,27 +369,6 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                     );
                 })),
             );
-            // Units and out-of-bounds handling are stated, not offered. The
-            // quantity is a label, so a unit is read when typed and never
-            // required, and silently moving a value its author bounded is not
-            // something a signed-off result could be built on.
-            rule_row(
-                ui,
-                "Unit",
-                "optional · 1.8, 1.8V and 1.8 V are the same number; the quantity only labels it",
-            );
-            rule_row(
-                ui,
-                "Out of bounds",
-                "the edit is refused · a resolved value outside the range is never clamped into it",
-            );
-            if variable.allowed_range.is_none() {
-                card_note(
-                    ui,
-                    "This variable is unbounded, so nothing can reject an out-of-range \
-                     value. Give it both a minimum and a maximum to have the bound enforced.",
-                );
-            }
             if !variable.description.trim().is_empty() {
                 rule_row(ui, "Description", &variable.description);
             }
