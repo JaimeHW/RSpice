@@ -6,11 +6,7 @@ use crate::strip::{self, HEADER_PADDING_X, header_button, header_button_width};
 use egui::Ui;
 use rspice_results::visualization_document::{Abscissa, Strip};
 use rspice_ui_kit::{
-    icons::Icon,
-    plot::paint_trace_swatch,
-    theme,
-    tokens::Tokens,
-    widgets::{IconButton, chip, chip_width},
+    icons::Icon, plot::paint_trace_swatch, theme, tokens::Tokens, widgets::IconButton,
 };
 use rspice_vocabulary::quantity::QuantityPresentationPolicy;
 use std::borrow::Cow;
