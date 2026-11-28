@@ -1156,7 +1156,9 @@ mod tests {
                 RetainedTrace::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 2.0e-18], "#fff"),
             ]);
             assert!(
-                sheets_of(&analysis).any(|viewer| viewer.id == "viewer-bode"),
+                VIEWER_DOCUMENTS
+                    .iter()
+                    .any(|viewer| viewer.id == "viewer-bode" && renders(viewer, &analysis)),
                 "the noise sheet draws {analysis_type:?} but is not offered for it"
             );
         }
