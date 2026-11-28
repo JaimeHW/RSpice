@@ -155,6 +155,50 @@ pub fn issue_sentence(plan: &SimulationPlan, issue: &AnalysisPlanIssue) -> Strin
     }
 }
 
+/// What `issue` says about the analysis it concerns, in the few words its
+/// row in the list has room for, without naming that analysis: "needs a
+/// periodic steady state", "uses Carrier, which is switched off".
+#[must_use]
+pub fn issue_reason(plan: &SimulationPlan, issue: &AnalysisPlanIssue) -> String {
+    let name = |id| {
+        plan.instance(id).map_or_else(
+            || "an analysis no longer in this test".to_owned(),
+            |instance| instance.display_name().to_owned(),
+        )
+    };
+    match issue {
+        AnalysisPlanIssue::NoEnabledInstances => "nothing is switched on".to_owned(),
+        AnalysisPlanIssue::DuplicateInstanceName { .. } => "its name is used twice".to_owned(),
+        AnalysisPlanIssue::MissingPrerequisite { prerequisite, .. } => {
+            format!("needs {}", prerequisite_need(*prerequisite))
+        }
+        AnalysisPlanIssue::DisabledDependency { target, .. } => {
+            format!("uses {}, which is switched off", name(*target))
+        }
+        AnalysisPlanIssue::DependencyNotEarlier { target, .. } => {
+            format!("uses {}, which runs after it", name(*target))
+        }
+        AnalysisPlanIssue::IncompatibleDependencyConfiguration { target, .. } => {
+            format!("cannot use {}", name(*target))
+        }
+        AnalysisPlanIssue::DanglingDependency { dependent, target } => format!(
+            "needs {}",
+            plan.instance(*dependent)
+                .and_then(|instance| {
+                    instance
+                        .dependencies()
+                        .iter()
+                        .find(|dependency| dependency.target() == *target)
+                })
+                .map_or("another analysis", |dependency| {
+                    prerequisite_need(dependency.prerequisite())
+                })
+        ),
+        AnalysisPlanIssue::DependencyCycle { .. } => "waits on itself".to_owned(),
+        _ => "damaged in the saved test".to_owned(),
+    }
+}
+
 /// The exact shape of every damage finding in `plan`, identities included:
 /// what the log records where the interface says only that something is
 /// damaged.
@@ -269,6 +313,10 @@ mod tests {
             "Mixer gain (Periodic AC) needs a periodic steady state before it."
         );
         assert_eq!(
+            issue_reason(&plan, &missing),
+            "needs a periodic steady state"
+        );
+        assert_eq!(
             issue_sentence(
                 &plan,
                 &AnalysisPlanIssue::DisabledDependency {
@@ -302,6 +350,15 @@ mod tests {
                     "{sentence:?}"
                 );
                 assert!(sentence.ends_with('.'), "{sentence:?}");
+                let reason = issue_reason(&plan, &issue);
+                assert!(
+                    !reason.ends_with('.')
+                        && !reason.to_lowercase().contains("prerequisite")
+                        && [dependent, target]
+                            .iter()
+                            .all(|id| !reason.contains(&id.to_string())),
+                    "{issue:?} reads {reason:?}"
+                );
             }
         }
 

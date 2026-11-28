@@ -254,13 +254,16 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
             .iter()
             .map(|instance| (instance.id(), instance.enabled()))
             .collect::<Vec<_>>();
+        // Named, so its row is found by what a reader hears, not by an id.
+        plan.set_instance_name(rows[1].0, "Second row")
+            .expect("the second row takes a name");
         (rows[0], rows[1])
     };
     app.state.simulate.active_analysis_instance = Some(first.0);
 
     let mut studio = Studio::open(app, SimulationPage::Analyses, DESKTOP);
-    let target = format!("instance {}", second.0);
-    studio.click(|label| label.starts_with("Select ") && label.contains(&target));
+    let target = ", Second row";
+    studio.click(|label| label.starts_with("Select ") && label.contains(target));
     assert_eq!(
         studio.app.state.simulate.active_analysis_instance,
         Some(second.0),
@@ -290,7 +293,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
             .count()
     };
     let receipts_before = plan_records(&studio.app);
-    studio.click(|label| label.starts_with("Enable ") && label.contains(&target));
+    studio.click(|label| label.starts_with("Enable ") && label.contains(target));
     assert_eq!(
         studio
             .app

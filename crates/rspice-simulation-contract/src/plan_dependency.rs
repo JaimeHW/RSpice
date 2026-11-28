@@ -14,7 +14,8 @@ pub use validation::{
 };
 
 pub use wording::{
-    analysis_title, damage_details, issue_is_damage, issue_sentence, prerequisite_need,
+    analysis_title, damage_details, issue_is_damage, issue_reason, issue_sentence,
+    prerequisite_need,
 };
 
 use rspice_vocabulary::product::AnalysisInstanceId;

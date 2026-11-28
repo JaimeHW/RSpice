@@ -15,7 +15,7 @@
 use super::*;
 
 pub(super) use rspice_simulation_contract::plan_dependency::{
-    analysis_title, issue_is_damage, prerequisite_need,
+    analysis_title, issue_is_damage, issue_reason, prerequisite_need,
 };
 
 #[cfg(test)]

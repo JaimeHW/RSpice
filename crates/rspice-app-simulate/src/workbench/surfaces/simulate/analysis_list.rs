@@ -34,7 +34,9 @@ pub(super) struct AnalysisStackRow {
     /// that arithmetic, so a row and the Run Set page's rate table cannot
     /// disagree about the same instance.
     workload: Option<String>,
-    issue_count: usize,
+    /// Why it cannot run, in the few words the row has room for ("needs a
+    /// periodic steady state"); `None` when nothing stops it.
+    reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -202,12 +204,11 @@ fn analysis_stack_row(
             // and an assistive one cannot is not a status the row has.
             match row.run_state {
                 Some(state) => format!(
-                    "Select {} analysis instance {}, {} in the last run",
+                    "Select analysis {position:02}, {}, {} in the last run",
                     row.name,
-                    row.id,
                     state.label()
                 ),
-                None => format!("Select {} analysis instance {}", row.name, row.id),
+                None => format!("Select analysis {position:02}, {}", row.name),
             },
         )
     });
@@ -289,7 +290,7 @@ fn analysis_stack_row(
             egui::WidgetType::Checkbox,
             ui.is_enabled(),
             row.enabled,
-            format!("Enable {} instance {}", row.name, row.id),
+            format!("Enable analysis {position:02}, {}", row.name),
         )
     });
     paint_switch(ui, switch_hit.center(), row.enabled, toggle.hovered(), rect);
@@ -304,15 +305,14 @@ fn analysis_stack_row(
     // as it did before anyone named anything.
     let first_line = format!("{} · {}", row.kind.stable_id().to_uppercase(), row.name);
     let second_line = row.summary.as_str();
-    // A blocked dependency is the row's one problem and leads the line with its
+    // Why it cannot run is the row's one problem and leads the line with its
     // mark. A production analysis is the default and says nothing about it; any
     // other availability is named, neutrally.
-    let blocked = row.issue_count > 0;
-    let status = if blocked {
-        Some("dependency blocked")
-    } else {
-        Some(availability_label(row.kind)).filter(|label| *label != "Production")
-    };
+    let blocked = row.reason.is_some();
+    let status = row
+        .reason
+        .as_deref()
+        .or_else(|| Some(availability_label(row.kind)).filter(|label| *label != "Production"));
     let status_line = match status {
         Some(status) => format!("{status} · {}", row.lifecycle),
         None => row.lifecycle.to_string(),
@@ -502,6 +502,28 @@ fn instance_run_states(model: &Model) -> Vec<(AnalysisInstanceId, InstanceRunSta
         .collect()
 }
 
+/// Why the analysis `id` cannot run, as its row says it: its own first
+/// finding, or else that an analysis it uses cannot run.
+fn row_reason(
+    plan: &crate::simulation::plan::SimulationPlan,
+    issues: &[AnalysisPlanIssue],
+    id: AnalysisInstanceId,
+    closure_ids: &HashSet<AnalysisInstanceId>,
+) -> Option<String> {
+    if let Some(issue) = issues.iter().find(|issue| issue_applies_to(issue, id)) {
+        return Some(issue_reason(plan, issue));
+    }
+    plan.instances()
+        .iter()
+        .filter(|used| used.id() != id && closure_ids.contains(&used.id()))
+        .find(|used| {
+            issues
+                .iter()
+                .any(|issue| issue_applies_to(issue, used.id()))
+        })
+        .map(|used| format!("uses {}, which cannot run", used.display_name()))
+}
+
 pub(super) fn analysis_stack_rows(
     model: &Model,
     participation: &participation::PlanParticipation,
@@ -535,14 +557,7 @@ pub(super) fn analysis_stack_rows(
                 workload: workload
                     .as_ref()
                     .and_then(|plan| plan.row_cost_for(instance.id())),
-                issue_count: issues
-                    .iter()
-                    .filter(|issue| {
-                        closure_ids
-                            .iter()
-                            .any(|closure_id| issue_applies_to(issue, *closure_id))
-                    })
-                    .count(),
+                reason: row_reason(plan, &issues, instance.id(), &closure_ids),
             }
         })
         .collect())
