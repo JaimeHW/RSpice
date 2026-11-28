@@ -1447,7 +1447,8 @@ fn ensure_plan_probe_output(
 }
 
 /// Validate a changed output list and commit it with the plan setup in one
-/// step, so a failure leaves the live configuration as it was.
+/// step, so a failure leaves the live configuration as it was. The step is
+/// one of the setup's own, which Undo on a Simulate page takes back.
 fn publish_plan_outputs(
     state: &mut CanvasParts<'_>,
     mut setup: rspice_app_state::workbench::app_state::sim_setup::SimSetupState,
@@ -1461,8 +1462,12 @@ fn publish_plan_outputs(
     let receipt = setup
         .commit_active_plan_configuration_change(description)
         .map_err(|error| error.to_string())?;
+    let step = state
+        .model
+        .setup_snapshot(crate::workbench::app_state::design_history::SetupParts::PLAN_DATA);
     state.model.sim_setup = setup;
     state.model.workspace = workspace;
+    state.model.record_setup_change("probe", step);
     state.runs.preflight.invalidate();
     state.model.record_plan_receipt(receipt.status_line());
     Ok(())

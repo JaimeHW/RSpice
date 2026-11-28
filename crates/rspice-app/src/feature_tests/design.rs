@@ -57,6 +57,7 @@ mod net_label_placement_drawn;
 mod object_properties_drawn;
 mod physical_layout_transactions;
 mod pin_port_placement_drawn;
+mod probe_setup_step;
 mod property_dialog_drawn;
 mod property_display_drawn;
 mod property_edit;
