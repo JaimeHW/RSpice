@@ -53,6 +53,8 @@ mod transient_noise;
 pub(crate) use name_domain::*;
 pub(super) use prerequisites::prerequisite_rows;
 use prerequisites::study_base_row;
+#[cfg(test)]
+pub(super) use prerequisites::uses_field;
 pub(crate) use rows::*;
 pub(super) use run_space::RunSpaceContext;
 use sweep_point_label::{

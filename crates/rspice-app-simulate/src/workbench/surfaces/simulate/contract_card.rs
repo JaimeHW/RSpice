@@ -211,7 +211,7 @@ pub(super) fn analysis_contract(
                     Some((
                         page_kit::Tone::Warn,
                         "Prerequisites not prepared",
-                        "Prepare its prerequisites before enabling it.".to_owned(),
+                        "Choose what it uses before enabling it.".to_owned(),
                     ))
                 } else {
                     None
@@ -219,19 +219,6 @@ pub(super) fn analysis_contract(
                 if let Some((tone, title, detail)) = problem {
                     page_kit::note_line(ui, title, tone);
                     page_kit::note_line(ui, &detail, page_kit::Tone::Dim);
-                }
-                if let Some(repair_label) = selected.repair_label.as_deref() {
-                    ui.add_space(7.0);
-                    if Button::new(repair_label)
-                        .icon(Icon::Add)
-                        .show(ui)
-                        .on_hover_text(
-                            "Atomically reuse, enable, move, or add the complete prerequisite chain before this analysis.",
-                        )
-                        .clicked()
-                    {
-                        *action = Some(AnalysisAction::RepairDependencies);
-                    }
                 }
                 if let Some(configure_label) = selected.configure_pss_label.as_deref() {
                     ui.add_space(7.0);

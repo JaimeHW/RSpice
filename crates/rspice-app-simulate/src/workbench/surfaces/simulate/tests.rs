@@ -748,6 +748,81 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
     );
 }
 
+/// The PAC of `plan`, as the editor shows it against a circuit whose one
+/// periodic source is `VSRC`.
+fn selected_pac(
+    plan: crate::simulation::plan::SimulationPlan,
+    pac: AnalysisInstanceId,
+) -> SelectedAnalysis {
+    let mut harness = SimulateTestHost::harness();
+    harness.model.sim_setup.analysis_plan = Some(plan);
+    harness.state.active_analysis_instance = Some(pac);
+    let sources = EnvelopeSourceCatalog {
+        source_digest: ContentDigest::from_bytes([10; 32]),
+        names: vec!["VSRC".to_owned()],
+        netlist_source: Some(
+            "periodic fixture\nVSRC in 0 SIN(0 1 1k)\nR1 in 0 1k\n.end\n".to_owned(),
+        ),
+        diagnostic: None,
+    };
+    selected_analysis(&harness.model, &harness.state, &sources)
+        .expect("selection resolves")
+        .expect("the PAC is selected")
+}
+
+#[test]
+fn the_uses_field_lists_the_carriers_by_name_and_rebinds() {
+    let mut plan = crate::simulation::plan::SimulationPlan::empty();
+    let (first, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+    let (second, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
+    name_every_pss_tone(&mut plan);
+    plan.set_instance_name(first, "Carrier A").unwrap();
+    plan.set_instance_name(second, "Carrier B").unwrap();
+    let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+    plan.bind_dependency(pac, AnalysisKind::Pss, first)
+        .expect("PAC binds the first PSS");
+
+    let field = analysis_form::uses_field(&selected_pac(plan, pac), AnalysisKind::Pss);
+    assert_eq!(field.current, "Carrier A");
+    assert_eq!(
+        field
+            .options
+            .iter()
+            .map(|(label, _)| label.as_str())
+            .collect::<Vec<_>>(),
+        ["Carrier A", "Carrier B"]
+    );
+    assert!(matches!(
+        field.options[1].1,
+        AnalysisAction::BindDependency {
+            prerequisite: AnalysisKind::Pss,
+            target,
+        } if target == second
+    ));
+}
+
+#[test]
+fn a_dependent_with_no_carrier_shows_why_and_offers_to_add_one() {
+    let mut plan = crate::simulation::plan::SimulationPlan::empty();
+    let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+
+    let field = analysis_form::uses_field(&selected_pac(plan, pac), AnalysisKind::Pss);
+    assert!(!field.bound);
+    assert_eq!(field.current, "needs a periodic steady state");
+    let [(label, action)] = field.options.as_slice() else {
+        panic!(
+            "{:?}",
+            field
+                .options
+                .iter()
+                .map(|(label, _)| label)
+                .collect::<Vec<_>>()
+        );
+    };
+    assert!(label.starts_with("Add "), "{label}");
+    assert!(matches!(action, AnalysisAction::RepairDependencies));
+}
+
 #[test]
 fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable_repair() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
