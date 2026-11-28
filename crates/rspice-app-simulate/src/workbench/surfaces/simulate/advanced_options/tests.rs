@@ -241,9 +241,8 @@ fn origin_of(rows: &[(O, String, &'static str)], option: O) -> &'static str {
 /// Every option earns a row, whether or not the analysis touched it.
 ///
 /// A panel that listed only authored options would answer "what did I
-/// change", which the ledger above it already answers. This one answers "what
-/// will this analysis actually use", so an untouched option is exactly as
-/// interesting as a changed one.
+/// change". This one answers "what will this analysis actually use", so an
+/// untouched option is exactly as interesting as a changed one.
 #[test]
 fn every_catalog_option_earns_a_row_for_every_kind() {
     for kind in AnalysisKind::ALL {
@@ -288,8 +287,8 @@ fn an_authored_option_outranks_the_plan_in_its_own_row() {
 
 /// A refused option states who owns it instead, in place.
 ///
-/// This is the tier-ownership row the Solver page's ledger also carries: the
-/// operating point's Newton budget belongs to its accuracy tier, which is
+/// This is the tier-ownership row: the operating point's Newton budget
+/// belongs to its accuracy tier, which is
 /// applied after the deck's options, so an ITL1 authored here would be
 /// overwritten before the first Newton step.
 #[test]
@@ -451,8 +450,7 @@ fn the_departure_count_follows_the_authored_options() {
 /// A refused ITL1 row states the tier's budget, not the plan's ITL1.
 ///
 /// The tier replaces `max_iterations` after the deck resolves, so the plan's
-/// number is exactly the one the solve will not use. The value is the same
-/// string the Solver page's resolution ledger prints for the same analysis.
+/// number is exactly the one the solve will not use.
 #[test]
 fn a_refused_iteration_budget_states_the_tier_that_owns_it() {
     let mut draft = AnalysisDraft::for_kind(AnalysisKind::OperatingPoint);
@@ -563,7 +561,7 @@ fn a_refused_step_ceiling_reads_the_transient_form_it_names() {
 ///
 /// `DELMAX` and `MAXTIMESTEP` reach the engine as two fields and the transient
 /// clamps against both, so the panel reports the tighter one and names the plan
-/// as the owner — the same answer the Solver page's ledger gives.
+/// as the owner.
 #[test]
 fn an_authored_step_ceiling_is_reported_after_the_plan_clamps_it() {
     let options = SimulationOptions {

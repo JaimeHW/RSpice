@@ -48,10 +48,21 @@ impl SimulationCompatibility {
         matches!(self, Self::Inherit)
     }
 
-    pub const fn label(self) -> &'static str {
+    /// The choices a plan offers. A plan drawn from a schematic has no source
+    /// of its own to defer to, so inheriting is RSpice's own numerics and is
+    /// offered once, as RSpice; a netlist test may state a dialect of its own.
+    pub const fn offered(netlist_test: bool) -> &'static [Self] {
+        if netlist_test {
+            &Self::ALL
+        } else {
+            &[Self::Inherit, Self::Ngspice, Self::Xyce]
+        }
+    }
+
+    pub const fn label(self, netlist_test: bool) -> &'static str {
         match self {
-            Self::Inherit => "From netlist (default: RSpice)",
-            Self::BestAvailable => "RSpice best available",
+            Self::Inherit if netlist_test => "As the netlist says",
+            Self::Inherit | Self::BestAvailable => "RSpice",
             Self::Ngspice => "ngspice compatible",
             Self::Xyce => "Xyce compatible",
         }
@@ -73,5 +84,35 @@ impl SimulationCompatibility {
             Self::Ngspice => Some("NGSPICE"),
             Self::Xyce => Some("XYCE"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SimulationCompatibility;
+
+    /// A plan drawn from a schematic offers RSpice, ngspice and Xyce; only a
+    /// netlist test offers to follow what its own deck states.
+    #[test]
+    fn only_a_netlist_test_offers_to_follow_its_deck() {
+        let words = |netlist_test| {
+            SimulationCompatibility::offered(netlist_test)
+                .iter()
+                .map(|choice| choice.label(netlist_test))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            words(false),
+            ["RSpice", "ngspice compatible", "Xyce compatible"]
+        );
+        assert_eq!(
+            words(true),
+            [
+                "As the netlist says",
+                "RSpice",
+                "ngspice compatible",
+                "Xyce compatible"
+            ]
+        );
     }
 }

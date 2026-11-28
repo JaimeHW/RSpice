@@ -107,7 +107,7 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
 }
 
 #[test]
-fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
+fn configured_study_form_writer_shares_base_ownership() {
     let (mut harness, id) = studio(AnalysisKind::MonteCarlo);
     let plan = harness.model.sim_setup.stable_analysis_plan_mut().unwrap();
     let ac = plan.insert(AnalysisKind::Ac).unwrap().0;
@@ -132,13 +132,6 @@ fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
         .unwrap();
     assert_eq!(row_of(&harness, id, O::Reltol).origin, STUDY_DEFAULT_ORIGIN);
     assert!(offered(&harness, id).contains(&(O::Reltol, STUDY_DEFAULT_ORIGIN)));
-    let rows = super::super::page_solver::analysis_overrides(&harness.model);
-    let row = rows
-        .iter()
-        .find(|row| row.option == O::Reltol.label())
-        .unwrap();
-    assert_eq!(row.origin, STUDY_DEFAULT_ORIGIN);
-    assert_eq!(row.effective, "10u");
     harness
         .model
         .sim_setup

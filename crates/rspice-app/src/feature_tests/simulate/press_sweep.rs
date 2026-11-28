@@ -786,8 +786,10 @@ fn press_one(index: usize, surface: &str, target: NodeId) -> Press {
         .find(|(id, _)| *id == target)
         .expect("a rebuilt surface republishes the control the plan enumerated");
     let described = describe(node);
-    let holds_a_selection =
-        node.role() == Role::Button && node.toggled() == Some(egui::accesskit::Toggled::True);
+    // A toggle button or a segment of the kit's segmented group, which
+    // announces each option as a radio button.
+    let holds_a_selection = matches!(node.role(), Role::Button | Role::RadioButton)
+        && node.toggled() == Some(egui::accesskit::Toggled::True);
     if is_text_field(node) {
         let at = centre(node);
         let after = sweep.pointer_press(at);
@@ -969,7 +971,7 @@ fn press_every_control_on(index: usize, surface: &str) {
     if surface == "Solver" {
         assert_eq!(
             held,
-            ["Solver: Button \"Balanced\""],
+            ["Solver: RadioButton \"Balanced\""],
             "only the already-selected solver preset may hold its selection without mutation"
         );
     }

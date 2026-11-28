@@ -106,7 +106,7 @@ impl SimulationPage {
             Self::RunSet => "PVT, sweeps & variation",
             Self::Models => "Models & sections",
             Self::ConnectRules => "Connect rules & inserted converters",
-            Self::Solver => "Solver, convergence & per-analysis overrides",
+            Self::Solver => "Solver & convergence",
             Self::Save => "Save, streaming & retention policy",
         }
     }

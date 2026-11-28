@@ -2,14 +2,14 @@
 //!
 //! Compatibility and the solve policy: what counts as converged, how
 //! the solve recovers when it is not, how many iterations each stage gets,
-//! how time advances, how the matrix is factored, what temperature the models
-//! are read at, and what the topology refuses outright — closing on the ledger
-//! of the value each analysis actually resolves to.
+//! how time advances, how the matrix is factored and what temperature the
+//! models are read at.
 //!
 //! This page is the only editor of the plan's engine options. Its cards edit
-//! the `options_draft` in [`SimSetupState::session`] and are applied through the
-//! plan-configuration transaction, so a numerical change produces a
-//! configuration receipt and invalidates preflight.
+//! the `options_draft` in [`SimSetupState::session`], and a field commits when
+//! it is let go of (Enter or focus loss) through the plan-configuration
+//! transaction, so a numerical change produces a configuration receipt and
+//! invalidates preflight. There is no second, deferred way to apply an edit.
 //! Every field reaches the engine through one channel and only one: the
 //! `.OPTIONS` block `SimulationOptions::to_spice_options` writes into the
 //! prepared deck, which the engine then re-parses. A value that emitter does
@@ -21,20 +21,7 @@
 //! product policy's step bounds, transient Newton budget, and absolute pivot
 //! threshold differ from the core fallbacks, so they are always emitted into
 //! the prepared deck; an untouched page therefore executes exactly the values
-//! its ledger reports.
-//!
-//! The ledger is a reader, not an editor. A per-analysis override belongs to
-//! its analysis — it is that analysis's own record, and it reaches the engine as
-//! a second options block in that task's deck — so it is authored in the
-//! Advanced options section under the analysis form on the Analyses page. This
-//! page carried a second editor over the same fact for a while, a single-row
-//! one that could aim at any analysis; two editors over one record is how the
-//! two surfaces came to disagree about what an override is. What is left here
-//! is the plan-wide view neither form can give: every option each enabled
-//! analysis resolves to, and a press on a departed row to reach the section
-//! that authored it.
-
-use std::cell::Cell;
+//! it shows.
 
 use egui::Ui;
 
@@ -46,7 +33,7 @@ use crate::simulation::dialog::{
 use crate::simulation::plan::{AnalysisNumericOverride, NumericOverrideOption, OptionsDialogState};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, mono_input, select};
+use crate::ui::widgets::{SegmentedWidth, mono_input, segmented, select};
 use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::framework::feature::Cx;
@@ -54,10 +41,9 @@ use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, record_p
 
 mod startup;
 
-use super::advanced_options::REVEAL_ACTION;
 use super::page_kit::{
-    CARD_PAD_X, RowPress, Tone, card, card_body, card_head_row, card_note, card_row, cell_ui,
-    field_pair, ledger_group, ledger_head, ledger_row, ledger_row_cells, rule_row,
+    CARD_PAD_X, Tone, card, card_body, card_row, cell_ui, field_pair, ledger_group,
+    ledger_row_cells,
 };
 
 /// What choosing each named policy means, positionally matched to
@@ -90,18 +76,20 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             commit_draft(cx);
         }
     });
-    topology_contract(ui);
-    resolution_ledger(ui, cx);
 }
 
 // ---------------------------------------------------------------- preset strip
 
 fn compatibility_policy(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    // Only a netlist test has a source of its own to defer to; a plan drawn
+    // from a schematic inherits RSpice's own numerics.
+    let netlist_test = cx.model.is_netlist_first_without_schematic();
     card(ui, "Simulation compatibility", None, |ui| {
         card_body(ui, |ui| {
-            let choices: Vec<String> = SimulationCompatibility::ALL
+            let offered = SimulationCompatibility::offered(netlist_test);
+            let choices: Vec<String> = offered
                 .iter()
-                .map(|policy| policy.label().to_owned())
+                .map(|policy| policy.label(netlist_test).to_owned())
                 .collect();
             let current = cx
                 .model
@@ -109,13 +97,13 @@ fn compatibility_policy(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 .session
                 .options_draft
                 .compatibility
-                .label()
+                .label(netlist_test)
                 .to_owned();
             let mut picked = None;
             field_pair(
                 ui,
                 (
-                    "Numerical and device-model policy",
+                    "Device models and numerics",
                     &mut |ui: &mut Ui, width: f32| {
                         picked = select(
                             ui,
@@ -129,42 +117,32 @@ fn compatibility_policy(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 ),
                 None,
             );
-            if let Some(index) = picked {
-                cx.model.sim_setup.session.options_draft.compatibility =
-                    SimulationCompatibility::ALL[index];
+            if let Some(&policy) = picked.and_then(|index| offered.get(index)) {
+                cx.model.sim_setup.session.options_draft.compatibility = policy;
                 commit_draft(cx);
             }
         });
-        card_note(
-            ui,
-            "Xyce-specific Newton controls require Xyce compatibility. This policy also selects \
-                 available device-model variants; source syntax is unchanged.",
-        );
     });
 }
 
-/// The chooser, what the active policy means, and the apply/revert pair.
+/// The named presets, and what the active one means.
 ///
-/// Everything packs left and nothing grows: a grown summary or a right-pinned
-/// action opens a gap in the middle of the strip at wide widths.
+/// The group fills the preset the plan's options match and none once they are
+/// edited away from every preset. Everything packs left and nothing grows: a
+/// grown summary opens a gap in the middle of the strip at wide widths.
 fn policy_strip(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let t = Tokens::get(ui.ctx());
-    let active = active_preset(cx.model);
+    let labels: Vec<&str> = SimulationOptions::PRESETS
+        .iter()
+        .map(|(label, _)| *label)
+        .collect();
+    let active =
+        active_preset(cx.model).and_then(|label| labels.iter().position(|name| *name == label));
     let summary = active
-        .and_then(|label| {
-            SimulationOptions::PRESETS
-                .iter()
-                .position(|(name, _)| *name == label)
-                .and_then(|index| PRESET_INTENT.get(index))
-                .map(|summary| (*summary).to_owned())
-        })
-        .unwrap_or_else(|| {
-            "Edited from a named preset · the resolved values below are what runs".to_owned()
-        });
-    let pending = pending_change(cx.model);
-    let mut requested = None;
-    let mut apply = false;
-    let mut revert = false;
+        .and_then(|index| PRESET_INTENT.get(index))
+        .map_or("Edited from a named preset", |summary| *summary);
+    let mut chosen = active.unwrap_or(usize::MAX);
+    let mut requested = false;
 
     let strip_width = ui.available_width();
     egui::Frame::new()
@@ -176,53 +154,23 @@ fn policy_strip(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             ui.set_width(strip_width - CARD_PAD_X * 2.0 - 2.0);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 8.0);
-                ui.scope(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    for (index, (label, _)) in SimulationOptions::PRESETS.iter().enumerate() {
-                        let tooltip = PRESET_INTENT.get(index).copied().unwrap_or_default();
-                        if preset_segment(ui, label, active == Some(*label), tooltip) {
-                            requested = Some(*label);
-                        }
-                    }
-                });
+                requested = segmented(
+                    ui,
+                    "simulation.solver.preset",
+                    &labels,
+                    &mut chosen,
+                    SegmentedWidth::Natural,
+                );
                 ui.label(
                     egui::RichText::new(summary)
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_dim),
                 );
-                match &pending {
-                    // Applied is the normal state, and says nothing.
-                    PendingChange::None => {}
-                    PendingChange::Invalid(errors) => {
-                        ui.label(
-                            egui::RichText::new(errors.join(" · "))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.err),
-                        );
-                        revert = Button::new("Revert").show(ui).clicked();
-                    }
-                    PendingChange::Ready(_) => {
-                        ui.label(
-                            egui::RichText::new("unapplied edit")
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        );
-                        apply = Button::new("Apply").accent().show(ui).clicked();
-                        revert = Button::new("Revert").show(ui).clicked();
-                    }
-                }
             });
         });
 
-    if let Some(label) = requested {
+    if requested && let Some(label) = labels.get(chosen) {
         apply_preset(cx, label);
-    }
-    if apply && let PendingChange::Ready(options) = pending {
-        apply_options(cx, &options);
-    }
-    if revert {
-        cx.model.sim_setup.session.options_draft =
-            OptionsDialogState::from_options(&cx.model.sim_setup.options);
     }
 }
 
@@ -237,66 +185,6 @@ pub(super) fn apply_preset(cx: &mut Cx<'_, SimulateFeature>, label: &str) {
         cx.model.sim_setup.session.options_draft = OptionsDialogState::from_options(&options);
         apply_options(cx, &options);
     }
-}
-
-fn preset_segment(ui: &mut Ui, label: &str, selected: bool, tooltip: &str) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let font = theme::sans(
-        tokens::FS_1,
-        if selected {
-            FontWeight::SemiBold
-        } else {
-            FontWeight::Medium
-        },
-    );
-    let galley = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), font.clone(), t.color.text);
-    let size = egui::vec2((galley.size().x + 28.0).max(84.0), t.metrics.row_h + 4.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            ui.is_enabled(),
-            selected,
-            label,
-        )
-    });
-    let fill = if selected {
-        t.color.accent_dim
-    } else if response.hovered() {
-        t.color.bg_hover
-    } else {
-        t.color.bg_app
-    };
-    ui.painter().rect(
-        rect,
-        egui::CornerRadius::ZERO,
-        fill,
-        egui::Stroke::new(1.0, t.color.border),
-        egui::StrokeKind::Inside,
-    );
-    if selected {
-        ui.painter().rect_filled(
-            egui::Rect::from_min_max(
-                egui::pos2(rect.left(), rect.bottom() - 2.0),
-                rect.right_bottom(),
-            ),
-            0.0,
-            t.color.accent,
-        );
-    }
-    ui.painter().galley(
-        rect.center() - galley.size() * 0.5,
-        galley,
-        if selected {
-            t.color.text
-        } else {
-            t.color.text_dim
-        },
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    response.on_hover_text(tooltip).clicked()
 }
 
 /// What the draft would do if applied.
@@ -332,7 +220,7 @@ fn pending_change(model: &Model) -> PendingChange {
 ///
 /// A refusal here is not a draft error — the draft parsed and validated, and
 /// the transaction declined it — so it is announced on the plan's lifecycle
-/// channel, which is the one place this page reports an unapplied edit.
+/// channel, which is where this page reports a value the plan refused.
 fn apply_options(cx: &mut Cx<'_, SimulateFeature>, options: &SimulationOptions) {
     match commit_options_transaction(cx, options) {
         Ok(_) => {
@@ -408,12 +296,6 @@ fn convergence_criteria(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             criterion_row(ui, cx, "RESIDUAL_RELTOL", "relative residual", |draft| {
                 &mut draft.residual_reltol
             });
-            card_note(
-                ui,
-                "A solve is accepted only when every node passes both tests — the update bound and \
-                 its own residual bound — never by a vector norm over the whole system. Values \
-                 below the engine's own floor are rejected rather than silently clamped.",
-            );
         },
     );
 }
@@ -460,7 +342,7 @@ const BUDGET_COLUMNS: [f32; 3] = [0.18, 0.52, 0.30];
 fn iteration_budgets(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     card(
         ui,
-        "Iteration budgets",
+        "Iteration limits",
         Some(("per stage, not per task", Tone::Neutral)),
         |ui| {
             budget_row(
@@ -488,7 +370,7 @@ fn iteration_budgets(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                     |draft| &mut draft.trtol,
                 );
             }).response.on_hover_text(
-                "Xyce uses each analysis's NONLIN-TRAN MAXSTEP budget and TIMEINT truncation tolerances."
+                "Xyce uses each analysis's NONLIN-TRAN MAXSTEP limit and TIMEINT truncation tolerances."
             );
             budget_row(
                 ui,
@@ -510,14 +392,6 @@ fn iteration_budgets(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 "SEED",
                 "statistical draws · agauss/gauss/unif · blank is not reproducible",
                 |draft| &mut draft.statistical_seed,
-            );
-            card_note(
-                ui,
-                "A budget bounds one attempt, not the task: exhausting it hands the point to the \
-                 next rung of the continuation ladder rather than failing it. Only when every \
-                 enabled rung is exhausted does the point fail, with its per-node residuals \
-                 retained. TRTOL scales the accepted local truncation error, so raising it buys \
-                 transient run time at the cost of waveform fidelity.",
             );
         },
     );
@@ -609,12 +483,6 @@ fn continuation_ladder(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             for (index, (name, contract, control)) in stages.into_iter().enumerate() {
                 ladder_stage(ui, cx, index + 1, name, contract, control);
             }
-            card_note(
-                ui,
-                "Stages run in this order and only in this order; a disabled stage is skipped, \
-                 never resequenced. The order and every stage parameter are frozen into the run \
-                 manifest.",
-            );
         },
     );
 }
@@ -864,25 +732,6 @@ fn time_integration(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                     commit_on_release(cx, &response);
                 }
             });
-            card_note(
-                ui,
-                "Bypass reuses a BSIMSOI device's last linearization across a transient timestep. \
-                 No other model family reads it yet, and inside BSIMSOI it reaches only an \
-                 instance in the ngspice dialect, only where the previous iterate evaluated \
-                 without limiting, and never inside an operating point. It also needs a \
-                 linearization to reuse and a state from this timestep to compare against: a \
-                 device evaluating for the first time has neither, and every timestep attempt \
-                 starts with one full evaluation before any iteration can be frozen. Both \
-                 bounds above gate \
-                 the terminal-voltage test: the relative bound scales with the terminal voltage \
-                 itself, and the voltage floor decides a terminal sitting at or near zero, where \
-                 a relative bound admits nothing. Passing that test is not enough — the device \
-                 freezes only if the drain and body currents its stored linearization predicts \
-                 also agree with the last evaluation, within the run's own current floor \
-                 (IABSTOL) rather than anything set here. Both bounds are emitted only while \
-                 bypass is enabled. It is a speed/accuracy trade, not a tolerance: a run that \
-                 must be compared against another should keep it off.",
-            );
         },
     );
 }
@@ -986,14 +835,6 @@ fn matrix_policy(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 commit_on_release(cx, &response);
             }
         });
-        card_note(
-            ui,
-            "The factorization backend and the pivot thresholds decide whether two runs of the \
-                 same plan produce bit-identical results. A change here is recorded as a \
-                 configuration change, and comparisons made under the previous setting no longer \
-                 apply. RSHUNT, in ohms, places a resistor from every node to ground in every \
-                 analysis; empty places none.",
-        );
     });
 }
 
@@ -1010,90 +851,33 @@ fn matrix_policy(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 /// edits the setup it is given and does not reach the rest of the application.
 fn temperature_reference(ui: &mut Ui, setup: &mut SimSetupState) -> bool {
     let mut release = false;
-    card(
-        ui,
-        "Temperature reference",
-        Some(("model parameters vs. operating point", Tone::Neutral)),
-        |ui| {
-            card_body(ui, |ui| {
-                let mut tnom = None;
-                field_pair(
-                    ui,
-                    (
-                        "Model reference temperature · TNOM",
-                        &mut |ui: &mut Ui, width: f32| {
-                            tnom = Some(mono_input(
-                                ui,
-                                "Model reference temperature \u{b7} TNOM",
-                                &mut setup.session.options_draft.tnom,
-                                width,
-                            ));
-                        },
-                    ),
-                    None,
-                );
-                release = tnom.is_some_and(|response| released(&response));
-            });
-            card_note(
+    card(ui, "Temperature reference", None, |ui| {
+        card_body(ui, |ui| {
+            let mut tnom = None;
+            field_pair(
                 ui,
-                "TEMP is the temperature the circuit runs at; TNOM is the temperature its model \
-                 parameters were extracted at. A device applies its temperature coefficients over \
-                 the difference between the two, so TNOM does not warm or cool the circuit — it \
-                 re-interprets every model card that does not state a TNOM of its own. Both are \
-                 stated in degrees Celsius, and a model card's own TNOM always wins over this one.",
+                (
+                    "Model reference temperature · TNOM",
+                    &mut |ui: &mut Ui, width: f32| {
+                        tnom = Some(mono_input(
+                            ui,
+                            "Model reference temperature \u{b7} TNOM",
+                            &mut setup.session.options_draft.tnom,
+                            width,
+                        ));
+                    },
+                ),
+                None,
             );
-        },
-    );
+            release = tnom.is_some_and(|response| released(&response));
+        });
+    });
     release
 }
 
-// -------------------------------------------------------------- topology rules
+// ------------------------------------------------------------- step ceilings
 
-fn topology_contract(ui: &mut Ui) {
-    card(ui, "Topology & conditioning contract", None, |ui| {
-        card_body(ui, |ui| {
-            rule_row(
-                ui,
-                "Nodes without a DC path",
-                "forced ones refused at preflight for OP, AC, noise, PZ, sensitivity",
-            );
-            rule_row(
-                ui,
-                "Voltage-source loops",
-                "sources alone refused by design rules at every DC point",
-            );
-            rule_row(
-                ui,
-                "Loops through inductors",
-                "1 pOhm per winding and a warning · refused under ngspice and Xyce",
-            );
-            rule_row(
-                ui,
-                "Conditioning floor",
-                "GMIN is never raised above its floor to force a solve",
-            );
-            rule_row(
-                ui,
-                "Node shunt · RSHUNT",
-                "an author-sized resistor at every node · satisfies the check as a real device",
-            );
-        });
-        card_note(
-            ui,
-            "Preflight builds every deck the run dispatches and states what the engine refuses \
-                 there; it solves nothing. A node no element conducts from at DC is solved when \
-                 nothing forces current into it, as behind a coupling capacitor, and refused \
-                 when a source does. A .DC sweep and a transient's startup refuse such a node \
-                 from the sweep value and the startup waveform, which only the run knows.",
-        );
-    });
-}
-
-// ------------------------------------------------------------ resolution ledger
-
-const LEDGER_COLUMNS: [f32; 5] = [0.19, 0.25, 0.16, 0.18, 0.22];
-
-/// The origin cell of a row an analysis owns rather than the plan.
+/// The origin cell of a value an analysis owns rather than the plan.
 const OVERRIDE_ORIGIN: &str = "analysis override";
 /// The origin of a value the plan's own ceiling took back from an override.
 const PLAN_TIGHTER_THAN_OVERRIDE_ORIGIN: &str = "plan preset \u{b7} tighter than the override";
@@ -1166,210 +950,6 @@ fn step_ceiling(candidate: &str, plan_ceiling: Option<f64>) -> Option<(String, b
     }
 }
 
-/// One statement of what an analysis actually resolves to.
-pub(super) struct PolicyRow {
-    pub(super) analysis: String,
-    pub(super) option: String,
-    pub(super) preset: String,
-    pub(super) effective: String,
-    pub(super) origin: &'static str,
-    /// The analysis this row reports an authored override of, when it reports
-    /// one. A row without a target states the plan's own policy, so there is no
-    /// analysis for a press to carry the reader to.
-    ///
-    /// The instance alone, and not the option beside it: the option is a field
-    /// on that analysis's own form, always drawn, so a hop that named it would
-    /// be carrying something the destination does not need.
-    target: Option<AnalysisInstanceId>,
-}
-
-/// The head that sits over the resolution ledger, derived from the rows it
-/// heads.
-///
-/// It used to count the rows this card can *remove* — authored overrides — and
-/// so read "every analysis resolves to the plan policy" over a default plan
-/// whose own rows said otherwise: the operating point resolves its Newton
-/// budget from an accuracy tier (`50` → `150 · Balanced`) and the transient
-/// steps at its own output step rather than the plan's ceiling (`1m` → `10n`).
-/// Neither is authored, and neither resolves to the plan policy. A head that
-/// contradicts the two rows under it is worse than no head at all.
-///
-/// So it counts what the ledger's own columns show: the analyses named by rows
-/// whose effective value differs from the preset beside it. Analyses rather
-/// than rows, because one analysis can depart on two options and a reader
-/// counting names would find fewer than the head claimed.
-fn resolution_summary(rows: &[PolicyRow]) -> String {
-    let mut departed: Vec<&str> = rows
-        .iter()
-        .filter(|row| row.effective != row.preset)
-        .map(|row| row.analysis.as_str())
-        .collect();
-    departed.sort_unstable();
-    departed.dedup();
-    match departed.len() {
-        0 => "every analysis resolves to the plan policy".to_owned(),
-        1 => "1 analysis resolves away from the plan policy".to_owned(),
-        count => format!("{count} analyses resolve away from the plan policy"),
-    }
-}
-
-fn resolution_ledger(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    let mut rows = plan_policy_rows(cx.model);
-    // The overrides the page's own title promises. An analysis that carries its
-    // own bound does not resolve to the plan preset, and the ledger is the only
-    // place that difference is visible across the whole plan.
-    rows.extend(analysis_overrides(cx.model));
-    let status = resolution_summary(&rows);
-
-    // The press writes through a cell: `card_with_head` takes two closures and
-    // neither may hold `&mut cx` while the other runs.
-    let picked_row = Cell::new(None::<usize>);
-
-    super::page_kit::card_with_head(
-        ui,
-        |ui| {
-            card_head_row(
-                ui,
-                "Resolved policy",
-                Some((status.as_str(), Tone::Neutral)),
-                |_| {},
-            )
-        },
-        |ui| {
-            ledger_head(
-                ui,
-                &LEDGER_COLUMNS,
-                &[
-                    "Analysis",
-                    "Option",
-                    "Preset value",
-                    "Effective value",
-                    "Origin",
-                ],
-            );
-            for (index, row) in rows.iter().enumerate() {
-                let response = ledger_row(
-                    ui,
-                    &LEDGER_COLUMNS,
-                    &[
-                        (row.analysis.as_str(), Tone::Neutral),
-                        (row.option.as_str(), Tone::Neutral),
-                        (row.preset.as_str(), Tone::Neutral),
-                        // The Origin column says where the value came from.
-                        (row.effective.as_str(), Tone::Text),
-                        (row.origin, Tone::Neutral),
-                    ],
-                    false,
-                    // A row with no target states the plan's own policy rather
-                    // than an authored override, so there is no analysis for a
-                    // press to carry the reader to.
-                    if row.target.is_some() {
-                        RowPress::Taken
-                    } else {
-                        RowPress::Ignored
-                    },
-                );
-                // The origin is the row's longest cell and the first to elide,
-                // and one of them is a whole sentence about who owns the value,
-                // so the hover restates it rather than leaving a reader with
-                // half. A row that hops names the hop underneath it: the press
-                // leaves this page, which is not something a reader should have
-                // to discover by pressing.
-                let response = response.on_hover_text(if row.target.is_some() {
-                    format!("{}\n\n{REVEAL_ACTION}", row.origin)
-                } else {
-                    row.origin.to_owned()
-                });
-                if response.clicked() {
-                    picked_row.set(Some(index));
-                }
-            }
-            card_note(
-                ui,
-                "The reference temperature is owned by the run set and mirrored here; every other \
-                 preset on this page is owned by this page. An override is owned by its analysis \
-                 and authored in the Advanced options section under that analysis's form on the \
-                 Analyses page; this ledger reports where the plan is departed from, and a press \
-                 on a departed row opens the section that authored it.",
-            );
-        },
-    );
-
-    if let Some(index) = picked_row.get()
-        && let Some(instance) = rows[index].target
-    {
-        // The row names the analysis; the analysis's own form is where the
-        // option it names is a field. Nothing else needs carrying: the field is
-        // always on screen there, under the analysis's own parameters.
-        super::advanced_options::reveal_in_analyses(cx.state, instance);
-    }
-}
-
-/// What the plan states before any analysis departs from it.
-pub(super) fn plan_policy_rows(model: &Model) -> Vec<PolicyRow> {
-    let options = &model.sim_setup.options;
-    // A row scoped to time integration is a claim about a run, so it is only
-    // shown when a solve that steps time is enabled — the alternative states a
-    // policy for a solve that will never happen.
-    let time_stepped = model.sim_setup.stable_analysis_plan().is_ok_and(|plan| {
-        plan.instances().iter().any(|instance| {
-            instance.enabled()
-                && NumericOverrideOption::Itl4
-                    .refusal_for_instance(instance.kind(), plan.solver_ownership(instance.id()))
-                    .is_none()
-        })
-    });
-
-    let plan_row = |analysis: &str, option: NumericOverrideOption| PolicyRow {
-        analysis: analysis.to_owned(),
-        option: option.label().to_owned(),
-        preset: plan_preset_value(option, options),
-        effective: plan_preset_value(option, options),
-        origin: "plan preset",
-        target: None,
-    };
-    // ITL1 is claimed only for the solves it actually bounds. An analysis that
-    // carries an accuracy tier resolves its Newton budget from that tier — see
-    // the per-analysis rows below — so naming the operating point here would
-    // report a number no `.op` task runs.
-    let mut rows = vec![
-        plan_row("Every analysis", NumericOverrideOption::Reltol),
-        plan_row("Every analysis", NumericOverrideOption::ResidualReltol),
-        plan_row("DC · untiered solves", NumericOverrideOption::Itl1),
-    ];
-    if time_stepped {
-        rows.extend([
-            plan_row("Time stepped", NumericOverrideOption::IntegrationMethod),
-            plan_row("Time stepped", NumericOverrideOption::Itl4),
-            plan_row("Time stepped", NumericOverrideOption::MaximumTimestep),
-        ]);
-    }
-    let solver = options.solver.display_name().to_owned();
-    let temperature = format!(
-        "{:.1} °C",
-        model.sim_setup.reference_pvt.temperature_celsius
-    );
-    rows.extend([
-        PolicyRow {
-            analysis: "Every analysis".to_owned(),
-            option: "Factorization".to_owned(),
-            preset: solver.clone(),
-            effective: solver,
-            origin: "plan level",
-            target: None,
-        },
-        PolicyRow {
-            analysis: "Every analysis".to_owned(),
-            option: "Reference temperature".to_owned(),
-            preset: temperature.clone(),
-            effective: temperature,
-            origin: "run set",
-            target: None,
-        },
-    ]);
-    rows
-}
-
 /// What the plan resolves one option to, for the preset column.
 ///
 /// This is the policy an analysis departs *from*, so it must be the value the
@@ -1420,7 +1000,7 @@ pub(super) fn plan_preset_value(
         // read, because an output schedule and a harmonic-balance initial
         // state belong to one analysis and not to the whole deck — so the
         // engine's own default stands until an analysis states otherwise, and
-        // that is what the ledger and the hint slot say.
+        // that is what the hint slot says.
         O::TransientNewtonReltol
         | O::TransientNewtonAbstol
         | O::TransientNewtonUpdateBound
@@ -1445,156 +1025,17 @@ fn optional_preset(value: Option<f64>) -> String {
     value.map_or_else(|| "engine default".to_owned(), format_value)
 }
 
-/// The analyses that resolve to something other than the plan-level policy.
-///
-/// Only a divergence is reported: listing every analysis at its default would
-/// bury the ones that actually differ, which is the only thing this section of
-/// the ledger exists to show. The numeric records are enumerated from the
-/// records themselves rather than from a table of options this page recognizes,
-/// so an authored bound always earns a row even when the projection below has
-/// nothing else to say about it.
-pub(super) fn analysis_overrides(model: &Model) -> Vec<PolicyRow> {
-    use crate::simulation::plan::AnalysisDraft;
-
-    let options = &model.sim_setup.options;
-    let Ok(plan) = model.sim_setup.stable_analysis_plan() else {
-        return Vec::new();
-    };
-    let mut rows = Vec::new();
-    for (index, instance) in plan
-        .instances()
-        .iter()
-        .enumerate()
-        .filter(|(_, instance)| instance.enabled())
-    {
-        let analysis = plan
-            .instance_list_label(index)
-            .unwrap_or_else(|| instance.display_name().to_owned());
-        // Accuracy tiers are owned by their analysis's own form and are only
-        // reported here. There is no plan-level tier to depart from, so the
-        // preset column names the tier every analysis starts at.
-        match instance.draft() {
-            // One arm for both kinds that offer a tier: `OpAccuracy` and
-            // `XfAccuracy` are two spellings of `AnalysisAccuracy`, and two arms
-            // reading the same field were two places for the answer to drift.
-            AnalysisDraft::OperatingPoint(_) | AnalysisDraft::TransferFunction(_) => {
-                let accuracy = draft_accuracy_tier(instance.draft()).unwrap_or_default();
-                if accuracy != AnalysisAccuracy::default() {
-                    rows.push(PolicyRow {
-                        analysis: analysis.clone(),
-                        option: "Accuracy tier".to_owned(),
-                        preset: AnalysisAccuracy::default().display_name().to_owned(),
-                        effective: accuracy.display_name().to_owned(),
-                        origin: OVERRIDE_ORIGIN,
-                        target: None,
-                    });
-                }
-                rows.push(tier_iteration_budget_row(&analysis, accuracy, options));
-            }
-            // A transient that names its own step ceiling departs from the
-            // plan's, though it can only tighten it. `auto` does not mean it
-            // steps at the plan's ceiling either — see
-            // [`inherited_step_ceiling`], which owns that derivation — so there
-            // is a row to state in both cases, and the ledger emitted none for
-            // `auto`, which is where the largest gap between the reported and
-            // the honoured ceiling was.
-            AnalysisDraft::Transient(setup) => {
-                let ceiling = setup.max_step.trim();
-                let authored = !(ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto"));
-                let resolved = if authored {
-                    Some(resolved_step_ceiling(ceiling, options.max_timestep))
-                } else {
-                    inherited_step_ceiling(&setup.step, options.max_timestep)
-                };
-                if let Some((effective, origin)) = resolved {
-                    rows.push(PolicyRow {
-                        analysis: analysis.clone(),
-                        option: NumericOverrideOption::MaximumTimestep.label().to_owned(),
-                        preset: plan_preset_value(NumericOverrideOption::MaximumTimestep, options),
-                        effective,
-                        origin,
-                        // Only an authored ceiling can be removed from here.
-                        // An inherited one is what the analysis's own step time
-                        // implies, and there is nothing on this row to clear.
-                        target: authored.then(|| instance.id()),
-                    });
-                }
-            }
-            _ => {}
-        }
-        let Some(record) = instance.numeric_override() else {
-            continue;
-        };
-        for (option, effective) in record.entries() {
-            let ownership = plan.solver_ownership(instance.id());
-            let (effective, origin) =
-                if let Some(reason) = option.refusal_for_instance(instance.kind(), ownership) {
-                    ("—".into(), reason)
-                } else if ownership.study_inherited_options.is_some() {
-                    (effective, super::advanced_options::STUDY_DEFAULT_ORIGIN)
-                } else if option == NumericOverrideOption::MaximumTimestep {
-                    resolved_step_ceiling(&effective, options.max_timestep)
-                } else {
-                    (effective, OVERRIDE_ORIGIN)
-                };
-            rows.push(PolicyRow {
-                analysis: analysis.clone(),
-                option: option.label().to_owned(),
-                preset: plan_preset_value(option, options),
-                effective,
-                origin,
-                target: Some(instance.id()),
-            });
-        }
-    }
-    rows
-}
-
-/// What one tiered analysis's Newton budget actually resolves to.
-///
-/// The plan's ITL1 reaches this task's deck like any other option and is then
-/// overwritten: `AccuracyPolicy::apply` assigns `max_iterations` from the tier
-/// after the deck has been resolved. The preset column still names the plan's
-/// value, because that is the policy this analysis departs from, and the origin
-/// column carries the one sentence that says why.
-fn tier_iteration_budget_row(
-    analysis: &str,
-    accuracy: AnalysisAccuracy,
-    options: &SimulationOptions,
-) -> PolicyRow {
-    PolicyRow {
-        analysis: analysis.to_owned(),
-        option: NumericOverrideOption::Itl1.label().to_owned(),
-        preset: plan_preset_value(NumericOverrideOption::Itl1, options),
-        effective: tier_iteration_budget(accuracy),
-        origin: NumericOverrideOption::ACCURACY_TIER_OWNS_ITERATIONS,
-        target: None,
-    }
-}
-
 /// The Newton budget a tier assigns, and the tier that assigned it.
 ///
-/// Read by both surfaces that report ITL1 for a tiered analysis — this page's
-/// resolution ledger and the Advanced options section, whose ITL1 row is
-/// refused and therefore has to state the owner's value rather than the plan's.
+/// Read by the Advanced options section, whose ITL1 row is refused for a
+/// tiered analysis and therefore has to state the owner's value rather than
+/// the plan's.
 pub(super) fn tier_iteration_budget(accuracy: AnalysisAccuracy) -> String {
     format!(
         "{} \u{00b7} {}",
         accuracy.solver_policy().iteration_budget,
         accuracy.display_name()
     )
-}
-
-/// The accuracy tier a draft resolves to, for the two kinds that offer one.
-///
-/// Projected from [`AnalysisDraft::solver_ownership`], which is what the
-/// option gate asks the same question through. The tier decides which of an
-/// analysis's numeric options survive the deck as well as what this ledger
-/// prints, and one stored index cannot be allowed two readings of it.
-pub(super) fn draft_accuracy_tier(
-    draft: &crate::simulation::plan::AnalysisDraft,
-) -> Option<AnalysisAccuracy> {
-    draft.solver_ownership().accuracy
 }
 
 fn format_value(value: f64) -> String {
@@ -1684,119 +1125,6 @@ pub(super) fn commit_draft(cx: &mut Cx<'_, SimulateFeature>) {
             );
         }
         PendingChange::Ready(options) => apply_options(cx, &options),
-    }
-}
-
-#[cfg(test)]
-mod ledger_head_tests {
-    use super::{PolicyRow, analysis_overrides, plan_policy_rows, resolution_summary};
-    use crate::workbench::simulate::test_host::SimulateTestHost;
-
-    /// Every row of one plan's ledger, as the card assembles them.
-    fn ledger_rows(state: &SimulateTestHost) -> Vec<PolicyRow> {
-        let mut rows = plan_policy_rows(&state.model);
-        rows.extend(analysis_overrides(&state.model));
-        rows
-    }
-
-    /// The departures a ledger shows, spelled the way its columns spell them.
-    fn departures(rows: &[PolicyRow]) -> Vec<String> {
-        let mut named: Vec<String> = rows
-            .iter()
-            .filter(|row| row.effective != row.preset)
-            .map(|row| {
-                format!(
-                    "{} \u{b7} {} \u{b7} {} \u{2192} {}",
-                    row.analysis, row.option, row.preset, row.effective
-                )
-            })
-            .collect();
-        named.sort();
-        named
-    }
-
-    /// The ledger's head agrees with the rows it heads.
-    ///
-    /// The default plan is the case, and it authors no override at all: the
-    /// head counted the rows it can *remove*, found none, and printed "every
-    /// analysis resolves to the plan policy" directly above `Transient · Step
-    /// ceiling · step time → 10n`. Add an operating point and a second row disagrees
-    /// with it — `ITL1 · 50 → 150 · Balanced` — and the head still said none.
-    #[test]
-    fn the_ledger_head_counts_the_analyses_its_rows_show_departing() {
-        let state = SimulateTestHost::default();
-        let rows = ledger_rows(&state);
-
-        // The shape that made the old head wrong: nothing here is removable,
-        // so counting authored rows answers zero over a ledger that shows one.
-        // Both halves are asserted rather than assumed.
-        assert_eq!(
-            rows.iter().filter(|row| row.target.is_some()).count(),
-            0,
-            "the default plan authors no override"
-        );
-        assert_eq!(
-            departures(&rows),
-            vec!["Transient \u{b7} Step ceiling \u{b7} step time \u{2192} 10n".to_owned()]
-        );
-        assert_eq!(
-            resolution_summary(&rows),
-            "1 analysis resolves away from the plan policy"
-        );
-
-        let mut state = state;
-        state
-            .model
-            .sim_setup
-            .analysis_plan
-            .as_mut()
-            .expect("the test instance holds a stable plan")
-            .insert(crate::simulation::plan::AnalysisKind::OperatingPoint)
-            .expect("an operating point joins the plan");
-        let rows = ledger_rows(&state);
-        assert_eq!(
-            rows.iter().filter(|row| row.target.is_some()).count(),
-            0,
-            "an inserted operating point authors no override either"
-        );
-        assert_eq!(
-            departures(&rows),
-            vec![
-                "Operating point \u{b7} Newton budget \u{b7} ITL1 \u{b7} 50 \u{2192} 150 \u{b7} Balanced"
-                    .to_owned(),
-                "Transient \u{b7} Step ceiling \u{b7} step time \u{2192} 10n".to_owned(),
-            ]
-        );
-        assert_eq!(
-            resolution_summary(&rows),
-            "2 analyses resolve away from the plan policy"
-        );
-    }
-
-    /// A ledger whose rows all resolve to the preset says so, and one departure
-    /// is spelled in the singular.
-    #[test]
-    fn the_ledger_head_agrees_with_its_own_verb() {
-        let mut rows = ledger_rows(&SimulateTestHost::default());
-        for row in &mut rows {
-            row.effective = row.preset.clone();
-        }
-        assert_eq!(
-            resolution_summary(&rows),
-            "every analysis resolves to the plan policy"
-        );
-
-        // Two rows, one analysis: a reader counting names must find the number
-        // the head states.
-        let analysis = rows[0].analysis.clone();
-        for row in rows.iter_mut().take(2) {
-            row.analysis = analysis.clone();
-            row.effective = format!("{} \u{b7} elsewhere", row.preset);
-        }
-        assert_eq!(
-            resolution_summary(&rows),
-            "1 analysis resolves away from the plan policy"
-        );
     }
 }
 

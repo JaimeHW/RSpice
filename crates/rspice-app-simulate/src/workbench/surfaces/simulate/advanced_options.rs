@@ -7,9 +7,8 @@
 //! *what* those fields say; `analysis_form/options.rs` draws them.
 //!
 //! Every option the catalogue knows earns a row here, including the ones no
-//! form offers: the Solver page's resolution ledger reports the plan whole, and
-//! it reads these same rows. [`form_rows`] is what narrows them to the ones one
-//! analysis owns.
+//! form offers. [`form_rows`] is what narrows them to the ones one analysis
+//! owns.
 //!
 //! The origin has four values:
 //!
@@ -23,7 +22,7 @@
 //!   says who owns it instead. The accuracy tier's ownership of the Newton
 //!   budget is the one a reader meets most often. A refused option is given no
 //!   field: a control that authors a value the solve discards is worse than no
-//!   control, and the ledger has the room to say who owns it.
+//!   control.
 //!
 //! A refusal is not always a property of the kind. Five of these options land
 //! on fields the analysis's *own* accuracy tier and homotopy control assign,
@@ -311,11 +310,10 @@ const NO_REFUSED_VALUE: &str = "\u{2014}";
 /// than the plan decides the value, so echoing the preset there stated a
 /// number the run would not use. Three owners can answer, and each is read
 /// through the call that actually assigns it rather than restated here, so
-/// this cell and the Solver page's resolution ledger cannot disagree about one
-/// analysis:
+/// this cell cannot disagree with the solve about one analysis:
 ///
 /// * the accuracy tier replaces ITL1 outright after the deck resolves, and
-///   this prints the ledger's own string for it;
+///   this prints the tier's own string for it;
 /// * the tier and the operating point's homotopy control assign the four
 ///   continuation aids and the damping strategy, also after the deck, which
 ///   [`owned_solver_value`] reads back out of the two `apply` calls the solve
@@ -407,8 +405,7 @@ pub(super) enum OptionEdit {
 /// Two exclusions on top of that. The transient's step ceiling is its own `Max
 /// step` field and is not repeated here. And an option the instance cannot
 /// carry earns no field at all: a control that authors a value the solve
-/// discards is worse than no control, and the Solver page's ledger has the room
-/// to say who owns it instead.
+/// discards is worse than no control.
 ///
 /// The one exception is legacy data. A project saved before this partition can
 /// hold a per-analysis override of a global option, and dropping it silently
@@ -638,12 +635,6 @@ pub(super) fn commit(
         };
     }
 }
-
-///
-/// Two surfaces send a reader here — the Solver page's resolution ledger and a
-/// refused plan removal — and the removal dialog words the hop the same way
-/// (`workbench::app::dialogs::plan_removal::REVEAL_BLOCKER`).
-pub(super) const REVEAL_ACTION: &str = "Open in Analyses";
 
 /// Show one analysis on the page that edits it.
 ///
