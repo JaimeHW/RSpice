@@ -25,6 +25,19 @@ pub(super) fn dependency_repair_cta(
     dependency_repair_cta_with_context(plan, issues, dependencies, &context)
 }
 
+/// What an analysis of `kind` hands the analyses built on it, as a reason
+/// names it: "needs a periodic steady state before it".
+pub(super) fn prerequisite_need(kind: AnalysisKind) -> &'static str {
+    match kind {
+        AnalysisKind::Pss => "a periodic steady state",
+        AnalysisKind::HarmonicBalance => "a harmonic-balance steady state",
+        AnalysisKind::Qpss => "a quasi-periodic steady state",
+        AnalysisKind::Transient => "a transient",
+        AnalysisKind::OperatingPoint => "an operating point",
+        _ => "another analysis",
+    }
+}
+
 pub(super) fn compatible_dependency_repair_label(
     plan: &crate::simulation::plan::SimulationPlan,
     dependent: AnalysisInstanceId,

@@ -877,10 +877,11 @@ fn a_periodic_solve_starts_from_its_own_dc_solve_unless_told_an_operating_point(
             vec![AnalysisKind::OperatingPoint],
             "{kind} needs the operating point it was told to start from"
         );
-        assert!(plan.validation_issues().iter().all(|issue| !matches!(
-            issue,
-            AnalysisPlanIssue::UnexpectedDependencyRole { .. }
-        )));
+        assert!(
+            plan.validation_issues()
+                .iter()
+                .all(|issue| !matches!(issue, AnalysisPlanIssue::UnexpectedDependencyRole { .. }))
+        );
         assert!(
             plan.reorder(op, 1).is_err(),
             "{kind}'s chosen operating point keeps running before it"
@@ -907,6 +908,94 @@ fn a_periodic_solve_starts_from_its_own_dc_solve_unless_told_an_operating_point(
             Err(AnalysisPlanError::UnexpectedDependencyRole { .. })
         ),
         "a required role cannot be unbound"
+    );
+}
+
+/// A circuit whose one periodic source is `VLO`.
+struct OnePeriodicSource(Vec<String>);
+
+impl PlanDependencySourceContext for OnePeriodicSource {
+    fn periodic_sources(&self) -> Result<&[String], String> {
+        Ok(&self.0)
+    }
+
+    fn availability_error(&self) -> Option<&str> {
+        None
+    }
+
+    fn validate_pss_sources(
+        &self,
+        _draft: &crate::pss_draft::PssDialogState,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[test]
+fn adding_an_analysis_adds_or_binds_what_it_reads_in_the_same_edit() {
+    let circuit = OnePeriodicSource(vec!["VLO".to_owned()]);
+
+    let mut plan = SimulationPlan::empty();
+    let (pac, unprepared) = plan
+        .insert_with_prerequisites_with_context(
+            AnalysisDraft::for_kind(AnalysisKind::Pac),
+            0,
+            &circuit,
+        )
+        .unwrap();
+    assert!(unprepared.is_none(), "{unprepared:?}");
+    let [pss, added] = plan.instances() else {
+        panic!("{:?}", plan.instances());
+    };
+    assert_eq!((pss.kind(), added.id()), (AnalysisKind::Pss, pac));
+    assert_eq!(
+        added.dependencies(),
+        &[AnalysisDependency::new(AnalysisKind::Pss, pss.id())]
+    );
+    let pss = pss.id();
+    assert!(
+        plan.validation_issues().is_empty(),
+        "{:?}",
+        plan.validation_issues()
+    );
+
+    // The only PSS already in the plan is bound rather than a second added.
+    let (second, unprepared) = plan
+        .insert_with_prerequisites_with_context(
+            AnalysisDraft::for_kind(AnalysisKind::Pac),
+            2,
+            &circuit,
+        )
+        .unwrap();
+    assert!(unprepared.is_none(), "{unprepared:?}");
+    assert_eq!(plan.instances().len(), 3);
+    assert_eq!(
+        plan.instance(second).unwrap().dependencies(),
+        &[AnalysisDependency::new(AnalysisKind::Pss, pss)]
+    );
+
+    // An analysis that reads nothing is added alone.
+    let (ac, unprepared) = plan
+        .insert_with_prerequisites(AnalysisDraft::for_kind(AnalysisKind::Ac), 3)
+        .unwrap();
+    assert!(unprepared.is_none());
+    assert!(plan.instance(ac).unwrap().dependencies().is_empty());
+    assert_eq!(plan.instances().len(), 4);
+
+    // Without the circuit's periodic sources no PSS can be made: the PAC is
+    // added unbound, and the reason comes back.
+    let mut plan = SimulationPlan::empty();
+    let (pac, unprepared) = plan
+        .insert_with_prerequisites(AnalysisDraft::for_kind(AnalysisKind::Pac), 0)
+        .unwrap();
+    assert!(unprepared.is_some());
+    assert_eq!(plan.instances().len(), 1);
+    assert!(
+        plan.validation_issues()
+            .contains(&AnalysisPlanIssue::MissingPrerequisite {
+                dependent: pac,
+                prerequisite: AnalysisKind::Pss,
+            })
     );
 }
 

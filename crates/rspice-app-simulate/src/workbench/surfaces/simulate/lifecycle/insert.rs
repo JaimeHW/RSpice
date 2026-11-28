@@ -2,15 +2,6 @@
 
 use super::*;
 
-pub(super) type InsertAnalysisResult = Result<
-    (
-        AnalysisInstanceId,
-        AnalysisLifecycleReceipt,
-        Option<Result<AnalysisLifecycleReceipt, String>>,
-    ),
-    String,
->;
-
 /// Add one instance of `kind` to the stable plan, and name it if it committed.
 ///
 /// The identity comes back because the caller decides what happens next, and
@@ -32,62 +23,37 @@ pub fn insert_analysis_instance(
     cx.model.sim_setup.session.palette_scroll_to_active = false;
     let repair_context = build_envelope_source_catalog(cx.model).dependency_repair_context();
     let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
-    let result: InsertAnalysisResult = match cx.model.sim_setup.stable_analysis_plan_mut() {
-        Ok(plan) => match plan.insert(kind) {
-            Ok((id, insert_receipt)) => {
-                let has_prerequisites = !plan.required_prerequisite_roles(id).is_empty();
-                let bind_receipt = has_prerequisites.then(|| {
-                    plan.auto_bind_dependencies_with_context(id, &repair_context)
-                        .map_err(|error| error.to_string())
-                });
-                Ok((id, insert_receipt, bind_receipt))
-            }
-            Err(error) => Err(error.to_string()),
-        },
+    let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
+        Ok(plan) => {
+            let position = plan.instances().len();
+            plan.insert_with_prerequisites_with_context(
+                AnalysisDraft::for_kind(kind),
+                position,
+                &repair_context,
+            )
+            .map_err(|error| error.to_string())
+        }
         Err(error) => Err(error),
     };
     cx.model
         .record_setup_change(SimulationPage::Analyses.label(), step);
     match result {
-        Ok((id, insert_receipt, bind_receipt)) => {
+        Ok((id, unprepared)) => {
             refresh_analysis_projections(cx);
             cx.state.active_analysis_instance = Some(id);
-            match bind_receipt {
-                None => cx.model.record_plan_receipt(receipt_line(&insert_receipt)),
-                Some(Ok(bind_receipt)) => {
-                    let issue = cx
-                        .model
-                        .sim_setup
-                        .stable_analysis_plan()
-                        .ok()
-                        .and_then(|plan| {
-                            plan.validation_issues()
-                                .iter()
-                                .find(|issue| issue_applies_to(issue, id))
-                                .map(format_plan_issue)
-                        });
-                    let readiness = issue.map_or_else(
-                        || "Dependencies are explicitly bound.".to_owned(),
-                        |issue| format!("Preflight remains blocked: {issue}"),
-                    );
-                    cx.model.record_plan_receipt(format!(
-                        "Receipts #{} and #{} committed for instance {id}. {} {} {readiness}",
-                        insert_receipt.sequence(),
-                        bind_receipt.sequence(),
-                        insert_receipt.detail(),
-                        bind_receipt.detail(),
-                    ));
-                }
-                Some(Err(error)) => {
-                    crate::workbench::simulate::record_plan_refusal(
-                        cx,
-                        format!(
-                            "Receipt #{} committed for instance {id}. {} Automatic dependency binding was rejected fail-closed: {error}. The inserted instance remains selected and preflight blocked.",
-                            insert_receipt.sequence(),
-                            insert_receipt.detail(),
-                        ),
-                    );
-                }
+            let line = cx
+                .model
+                .sim_setup
+                .stable_analysis_plan()
+                .ok()
+                .map(|plan| added_line(plan, id))
+                .unwrap_or_default();
+            match unprepared {
+                None => cx.model.record_plan_receipt(line),
+                Some(error) => crate::workbench::simulate::record_plan_refusal(
+                    cx,
+                    format!("{line} Choose what it uses on its form: {error}."),
+                ),
             }
             Some(id)
         }
@@ -98,5 +64,39 @@ pub fn insert_analysis_instance(
             );
             None
         }
+    }
+}
+
+/// What adding `id` did, by name: "Added Periodic AC 1, using PSS 1." or,
+/// with nothing to read, "Added AC 1."
+fn added_line(plan: &crate::simulation::plan::SimulationPlan, id: AnalysisInstanceId) -> String {
+    let Some(instance) = plan.instance(id) else {
+        return String::new();
+    };
+    let used = instance
+        .dependencies()
+        .iter()
+        .filter_map(|dependency| plan.instance(dependency.target()))
+        .map(|target| target.display_name().to_owned())
+        .collect::<Vec<_>>();
+    let missing = plan
+        .required_prerequisite_roles(id)
+        .into_iter()
+        .filter(|role| {
+            !instance
+                .dependencies()
+                .iter()
+                .any(|dependency| dependency.prerequisite() == *role)
+        })
+        .map(prerequisite_need)
+        .collect::<Vec<_>>();
+    let name = instance.display_name();
+    match (used.is_empty(), missing.is_empty()) {
+        (_, false) => format!(
+            "Added {name}. It needs {} before it.",
+            missing.join(" and ")
+        ),
+        (false, true) => format!("Added {name}, using {}.", used.join(" and ")),
+        (true, true) => format!("Added {name}."),
     }
 }

@@ -2171,3 +2171,69 @@ fn a_temperature_crossed_with_a_parameter_answers_no_point_scoped_specification(
         everywhere.value
     );
 }
+
+/// The catalogue adds `kind` and what it reads in one step, which one undo
+/// takes back whole.
+fn add_from_the_catalogue_and_undo(
+    harness: &mut crate::workbench::framework::feature::harness::FeatureHarness<SimulateFeature>,
+    kind: AnalysisKind,
+    reads: AnalysisKind,
+) {
+    let before = harness
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .unwrap()
+        .instances()
+        .len();
+    let added = insert_analysis_instance(&mut harness.cx(), kind).expect("it is added");
+    let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
+    let dependencies = plan.instance(added).unwrap().dependencies();
+    assert_eq!(dependencies.len(), 1, "{kind} is bound to what it reads");
+    assert_eq!(
+        plan.instance(dependencies[0].target()).unwrap().kind(),
+        reads
+    );
+    assert!(
+        !plan
+            .validation_issues()
+            .iter()
+            .any(|issue| issue_applies_to(issue, added)),
+        "{kind} arrives ready: {:?}",
+        plan.validation_issues()
+    );
+    let after = plan.instances().len();
+    assert!(after > before, "{kind} was added");
+    harness
+        .model
+        .undo_simulation_setup()
+        .expect("the add is one undo step")
+        .expect("it undoes");
+    assert_eq!(
+        harness
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .instances()
+            .len(),
+        before,
+        "one undo takes {kind} and what was added for it back together"
+    );
+}
+
+#[test]
+fn adding_a_periodic_ac_from_the_catalogue_adds_its_pss_in_one_undo_step() {
+    let mut harness = SimulateTestHost::harness();
+    rspice_app_state::workbench::examples::load_example(
+        "RC Lowpass Filter",
+        &mut harness.model.schematic,
+    );
+    add_from_the_catalogue_and_undo(&mut harness, AnalysisKind::Pac, AnalysisKind::Pss);
+}
+
+#[test]
+fn adding_an_fft_from_the_catalogue_binds_a_transient_in_one_undo_step() {
+    let mut harness = SimulateTestHost::harness();
+    add_from_the_catalogue_and_undo(&mut harness, AnalysisKind::Fft, AnalysisKind::Transient);
+}

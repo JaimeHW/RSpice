@@ -102,6 +102,39 @@ impl SimulationPlan {
         Ok(receipt)
     }
 
+    /// Add `draft` at `position` with what it reads: the matching analysis
+    /// earlier in the plan bound to it, or a new one added before it, in this
+    /// one edit. Every path that adds an analysis adds it here, so none
+    /// arrives without the analysis it reads while one can be had.
+    ///
+    /// The analysis is added even when what it reads cannot be prepared (a
+    /// PSS needs the circuit's periodic sources named, which this plan does
+    /// not know), and the second value says why, so the caller can say so or
+    /// refuse the add.
+    pub fn insert_with_prerequisites(
+        &mut self,
+        draft: AnalysisDraft,
+        position: usize,
+    ) -> Result<(AnalysisInstanceId, Option<AnalysisPlanError>), AnalysisPlanError> {
+        self.insert_with_prerequisites_with_context(draft, position, &NoCircuitSourceContext)
+    }
+
+    /// [`Self::insert_with_prerequisites`], preparing a circuit-specific
+    /// prerequisite against the circuit's own sources.
+    pub fn insert_with_prerequisites_with_context(
+        &mut self,
+        draft: AnalysisDraft,
+        position: usize,
+        context: &impl PlanDependencySourceContext,
+    ) -> Result<(AnalysisInstanceId, Option<AnalysisPlanError>), AnalysisPlanError> {
+        let id = self.fresh_identity();
+        self.insert_draft_with_id(id, draft, true, position)?;
+        if self.required_prerequisite_roles(id).is_empty() {
+            return Ok((id, None));
+        }
+        Ok((id, self.repair_dependencies_with_context(id, context).err()))
+    }
+
     /// Unbind an optional role, so the dependent solves for itself what the
     /// bound analysis handed it: a PSS, HB or QPSS told to start from its own
     /// DC solve instead of an operating point's.
@@ -178,7 +211,10 @@ impl SimulationPlan {
     ) -> Vec<AnalysisKind> {
         for dependency in &instance.dependencies {
             let prerequisite = dependency.prerequisite();
-            if instance.kind.optional_prerequisites().contains(&prerequisite)
+            if instance
+                .kind
+                .optional_prerequisites()
+                .contains(&prerequisite)
                 && !roles.contains(&prerequisite)
             {
                 roles.push(prerequisite);

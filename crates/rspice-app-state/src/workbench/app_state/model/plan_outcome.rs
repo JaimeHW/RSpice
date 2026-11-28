@@ -144,7 +144,7 @@ impl Model {
 impl Model {
     /// Write the analysis card `card` into the active plan, as the Analyses
     /// page adds an analysis: one step of the plan's history, with the
-    /// operating point it needs bound. Returns the receipt, which the plan's
+    /// analysis it reads bound. Returns the receipt, which the plan's
     /// record keeps too, or why the card cannot join the plan.
     pub fn add_analysis_card_to_plan(&mut self, card: &str) -> Result<String, String> {
         use crate::workbench::app_state::design_history::SetupParts;
@@ -157,18 +157,11 @@ impl Model {
         let plan = self.sim_setup.stable_analysis_plan_mut()?;
         let mut candidate = plan.clone();
         let position = candidate.instances().len();
-        let (inserted, _) = candidate
-            .insert_draft_with_id(
-                rspice_vocabulary::product::AnalysisInstanceId::new(),
-                draft,
-                true,
-                position,
-            )
+        let (_, unprepared) = candidate
+            .insert_with_prerequisites(draft, position)
             .map_err(|error| error.to_string())?;
-        if !candidate.required_prerequisite_roles(inserted).is_empty() {
-            candidate
-                .repair_dependencies(inserted)
-                .map_err(|error| error.to_string())?;
+        if let Some(error) = unprepared {
+            return Err(error.to_string());
         }
         *plan = candidate;
         self.sim_setup.refresh_legacy_analysis_projections();
