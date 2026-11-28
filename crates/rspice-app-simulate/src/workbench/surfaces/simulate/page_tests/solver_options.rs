@@ -4,6 +4,41 @@ use super::super::page_solver;
 use super::{OptionsDialogState, SimulationOptions};
 use crate::workbench::simulate::test_host::SimulateTestHost;
 
+/// A preset decides tolerances and convergence aids. The plan's temperature,
+/// TNOM and seed are the engineer's own and reach the deck unchanged, and the
+/// page still names the preset whose tolerances the plan holds.
+#[test]
+fn a_solver_preset_leaves_the_temperature_tnom_and_seed_alone() {
+    let mut harness = SimulateTestHost::harness();
+    crate::workbench::simulate::chrome::commit_reference_pvt(
+        &mut harness.cx(),
+        crate::product::ProcessCorner::TT,
+        85.0,
+    )
+    .expect("the run set takes 85 degrees");
+    harness.model.sim_setup.session.options_draft.tnom = "25".to_owned();
+    harness
+        .model
+        .sim_setup
+        .session
+        .options_draft
+        .statistical_seed = "42".to_owned();
+    page_solver::commit_draft(&mut harness.cx());
+
+    page_solver::apply_preset(&mut harness.cx(), "Accurate");
+
+    let options = &harness.model.sim_setup.options;
+    assert_eq!(options.preset_name(), Some("Accurate"));
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
+        "preset\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n",
+        options,
+    );
+    let lines: Vec<&str> = deck.lines().map(str::trim).collect();
+    for line in ["+ TEMP=85", "+ TNOM=25", "+ SEED=42", "+ RELTOL=1e-4"] {
+        assert!(lines.contains(&line), "the deck lacks {line}:\n{deck}");
+    }
+}
+
 #[test]
 fn solver_options_iteration_edit_preserves_precise_temperatures() {
     let mut harness = SimulateTestHost::harness();

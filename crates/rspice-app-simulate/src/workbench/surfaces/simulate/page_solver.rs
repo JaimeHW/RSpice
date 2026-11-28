@@ -214,31 +214,8 @@ fn policy_strip(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
             });
         });
 
-    if let Some(label) = requested
-        && let Some((_, build)) = SimulationOptions::PRESETS
-            .iter()
-            .find(|(name, _)| *name == label)
-    {
-        let mut options = build();
-        options.compatibility = cx.model.sim_setup.options.compatibility;
-        // A resistor in the circuit, not a numerical setting: no preset
-        // places or removes it. Nor does one choose the connect rules.
-        options.rshunt = cx.model.sim_setup.options.rshunt;
-        options
-            .connect_rules
-            .clone_from(&cx.model.sim_setup.options.connect_rules);
-        options
-            .connect_rule_block
-            .clone_from(&cx.model.sim_setup.options.connect_rule_block);
-        // Nor where the circuit starts.
-        options
-            .initial_conditions
-            .clone_from(&cx.model.sim_setup.options.initial_conditions);
-        options
-            .nodesets
-            .clone_from(&cx.model.sim_setup.options.nodesets);
-        cx.model.sim_setup.session.options_draft = OptionsDialogState::from_options(&options);
-        apply_options(cx, &options);
+    if let Some(label) = requested {
+        apply_preset(cx, label);
     }
     if apply && let PendingChange::Ready(options) = pending {
         apply_options(cx, &options);
@@ -246,6 +223,19 @@ fn policy_strip(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     if revert {
         cx.model.sim_setup.session.options_draft =
             OptionsDialogState::from_options(&cx.model.sim_setup.options);
+    }
+}
+
+/// Apply the named preset over the plan's own options: its tolerances,
+/// budgets and convergence aids, and nothing else.
+pub(super) fn apply_preset(cx: &mut Cx<'_, SimulateFeature>, label: &str) {
+    if let Some((_, build)) = SimulationOptions::PRESETS
+        .iter()
+        .find(|(name, _)| *name == label)
+    {
+        let options = cx.model.sim_setup.options.with_preset(*build);
+        cx.model.sim_setup.session.options_draft = OptionsDialogState::from_options(&options);
+        apply_options(cx, &options);
     }
 }
 

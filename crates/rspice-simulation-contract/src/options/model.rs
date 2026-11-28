@@ -302,7 +302,6 @@ impl SimulationOptions {
             chgtol: 1e-16,
             itl1: 100,
             itl4: 10,
-            min_timestep: 1e-18,
             damping: DampingStrategy::Combined,
             ..Default::default()
         }
@@ -340,30 +339,48 @@ impl SimulationOptions {
     /// names the setting names the field the reader will find.
     pub const CONNECT_RULES_LABEL: &'static str = "Connect rules \u{b7} CONNECTRULES";
 
+    /// These options with a named preset applied.
+    ///
+    /// A preset decides the tolerances, the iteration budgets and the
+    /// convergence aids, and nothing else: the temperatures, the seed, the step
+    /// limits, the compatibility, the node shunt, the connect rules and where
+    /// the circuit starts are kept as they are.
+    #[must_use]
+    pub fn with_preset(&self, build: fn() -> Self) -> Self {
+        let preset = build();
+        Self {
+            reltol: preset.reltol,
+            residual_reltol: preset.residual_reltol,
+            vntol: preset.vntol,
+            abstol: preset.abstol,
+            iabstol: preset.iabstol,
+            chgtol: preset.chgtol,
+            trtol: preset.trtol,
+            itl1: preset.itl1,
+            itl4: preset.itl4,
+            gmin: preset.gmin,
+            gmin_stepping: preset.gmin_stepping,
+            source_stepping: preset.source_stepping,
+            pseudo_transient: preset.pseudo_transient,
+            arc_length: preset.arc_length,
+            damping: preset.damping,
+            method: preset.method,
+            bypass_enabled: preset.bypass_enabled,
+            ..self.clone()
+        }
+    }
+
     /// Which named preset these options are exactly, if any.
     ///
-    /// Compared by serialized value rather than by a remembered "last preset
-    /// pressed": editing a numerical field leaves the preset. Compatibility,
-    /// the node shunt and the connect rules are selected independently and
-    /// are preserved when applying a preset. Returns `None` for options that
-    /// match no preset.
+    /// Compared by value over the fields a preset decides rather than by a
+    /// remembered "last preset pressed": editing a tolerance leaves the
+    /// preset, and a field no preset decides never does. Returns `None` for
+    /// options that match no preset.
     #[must_use]
     pub fn preset_name(&self) -> Option<&'static str> {
         let current = serde_json::to_vec(self).ok()?;
         Self::PRESETS.iter().find_map(|(label, build)| {
-            let mut preset = build();
-            preset.compatibility = self.compatibility;
-            preset.source_simulator = self.source_simulator;
-            preset.rshunt = self.rshunt;
-            preset.connect_rules.clone_from(&self.connect_rules);
-            preset
-                .connect_rule_block
-                .clone_from(&self.connect_rule_block);
-            preset
-                .initial_conditions
-                .clone_from(&self.initial_conditions);
-            preset.nodesets.clone_from(&self.nodesets);
-            serde_json::to_vec(&preset)
+            serde_json::to_vec(&self.with_preset(*build))
                 .ok()
                 .filter(|preset| *preset == current)
                 .map(|_| *label)
