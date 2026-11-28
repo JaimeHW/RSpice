@@ -8,6 +8,7 @@ mod accessibility;
 mod capture_groups;
 mod checkpoint_exchange;
 mod clicks;
+mod commit_rule;
 mod excitations;
 mod field_editing;
 mod frame_cost;

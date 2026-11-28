@@ -151,6 +151,21 @@ pub(super) fn full_width_field<R>(
     add_control(&mut cell)
 }
 
+/// The kit's mono well, under the Simulate commit rule: it holds what is
+/// typed while it has the keyboard and commits when it lets go.
+pub(super) fn mono_input(ui: &mut Ui, label: &str, value: &mut String, width: f32) -> Response {
+    crate::workbench::surfaces::simulate::drafts::text_field(ui, label, |ui| {
+        crate::ui::widgets::mono_input(ui, label, value, width)
+    })
+}
+
+/// The kit's inspector row, its well under the Simulate commit rule.
+pub(super) fn inspector_input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
+    crate::workbench::surfaces::simulate::drafts::text_field(ui, label, |ui| {
+        crate::ui::widgets::input_row(ui, label, value)
+    })
+}
+
 pub(super) fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
     if !uses_two_column_fields(ui) {
         return inspector_input_row(ui, label, value);
@@ -392,19 +407,21 @@ pub(super) fn defaulted_input(
     width: f32,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
-    let response = ui.add_sized(
-        vec2(width, t.metrics.ctl_h),
-        egui::TextEdit::singleline(value)
-            .font(theme::field_mono())
-            .margin(egui::Margin::symmetric(8, 4))
-            .hint_text(
-                egui::RichText::new(EMPTY_WELL_PLACEHOLDER)
-                    .font(theme::field_mono())
-                    .color(t.color.text_faint),
-            ),
-    );
-    crate::ui::widgets::name_control(ui, &response, label);
-    response
+    crate::workbench::surfaces::simulate::drafts::text_field(ui, label, |ui| {
+        let response = ui.add_sized(
+            vec2(width, t.metrics.ctl_h),
+            egui::TextEdit::singleline(value)
+                .font(theme::field_mono())
+                .margin(egui::Margin::symmetric(8, 4))
+                .hint_text(
+                    egui::RichText::new(EMPTY_WELL_PLACEHOLDER)
+                        .font(theme::field_mono())
+                        .color(t.color.text_faint),
+                ),
+        );
+        crate::ui::widgets::name_control(ui, &response, label);
+        response
+    })
 }
 
 pub(super) fn enabled_choice_row(ui: &mut Ui, label: &str, enabled: &mut bool) -> bool {

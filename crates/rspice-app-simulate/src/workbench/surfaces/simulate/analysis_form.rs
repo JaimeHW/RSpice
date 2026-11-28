@@ -68,8 +68,8 @@ use crate::state::format_engineering;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, choice_row as inspector_choice_row, input_row as inspector_input_row, mono_input,
-    select, select_mono_with_response, select_with_disabled, switch_row as inspector_switch_row,
+    Button, choice_row as inspector_choice_row, select, select_mono_with_response,
+    select_with_disabled, switch_row as inspector_switch_row,
 };
 use crate::workbench::design_system::property_row as inspector_property_row;
 use rspice_simulation::runner::TfRunConfig;

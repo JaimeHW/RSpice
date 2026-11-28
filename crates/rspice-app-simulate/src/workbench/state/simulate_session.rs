@@ -8,6 +8,59 @@
 
 use super::*;
 
+/// The Simulate field that has the keyboard, and what committing it would
+/// write. Kept between frames because a field commits when it lets go, and
+/// Run, Check or a switch of page, test or workspace can arrive while it has
+/// not: they commit it first, from here.
+#[derive(Debug, Clone)]
+pub struct OpenDraft {
+    /// The field: its widget, and the label its row states.
+    pub field: OpenField,
+    pub edit: DraftEdit,
+    /// Why the text does not read. The field keeps it, outlined with this,
+    /// until it is retyped, and nothing that commits it first can start.
+    pub refusal: Option<String>,
+    /// Something that commits the field first asked it to let go; the form
+    /// lets go of it the next time it draws.
+    pub release: bool,
+    /// The field takes the keyboard back the next time it draws: it holds
+    /// text that does not read, and Run, Check or Enter came to it.
+    pub refocus: bool,
+}
+
+/// One text field, as its form drew it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenField {
+    pub id: egui::Id,
+    pub label: String,
+}
+
+/// What committing an open field writes.
+#[derive(Debug, Clone)]
+pub enum DraftEdit {
+    /// An analysis's own fields, as its form holds them with one typed into.
+    Analysis {
+        instance: crate::product::AnalysisInstanceId,
+        draft: Box<crate::simulation::plan::AnalysisDraft>,
+    },
+    /// One of an analysis's option fields, as typed.
+    AnalysisOption {
+        instance: crate::product::AnalysisInstanceId,
+        option: crate::simulation::plan::NumericOverrideOption,
+        text: String,
+    },
+}
+
+impl DraftEdit {
+    /// The analysis whose form holds the field.
+    #[must_use]
+    pub const fn instance(&self) -> crate::product::AnalysisInstanceId {
+        match self {
+            Self::Analysis { instance, .. } | Self::AnalysisOption { instance, .. } => *instance,
+        }
+    }
+}
+
 /// Authored text of the run-set execution budgets while they are being edited.
 ///
 /// A budget is committed on release, not on keystroke: a partially typed

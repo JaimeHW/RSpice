@@ -20,6 +20,7 @@ use crate::workbench::slots::SimulateState;
 use crate::workbench::state::{
     SimulationPlanManagerDraft, SimulationWorkflowDialog, WorkbenchSession, Workspace,
 };
+use crate::workbench::surfaces::simulate::drafts;
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::SimulateCommand;
 pub(in crate::workbench) use run_host::run_host;
@@ -149,7 +150,13 @@ impl CommandSet for SimulateCommand {
 
     fn execute(self, cx: &mut Cx<'_, SimulateFeature>) {
         match self {
-            Self::Run => cx.runs.preflight.request_run_and_queue(),
+            // The open field commits first; text there that does not read
+            // starts nothing.
+            Self::Run => {
+                if drafts::commit_open_drafts(cx).is_ok() {
+                    cx.runs.preflight.request_run_and_queue();
+                }
+            }
             // Stop is disabled, and names why, while the run cannot take it.
             Self::Stop => {
                 if cx.runs.preflight.checking.is_some() {
@@ -182,6 +189,9 @@ impl CommandSet for SimulateCommand {
             }
             Self::JobsManager => open_jobs_manager(cx.wb),
             Self::Preflight => {
+                if drafts::commit_open_drafts(cx).is_err() {
+                    return;
+                }
                 let (mut host, controller) = run_host::run_host(cx);
                 rspice_app_runs::workbench::preflight::start(&mut host, controller, false);
             }
@@ -204,6 +214,9 @@ impl CommandSet for SimulateCommand {
             },
             Self::AddAnalysis => open_analysis_catalog(cx.model, cx.wb),
             Self::Options => {
+                if drafts::commit_open_drafts(cx).is_err() {
+                    return;
+                }
                 // The Solver & convergence page is the only editor of the
                 // plan's engine options: every field of `SimulationOptions`
                 // reaches the engine from a control on that page, so the
@@ -214,6 +227,9 @@ impl CommandSet for SimulateCommand {
                 cx.wb.activate(Workspace::Simulate);
             }
             Self::Page(page) => {
+                if drafts::commit_open_drafts(cx).is_err() {
+                    return;
+                }
                 cx.wb.activate(Workspace::Simulate);
                 cx.state.simulation_page = page;
             }
@@ -245,6 +261,20 @@ pub fn record_plan_refusal(cx: &mut Cx<'_, SimulateFeature>, message: impl Into<
 }
 
 impl SimulateFeature {
+    /// Ask the open Simulate field to let go before a command that commits
+    /// it runs. True when the command has to wait for the field's form to
+    /// draw that, so the keystrokes of the frame land in it first.
+    pub fn release_open_field(state: &mut SimulateState) -> bool {
+        drafts::release_open_field(state)
+    }
+
+    /// Commit the open Simulate field before a command that reads what it
+    /// holds. False when its text does not read: the field keeps the text
+    /// and takes the keyboard back, and the status line names it.
+    pub fn commit_open_drafts(cx: &mut Cx<'_, Self>) -> bool {
+        drafts::commit_open_drafts(cx).is_ok()
+    }
+
     /// Select analysis instance `instance` on the Analyses page, or none, as
     /// a results command asks.
     pub fn select_analysis_instance(

@@ -277,10 +277,19 @@ impl RSpiceApp {
         {
             return;
         }
-        if flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT)
-            && !self.state.commit_pending_inspector_edit()
-        {
-            return;
+        if flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT) {
+            // The open Simulate field lets go first, and the command waits for
+            // its form to draw that: the frame's keystrokes land in it, and it
+            // commits as Tab would commit it.
+            if SimulateFeature::release_open_field(&mut self.state.simulate) {
+                self.state.shell.held_commands.push(spec.key);
+                return;
+            }
+            if !self.state.commit_pending_inspector_edit()
+                || !SimulateFeature::commit_open_drafts(&mut features::cx(self))
+            {
+                return;
+            }
         }
         if flags.contains(CommandFlags::REPEATABLE) && self.command_key_enabled(spec.key) {
             self.state.workbench.last_repeatable_command = Some(spec.key.as_str().to_owned());

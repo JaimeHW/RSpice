@@ -160,8 +160,9 @@ impl SimulateCommand {
     /// Running and stopping act on whatever is open and keep the run chords,
     /// whose desktop key a browser keeps for itself; the run history needs
     /// no project either. Everything else needs an open project. Running,
-    /// checking and the pages commit a pending inspector edit before they
-    /// act.
+    /// checking, the pages, the plan manager, the analysis catalogue and the
+    /// solver options commit a pending inspector edit and the open Simulate
+    /// field before they act.
     pub const fn declared_spec(self) -> CommandSpec {
         let palette = CommandFlags::PALETTE_VISIBLE;
         let commits = palette.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
@@ -205,21 +206,21 @@ impl SimulateCommand {
             Self::ManagePlans => (
                 "Manage simulation plans\u{2026}",
                 "Simulate",
-                open,
+                navigates,
                 ShortcutContext::Global,
                 NONE,
             ),
             Self::AddAnalysis => (
                 "Add analysis\u{2026}",
                 "Simulate",
-                open,
+                navigates,
                 ShortcutContext::Global,
                 NONE,
             ),
             Self::Options => (
                 "Global solver & convergence",
                 "Simulate",
-                open,
+                navigates,
                 ShortcutContext::Global,
                 NONE,
             ),

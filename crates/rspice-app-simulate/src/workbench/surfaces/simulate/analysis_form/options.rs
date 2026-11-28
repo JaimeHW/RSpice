@@ -20,26 +20,46 @@
 use egui::Ui;
 
 use crate::product::AnalysisInstanceId;
-use crate::simulation::plan::{AnalysisDraft, NumericOverrideOption, OverrideValueKind};
+use crate::simulation::plan::{
+    AnalysisDraft, NumericOverrideOption, OverrideValueKind, SolverOwnership,
+};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::select;
 use crate::workbench::app_state::Model;
 
 use super::super::advanced_options::{self, AdvancedOptionRow, AdvancedOptionSection, OptionEdit};
 
-/// Draw every advanced option this analysis owns, and report what was edited.
+/// What the option fields asked for in one frame.
+#[derive(Default)]
+pub(in crate::workbench::surfaces::simulate) struct OptionFields {
+    /// What a switch or a chooser asked for: these commit at once.
+    pub(in crate::workbench::surfaces::simulate) edits: Vec<OptionEdit>,
+    /// The option field that has the keyboard, and what it holds. It
+    /// commits when it lets go, which the frame that drew it decides.
+    pub(in crate::workbench::surfaces::simulate) open: Option<(NumericOverrideOption, String)>,
+}
+
+/// The options this analysis's form offers, in their catalogue sections.
+pub(in crate::workbench::surfaces::simulate) fn offered(
+    model: &Model,
+    draft: &AnalysisDraft,
+    instance: AnalysisInstanceId,
+) -> Vec<AdvancedOptionSection> {
+    ownership_and_rows(model, draft, instance).1
+}
+
+/// Who owns this analysis's solver settings, and the options its form offers.
 ///
 /// The record is the committed one and the options are the plan's committed
 /// block, not the drafts either is edited through: an option field reports what
 /// a run would resolve to, and an uncommitted edit is not part of any run yet.
 /// The draft is still what carries the instance's tier and homotopy, which is
 /// what decides whether an option reaches the solve at all.
-pub(in crate::workbench::surfaces::simulate) fn fields(
-    ui: &mut Ui,
+fn ownership_and_rows(
     model: &Model,
     draft: &AnalysisDraft,
     instance: AnalysisInstanceId,
-) -> Vec<OptionEdit> {
+) -> (SolverOwnership, Vec<AdvancedOptionSection>) {
     let plan = model.sim_setup.stable_analysis_plan().ok();
     let record = plan
         .and_then(|plan| plan.instance(instance))
@@ -48,7 +68,7 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
         || draft.solver_ownership_with_options(record),
         |plan| plan.solver_ownership_for_draft(draft, record),
     );
-    let offered = if ownership.study_inherited_options.is_some() {
+    let rows = if ownership.study_inherited_options.is_some() {
         advanced_options::form_rows_with_ownership(
             draft.kind(),
             draft,
@@ -59,6 +79,21 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
     } else {
         advanced_options::form_rows(draft.kind(), draft, record, &model.sim_setup.options)
     };
+    (ownership, rows)
+}
+
+/// Draw every advanced option this analysis owns, and report what was edited.
+///
+/// `held` is the option field left holding typed text, and that text: the
+/// field shows it rather than the value the plan resolves.
+pub(in crate::workbench::surfaces::simulate) fn fields(
+    ui: &mut Ui,
+    model: &Model,
+    draft: &AnalysisDraft,
+    instance: AnalysisInstanceId,
+    held: Option<(NumericOverrideOption, &str)>,
+) -> OptionFields {
+    let (ownership, offered) = ownership_and_rows(model, draft, instance);
     if ownership.study_inherited_options.is_some() {
         super::field_note(
             ui,
@@ -79,16 +114,21 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
             "Shared solver options come from the bound periodic analysis. Configure its solver options there; response-specific settings remain on this form.",
         );
     }
-    let mut edits = Vec::new();
+    let mut asked = OptionFields {
+        edits: Vec::new(),
+        open: None,
+    };
     for (heading, rows) in grouped(&offered) {
         super::sub_header(ui, heading);
         for row in rows {
-            if let Some(edit) = advanced_options::draw_field(ui, row, field) {
-                edits.push(edit);
+            if let Some(edit) = advanced_options::draw_field(ui, row, |ui, row| {
+                field(ui, row, held, &mut asked.open)
+            }) {
+                asked.edits.push(edit);
             }
         }
     }
-    edits
+    asked
 }
 
 /// The rows a form draws, under the headings it draws them under.
@@ -124,7 +164,14 @@ fn grouped(sections: &[AdvancedOptionSection]) -> Vec<(&'static str, Vec<&Advanc
 }
 
 /// One option as a field: its label and the control its value kind asks for.
-fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
+/// A switch or a chooser returns its edit; a text field reports itself in
+/// `open` while it has the keyboard.
+fn field(
+    ui: &mut Ui,
+    row: &AdvancedOptionRow,
+    held: Option<(NumericOverrideOption, &str)>,
+    open: &mut Option<(NumericOverrideOption, String)>,
+) -> Option<OptionEdit> {
     let label = row.option.label();
     match row.option.value_kind() {
         OverrideValueKind::Flag => option_field(ui, label, |ui| {
@@ -164,19 +211,20 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
             .and_then(|chosen| advanced_options::setting_edit(row, &chosen))
         }
         _ => {
-            let mut text = well_text(ui, row);
+            let mut text = held
+                .filter(|(option, _)| *option == row.option)
+                .map_or_else(
+                    || advanced_options::well_value(row).to_owned(),
+                    |(_, text)| text.to_owned(),
+                );
             let response = option_field(ui, label, |ui| {
                 super::defaulted_input(ui, label, &mut text, ui.available_width())
                     .on_hover_text(option_tooltip(row.option, &row.preset))
             });
-            retain_well_text(ui, row, &text, &response);
-            // Committed when the well is let go of, not per keystroke: one
-            // would produce a configuration receipt for every character and
-            // invalidate preflight mid-number.
-            let released = response.lost_focus() || (response.changed() && !response.has_focus());
-            released
-                .then(|| advanced_options::well_edit(row, &text))
-                .flatten()
+            if response.has_focus() {
+                *open = Some((row.option, text));
+            }
+            None
         }
     }
 }
@@ -298,33 +346,4 @@ fn settings_of(option: NumericOverrideOption) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
-}
-
-/// The text one option's well currently holds.
-///
-/// Seeded from the effective value on every frame the well is not being typed
-/// into, which is what makes a refused edit revert: the value the solve is
-/// actually using comes back rather than a number no run resolves to staying on
-/// screen. While the well has focus the reader's own keystrokes are what it
-/// holds, so the buffer sits beside the widget that draws it — the fields are
-/// drawn from a shared reference and cannot write a keystroke into the plan.
-fn well_text(ui: &Ui, row: &AdvancedOptionRow) -> String {
-    ui.data(|data| data.get_temp::<String>(well_id(ui, row)))
-        .unwrap_or_else(|| advanced_options::well_value(row).to_owned())
-}
-
-/// Retain what the well holds while it is focused, and drop it once it is not.
-fn retain_well_text(ui: &Ui, row: &AdvancedOptionRow, text: &str, response: &egui::Response) {
-    let id = well_id(ui, row);
-    if response.has_focus() {
-        ui.data_mut(|data| data.insert_temp(id, text.to_owned()));
-    } else {
-        ui.data_mut(|data| data.remove::<String>(id));
-    }
-}
-
-/// Where one option's well keeps its text. Keyed by the option, under the id of
-/// the form drawing it, so two analyses on one route cannot share a buffer.
-fn well_id(ui: &Ui, row: &AdvancedOptionRow) -> egui::Id {
-    ui.id().with(("analysis-option-well", row.option.key()))
 }

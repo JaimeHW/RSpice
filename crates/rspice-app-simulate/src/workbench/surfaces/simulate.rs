@@ -7,6 +7,7 @@ mod analysis_list;
 pub mod catalog;
 pub mod checkpoint_exchange;
 mod contract_card;
+pub(crate) mod drafts;
 pub mod lifecycle;
 mod output_evidence;
 mod page_connect_rules;

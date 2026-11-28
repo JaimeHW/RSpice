@@ -2,6 +2,8 @@
 //! netlist names the form offers.
 
 use super::*;
+use crate::simulation::plan::NumericOverrideOption;
+use crate::workbench::state::{DraftEdit, OpenDraft, OpenField};
 
 #[derive(Clone)]
 pub(super) struct SelectedAnalysis {
@@ -290,6 +292,22 @@ pub(super) fn analysis_editor(
     scroll_content_origin_y: f32,
     resolved_participation: &participation::PlanParticipation,
 ) {
+    cx.state.form_committed = false;
+    // A field left open on another analysis lets go before this one draws:
+    // the selection moved off it. Text there that does not read takes the
+    // selection back to it, as it would refuse Run.
+    if let Some(held) = cx
+        .state
+        .open_draft
+        .as_ref()
+        .map(|open| open.edit.instance())
+        && Some(held) != cx.state.active_analysis_instance
+    {
+        match drafts::commit_open_drafts(cx) {
+            Ok(()) => cx.state.form_committed = true,
+            Err(_) => cx.state.active_analysis_instance = Some(held),
+        }
+    }
     let dependency_sources = envelope_source_catalog(ui, cx.model);
     let selected = match selected_analysis(cx.model, cx.state, &dependency_sources) {
         Ok(Some(selected)) => selected,
@@ -320,8 +338,22 @@ pub(super) fn analysis_editor(
         || "No prior datasets".to_owned(),
         PriorPlanRun::contract_summary,
     );
-    let mut draft = selected.draft.clone();
-    let serialized_before = serde_json::to_vec(&draft);
+    // The form shows what its open field holds, typed and not committed yet;
+    // otherwise what the plan holds.
+    let held = cx
+        .state
+        .open_draft
+        .as_mut()
+        .filter(|open| open.edit.instance() == selected.id);
+    let held_option = held.as_deref().and_then(|open| match &open.edit {
+        DraftEdit::AnalysisOption { option, text, .. } => Some((*option, text.clone())),
+        DraftEdit::Analysis { .. } => None,
+    });
+    let mut draft = match held.as_deref().map(|open| &open.edit) {
+        Some(DraftEdit::Analysis { draft, .. }) => (**draft).clone(),
+        _ => selected.draft.clone(),
+    };
+    drafts::begin_form(ui, held);
     let mut action = None;
     let mut open_prior_dataset = false;
     let envelope_sources = matches!(draft, AnalysisDraft::Envelope(_) | AnalysisDraft::Pss(_))
@@ -335,7 +367,7 @@ pub(super) fn analysis_editor(
     // than editing it in place. Collected here and applied below, for the same
     // reason the participation action is: the frame is already borrowing `cx`.
     let mut run_space_route = None;
-    let mut option_edits = Vec::new();
+    let mut option_fields = analysis_form::options::OptionFields::default();
     let mut checkpoint_action = None;
 
     let t = Tokens::get(ui.ctx());
@@ -365,11 +397,15 @@ pub(super) fn analysis_editor(
             envelope_sources,
             &mut run_space_route,
             selected.id,
-            &mut option_edits,
+            held_option
+                .as_ref()
+                .map(|(option, text)| (*option, text.as_str())),
+            &mut option_fields,
             &mut checkpoint_action,
         );
         (form_anchor_y, rename_requested)
     });
+    let open_field = drafts::end_form(ui);
     if let Some(action) = checkpoint_action {
         checkpoint_exchange::apply(ui.ctx(), cx, action);
     }
@@ -389,37 +425,22 @@ pub(super) fn analysis_editor(
         cx.state.simulation_surface_pending_scroll_delta_y +=
             editor_anchor_scroll_delta(anchor_y, form_anchor_content_y);
     }
-
-    let draft_changed = match (serialized_before, serde_json::to_vec(&draft)) {
-        (Ok(before), Ok(after)) => before != after,
-        (Err(error), _) | (_, Err(error)) => {
-            record_failure(
-                cx,
-                "Analysis edit",
-                &format!("the draft could not be serialized: {error}"),
-            );
-            cx.state.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
-            return;
-        }
-    };
-
     // Retain the selected form's content-space anchor every frame. Any edit,
     // dependency bind, enable toggle, insertion, removal, or repair that changes
     // content above it is then compensated on the next frame without maintaining
     // a fragile action whitelist.
     cx.state.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
-    // Ahead of every commit below, for the reason the participation action is:
-    // an option field commits when it is let go of, which is the same instant
-    // focus lands somewhere else, and that must not also commit an edit to the
-    // analysis's own parameters.
-    if !option_edits.is_empty() {
-        advanced_options::commit(cx, selected.id, &option_edits);
+
+    if settle_fields(ui, cx, &selected, draft, open_field, option_fields.open) {
+        cx.state.form_committed = true;
         ui.ctx().request_repaint();
-        return;
     }
-    // Dispatched before the draft comparison so that clicking the hop, which
-    // takes focus off whatever field was being typed into, does not also
-    // commit an unintended edit on the way out of the page.
+    // A switch or a chooser among the options commits at once.
+    if !option_fields.edits.is_empty() {
+        advanced_options::commit(cx, selected.id, &option_fields.edits);
+        cx.state.form_committed = true;
+        ui.ctx().request_repaint();
+    }
     if open_prior_dataset
         && let Some(PriorPlanRun { index, .. }) = prior_run
         && cx.model.simulation.select_run(index)
@@ -440,9 +461,6 @@ pub(super) fn analysis_editor(
         ui.ctx().request_repaint();
         return;
     }
-    // Ahead of the draft comparison for the same reason the hop is: changing
-    // participation moves focus off whatever field was being typed into, and
-    // that must not also commit an edit to the analysis's own values.
     if let Some(asked) = participation_action {
         match asked {
             participation::ParticipationAction::Set(run_at) => {
@@ -455,14 +473,149 @@ pub(super) fn analysis_editor(
         ui.ctx().request_repaint();
         return;
     }
-    if draft_changed {
-        commit_draft(cx, selected.id, draft);
-        ui.ctx().request_repaint();
-    }
     if let Some(action) = action {
         apply_analysis_action(cx, selected.id, action);
         ui.ctx().request_repaint();
     }
+}
+
+/// Apply the commit rule to what the form holds once it has drawn: keep it
+/// while one of its text fields has the keyboard, commit it when that field
+/// lets go, and commit a switch's or a chooser's change at once. Text that
+/// does not read stays in its field with the reason, uncommitted. Whether
+/// the plan or the open field changed.
+fn settle_fields(
+    ui: &Ui,
+    cx: &mut Cx<'_, SimulateFeature>,
+    selected: &SelectedAnalysis,
+    working: AnalysisDraft,
+    open_field: Option<OpenField>,
+    open_option: Option<(NumericOverrideOption, String)>,
+) -> bool {
+    let instance = selected.id;
+    let committed = &selected.draft;
+    let held = if cx
+        .state
+        .open_draft
+        .as_ref()
+        .is_some_and(|open| open.edit.instance() == instance)
+    {
+        cx.state.open_draft.take()
+    } else {
+        None
+    };
+    let mut changed = false;
+    // The field open before this frame lets go when the keyboard went
+    // elsewhere: to nothing, or to another field.
+    let let_go = held.as_ref().filter(|held| {
+        open_field
+            .as_ref()
+            .is_none_or(|open| open.id != held.field.id)
+    });
+    let mut refusal = None;
+    if let Some(held) = let_go {
+        let still_refused = held.refusal.is_some()
+            && match &held.edit {
+                DraftEdit::Analysis { draft, .. } => drafts::same_draft(draft, &working),
+                DraftEdit::AnalysisOption { .. } => true,
+            };
+        let outcome = if still_refused {
+            Err(held.refusal.clone().unwrap_or_default())
+        } else {
+            match &held.edit {
+                DraftEdit::Analysis { .. } if drafts::same_draft(&working, committed) => Ok(()),
+                DraftEdit::Analysis { .. } => {
+                    match drafts::new_problem(cx.model, &working, committed) {
+                        None => {
+                            commit_draft(cx, instance, working.clone());
+                            Ok(())
+                        }
+                        Some(problem) => Err(drafts::field_reason(&held.field.label, &problem)),
+                    }
+                }
+                DraftEdit::AnalysisOption { option, text, .. } => {
+                    drafts::commit_option(cx, instance, *option, text)
+                        .map_err(|problem| drafts::field_reason(&held.field.label, &problem))
+                }
+            }
+        };
+        match outcome {
+            Ok(()) => changed = true,
+            Err(reason) => refusal = Some(reason),
+        }
+    }
+    if let (Some(reason), Some(held)) = (refusal, held.as_ref()) {
+        // Set aside, uncommitted and outlined, in its field. Enter there
+        // keeps the keyboard in it. A move to another of the analysis's own
+        // fields or a press elsewhere leaves it, so what is typed next lands
+        // where it is typed; the form holds one typed option at a time, so a
+        // move between an option and another field comes back to it.
+        let crosses_option = open_field.is_some()
+            && (open_option.is_some() || matches!(held.edit, DraftEdit::AnalysisOption { .. }));
+        let entered = ui.input(|input| input.key_pressed(egui::Key::Enter));
+        let edit = match &held.edit {
+            DraftEdit::Analysis { .. } => DraftEdit::Analysis {
+                instance,
+                draft: Box::new(working),
+            },
+            other @ DraftEdit::AnalysisOption { .. } => other.clone(),
+        };
+        cx.state.open_draft = Some(OpenDraft {
+            field: held.field.clone(),
+            edit,
+            refusal: Some(reason),
+            release: false,
+            refocus: entered || crosses_option,
+        });
+        return true;
+    }
+    if let Some(field) = open_field {
+        // A field has the keyboard: what is typed stays here until it lets
+        // go. A refusal stays on it until its text changes.
+        let kept = |edit: &DraftEdit| {
+            held.as_ref()
+                .filter(|held| held.field.id == field.id)
+                .filter(|held| match (&held.edit, edit) {
+                    (
+                        DraftEdit::Analysis { draft: had, .. },
+                        DraftEdit::Analysis { draft: has, .. },
+                    ) => drafts::same_draft(had, has),
+                    (
+                        DraftEdit::AnalysisOption { text: had, .. },
+                        DraftEdit::AnalysisOption { text: has, .. },
+                    ) => had == has,
+                    _ => false,
+                })
+                .and_then(|held| held.refusal.clone())
+        };
+        let edit = match open_option {
+            Some((option, text)) => DraftEdit::AnalysisOption {
+                instance,
+                option,
+                text,
+            },
+            None => DraftEdit::Analysis {
+                instance,
+                draft: Box::new(working),
+            },
+        };
+        let refusal = kept(&edit);
+        cx.state.open_draft = Some(OpenDraft {
+            field,
+            edit,
+            refusal,
+            release: false,
+            refocus: false,
+        });
+        return changed;
+    }
+    // Nothing had the keyboard: a switch, a chooser or a press changed the
+    // form, and that commits at once.
+    if held.is_none() && !drafts::same_draft(&working, committed) {
+        commit_draft(cx, instance, working);
+        changed = true;
+    }
+    changed
 }
 
 pub(super) fn editor_anchor_scroll_delta(anchor_y: f32, current_y: f32) -> f32 {
@@ -686,7 +839,8 @@ fn analysis_form_body(
     // one is not part of the draft: it lands on the instance's own override
     // record, through the plan transaction, after this frame has closed.
     selected: AnalysisInstanceId,
-    option_edits: &mut Vec<advanced_options::OptionEdit>,
+    held_option: Option<(NumericOverrideOption, &str)>,
+    option_fields: &mut analysis_form::options::OptionFields,
     checkpoint_action: &mut Option<checkpoint_exchange::Action>,
 ) -> f32 {
     let project_revision = model.workspace.content.project.revision();
@@ -840,7 +994,8 @@ fn analysis_form_body(
                     )
                     .map(checkpoint_exchange::Action::Transient);
                 }
-                *option_edits = analysis_form::options::fields(ui, model, draft, selected);
+                *option_fields =
+                    analysis_form::options::fields(ui, model, draft, selected, held_option);
             });
         })
         .response

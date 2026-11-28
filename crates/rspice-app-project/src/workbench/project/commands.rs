@@ -325,7 +325,8 @@ impl ProjectCommand {
     /// that act on a project need one open, except Save, which also saves a
     /// standalone schematic, and the ones that open or start a project. The
     /// launcher, recent projects and the pages commit a pending inspector
-    /// edit before they navigate, and the two design commands that edit the
+    /// edit before they navigate, Close project before it closes, and the
+    /// two design commands that edit the
     /// drawing are refused on a read-only one. Open project, New project and
     /// Save leave their primary chord to the browser.
     pub const fn declared_spec(self) -> CommandSpec {
@@ -334,6 +335,7 @@ impl ProjectCommand {
         let navigates = waits.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let reserved = waits.with(CommandFlags::PRIMARY_RESERVED_BY_BROWSER, true);
         let open = waits.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
+        let closes = open.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
         let page = CommandFlags::PALETTE_VISIBLE
             .with(CommandFlags::REQUIRES_OPEN_PROJECT, true)
             .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
@@ -358,7 +360,7 @@ impl ProjectCommand {
             Self::SaveCopy => ("Save a copy…", "File", open, global, NONE),
             Self::PackWithResults => ("Pack with results…", "File", open, global, NONE),
             Self::SaveAll => ("Save all", "File", open, global, SAVE_ALL),
-            Self::CloseProject => ("Close project…", "File", open, global, CLOSE_PROJECT),
+            Self::CloseProject => ("Close project…", "File", closes, global, CLOSE_PROJECT),
             Self::NewCell => ("New cell…", "File", open, global, NEW_CELL),
             Self::NewView => ("New cell view…", "File", open, global, NONE),
             Self::OpenSchematic => ("Open schematic…", "File", waits, global, NONE),

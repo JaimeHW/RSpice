@@ -57,7 +57,11 @@ pub(super) fn show_navigator(cx: &mut Cx<'_, SimulateFeature>, ui: &mut egui::Ui
         },
     );
     if let Some(page) = asked.open {
-        cx.state.simulation_page = page;
+        // The open field commits first; text there that does not read keeps
+        // the page in front.
+        if crate::workbench::surfaces::simulate::drafts::commit_open_drafts(cx).is_ok() {
+            cx.state.simulation_page = page;
+        }
         cx.wb.close_drawer();
     }
     if asked.add_analysis {

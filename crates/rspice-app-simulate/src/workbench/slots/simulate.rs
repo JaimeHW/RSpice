@@ -37,6 +37,12 @@ pub struct SimulateState {
     /// Active Simulation Studio transaction. Drafts are runtime-only and are
     /// committed atomically by the dialog's primary action.
     pub simulation_workflow: Option<crate::workbench::state::SimulationWorkflowDialog>,
+    /// The Simulate field that has the keyboard and has not committed yet.
+    pub open_draft: Option<crate::workbench::state::OpenDraft>,
+    /// The analysis form changed the plan in the frame it last drew. A frame
+    /// that edits the plan drops every check started in it, so a command that
+    /// commits the open field first waits for the next frame.
+    pub form_committed: bool,
     /// Selected specification row in the verification matrix, by exact
     /// measurement name. That name is the specification's identity — it is the
     /// key the limit is joined to a result by, and it is unique within a plan.
@@ -110,6 +116,8 @@ impl Default for SimulateState {
             simulation_surface_pending_scroll_delta_y: 0.0,
             simulation_surface_editor_anchor_y: None,
             simulation_workflow: None,
+            open_draft: None,
+            form_committed: false,
             selected_specification: None,
             selected_design_variable: None,
             selected_saved_output: None,
