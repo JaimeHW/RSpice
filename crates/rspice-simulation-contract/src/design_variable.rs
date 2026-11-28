@@ -213,9 +213,12 @@ fn expression_text(text: &str) -> String {
 }
 
 /// What `text` resolves to with no other variable known: the number, `None`
-/// when it names another variable (the plan resolves those), or why the
-/// engine cannot read it.
+/// when it names another variable or is written in a unit its label refuses
+/// (the plan resolves and reports those), or why the engine cannot read it.
 fn standalone_value(text: &str, quantity: DesignVariableQuantity) -> Result<Option<f64>, String> {
+    if crate::design_variable_quantity::unit_refusal(text, quantity).is_some() {
+        return Ok(None);
+    }
     use rspice_core::netlist::expr::{ExprError, ParamContext, evaluate, parse_expression};
 
     let expression =

@@ -84,6 +84,43 @@ pub fn number_written_with_unit(text: &str, quantity: DesignVariableQuantity) ->
         .then(|| format!("{number}{word}"))
 }
 
+/// Why `text` cannot be the value of a variable labelled `quantity`, or
+/// `None` when it can.
+///
+/// A temperature is in degrees Celsius, as every RSpice temperature is. One
+/// written in kelvin, `300 K` or `300K`, would otherwise reach the engine as
+/// SPICE reads it, 300 kilo; it is refused, saying what it is in \u{b0}C.
+/// Outside a temperature `K` stays SPICE's kilo.
+pub fn unit_refusal(text: &str, quantity: DesignVariableQuantity) -> Option<String> {
+    if !matches!(quantity, DesignVariableQuantity::Temperature) {
+        return None;
+    }
+    let text = text.trim();
+    let text = text
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .unwrap_or(text)
+        .trim();
+    let number = text.strip_suffix('K')?;
+    let number = number.strip_suffix('\u{b0}').unwrap_or(number).trim_end();
+    let (digits, prefix) = split_number(number)?;
+    if !prefix.is_empty() {
+        return None;
+    }
+    let kelvin = digits.parse::<f64>().ok()?;
+    // As many decimals as were typed, and at least the two 273.15 carries.
+    let decimals = digits
+        .split_once('.')
+        .map_or(0, |(_, fraction)| fraction.len())
+        .max(2);
+    let celsius = format!("{:.*}", decimals, kelvin - 273.15);
+    let celsius = celsius.trim_end_matches('0').trim_end_matches('.');
+    let celsius = if celsius == "-0" { "0" } else { celsius };
+    Some(format!(
+        "Temperatures are in \u{b0}C ({digits} K is {celsius} \u{b0}C)"
+    ))
+}
+
 /// `text` without `unit` at its end, or `None` when it does not end in it.
 fn strip_unit<'a>(text: &'a str, unit: &str) -> Option<&'a str> {
     if unit.len() > 1 && unit.is_ascii() {
@@ -174,5 +211,49 @@ mod tests {
         assert!(close(resolved("100 nF", Capacitance), 100e-9));
         assert!(close(resolved("1e-12F", Capacitance), 1e-12));
         assert_eq!(resolved("1.8 V", Dimensionless), 1.8);
+    }
+
+    /// A temperature is in \u{b0}C: one written in kelvin is kept, and has no
+    /// value but the error saying what it is in \u{b0}C. `27` and `27C` are
+    /// degrees Celsius, and outside a temperature `K` is SPICE's kilo.
+    #[test]
+    fn a_temperature_in_kelvin_is_an_error_that_converts_it() {
+        use DesignVariableQuantity::{Dimensionless, Resistance, Temperature};
+        for (text, expected) in [
+            (
+                "300 K",
+                "Temperatures are in \u{b0}C (300 K is 26.85 \u{b0}C)",
+            ),
+            (
+                "300K",
+                "Temperatures are in \u{b0}C (300 K is 26.85 \u{b0}C)",
+            ),
+            (
+                "300 \u{b0}K",
+                "Temperatures are in \u{b0}C (300 K is 26.85 \u{b0}C)",
+            ),
+            (
+                "77 K",
+                "Temperatures are in \u{b0}C (77 K is -196.15 \u{b0}C)",
+            ),
+            (
+                "273.15K",
+                "Temperatures are in \u{b0}C (273.15 K is 0 \u{b0}C)",
+            ),
+        ] {
+            let variable = DesignVariable::new("TJ", text, Temperature, "", None, false)
+                .unwrap_or_else(|error| panic!("{text} is refused by the store: {error}"));
+            assert_eq!(
+                resolve_design_variables(&[variable]).value(0),
+                Some(&Err(expected.to_owned())),
+                "{text}"
+            );
+        }
+        for text in ["27", "27C", "27 \u{b0}C"] {
+            assert_eq!(resolved(text, Temperature), 27.0, "{text}");
+        }
+        assert_eq!(resolved("300K", Dimensionless), 300e3);
+        assert_eq!(resolved("300 K", Dimensionless), 300e3);
+        assert_eq!(resolved("1K", Resistance), 1e3);
     }
 }

@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use rspice_core::netlist::expr::{Expr, ParamContext, evaluate, parse_expression};
 
 use crate::design_variable::DesignVariable;
+use crate::design_variable_quantity::unit_refusal;
 
 /// Every variable of a plan, resolved.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,6 +68,9 @@ pub fn resolve_design_variables(variables: &[DesignVariable]) -> ResolvedDesignV
     let parsed = variables
         .iter()
         .map(|variable| {
+            if let Some(refusal) = unit_refusal(&variable.expression, variable.quantity) {
+                return Err(refusal);
+            }
             parse_expression(&variable.deck_expression()).map_err(|error| error.to_string())
         })
         .collect::<Vec<_>>();

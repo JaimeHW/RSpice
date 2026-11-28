@@ -360,3 +360,28 @@ fn the_optimizer_tunes_only_a_variable_ticked_tunable() {
         assert!(!error.to_string().contains("Tunable"), "{error}");
     }
 }
+
+/// A temperature written in kelvin is refused by Check, naming the variable
+/// and what its value is in \u{b0}C, so no deck reads it as 300 kilo.
+#[test]
+fn a_temperature_in_kelvin_is_refused_by_check_naming_it() {
+    let mut state = divider_reading_variables();
+    add(
+        &mut state,
+        "W2",
+        "8u",
+        DesignVariableQuantity::Dimensionless,
+    );
+    add(&mut state, "VCM", "0.5", DesignVariableQuantity::Voltage);
+    add(
+        &mut state,
+        "TJ",
+        "300 K",
+        DesignVariableQuantity::Temperature,
+    );
+    let refused = refusal(&mut state);
+    assert!(
+        refused.contains("TJ: Temperatures are in \u{b0}C (300 K is 26.85 \u{b0}C)"),
+        "{refused}"
+    );
+}

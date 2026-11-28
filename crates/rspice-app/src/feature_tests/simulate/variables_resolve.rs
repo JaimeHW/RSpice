@@ -62,3 +62,20 @@ fn a_loop_or_an_unknown_name_is_an_error_on_its_row() {
         );
     }
 }
+
+/// A temperature written in kelvin is an error on its row; `27` and `27C`
+/// beside it are degrees Celsius and resolve. The row's cell is narrower than
+/// the sentence, so the start of it is what is painted.
+#[test]
+fn a_temperature_in_kelvin_is_an_error_on_its_row() {
+    let rendered = page_with(&[
+        ("TJ", "300 K", DesignVariableQuantity::Temperature),
+        ("TA", "27", DesignVariableQuantity::Temperature),
+        ("TB", "27C", DesignVariableQuantity::Temperature),
+    ]);
+    assert_eq!(
+        rendered.matches("Temperatures are in").count(),
+        1,
+        "only the kelvin row is an error:\n{rendered}"
+    );
+}
