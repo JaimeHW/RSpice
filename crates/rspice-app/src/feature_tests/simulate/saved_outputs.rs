@@ -276,10 +276,15 @@ fn divider(e: &mut Engineer) {
 /// evaluating `expression`, under the save choice `policy` or the dialog's
 /// default, and Add output.
 fn add_expression(e: &mut Engineer, name: &str, expression: &str, policy: Option<&str>) {
+    add_output(e, "Derived expression", name, expression, policy);
+}
+
+/// An output of `kind` added from Outputs' Add output dialog.
+fn add_output(e: &mut Engineer, kind: &str, name: &str, expression: &str, policy: Option<&str>) {
     e.setup_page("Outputs & expressions");
     e.press("Add output\u{2026}", Role::Button);
     e.press("Output kind", Role::ComboBox);
-    e.press("Derived expression", Role::ListBoxOption);
+    e.press(kind, Role::ListBoxOption);
     e.press("Name", Role::TextInput);
     e.type_text(name);
     e.press("Source or expression", Role::MultilineTextInput);
@@ -297,4 +302,63 @@ fn add_expression(e: &mut Engineer, name: &str, expression: &str, policy: Option
             .any(|output| output.name == name && output.source_expression == expression)
     });
     assert!(added, "{name} = {expression} is one of the plan's outputs");
+}
+
+/// An output naming a net the design lacks is said on its row and by Check
+/// before any run, and pressing the finding selects that row. An output
+/// naming a net the design holds is neither.
+#[test]
+fn a_name_the_design_lacks_is_flagged_on_its_row_and_by_check() {
+    use crate::workbench::diagnostic_routes::apply_remediation;
+    use rspice_app_state::state::{PreflightRemediation, SimulationPage};
+
+    let mut engineer = Engineer::new_project("names");
+    let e = &mut engineer;
+    divider(e);
+    add_output(e, "Raw voltage / current", "typo", "V(outt)", None);
+    add_output(e, "Raw voltage / current", "vout", "V(out)", None);
+
+    let painted = e.painted();
+    assert!(
+        painted.contains("No net outt in top"),
+        "the row says what the design lacks:\n{painted}"
+    );
+    assert!(!painted.contains("No net out in"), "{painted}");
+
+    let report = rspice_app_runs::workbench::preflight::collect_report(&e.replay.app.state);
+    let findings = report
+        .advisories
+        .iter()
+        .filter(|advisory| advisory.about.0 == "unknown-output-signal")
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(findings.as_slice(), [finding] if finding.message.contains("No net outt in top")),
+        "Check names the one output the design cannot answer: {findings:?}"
+    );
+    assert!(
+        report.blockers.is_empty(),
+        "a warning, not a refusal: {:?}",
+        report.blockers
+    );
+    let remediation = findings[0]
+        .remediation
+        .clone()
+        .expect("the finding has a row");
+    assert_eq!(
+        remediation,
+        PreflightRemediation::SavedOutput {
+            name: "typo".to_owned()
+        }
+    );
+    e.replay.app.state.simulate.selected_saved_output = None;
+    e.replay.app.state.simulate.simulation_page = SimulationPage::Save;
+    apply_remediation(&mut e.replay.app, remediation);
+    assert_eq!(
+        e.replay.app.state.simulate.selected_saved_output.as_deref(),
+        Some("typo")
+    );
+    assert_eq!(
+        e.replay.app.state.simulate.simulation_page,
+        SimulationPage::Outputs
+    );
 }

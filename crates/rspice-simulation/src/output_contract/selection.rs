@@ -488,5 +488,57 @@ fn plotted_design_nets(
     Ok(outputs)
 }
 
+/// What `output` names that the design does not hold, said the way its row
+/// says it: "No net outt in ota2s". `None` when the design holds every node
+/// and part it names, and when it names none a design holds: an expression
+/// over other outputs, or a device quantity such as `@M1[ig]`.
+///
+/// A node is looked for among the nets of the occurrence its path names,
+/// `V(x1.n1)` inside `x1`, and a current's part among the parts there that
+/// carry one, by the name the drawing gives it or the card the deck writes.
+/// Ground is every design's. A name the grammar cannot read is the
+/// expression's own finding and not this one, and with no design listed
+/// there is nothing to look a name up in.
+#[must_use]
+pub fn unknown_signal(
+    output: &SavedOutput,
+    occurrences: &[OccurrenceNets],
+    design: &str,
+) -> Option<String> {
+    if occurrences.is_empty() {
+        return None;
+    }
+    let arguments = rspice_results::calculator::parser::Parser::new(
+        &output.source_expression,
+        rspice_results::spice_value::parse_spice_value_checked,
+    )
+    .try_parse_probe_arguments()
+    .ok()?;
+    arguments.into_iter().find_map(|argument| {
+        let name = argument.name.trim();
+        let target = rspice_vocabulary::hierarchy_path::ProbeTarget::parse(name).ok()?;
+        let Some(index) = occurrence_at(occurrences, &target.scope) else {
+            return Some(format!("No instance {} in {design}", target.scope));
+        };
+        let place = &occurrences[index];
+        let held = if argument.voltage {
+            target.leaf == "0"
+                || place
+                    .nets
+                    .iter()
+                    .any(|net| net.name.eq_ignore_ascii_case(&target.leaf))
+        } else {
+            place.devices.iter().any(|device| {
+                device.drawn.eq_ignore_ascii_case(&target.leaf)
+                    || device.written.eq_ignore_ascii_case(&target.leaf)
+            })
+        };
+        (!held).then(|| {
+            let kind = if argument.voltage { "net" } else { "part" };
+            format!("No {kind} {name} in {design}")
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests;

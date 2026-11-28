@@ -380,3 +380,73 @@ fn occurrences_are_found_by_engine_name_and_list_the_instances_inside() {
     assert_eq!(inside("/X1/X2"), ["/X1/X2/X4"]);
     assert!(inside("/X1/X3").is_empty());
 }
+
+/// An output's node is looked for where its path says it is and its current's
+/// part among the parts there that carry one; what the design lacks is said
+/// the way the output's row says it.
+#[test]
+fn a_name_the_design_lacks_is_said_and_one_it_holds_is_not() {
+    let device = |drawn: &str, written: &str| OccurrenceDevice {
+        drawn: drawn.to_owned(),
+        written: written.to_owned(),
+    };
+    let mut occurrences = root_occurrence(vec![
+        output_test_net("0", true, NetClass::Ground, None),
+        output_test_net("in", true, NetClass::Signal, None),
+        output_test_net("OUT", true, NetClass::Signal, None),
+    ]);
+    occurrences[0].devices = std::sync::Arc::new(vec![device("C4", "RC4")]);
+    let mut block = instance_occurrence(
+        "/X1",
+        vec![output_test_net("n1", true, NetClass::Signal, None)],
+    );
+    block.devices = std::sync::Arc::new(vec![device("R1", "R1")]);
+    occurrences.push(block);
+    let unknown = |kind: SavedOutputKind, expression: &str| {
+        let output = SavedOutput::new(
+            kind,
+            "probe",
+            expression,
+            SavedOutputCompatibility::AllCompatibleAnalyses,
+            SavedOutputPolicy::EveryAcceptedPoint,
+            SavedOutputStreaming::StoreOnly,
+        )
+        .expect("a valid output");
+        unknown_signal(&output, &occurrences, "ota2s")
+    };
+    let raw = SavedOutputKind::RawVoltageOrCurrent;
+    let expression = SavedOutputKind::DerivedExpression;
+
+    for held in [
+        "V(out)",
+        "V(in,0)",
+        "V(x1.n1)",
+        "V(/X1/n1)",
+        "I(C4)",
+        "I(RC4)",
+        "I(x1.r1)",
+    ] {
+        assert_eq!(unknown(raw, held), None, "{held} is the design's");
+    }
+    assert_eq!(unknown(expression, "db(V(out)/V(in))"), None);
+    assert_eq!(
+        unknown(raw, "V(outt)").as_deref(),
+        Some("No net outt in ota2s")
+    );
+    assert_eq!(
+        unknown(raw, "V(x1.n2)").as_deref(),
+        Some("No net x1.n2 in ota2s")
+    );
+    assert_eq!(
+        unknown(raw, "I(R9)").as_deref(),
+        Some("No part R9 in ota2s")
+    );
+    assert_eq!(
+        unknown(expression, "db(V(outt)/V(in))").as_deref(),
+        Some("No net outt in ota2s")
+    );
+    assert!(
+        unknown(raw, "V(x9.n1)").is_some_and(|reason| reason.starts_with("No instance ")),
+        "an instance the design lacks is said"
+    );
+}

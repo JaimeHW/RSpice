@@ -194,6 +194,19 @@ fn registry(
         .run_controller
         .saved_outputs_preflight(cx.model, outputs);
     let query = cx.state.saved_output_filter.clone();
+    // A name the design lacks is said on its row, ahead of what the analyses
+    // make of the output: the run goes on and finds nothing under it.
+    let occurrences = cx.model.simulation_occurrence_nets().ok();
+    let design = cx.model.plan_root_reference().cell;
+    let unknown = |output: &SavedOutput| {
+        occurrences.as_deref().and_then(|occurrences| {
+            rspice_simulation::output_contract::selection::unknown_signal(
+                output,
+                occurrences,
+                &design,
+            )
+        })
+    };
     // Which group holds each output, and what it will cost. Both were readable
     // only after selecting a row, so the registry could not be scanned for the
     // one output that dominates the forecast or for the one that landed in the
@@ -237,7 +250,10 @@ fn registry(
         .iter()
         .enumerate()
         .map(|(index, output)| {
-            let (status, status_tone) = status_cell(reports.get(index));
+            let (status, status_tone) = unknown(output).map_or_else(
+                || status_cell(reports.get(index)),
+                |reason| (reason, Tone::Warn),
+            );
             let group = group_name(index);
             let (size, size_tone) = size_cell(index, output);
             // Which enabled analyses would write this output, from the
@@ -398,10 +414,8 @@ fn registry(
             }
             card_note(
                 ui,
-                "Status is resolved against the elaborated design, not against the text: an expression \
-             that parses but names a node the design does not have is reported as unresolved here \
-             rather than failing after dispatch. The filter is a view of this registry and nothing \
-             more: it hides rows, never outputs, and a run captures every one the plan holds.",
+                "The filter is a view of this registry and nothing more: it hides rows, never \
+             outputs, and a run captures every one the plan holds.",
             );
         },
     );

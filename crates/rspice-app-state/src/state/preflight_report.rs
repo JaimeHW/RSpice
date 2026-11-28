@@ -109,6 +109,11 @@ pub enum PreflightRemediation {
         /// acceptance settings.
         measurement: Option<String>,
     },
+    /// The Outputs page, with the saved output a finding names selected, by
+    /// the name that selects its row.
+    SavedOutput {
+        name: String,
+    },
 }
 
 /// An object on one sheet, named the way the sheet names it.

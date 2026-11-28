@@ -144,6 +144,31 @@ impl Engineer {
         self.step(vec![button(at, false)])
     }
 
+    /// The text one frame paints, a run of text a line: what a reader sees,
+    /// including the cells no control names.
+    pub(super) fn painted(&mut self) -> String {
+        fn collect(shape: &egui::epaint::Shape, painted: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    painted.push_str(&text.galley.job.text);
+                    painted.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, painted);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let output = without_audit(|| self.replay.frame(Vec::new()));
+        let mut painted = String::new();
+        for clipped in &output.shapes {
+            collect(&clipped.shape, &mut painted);
+        }
+        painted
+    }
+
     pub(super) fn key(&mut self, key: Key, modifiers: Modifiers) -> &[Control] {
         self.step(stroke(key, modifiers).into())
     }

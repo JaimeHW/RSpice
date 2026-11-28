@@ -974,6 +974,7 @@ fn collect(state: &impl RunHost) -> PreflightReport {
     }
 
     advisories.extend(temperature_validity_advisories(state.model()));
+    advisories.extend(unknown_output_signals(state.model()));
     let (unmeasured, acceptance) = specification_findings(state.model());
     blockers.extend(unmeasured);
     advisories.extend(acceptance);
@@ -992,6 +993,40 @@ fn collect(state: &impl RunHost) -> PreflightReport {
         advisories,
         prepared: None,
     }
+}
+
+/// Each saved output that names a node or part the design does not hold,
+/// opening its row. The run goes on and writes what that output can find, so
+/// it is said rather than refused.
+fn unknown_output_signals(model: &Model) -> Vec<PreflightAdvisory> {
+    let Ok(plan) = model.sim_setup.stable_analysis_plan() else {
+        return Vec::new();
+    };
+    let Some(payload) = model.workspace.content.plan_data(plan.id()) else {
+        return Vec::new();
+    };
+    let Ok(occurrences) = model.simulation_occurrence_nets() else {
+        return Vec::new();
+    };
+    let design = model.plan_root_reference().cell;
+    payload
+        .saved_outputs
+        .iter()
+        .filter_map(|output| {
+            let reason = rspice_simulation::output_contract::selection::unknown_signal(
+                output,
+                &occurrences,
+                &design,
+            )?;
+            Some(PreflightAdvisory {
+                message: format!("Output {}: {reason}", output.name),
+                remediation: Some(PreflightRemediation::SavedOutput {
+                    name: output.name.clone(),
+                }),
+                about: ("unknown-output-signal", output.id.to_string()),
+            })
+        })
+        .collect()
 }
 
 /// Corners the run set asks to run outside the range the PDK qualified them for.

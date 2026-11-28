@@ -310,6 +310,12 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
             }
             open_specification(app, measurement);
         }
+        // The output's row, selected before the page opens so its first
+        // frame shows it.
+        PreflightRemediation::SavedOutput { name } => {
+            app.state.simulate.selected_saved_output = Some(name);
+            app.execute_command_key(SimulateCommand::Page(SimulationPage::Outputs).key());
+        }
         // The object an engine refusal named, in the view that draws it. The
         // view opens first so the object is looked up in its own drawing, and
         // one that drawing no longer holds is said rather than selected.
