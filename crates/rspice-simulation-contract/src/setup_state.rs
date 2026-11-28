@@ -212,7 +212,6 @@ impl SimulationSetup {
             process,
             temperature_celsius,
         };
-        self.options.temp = temperature_celsius;
         self.op.ensure_initialized();
         self.op.temperature = temperature_celsius.to_string();
         Ok(())
@@ -237,13 +236,17 @@ impl SimulationSetup {
         }
     }
 
-    /// Commit globally validated options while keeping the workbench reference
-    /// point and OP editor aligned with the temperature the solver will use.
+    /// Commit globally validated options.
     pub fn commit_options(&mut self, options: &crate::options::SimulationOptions) {
         self.options = options.clone();
-        self.reference_pvt.temperature_celsius = options.temp;
-        self.op.ensure_initialized();
-        self.op.temperature = options.temp.to_string();
+    }
+
+    /// The plan's `.OPTIONS` card: its solver options at its one reference
+    /// temperature.
+    #[must_use]
+    pub fn options_block(&self) -> String {
+        self.options
+            .to_spice_options(self.reference_pvt.temperature_celsius)
     }
 
     pub fn create_plan(

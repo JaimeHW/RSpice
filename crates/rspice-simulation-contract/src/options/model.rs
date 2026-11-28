@@ -113,7 +113,6 @@ pub struct SimulationOptions {
     /// The run's step ceiling. `None` states none, so each transient steps at
     /// up to its own step time.
     pub max_timestep: Option<f64>,
-    pub temp: f64,
     pub tnom: f64,
 }
 
@@ -185,7 +184,6 @@ struct PersistedSimulationOptions {
     bypass_abstol: f64,
     min_timestep: f64,
     max_timestep: Option<f64>,
-    temp: f64,
     tnom: f64,
 }
 
@@ -225,7 +223,6 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
             bypass_abstol: fields.bypass_abstol,
             min_timestep: fields.min_timestep,
             max_timestep: fields.max_timestep,
-            temp: fields.temp,
             tnom: fields.tnom,
         }
     }
@@ -267,7 +264,6 @@ impl Default for SimulationOptions {
             bypass_abstol: 1e-6,
             min_timestep: 1e-15,
             max_timestep: None,
-            temp: 27.0,
             tnom: 27.0,
         }
     }
@@ -400,10 +396,6 @@ impl SimulationOptions {
             .map_or_else(|| "Custom".to_owned(), str::to_owned)
     }
 
-    pub fn temp_kelvin(&self) -> f64 {
-        self.temp + 273.15
-    }
-
     fn core_damping_strategy(&self) -> rspice_core::engine::DampingStrategy {
         match self.damping {
             DampingStrategy::None => rspice_core::engine::DampingStrategy::None,
@@ -418,7 +410,7 @@ impl SimulationOptions {
 
     fn simulation_config_overrides(&self) -> rspice_core::SimulationConfigOverrides {
         rspice_core::SimulationConfigOverrides {
-            temperature_kelvin: Some(self.temp_kelvin()),
+            temperature_kelvin: None,
             max_iterations: Some(self.itl1),
             min_timestep: Some(self.min_timestep),
             max_timestep: self.max_timestep,
@@ -556,10 +548,8 @@ impl SimulationOptions {
         if let Some(max) = self.max_timestep.filter(|max| self.min_timestep >= *max) {
             errors.push(ValidationError::TimestepOrder(self.min_timestep, max));
         }
-        for (name, value) in [("temp", self.temp), ("tnom", self.tnom)] {
-            if !value.is_finite() || value <= -273.15 {
-                errors.push(ValidationError::InvalidTemperature(name, value));
-            }
+        if !self.tnom.is_finite() || self.tnom <= -273.15 {
+            errors.push(ValidationError::InvalidTemperature("tnom", self.tnom));
         }
         // A block is named by a simple Verilog-AMS identifier. Anything else
         // names no block a library can declare, and could break the card.
@@ -599,7 +589,10 @@ impl SimulationOptions {
     /// Export as SPICE .options string without rounding authored values.
     /// Exact default comparisons also preserve changes smaller than a
     /// display tolerance; these bytes are solver input.
-    pub fn to_spice_options(&self) -> String {
+    ///
+    /// The temperature is the plan's reference temperature, which the run
+    /// set stores; the card states it as `TEMP` unless it is the engine's own.
+    pub fn to_spice_options(&self, temperature_celsius: f64) -> String {
         let mut lines = vec![".OPTIONS".to_string()];
         let default = Self::default();
 
@@ -657,8 +650,8 @@ impl SimulationOptions {
         if self.method != default.method {
             lines.push(format!("+ METHOD={}", self.method.spice_name()));
         }
-        if self.temp != default.temp {
-            lines.push(format!("+ TEMP={}", self.temp));
+        if temperature_celsius != crate::run_set::ReferencePoint::default().temperature_celsius {
+            lines.push(format!("+ TEMP={temperature_celsius}"));
         }
         if self.tnom != default.tnom {
             lines.push(format!("+ TNOM={}", self.tnom));

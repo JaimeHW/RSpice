@@ -28,7 +28,9 @@ pub(crate) fn stated_facts(decks: &[&str]) -> RunFacts {
         let mut defaults = RunFacts::default();
         read_stated(
             &mut defaults,
-            &rspice_simulation_contract::options::SimulationOptions::default().to_spice_options(),
+            &rspice_simulation_contract::options::SimulationOptions::default().to_spice_options(
+                rspice_simulation_contract::run_set::ReferencePoint::default().temperature_celsius,
+            ),
         );
         defaults.options
     };
@@ -268,7 +270,7 @@ mod tests {
             reltol: 1e-4,
             ..Default::default()
         };
-        let facts = stated_facts(&[&options.to_spice_options()]);
+        let facts = stated_facts(&[&options.to_spice_options(27.0)]);
         assert_eq!(facts.options.len(), 1, "{:?}", facts.options);
         assert_eq!(facts.options[0].name, "RELTOL");
     }

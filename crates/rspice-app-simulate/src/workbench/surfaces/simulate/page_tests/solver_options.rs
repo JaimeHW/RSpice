@@ -31,7 +31,7 @@ fn a_solver_preset_leaves_the_temperature_tnom_and_seed_alone() {
     assert_eq!(options.preset_name(), Some("Accurate"));
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "preset\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n",
-        options,
+        &harness.model.sim_setup.options_block(),
     );
     let lines: Vec<&str> = deck.lines().map(str::trim).collect();
     for line in ["+ TEMP=85", "+ TNOM=25", "+ SEED=42", "+ RELTOL=1e-4"] {
@@ -54,7 +54,7 @@ fn the_current_tolerance_is_one_stored_number_the_engine_reads() {
     assert_eq!(options.iabstol, 1e-10);
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "current tolerance\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n",
-        options,
+        &harness.model.sim_setup.options_block(),
     );
     let stated: Vec<&str> = deck
         .lines()
@@ -85,7 +85,7 @@ fn a_plan_states_no_step_ceiling_until_one_is_typed() {
 
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         DECK,
-        &harness.model.sim_setup.options,
+        &harness.model.sim_setup.options_block(),
     );
     assert!(!deck.contains("MAXTIMESTEP"), "{deck}");
     let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
@@ -100,7 +100,7 @@ fn a_plan_states_no_step_ceiling_until_one_is_typed() {
     page_solver::commit_draft(&mut harness.cx());
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         DECK,
-        &harness.model.sim_setup.options,
+        &harness.model.sim_setup.options_block(),
     );
     assert!(
         deck.lines().any(|line| line.trim() == "+ MAXTIMESTEP=2e-3"),
@@ -113,11 +113,53 @@ fn a_plan_states_no_step_ceiling_until_one_is_typed() {
     );
 }
 
+/// A plan's temperature is one stored value, the run set's reference point:
+/// the options record keeps no copy for an edit to drift, and the deck states
+/// the reference.
+#[test]
+fn the_plan_temperature_is_the_run_sets_reference_alone() {
+    let mut harness = SimulateTestHost::harness();
+    crate::workbench::simulate::chrome::commit_reference_pvt(
+        &mut harness.cx(),
+        crate::product::ProcessCorner::TT,
+        85.0,
+    )
+    .expect("the run set takes 85 degrees");
+    harness.model.sim_setup.session.options_draft.itl1 = "73".to_owned();
+    page_solver::commit_draft(&mut harness.cx());
+
+    let stored = serde_json::to_value(&harness.model.sim_setup.options).unwrap();
+    assert!(stored.get("temp").is_none(), "{stored}");
+    assert_eq!(
+        harness.model.sim_setup.reference_pvt.temperature_celsius,
+        85.0
+    );
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
+        "temperature\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n",
+        &harness.model.sim_setup.options_block(),
+    );
+    assert!(
+        deck.lines().any(|line| line.trim() == "+ TEMP=85"),
+        "{deck}"
+    );
+    let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    assert_eq!(
+        rspice_simulation::netlist_preparation::build_engine_config(&parsed, None).temperature,
+        85.0 + 273.15
+    );
+}
+
 #[test]
 fn solver_options_iteration_edit_preserves_precise_temperatures() {
+    const REFERENCE: f64 = 27.123_456_789;
     let mut harness = SimulateTestHost::harness();
+    crate::workbench::simulate::chrome::commit_reference_pvt(
+        &mut harness.cx(),
+        crate::product::ProcessCorner::TT,
+        REFERENCE,
+    )
+    .expect("the run set takes a precise reference");
     let options = SimulationOptions {
-        temp: 27.123_456_789,
         tnom: -40.123_456_789,
         ..harness.model.sim_setup.options.clone()
     };
@@ -143,8 +185,17 @@ fn solver_options_iteration_edit_preserves_precise_temperatures() {
             .parse::<f64>()
             .unwrap()
             .to_bits(),
-        expected.temp.to_bits(),
+        REFERENCE.to_bits(),
         "the operating-point editor must retain the precise reference temperature"
+    );
+    assert_eq!(
+        harness
+            .model
+            .sim_setup
+            .reference_pvt
+            .temperature_celsius
+            .to_bits(),
+        REFERENCE.to_bits()
     );
 }
 
@@ -248,7 +299,7 @@ fn simulation_compatibility_commits_through_the_solver_transaction() {
     );
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "solver choice\nV1 in 0 1\nR1 in 0 1k\n.end\n",
-        &harness.model.sim_setup.options,
+        &harness.model.sim_setup.options_block(),
     );
     let parsed = rspice_core::Netlist::parse(&deck).unwrap();
     assert_eq!(

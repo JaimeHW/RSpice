@@ -827,7 +827,7 @@ fn dispatched_setup_digest(
         model.workspace.content.simulation_root_reference().key(),
         scope.configured_content()?,
         model.active_plan_revision(),
-        model.sim_setup.options.to_spice_options(),
+        model.sim_setup.options_block(),
         format!("{:?}", model.sim_setup.reference_pvt.process),
         model.sim_setup.reference_pvt.temperature_celsius.to_bits(),
         model.model_library_manager.design_inspection_catalog_key(),

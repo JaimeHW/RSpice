@@ -76,23 +76,15 @@ fn a_created_plan_inherits_exactly_what_its_route_committed() {
         Some("TT"),
         "the inherited model closure is the previous active plan's"
     );
-    assert_eq!(
-        setup.options.temp, -40.0,
-        "the chosen reference temperature owns the solver's TEMP option, so it \
-         has to survive an inherited options block written at another one"
+    assert!(
+        setup.options_block().contains("+ TEMP=-40"),
+        "the chosen reference temperature is the one the deck states, whatever \
+         temperature the inherited options block was written at"
     );
     // The options editor's draft is rebuilt from the options actually installed.
     // `create_plan` had built it from the defaults it minted, so without the
     // rebuild the Solver page would have opened showing the engine defaults over
-    // an inherited options block. The two are asserted by value rather than by
-    // string, because `set_reference_pvt` and `OptionsDialogState::from_options`
-    // format a temperature differently — "-40" against "-40.0" — and pinning
-    // either spelling here would assert a formatter instead of the invariant.
-    assert_eq!(
-        setup.session.options_draft.temp.parse::<f64>(),
-        Ok(-40.0),
-        "the draft states the plan's reference temperature"
-    );
+    // an inherited options block.
     let rebuilt = crate::simulation::plan::OptionsDialogState::from_options(&setup.options);
     assert_eq!(
         setup.session.options_draft.reltol, rebuilt.reltol,

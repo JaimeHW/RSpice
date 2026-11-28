@@ -267,7 +267,7 @@ fn differences(expected: &Value, found: &Value, path: &str, out: &mut Vec<String
 /// The reference process and temperature the setup states.
 fn reference_pvt(app: &RSpiceApp) -> String {
     let setup = &app.state.model.sim_setup;
-    format!("{:?}", (setup.reference_pvt, setup.options.temp))
+    format!("{:?}", setup.reference_pvt)
 }
 
 /// Take an earlier setup step, then `operation`. The operation is one step

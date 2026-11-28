@@ -472,7 +472,7 @@ where
         &root_reference,
         crate::netlist_gen::PlanStatements {
             design_variables: &plan_payload.design_variables,
-            options_block: &sim_setup.options.to_spice_options(),
+            options_block: &sim_setup.options_block(),
             temperature: sim_setup.plan_states_temperature(),
         },
     ));
@@ -489,7 +489,7 @@ where
     // plan's variables and the sheet's own cards, then the plan's options.
     let stated = super::snapshot::stated_facts(&[
         &generated_netlist,
-        &inputs.analysis.sim_setup.options.to_spice_options(),
+        &inputs.analysis.sim_setup.options_block(),
     ]);
 
     PreparationError::check_abort(abort)?;
@@ -515,7 +515,7 @@ where
     }
     netlist = crate::analysis_preparation::apply_simulation_options_to_netlist(
         &netlist,
-        &inputs.analysis.sim_setup.options,
+        &inputs.analysis.sim_setup.options_block(),
     );
     let (expanded_netlist, sealed_source_dependencies) =
         expand_generated_dependencies_with_sealed_sources(

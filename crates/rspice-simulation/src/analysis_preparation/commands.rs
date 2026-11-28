@@ -724,18 +724,15 @@ pub fn build_dc_mismatch_command(spec: &AnalysisSpec) -> Result<String, String> 
     Ok(command)
 }
 
-/// Inject non-default UI simulation options before `.end`.
-pub fn apply_simulation_options_to_netlist(
-    netlist: &str,
-    options: &rspice_simulation_contract::options::SimulationOptions,
-) -> String {
-    let options_block = options.to_spice_options();
+/// Inject a plan's `.OPTIONS` card (`SimulationSetup::options_block`)
+/// before `.end`.
+pub fn apply_simulation_options_to_netlist(netlist: &str, options_block: &str) -> String {
     // A lone `.OPTIONS` header states nothing, so an all-default option set
     // leaves the deck alone rather than adding an empty card.
     if options_block.lines().count() <= 1 {
         return netlist.to_string();
     }
-    splice_before_terminal_end_card(netlist, &options_block)
+    splice_before_terminal_end_card(netlist, options_block)
 }
 
 /// Inject the exact model sources selected for the nominal/reference PVT
@@ -1053,7 +1050,8 @@ mod tests {
                     reltol: 0.012345,
                     ..Default::default()
                 };
-                let configured = apply_simulation_options_to_netlist(&deck, &options);
+                let configured =
+                    apply_simulation_options_to_netlist(&deck, &options.to_spice_options(27.0));
                 let bound = apply_reference_model_bindings_to_netlist(
                     &configured,
                     &[".model sealed D (IS=1e-12)".to_owned()],
@@ -1083,7 +1081,8 @@ mod tests {
             let deck = format!("annotated terminal\nR1 1 0 1k\n{terminal}\n");
             let with_options = apply_simulation_options_to_netlist(
                 &deck,
-                &rspice_simulation_contract::options::SimulationOptions::fast(),
+                &rspice_simulation_contract::options::SimulationOptions::fast()
+                    .to_spice_options(27.0),
             );
             let option = with_options.find(".OPTIONS").expect("options inserted");
             let end = with_options.find(terminal).expect("terminal retained");

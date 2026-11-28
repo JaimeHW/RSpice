@@ -1118,12 +1118,11 @@ fn commit_plan(
             )),
         }
     }
-    let mut options = plan.options.clone();
+    let options = plan.options.clone();
     let mut reference_pvt =
         rspice_app_state::workbench::app_state::sim_setup::ReferencePvtPoint::default();
     if let Some(temperature) = plan.temperature {
         reference_pvt.temperature_celsius = temperature;
-        options.temp = temperature;
     }
     let payload = rspice_app_state::state::SimulationPlanPayload {
         design_variables: variables,

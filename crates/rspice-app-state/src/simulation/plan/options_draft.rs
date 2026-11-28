@@ -58,7 +58,6 @@ pub struct OptionsDialogState {
     pub bypass_abstol: String,
     pub min_timestep: String,
     pub max_timestep: String,
-    pub temp: String,
     pub tnom: String,
 }
 
@@ -124,7 +123,6 @@ impl OptionsDialogState {
             bypass_abstol: format_si_value(opts.bypass_abstol),
             min_timestep: format_si_value(opts.min_timestep),
             max_timestep: opts.max_timestep.map(format_si_value).unwrap_or_default(),
-            temp: opts.temp.to_string(),
             tnom: opts.tnom.to_string(),
         }
     }
@@ -169,7 +167,6 @@ impl OptionsDialogState {
                 }
             }
         };
-        let temp = parse_float_field(&self.temp, "temp", 27.0, &mut errors);
         let tnom = parse_float_field(&self.tnom, "tnom", 27.0, &mut errors);
 
         if !errors.is_empty() {
@@ -210,7 +207,6 @@ impl OptionsDialogState {
             bypass_abstol,
             min_timestep,
             max_timestep,
-            temp,
             tnom,
         })
     }

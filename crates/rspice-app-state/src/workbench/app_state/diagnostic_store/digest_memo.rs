@@ -119,7 +119,7 @@ impl DigestKey {
                     .iter()
                     .any(|run| run.id == *run_sequence),
                 plan: model.active_plan_revision(),
-                options: model.sim_setup.options.to_spice_options(),
+                options: model.sim_setup.options_block(),
                 process: format!("{:?}", model.sim_setup.reference_pvt.process),
                 temperature: model.sim_setup.reference_pvt.temperature_celsius.to_bits(),
                 models: model.model_library_manager.design_inspection_catalog_key(),
@@ -129,7 +129,7 @@ impl DigestKey {
                 design: design()?,
                 retained: false,
                 plan: model.active_plan_revision(),
-                options: model.sim_setup.options.to_spice_options(),
+                options: model.sim_setup.options_block(),
                 process: format!("{:?}", model.sim_setup.reference_pvt.process),
                 temperature: model.sim_setup.reference_pvt.temperature_celsius.to_bits(),
                 models: model.model_library_manager.design_inspection_catalog_key(),

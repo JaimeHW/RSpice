@@ -76,12 +76,10 @@ impl<'de> serde::Deserialize<'de> for SimSetupState {
 impl SimSetupState {
     /// Fresh setup with the conventional default transient run set.
     pub fn new() -> Self {
-        let mut setup = Self {
+        Self {
             setup: rspice_simulation_contract::setup_state::SimulationSetup::new(),
             session: SimSetupEditorSession::default(),
-        };
-        setup.session.options_draft.temp = setup.reference_pvt.temperature_celsius.to_string();
-        setup
+        }
     }
 
     /// Create a fresh project-owned plan using the user's retained numerical
@@ -92,9 +90,7 @@ impl SimSetupState {
     ) -> Self {
         let mut setup = Self::new();
         setup.save_policy.retained_dataset_limit = preferences.runs_kept();
-        let mut options = Self::preferred_solver_options(preferences);
-        options.temp = setup.reference_pvt.temperature_celsius;
-        setup.options = options;
+        setup.options = Self::preferred_solver_options(preferences);
         setup.session.options_draft =
             crate::simulation::plan::OptionsDialogState::from_options(&setup.options);
         setup
@@ -125,17 +121,6 @@ impl SimSetupState {
         self.session.palette_query.clear();
         self.session.palette_active = 0;
         self.session.palette_scroll_to_active = false;
-    }
-
-    /// Select nominal PVT and update the session's numerical-options draft.
-    pub fn set_reference_pvt(
-        &mut self,
-        process: crate::product::ProcessCorner,
-        temperature_celsius: f64,
-    ) -> Result<(), String> {
-        self.setup.set_reference_pvt(process, temperature_celsius)?;
-        self.session.options_draft.temp = temperature_celsius.to_string();
-        Ok(())
     }
 
     /// One-line mono summary of an analysis configuration, for list rows.
@@ -472,16 +457,13 @@ mod tests {
                 setup.reference_pvt.temperature_celsius.to_bits(),
                 temperature.to_bits()
             );
-            assert_eq!(setup.options.temp.to_bits(), temperature.to_bits());
-            assert_eq!(
+            assert!(
                 setup
-                    .session
-                    .options_draft
-                    .temp
-                    .parse::<f64>()
-                    .unwrap()
-                    .to_bits(),
-                temperature.to_bits()
+                    .options_block()
+                    .lines()
+                    .any(|line| line == format!("+ TEMP={temperature}")),
+                "{}",
+                setup.options_block()
             );
             assert_eq!(
                 setup.op.temperature.parse::<f64>().unwrap().to_bits(),
@@ -500,8 +482,7 @@ mod tests {
 
         assert_eq!(setup.reference_pvt.process, ProcessCorner::FF);
         assert_eq!(setup.reference_pvt.temperature_celsius, -40.0);
-        assert_eq!(setup.options.temp, -40.0);
-        assert_eq!(setup.session.options_draft.temp, "-40");
+        assert!(setup.options_block().contains("+ TEMP=-40"));
         assert_eq!(setup.op.temperature, "-40");
     }
 
@@ -516,7 +497,6 @@ mod tests {
 
         assert!(error.contains("absolute zero"));
         assert_eq!(setup.reference_pvt, before);
-        assert_eq!(setup.options.temp, before.temperature_celsius);
     }
 
     #[test]

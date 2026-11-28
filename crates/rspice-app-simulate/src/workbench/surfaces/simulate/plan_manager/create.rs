@@ -742,11 +742,6 @@ mod tests {
             "the inherited solver options are not what the plan stores"
         );
         assert_eq!(
-            stored.options.temp, CHOSEN_POINT.temperature_celsius,
-            "the reference temperature owns the solver TEMP option, so it has to \
-             survive both the inherited options block and being retired"
-        );
-        assert_eq!(
             stored.save_policy.retained_dataset_limit, inherited_policy.retained_dataset_limit,
             "the inherited retention policy is not what the plan stores"
         );
@@ -808,7 +803,7 @@ mod tests {
             }
             // Whatever was decided about the options, the chosen temperature is
             // the plan's: it owns TEMP either way.
-            assert_eq!(setup.options.temp, CHOSEN_POINT.temperature_celsius);
+            assert_eq!(setup.reference_pvt, CHOSEN_POINT);
 
             if policy {
                 assert_eq!(
@@ -844,7 +839,7 @@ mod tests {
         let setup = &harness.model.sim_setup;
         assert_eq!(setup.options.reltol, SimulationOptions::accurate().reltol);
         assert_ne!(setup.options.reltol, SimulationOptions::default().reltol);
-        assert_eq!(setup.options.temp, CHOSEN_POINT.temperature_celsius);
+        assert_eq!(setup.reference_pvt, CHOSEN_POINT);
     }
 
     /// The exclusion the surface states: no result reference is copied, and the

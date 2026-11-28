@@ -233,7 +233,6 @@ fn the_solver_page_carries_the_options_that_had_no_other_editor() {
         "Bypass relative bound",
         "Bypass voltage floor",
         "Temperature reference",
-        "Simulation temperature · TEMP",
         "Model reference temperature · TNOM",
     ] {
         assert!(

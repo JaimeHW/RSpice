@@ -111,7 +111,6 @@ impl SimulationSetupDocument {
         candidate.design_configuration = DesignConfiguration::UsedForRuns;
         candidate.save_policy = crate::output_policy::SimulationSavePolicy::default();
         candidate.options = SimulationOptions::default();
-        candidate.options.temp = candidate.reference_pvt.temperature_celsius;
         candidate.validate_plan_catalog()?;
         *self = candidate;
         Ok(id)
@@ -310,15 +309,11 @@ impl SimulationSetupDocument {
         } else {
             crate::output_policy::SimulationSavePolicy::default()
         };
-        let mut cloned_options = if contents.copy_advanced_options {
+        let cloned_options = if contents.copy_advanced_options {
             self.options.clone()
         } else {
             SimulationOptions::default()
         };
-        // Reference temperature is owned by the PVT domain and must agree
-        // with the exact value the solver consumes, regardless of whether the
-        // rest of the advanced options were copied.
-        cloned_options.temp = cloned_reference_pvt.temperature_celsius;
 
         let mut candidate = self.clone();
         let stored = take_active_plan_for_storage(&mut candidate)?;

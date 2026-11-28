@@ -999,18 +999,16 @@ fn matrix_policy(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 
 // --------------------------------------------------------- temperature reference
 
-/// The two temperatures a run resolves against, and which surface owns each.
+/// The model reference temperature.
 ///
-/// TEMP is the run set's: it is one axis of the declared run space, so a plan
-/// that sweeps temperature has no single value for this page to edit and the
-/// card mirrors what the reference point resolves to. TNOM is the plan's, and
-/// this is its only editor: it says nothing about where the circuit runs, only
-/// about how every model card without its own `TNOM=` is to be read.
+/// TEMP is the run set's and is edited there, on its reference point and its
+/// temperature axis. TNOM is the plan's, and this is its only editor: it says
+/// nothing about where the circuit runs, only about how every model card
+/// without its own `TNOM=` is to be read.
 ///
 /// Returns whether the draft was released and is ready to commit — the card
 /// edits the setup it is given and does not reach the rest of the application.
 fn temperature_reference(ui: &mut Ui, setup: &mut SimSetupState) -> bool {
-    let reference = format!("{:.1} °C · owned by the run space", setup.options.temp);
     let mut release = false;
     card(
         ui,
@@ -1018,7 +1016,6 @@ fn temperature_reference(ui: &mut Ui, setup: &mut SimSetupState) -> bool {
         Some(("model parameters vs. operating point", Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
-                rule_row(ui, "Simulation temperature · TEMP", reference.as_str());
                 let mut tnom = None;
                 field_pair(
                     ui,
@@ -1348,7 +1345,10 @@ pub(super) fn plan_policy_rows(model: &Model) -> Vec<PolicyRow> {
         ]);
     }
     let solver = options.solver.display_name().to_owned();
-    let temperature = format!("{:.1} °C", options.temp);
+    let temperature = format!(
+        "{:.1} °C",
+        model.sim_setup.reference_pvt.temperature_celsius
+    );
     rows.extend([
         PolicyRow {
             analysis: "Every analysis".to_owned(),

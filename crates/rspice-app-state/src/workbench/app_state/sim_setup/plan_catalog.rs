@@ -84,7 +84,7 @@ mod tests {
 
         assert!(setup.analysis_plan.as_ref().unwrap().instances().is_empty());
         assert_eq!(setup.options.reltol, SimulationOptions::default().reltol);
-        assert_eq!(setup.options.temp, 125.0);
+        assert_eq!(setup.reference_pvt.temperature_celsius, 125.0);
         assert_eq!(
             setup.reference_pvt.process,
             crate::product::ProcessCorner::SS

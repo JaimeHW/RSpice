@@ -421,7 +421,10 @@ fn a_temperature_typed_in_the_popover_is_the_one_the_next_run_uses() {
 
     let setup = &user.app.state.model.sim_setup;
     assert_eq!(setup.reference_pvt.temperature_celsius, 85.0);
-    assert_eq!(setup.options.temp, 85.0, "the temperature the run states");
+    assert!(
+        setup.options_block().contains("+ TEMP=85"),
+        "the temperature the run states"
+    );
     assert!(prompt(&user).starts_with("Reference PVT changed to "));
     assert!(prompt(&user).ends_with("85 \u{b0}C."), "{}", prompt(&user));
     assert!(
@@ -513,10 +516,6 @@ fn a_refused_temperature_leaves_the_reference_as_it_was() {
 
     type_temperature(&mut user, "-300");
     assert_eq!(user.app.state.model.sim_setup.reference_pvt, before);
-    assert_eq!(
-        user.app.state.model.sim_setup.options.temp,
-        before.temperature_celsius
-    );
     assert!(
         prompt(&user).starts_with("Reference PVT was not changed: ")
             && prompt(&user).contains("absolute zero"),

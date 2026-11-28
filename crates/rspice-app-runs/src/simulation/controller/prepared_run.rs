@@ -767,7 +767,7 @@ impl SimulationController {
             &root_reference,
             rspice_simulation::netlist_gen::PlanStatements {
                 design_variables: &payload.design_variables,
-                options_block: &options.to_spice_options(),
+                options_block: &model.sim_setup.options_block(),
                 temperature: model.sim_setup.plan_states_temperature(),
             },
         ));
@@ -827,7 +827,7 @@ impl SimulationController {
         }
         let source = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
             &source,
-            &model.sim_setup.options,
+            &model.sim_setup.options_block(),
         );
         Ok(DesignRunDeck {
             source,
@@ -1394,7 +1394,7 @@ pub fn design_inspection_input_digest(model: &Model) -> crate::product::ContentD
         plan_identity,
         model.sim_setup.reference_pvt.process,
         model.sim_setup.reference_pvt.temperature_celsius,
-        model.sim_setup.options.to_spice_options(),
+        model.sim_setup.options_block(),
         model_library_identity,
     );
     content_digest(

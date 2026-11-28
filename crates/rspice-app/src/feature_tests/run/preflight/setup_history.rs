@@ -465,7 +465,7 @@ fn a_run_set_axis_added_on_its_page_is_one_step_put_back_exactly() {
 /// state with them.
 fn reference_pvt(app: &RSpiceApp) -> String {
     let setup = &app.state.model.sim_setup;
-    format!("{:?}", (setup.reference_pvt, setup.options.temp))
+    format!("{:?}", setup.reference_pvt)
 }
 
 /// A reference PVT chosen is one step: Undo puts the process and temperature

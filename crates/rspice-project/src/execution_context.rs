@@ -386,12 +386,6 @@ fn validate_reference_pvt(plan: &SimulationSetup) -> Result<(), String> {
             "simulation_plan.reference_pvt.temperature_celsius must be finite and above -273.15 C, got {temperature}"
         ));
     }
-    if plan.options.temp != temperature {
-        return Err(format!(
-            "simulation_plan reference temperature ({temperature} C) disagrees with solver option temp ({} C)",
-            plan.options.temp
-        ));
-    }
     Ok(())
 }
 
@@ -409,7 +403,6 @@ fn validate_solver_options(plan: &SimulationSetup) -> Result<(), String> {
         ("bypass_reltol", options.bypass_reltol),
         ("bypass_abstol", options.bypass_abstol),
         ("min_timestep", options.min_timestep),
-        ("temp", options.temp),
         ("tnom", options.tnom),
     ];
     if let Some((field, value)) = finite_fields

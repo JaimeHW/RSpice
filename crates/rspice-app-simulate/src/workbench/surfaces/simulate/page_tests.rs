@@ -24,13 +24,16 @@ use crate::workbench::simulate::test_host::SimulateTestHost;
 #[test]
 fn the_model_reference_temperature_commits_without_moving_the_run_temperature() {
     let mut harness = SimulateTestHost::harness();
-    let run_temperature = harness.model.sim_setup.options.temp;
+    let run_temperature = harness.model.sim_setup.reference_pvt.temperature_celsius;
 
     harness.model.sim_setup.session.options_draft.tnom = "40.0".to_owned();
     super::page_solver::commit_draft(&mut harness.cx());
 
     assert_eq!(harness.model.sim_setup.options.tnom, 40.0);
-    assert_eq!(harness.model.sim_setup.options.temp, run_temperature);
+    assert_eq!(
+        harness.model.sim_setup.reference_pvt.temperature_celsius,
+        run_temperature
+    );
     assert!(
         !harness.model.analysis_lifecycle_status.is_refusal(),
         "{}",
@@ -52,7 +55,7 @@ fn the_bypass_voltage_floor_commits_through_the_pages_own_channel() {
     assert_eq!(harness.model.sim_setup.options.bypass_abstol, 4e-9);
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "bypass options\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
-        &harness.model.sim_setup.options,
+        &harness.model.sim_setup.options_block(),
     );
     let parsed = rspice_core::netlist::parse_netlist(&deck).expect("the committed options parse");
     assert_eq!(parsed.options.bypass_abstol, Some(4e-9));

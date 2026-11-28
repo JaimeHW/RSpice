@@ -123,7 +123,7 @@ fn a_stated_statistical_seed_reaches_the_deck() {
     };
 
     assert!(
-        options.to_spice_options().contains("SEED=20260811"),
+        options.to_spice_options(27.0).contains("SEED=20260811"),
         "the parser seeds the statistical stream from the deck, so the seed must be in it"
     );
 }
@@ -137,14 +137,14 @@ fn a_stated_node_shunt_is_on_the_deck_and_an_unset_one_is_nowhere() {
         rshunt: Some(1.0e9),
         ..SimulationOptions::default()
     };
-    let card = options.to_spice_options();
+    let card = options.to_spice_options(27.0);
     assert!(card.contains("+ RSHUNT=1e9"), "{card}");
     let deck = format!("node shunt\nR1 a 0 1k\n{card}\n.end\n");
     let parsed = rspice_core::Netlist::parse(&deck).expect("the options card parses");
     assert_eq!(parsed.options.rshunt, Some(1.0e9));
 
     let unset = SimulationOptions::default();
-    assert!(!unset.to_spice_options().contains("RSHUNT"));
+    assert!(!unset.to_spice_options(27.0).contains("RSHUNT"));
     let persisted = serde_json::to_value(&unset).expect("options encode");
     assert!(
         persisted.get("rshunt").is_none(),
@@ -188,14 +188,14 @@ fn a_named_connect_rule_block_is_on_the_deck_and_an_unnamed_one_is_nowhere() {
     options
         .validate()
         .expect("a simple identifier names a block");
-    let card = options.to_spice_options();
+    let card = options.to_spice_options(27.0);
     assert!(card.contains("+ CONNECTRULES=\"Low_vdd\""), "{card}");
     let deck = format!("connect rules\nR1 a 0 1k\n{card}\n.end\n");
     let parsed = rspice_core::Netlist::parse(&deck).expect("the options card parses");
     assert_eq!(parsed.options.connect_rules.as_deref(), Some("Low_vdd"));
 
     let unset = SimulationOptions::default();
-    assert!(!unset.to_spice_options().contains("CONNECTRULES"));
+    assert!(!unset.to_spice_options(27.0).contains("CONNECTRULES"));
     let persisted = serde_json::to_value(&unset).expect("options encode");
     assert!(
         persisted.get("connect_rules").is_none(),
@@ -241,20 +241,20 @@ fn a_new_project_integrates_trapezoidally_and_an_explicit_switch_is_written() {
         options.simulation_config_overrides().integration_method,
         Some(rspice_core::numerics::integration::IntegrationMethod::Trapezoidal)
     );
-    assert!(!options.to_spice_options().contains("METHOD"));
+    assert!(!options.to_spice_options(27.0).contains("METHOD"));
 
     let switched = SimulationOptions {
         method: IntegrationMethod::TrapGear,
         ..SimulationOptions::default()
     };
-    assert!(switched.to_spice_options().contains("METHOD=TRAPGEAR"));
+    assert!(switched.to_spice_options(27.0).contains("METHOD=TRAPGEAR"));
 }
 
 #[test]
 fn no_seed_emits_no_seed_line() {
     assert!(
         !SimulationOptions::default()
-            .to_spice_options()
+            .to_spice_options(27.0)
             .contains("SEED")
     );
 }

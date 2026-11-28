@@ -1258,7 +1258,7 @@ SYMATTR Value 1k
     import_foreign_schematic_file(&mut app, &file, ForeignTool::Ltspice, &mut replace)
         .expect("imports");
     std::fs::remove_dir_all(&folder).ok();
-    let card = app.state.model.sim_setup.options.to_spice_options();
+    let card = app.state.model.sim_setup.options_block();
     assert!(card.contains("RSPICE_EXP_REPEAT=LTSPICE"), "{card}");
     assert!(card.contains("RSPICE_STATISTICS=SAMPLE"), "{card}");
     let deck = format!(
@@ -1273,14 +1273,14 @@ R1 a 0 1k
     rspice_core::Netlist::parse(&deck).expect("the engine reads the option");
     let native = rspice_simulation_contract::options::SimulationOptions::default();
     assert!(
-        !native.to_spice_options().contains("RSPICE_"),
+        !native.to_spice_options(27.0).contains("RSPICE_"),
         "a native project keeps the engine's own readings"
     );
     let qspice = rspice_simulation_contract::options::SimulationOptions {
         source_simulator: rspice_simulation_contract::options::SourceSimulator::Qspice,
         ..native
     }
-    .to_spice_options();
+    .to_spice_options(27.0);
     assert!(qspice.contains("RSPICE_STATISTICS=SAMPLE"), "{qspice}");
     assert!(!qspice.contains("RSPICE_EXP_REPEAT"), "{qspice}");
 }

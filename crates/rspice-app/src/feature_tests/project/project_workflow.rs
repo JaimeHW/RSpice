@@ -936,7 +936,10 @@ fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
         state.model.sim_setup.options.method,
         IntegrationMethod::Gear2
     );
-    assert_eq!(state.model.sim_setup.options.temp, 27.0);
+    assert_eq!(
+        state.model.sim_setup.reference_pvt.temperature_celsius,
+        27.0
+    );
 }
 
 #[test]

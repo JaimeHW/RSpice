@@ -13,16 +13,28 @@ use super::*;
 /// instead would pass for a key the parser does not know, which is how
 /// fields drifted out of the engine in the first place.
 fn parse_through_the_deck(options: &SimulationOptions) -> rspice_core::Netlist {
+    parse_at(options, 27.0)
+}
+
+/// The deck a plan at this reference temperature runs.
+fn parse_at(options: &SimulationOptions, temperature_celsius: f64) -> rspice_core::Netlist {
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "round trip\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
-        options,
+        &options.to_spice_options(temperature_celsius),
     );
     rspice_core::netlist::parse_netlist(&deck)
         .unwrap_or_else(|error| panic!("the emitted deck must parse: {error}\n{deck}"))
 }
 
 fn resolve_through_the_deck(options: &SimulationOptions) -> rspice_core::engine::SimulationConfig {
-    let netlist = parse_through_the_deck(options);
+    resolve_at(options, 27.0)
+}
+
+fn resolve_at(
+    options: &SimulationOptions,
+    temperature_celsius: f64,
+) -> rspice_core::engine::SimulationConfig {
+    let netlist = parse_at(options, temperature_celsius);
     rspice_core::resolve_simulation_config(
         &rspice_core::engine::SimulationConfig::default(),
         Some(&netlist.options),
@@ -48,7 +60,8 @@ fn simulation_compatibility_survives_draft_persistence_and_execution_routes() {
         let source = "compatibility\nV1 in 0 1\nR1 in 0 1k\n.options RSPICE_DIALECT=XYCE\n.end\n";
         let authored = rspice_core::Netlist::parse(source).unwrap();
         let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
-            source, &restored,
+            source,
+            &restored.to_spice_options(27.0),
         );
         let parsed = rspice_core::Netlist::parse(&deck).unwrap();
         let engine = rspice_simulation::netlist_preparation::build_engine_config(&parsed, None);
@@ -74,7 +87,7 @@ fn simulation_compatibility_survives_draft_persistence_and_execution_routes() {
     );
     let restored: SimulationOptions = serde_json::from_value(legacy.clone()).unwrap();
     assert_eq!(restored.compatibility, SimulationCompatibility::Inherit);
-    assert!(!restored.to_spice_options().contains("RSPICE_DIALECT"));
+    assert!(!restored.to_spice_options(27.0).contains("RSPICE_DIALECT"));
     legacy["compatibility"] = serde_json::json!("unknown-policy");
     assert!(serde_json::from_value::<SimulationOptions>(legacy).is_err());
 }
@@ -128,11 +141,10 @@ fn the_timeint_card_leaves_the_global_tolerances_alone() {
         iabstol: 6.0e-13,
         transient_lte_reltol: Some(2.5e-7),
         transient_lte_abstol: Some(3.5e-11),
-        temp: 85.0,
         ..SimulationOptions::default()
     };
 
-    let resolved = resolve_through_the_deck(&options);
+    let resolved = resolve_at(&options, 85.0);
 
     assert_eq!(resolved.transient_lte_reltol, Some(2.5e-7));
     assert_eq!(resolved.transient_lte_abstol, Some(3.5e-11));
@@ -200,16 +212,15 @@ fn the_bypass_voltage_floor_reaches_the_engine_on_its_own() {
 #[test]
 fn the_model_reference_temperature_reaches_the_parsed_deck_separately_from_temp() {
     let options = SimulationOptions {
-        temp: 85.0,
         tnom: 40.0,
         ..SimulationOptions::default()
     };
 
-    let netlist = parse_through_the_deck(&options);
+    let netlist = parse_at(&options, 85.0);
 
     assert_eq!(netlist.options.tnom, Some(40.0));
     assert_eq!(
-        resolve_through_the_deck(&options).temperature,
+        resolve_at(&options, 85.0).temperature,
         85.0 + 273.15,
         "TNOM must not be read as the simulation temperature"
     );
@@ -219,7 +230,7 @@ fn the_model_reference_temperature_reaches_the_parsed_deck_separately_from_temp(
 fn an_untouched_model_reference_temperature_states_nothing() {
     assert!(
         !SimulationOptions::default()
-            .to_spice_options()
+            .to_spice_options(27.0)
             .contains("TNOM"),
         "the shipping TNOM matches the engine's own, so the deck states no opinion"
     );
@@ -237,7 +248,7 @@ fn bypass_stays_off_and_states_no_bounds_when_the_page_leaves_it_alone() {
     assert!(!resolved.bypass_config.enabled);
     assert!(
         !SimulationOptions::default()
-            .to_spice_options()
+            .to_spice_options(27.0)
             .contains("BYPASS")
     );
 }
@@ -316,7 +327,7 @@ fn a_step_floor_alone_still_reaches_the_deck() {
     };
 
     assert_eq!(
-        options.to_spice_options(),
+        options.to_spice_options(27.0),
         ".OPTIONS\n+ PIVTOL=1e-13\n+ ITL4=6\n.OPTIONS TIMEINT\n+ MINTIMESTEP=2e-18"
     );
     assert_eq!(resolve_through_the_deck(&options).min_timestep, 2.0e-18);
@@ -375,7 +386,7 @@ fn the_plan_ceiling_and_an_analysis_step_ceiling_bound_the_step_separately() {
 
     let deck = format!(
         "two ceilings\nV1 1 0 1\nR1 1 0 1k\n{}\n{}\n.op\n.end\n",
-        options.to_spice_options(),
+        options.to_spice_options(27.0),
         record.to_spice_options()
     );
     let netlist = rspice_core::netlist::parse_netlist(&deck)
@@ -485,7 +496,7 @@ fn an_authored_option_wins_over_the_plan_block_that_states_the_same_key() {
     // The plan's block first, the analysis's second, as a run splices them.
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "two blocks\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
-        &options,
+        &options.to_spice_options(27.0),
     );
     let spliced = deck.replace(".end", &format!("{}\n.end", record.to_spice_options()));
     let netlist = rspice_core::netlist::parse_netlist(&spliced)
@@ -549,14 +560,14 @@ fn full_width_seed_survives_options_editing_and_prepared_deck_parsing() {
 
 #[test]
 fn solver_options_preserve_legal_zero_bounds_and_temperature_limits() {
+    let coldest = (-273.15_f64).next_up();
     let options = SimulationOptions {
         gmin: -0.0,
         bypass_enabled: true,
         bypass_reltol: -0.0,
         bypass_abstol: -0.0,
         pivrel: 1.0,
-        temp: (-273.15_f64).next_up(),
-        tnom: (-273.15_f64).next_up(),
+        tnom: coldest,
         ..SimulationOptions::default()
     };
     options
@@ -564,7 +575,7 @@ fn solver_options_preserve_legal_zero_bounds_and_temperature_limits() {
         .expect("these boundary values are allowed");
     let draft = crate::simulation::plan::OptionsDialogState::from_options(&options);
     let restored = draft.to_options().unwrap();
-    let parsed = parse_through_the_deck(&restored).options;
+    let parsed = parse_at(&restored, coldest).options;
     for (name, authored, restored, parsed) in [
         ("GMIN", options.gmin, restored.gmin, parsed.gmin.unwrap()),
         (
@@ -579,7 +590,7 @@ fn solver_options_preserve_legal_zero_bounds_and_temperature_limits() {
             restored.bypass_abstol,
             parsed.bypass_abstol.unwrap(),
         ),
-        ("TEMP", options.temp, restored.temp, parsed.temp.unwrap()),
+        ("TEMP", coldest, coldest, parsed.temp.unwrap()),
         ("TNOM", options.tnom, restored.tnom, parsed.tnom.unwrap()),
     ] {
         assert_eq!(
@@ -613,13 +624,13 @@ fn solver_options_preserve_full_precision_through_the_deck() {
         bypass_enabled: true,
         bypass_reltol: 3.456_789_123_456e-4,
         bypass_abstol: 4.567_891_234_567e-7,
-        temp: 27.123_456_789,
         tnom: -40.123_456_789,
         ..SimulationOptions::default()
     };
+    let temperature = 27.123_456_789;
     options.validate().unwrap();
-    let netlist = parse_through_the_deck(&options);
-    let resolved = resolve_through_the_deck(&options);
+    let netlist = parse_at(&options, temperature);
+    let resolved = resolve_at(&options, temperature);
     for (name, authored, parsed) in [
         ("RELTOL", options.reltol, netlist.options.reltol.unwrap()),
         (
@@ -663,7 +674,7 @@ fn solver_options_preserve_full_precision_through_the_deck() {
             options.bypass_abstol,
             resolved.bypass_config.abstol,
         ),
-        ("TEMP", options.temp, netlist.options.temp.unwrap()),
+        ("TEMP", temperature, netlist.options.temp.unwrap()),
         ("TNOM", options.tnom, netlist.options.tnom.unwrap()),
     ] {
         assert_eq!(
@@ -672,7 +683,7 @@ fn solver_options_preserve_full_precision_through_the_deck() {
             "{name} was rounded in the prepared deck"
         );
     }
-    assert_eq!(resolved.temperature, options.temp_kelvin());
+    assert_eq!(resolved.temperature, temperature + 273.15);
 }
 
 #[test]
@@ -685,7 +696,6 @@ fn solver_options_preserve_changes_adjacent_to_defaults() {
         vntol: default.vntol.next_up(),
         chgtol: default.chgtol.next_up(),
         gmin: default.gmin.next_up(),
-        temp: default.temp.next_up(),
         tnom: default.tnom.next_up(),
         bypass_enabled: true,
         bypass_reltol: default.bypass_reltol.next_up(),
@@ -693,7 +703,8 @@ fn solver_options_preserve_changes_adjacent_to_defaults() {
         ..default
     };
     options.validate().unwrap();
-    let parsed = parse_through_the_deck(&options).options;
+    let temperature = 27.0_f64.next_up();
+    let parsed = parse_at(&options, temperature).options;
     for (name, authored, parsed) in [
         ("RELTOL", options.reltol, parsed.reltol),
         (
@@ -705,7 +716,7 @@ fn solver_options_preserve_changes_adjacent_to_defaults() {
         ("VNTOL", options.vntol, parsed.vntol),
         ("CHGTOL", options.chgtol, parsed.chgtol),
         ("GMIN", options.gmin, parsed.gmin),
-        ("TEMP", options.temp, parsed.temp),
+        ("TEMP", temperature, parsed.temp),
         ("TNOM", options.tnom, parsed.tnom),
         ("BYPASSRELTOL", options.bypass_reltol, parsed.bypass_reltol),
         ("BYPASSABSTOL", options.bypass_abstol, parsed.bypass_abstol),
