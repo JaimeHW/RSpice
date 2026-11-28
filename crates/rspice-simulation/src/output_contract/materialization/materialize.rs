@@ -263,22 +263,18 @@ pub fn apply_saved_output_policy<W: OutputWaveform>(
     if !matches!(policy, crate::execution::SavePolicy::PlanOwned { .. }) {
         return;
     }
-    // Automatic selection must not discard an analysis's native results just
-    // because it has no ordinary node-waveform output contract (for example,
-    // Monte Carlo statistics, a noise spectrum or an FFT).
-    if policy.output_selection_mode()
-        == rspice_simulation_contract::output_policy::OutputSelectionMode::Automatic
-        && contracts.is_empty()
-    {
-        return;
-    }
     if policy.output_selection_mode()
         == rspice_simulation_contract::output_policy::OutputSelectionMode::SaveAll
     {
+        name_transient_node_voltages(analysis, contracts);
+        // An analysis no output compiles for keeps its native results as the
+        // engine drew them: Monte Carlo statistics, a noise spectrum, an FFT.
+        if contracts.is_empty() {
+            return;
+        }
         for waveform in &mut analysis.waveforms {
             waveform.set_visible(false);
         }
-        name_transient_node_voltages(analysis, contracts);
         materialize_saved_outputs_preserving_engine(analysis, contracts);
     } else {
         retain_plan_saved_outputs(analysis, contracts);

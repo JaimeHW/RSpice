@@ -708,12 +708,24 @@ impl Engineer {
             {
                 assert!(
                     report.blockers.is_empty(),
-                    "Run was refused: {:?}",
+                    "Run was refused: {:?}; design checks: {:?}",
                     report
                         .blockers
                         .iter()
                         .map(|blocker| format!("{}: {}", blocker.check, blocker.observed))
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<_>>(),
+                    self.replay
+                        .app
+                        .state
+                        .model
+                        .design_checks
+                        .drc_results
+                        .as_ref()
+                        .map(|result| result
+                            .errors()
+                            .iter()
+                            .map(|violation| violation.message.clone())
+                            .collect::<Vec<_>>())
                 );
             }
             assert!(started.elapsed() < RUN_LIMIT, "the run did not end");

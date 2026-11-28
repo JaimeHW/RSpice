@@ -41,7 +41,7 @@ fn instance_occurrence(path: &str, nets: Vec<DesignNet>) -> OccurrenceNets {
 }
 
 #[test]
-fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
+fn save_all_plots_the_roots_output_ports_with_stable_ids() {
     let plan_id = SimulationPlanId::new();
     let mut nets = vec![
         output_test_net("0", true, NetClass::Ground, Some(PortDirection::Supply)),
@@ -50,72 +50,46 @@ fn automatic_output_selection_is_bounded_prioritized_and_deterministic() {
         output_test_net("mid", true, NetClass::Signal, None),
     ];
     nets.extend(
-        (0..20).map(|index| output_test_net(&format!("net{index}"), false, NetClass::Signal, None)),
+        (0..40).map(|index| output_test_net(&format!("net{index}"), false, NetClass::Signal, None)),
     );
 
     let occurrences = root_occurrence(nets);
-    let (first, used_fallback) = effective_plan_saved_outputs(
-        OutputSelectionMode::Automatic,
-        &[],
-        &[],
-        &occurrences,
-        plan_id,
-    )
-    .expect("automatic selection");
-    let (second, _) = effective_plan_saved_outputs(
-        OutputSelectionMode::Automatic,
-        &[],
-        &[],
-        &occurrences,
-        plan_id,
-    )
-    .expect("repeat automatic selection");
+    let select = || {
+        effective_plan_saved_outputs(
+            OutputSelectionMode::SaveAll,
+            &[],
+            &[],
+            &occurrences,
+            plan_id,
+        )
+        .expect("selection")
+    };
+    let first = select();
+    let second = select();
 
-    assert!(used_fallback);
     assert_eq!(
         first
             .iter()
             .map(|output| output.source_expression.as_str())
             .collect::<Vec<_>>(),
-        vec!["V(z_out)", "V(a_io)", "V(mid)"]
+        vec!["V(z_out)", "V(a_io)"]
     );
     assert_eq!(
         first.iter().map(|output| output.id).collect::<Vec<_>>(),
         second.iter().map(|output| output.id).collect::<Vec<_>>()
     );
     assert!(
-        first
-            .iter()
-            .all(|output| { output.save_policy == SavedOutputPolicy::EveryAcceptedPoint }),
-        "each keeps every point its analysis accepts"
-    );
-    assert_eq!(
-        first
-            .iter()
-            .map(|output| output.display_intent)
-            .collect::<Vec<_>>(),
-        vec![
-            SavedOutputDisplayIntent::Plot,
-            SavedOutputDisplayIntent::Plot,
-            SavedOutputDisplayIntent::DataBrowserOnly,
-        ]
-    );
-    assert_eq!(
-        first
-            .iter()
-            .map(|output| output.streaming)
-            .collect::<Vec<_>>(),
-        vec![
-            SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
-            SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
-            SavedOutputStreaming::StoreOnly,
-        ],
-        "what the plan plots streams while it runs; a data-browser net does not"
+        first.iter().all(|output| {
+            output.save_policy == SavedOutputPolicy::EveryAcceptedPoint
+                && output.display_intent == SavedOutputDisplayIntent::Plot
+                && output.streaming == SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
+        }),
+        "each keeps every point, plots, and streams while the run goes"
     );
 }
 
 #[test]
-fn explicit_output_modes_do_not_invent_quantities() {
+fn selected_only_invents_no_quantities() {
     let plan_id = SimulationPlanId::new();
     let occurrences = root_occurrence(vec![output_test_net(
         "out",
@@ -123,36 +97,34 @@ fn explicit_output_modes_do_not_invent_quantities() {
         NetClass::Signal,
         Some(PortDirection::Out),
     )]);
-    for mode in [
+    let outputs = effective_plan_saved_outputs(
         OutputSelectionMode::ExplicitOnly,
-        OutputSelectionMode::SaveAll,
-    ] {
-        let (outputs, used_fallback) =
-            effective_plan_saved_outputs(mode, &[], &[], &occurrences, plan_id).expect("selection");
-        assert!(outputs.is_empty());
-        assert!(!used_fallback);
-    }
+        &[],
+        &[],
+        &occurrences,
+        plan_id,
+    )
+    .expect("selection");
+    assert!(outputs.is_empty());
 }
 
 /// A first run plots something: the output ports when the design has any,
-/// else the nets the drawing names, else, on a small design, every node.
+/// else the nets the drawing names, else every node.
 #[test]
-fn automatic_outputs_plot_ports_else_named_nets_else_every_node() {
+fn save_all_plots_ports_else_named_nets_else_every_node() {
     let plan_id = SimulationPlanId::new();
     let plotted = |nets: Vec<DesignNet>| {
-        let (outputs, _) = effective_plan_saved_outputs(
-            OutputSelectionMode::Automatic,
+        effective_plan_saved_outputs(
+            OutputSelectionMode::SaveAll,
             &[],
             &[],
             &root_occurrence(nets),
             plan_id,
         )
-        .expect("automatic selection");
-        outputs
-            .into_iter()
-            .filter(|output| output.display_intent == SavedOutputDisplayIntent::Plot)
-            .map(|output| output.source_expression)
-            .collect::<Vec<_>>()
+        .expect("selection")
+        .into_iter()
+        .map(|output| output.source_expression)
+        .collect::<Vec<_>>()
     };
     let ground = || output_test_net("0", true, NetClass::Ground, None);
 
@@ -172,16 +144,16 @@ fn automatic_outputs_plot_ports_else_named_nets_else_every_node() {
             output_test_net("net2", false, NetClass::Signal, None),
         ]),
         vec!["V(net1)", "V(net2)"],
-        "with nothing named, every node of a small design"
+        "with nothing named, every node"
     );
 }
 
-/// A probe joins the bounded automatic set rather than replacing it, so a
-/// net probed after a run does not take the other nets out of the next one.
-/// A net asked for both ways is saved once, as the probe asked for it; an
-/// explicit-only plan still saves just what it asks for.
+/// A probe joins what Save all plots rather than replacing it, so a net
+/// probed after a run does not take the other nets out of the next one. A net
+/// asked for both ways is saved once, as the probe asked for it; a
+/// Selected only plan still saves just what it asks for.
 #[test]
-fn a_probe_joins_the_automatic_set_rather_than_replacing_it() {
+fn a_probe_joins_what_save_all_plots_rather_than_replacing_it() {
     let plan_id = SimulationPlanId::new();
     let occurrences = root_occurrence(vec![
         output_test_net("out", true, NetClass::Signal, None),
@@ -195,15 +167,14 @@ fn a_probe_joins_the_automatic_set_rather_than_replacing_it() {
     )
     .expect("probe marker");
 
-    let (outputs, used_automatic) = effective_plan_saved_outputs(
-        OutputSelectionMode::Automatic,
+    let outputs = effective_plan_saved_outputs(
+        OutputSelectionMode::SaveAll,
         &[],
         std::slice::from_ref(&probe),
         &occurrences,
         plan_id,
     )
-    .expect("automatic selection");
-    assert!(used_automatic);
+    .expect("selection");
     assert_eq!(
         outputs
             .iter()
@@ -215,96 +186,29 @@ fn a_probe_joins_the_automatic_set_rather_than_replacing_it() {
         ]
     );
 
-    let (outputs, used_automatic) = effective_plan_saved_outputs(
+    let outputs = effective_plan_saved_outputs(
         OutputSelectionMode::ExplicitOnly,
         &[],
         std::slice::from_ref(&probe),
         &occurrences,
         plan_id,
     )
-    .expect("explicit selection");
-    assert!(!used_automatic);
+    .expect("selection");
     assert_eq!(outputs.len(), 1);
     assert_eq!(outputs[0].source_expression, "V(out)");
 }
 
-/// A small design keeps every part's current beside its nodes, for the data
-/// browser and not the plot, each occurrence's under its own name and the
-/// element the deck writes; a design past small keeps no currents.
+/// Save all plots the root's nets only: every node below it and every
+/// part's current is a quantity the engine saves under its own name, so no
+/// output stands in for one, and two instances of one master do not plot
+/// one trace each per node.
 #[test]
-fn a_small_design_keeps_every_parts_current() {
+fn save_all_plots_the_root_and_leaves_every_level_to_the_engine() {
     let plan_id = SimulationPlanId::new();
     let device = |drawn: &str, written: &str| OccurrenceDevice {
         drawn: drawn.to_owned(),
         written: written.to_owned(),
     };
-    let mut occurrences =
-        root_occurrence(vec![output_test_net("out", true, NetClass::Signal, None)]);
-    occurrences[0].devices = std::sync::Arc::new(vec![device("V1", "V1"), device("C4", "RC4")]);
-    let mut block = instance_occurrence(
-        "/X1",
-        vec![output_test_net("n1", true, NetClass::Signal, None)],
-    );
-    block.devices = std::sync::Arc::new(vec![device("R1", "R1")]);
-    occurrences.push(block);
-
-    let (outputs, _) = effective_plan_saved_outputs(
-        OutputSelectionMode::Automatic,
-        &[],
-        &[],
-        &occurrences,
-        plan_id,
-    )
-    .expect("automatic selection");
-    let currents = outputs
-        .iter()
-        .filter(|output| output.source_expression.starts_with("I("))
-        .map(|output| {
-            (
-                output.name.as_str(),
-                output.source_expression.as_str(),
-                output.display_intent,
-            )
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        currents,
-        [
-            ("I(V1)", "I(V1)", SavedOutputDisplayIntent::DataBrowserOnly),
-            ("I(C4)", "I(RC4)", SavedOutputDisplayIntent::DataBrowserOnly),
-            (
-                "I(/X1/R1)",
-                "I(x1.r1)",
-                SavedOutputDisplayIntent::DataBrowserOnly
-            ),
-        ]
-    );
-
-    let mut large = (0..20)
-        .map(|index| output_test_net(&format!("n{index}"), true, NetClass::Signal, None))
-        .collect::<Vec<_>>();
-    large.push(output_test_net("out", true, NetClass::Signal, None));
-    let mut occurrences = root_occurrence(large);
-    occurrences[0].devices = std::sync::Arc::new(vec![device("V1", "V1")]);
-    let (outputs, _) = effective_plan_saved_outputs(
-        OutputSelectionMode::Automatic,
-        &[],
-        &[],
-        &occurrences,
-        plan_id,
-    )
-    .expect("automatic selection");
-    assert!(
-        !outputs
-            .iter()
-            .any(|output| output.source_expression.starts_with("I(")),
-        "a design past small keeps its bounded node voltages only"
-    );
-}
-
-#[test]
-fn automatic_outputs_cover_every_occurrence_exactly_once() {
-    let plan_id = SimulationPlanId::new();
     let master_net = || vec![output_test_net("n1", true, NetClass::Signal, None)];
     let mut occurrences = root_occurrence(vec![output_test_net(
         "out",
@@ -312,63 +216,26 @@ fn automatic_outputs_cover_every_occurrence_exactly_once() {
         NetClass::Signal,
         Some(PortDirection::Out),
     )]);
-    occurrences.push(instance_occurrence("/X1", master_net()));
+    occurrences[0].devices = std::sync::Arc::new(vec![device("V1", "V1"), device("C4", "RC4")]);
+    let mut block = instance_occurrence("/X1", master_net());
+    block.devices = std::sync::Arc::new(vec![device("R1", "R1")]);
+    occurrences.push(block);
     occurrences.push(instance_occurrence("/X2", master_net()));
 
-    let (outputs, used_fallback) = effective_plan_saved_outputs(
-        OutputSelectionMode::Automatic,
+    let outputs = effective_plan_saved_outputs(
+        OutputSelectionMode::SaveAll,
         &[],
         &[],
         &occurrences,
         plan_id,
     )
-    .expect("automatic selection");
-
-    assert!(used_fallback);
+    .expect("selection");
     assert_eq!(
         outputs
             .iter()
             .map(|output| (output.name.as_str(), output.source_expression.as_str()))
             .collect::<Vec<_>>(),
-        vec![
-            ("V(out)", "V(out)"),
-            ("V(/X1/n1)", "V(x1.n1)"),
-            ("V(/X2/n1)", "V(x2.n1)"),
-        ],
-        "each occurrence contributes its own node once, and the root keeps today's spelling"
-    );
-    assert_eq!(
-        outputs
-            .iter()
-            .map(|output| output.id)
-            .collect::<std::collections::HashSet<_>>()
-            .len(),
-        3,
-        "two instances of one master must not collapse onto one saved-output identity"
-    );
-}
-
-#[test]
-fn an_occurrence_the_engine_cannot_name_contributes_no_automatic_output() {
-    let plan_id = SimulationPlanId::new();
-    let mut occurrences = root_occurrence(Vec::new());
-    occurrences.push(instance_occurrence(
-        "/Xé",
-        vec![output_test_net("n1", true, NetClass::Signal, None)],
-    ));
-
-    let (outputs, _) = effective_plan_saved_outputs(
-        OutputSelectionMode::Automatic,
-        &[],
-        &[],
-        &occurrences,
-        plan_id,
-    )
-    .expect("automatic selection");
-
-    assert!(
-        outputs.is_empty(),
-        "the engine has no name for this node, so there is nothing to ask it for"
+        vec![("V(out)", "V(out)")]
     );
 }
 
@@ -395,7 +262,7 @@ fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
     .expect("probe marker");
     probe.bind_saved_output(plan_id, output.id);
 
-    let (linked, _) = effective_plan_saved_outputs(
+    let linked = effective_plan_saved_outputs(
         OutputSelectionMode::ExplicitOnly,
         std::slice::from_ref(&output),
         std::slice::from_ref(&probe),
@@ -407,7 +274,7 @@ fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
     assert_eq!(linked[0].display_intent, SavedOutputDisplayIntent::Plot);
 
     probe.plot_on_materialization = false;
-    let (browser_only, _) = effective_plan_saved_outputs(
+    let browser_only = effective_plan_saved_outputs(
         OutputSelectionMode::ExplicitOnly,
         std::slice::from_ref(&output),
         std::slice::from_ref(&probe),
@@ -423,7 +290,7 @@ fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
     let mut rebound_row = output.clone();
     rebound_row.name = "V(other)".to_owned();
     rebound_row.source_expression = "V(other)".to_owned();
-    let (stale_binding, _) = effective_plan_saved_outputs(
+    let stale_binding = effective_plan_saved_outputs(
         OutputSelectionMode::ExplicitOnly,
         std::slice::from_ref(&rebound_row),
         std::slice::from_ref(&probe),
@@ -436,7 +303,7 @@ fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
     assert_ne!(stale_binding[0].id, rebound_row.id);
 
     probe.enabled = false;
-    let (disabled, _) = effective_plan_saved_outputs(
+    let disabled = effective_plan_saved_outputs(
         OutputSelectionMode::ExplicitOnly,
         std::slice::from_ref(&output),
         std::slice::from_ref(&probe),
@@ -448,7 +315,7 @@ fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
 
     probe.enabled = true;
     probe.bind_saved_output(SimulationPlanId::new(), output.id);
-    let (cross_plan, _) = effective_plan_saved_outputs(
+    let cross_plan = effective_plan_saved_outputs(
         OutputSelectionMode::ExplicitOnly,
         std::slice::from_ref(&output),
         std::slice::from_ref(&probe),
@@ -461,7 +328,7 @@ fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
     assert_eq!(cross_plan[0].source_expression, "V(out)");
     assert_eq!(cross_plan[0].origin, SavedOutputOrigin::SchematicProbe);
 
-    let (deleted, _) = effective_plan_saved_outputs(
+    let deleted = effective_plan_saved_outputs(
         OutputSelectionMode::ExplicitOnly,
         &[output],
         &[],

@@ -190,10 +190,10 @@ pub fn priced_output_bytes(
 /// The plan's retained-evidence forecast, partitioned the way it is printed.
 pub struct CaptureLedger {
     rows: Vec<CaptureLedgerRow>,
-    /// Retained engine state shared by deferred outputs and by Automatic's
-    /// whole engine columns, counted once for the plan.
+    /// Retained engine state shared by deferred outputs, counted once for the
+    /// plan.
     shared_source_bytes: u64,
-    /// Engine results retained by Save All or Automatic without output contracts.
+    /// Engine results Save all retains for every engine task.
     engine_ceiling_bytes: Option<u64>,
     indeterminate: Vec<IndeterminateOutput>,
     /// Outputs that stream to the store at every point the solve accepts.
@@ -266,24 +266,6 @@ impl CaptureLedger {
         let per_analysis_engine_bytes = retained_engine_source_upper_bound_bytes(1);
         let engine_points = if save_all {
             workload.engine_task_points()
-        } else if selection_mode == OutputSelectionMode::Automatic {
-            let contracted = reports
-                .iter()
-                .flat_map(|report| {
-                    report
-                        .bytes_by_analysis()
-                        .iter()
-                        .map(|(id, _)| *id)
-                        .chain(report.retained_engine_source_analysis_ids().iter().copied())
-                        .chain(report.streamed_analysis_ids().iter().copied())
-                })
-                .collect::<std::collections::HashSet<_>>();
-            let contracted_points = contracted.iter().fold(0u64, |total, analysis| {
-                total.saturating_add(workload.points_for(*analysis))
-            });
-            workload
-                .engine_task_points()
-                .saturating_sub(contracted_points)
         } else {
             0
         };
@@ -488,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_native_results_are_budgeted_once_at_their_run_set_points() {
+    fn save_all_reserves_every_engine_task_once_at_its_run_set_points() {
         let selected = rspice_vocabulary::product::AnalysisInstanceId::new();
         let native = rspice_vocabulary::product::AnalysisInstanceId::new();
         let outputs = vec![output("a", "V(n)"), output("b", "V(m)")];
@@ -504,12 +486,12 @@ mod tests {
             &outputs,
             &reports,
             &membership,
-            OutputSelectionMode::Automatic,
+            OutputSelectionMode::SaveAll,
             &workload,
         );
-        let native_bytes = retained_engine_source_upper_bound_bytes(3);
-        assert_eq!(ledger.engine_ceiling_bytes(), Some(native_bytes));
-        assert_eq!(ledger.total_bytes(), native_bytes + 300);
+        let engine_bytes = retained_engine_source_upper_bound_bytes(4);
+        assert_eq!(ledger.engine_ceiling_bytes(), Some(engine_bytes));
+        assert_eq!(ledger.total_bytes(), engine_bytes + 300);
         assert!(ledger.indeterminate().is_empty());
     }
 

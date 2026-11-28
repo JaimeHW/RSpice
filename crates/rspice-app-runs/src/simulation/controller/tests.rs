@@ -293,7 +293,7 @@ fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
     let required = analysis.retained_storage_bytes();
     let mut controller = SimulationController::new();
     controller.current_save_policy = crate::simulation::execution::SavePolicy::PlanOwned {
-        output_selection_mode: crate::state::OutputSelectionMode::Automatic,
+        output_selection_mode: crate::state::OutputSelectionMode::SaveAll,
         retained_dataset_limit: 10,
         maximum_storage_bytes: required - 1,
         live_streaming_enabled: false,
@@ -337,7 +337,7 @@ fn provisional_live_result_obeys_the_authenticated_storage_ceiling() {
         .with_provenance(synthetic_result_provenance());
     let mut controller = SimulationController::new();
     controller.current_save_policy = crate::simulation::execution::SavePolicy::PlanOwned {
-        output_selection_mode: crate::state::OutputSelectionMode::Automatic,
+        output_selection_mode: crate::state::OutputSelectionMode::SaveAll,
         retained_dataset_limit: 10,
         maximum_storage_bytes: partial.retained_storage_bytes() - 1,
         live_streaming_enabled: true,

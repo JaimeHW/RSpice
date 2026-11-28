@@ -10,18 +10,22 @@ const DECK: &str =
     "Grounded probes\nV1 pos 0 DC 2 AC 1 0\nV2 neg 0 DC -1 AC 1 180\nR1 pos neg 1k\n.end\n";
 
 #[test]
-fn automatic_outputs_retain_dc_sweeps_and_native_noise_results() {
+fn save_all_keeps_dc_sweeps_and_native_noise_results() {
     let automatic = output(SavedOutputKind::RawVoltageOrCurrent, "V(pos)", "V(pos)")
         .with_origin(crate::state::SavedOutputOrigin::Automatic);
     let dc_run = run(
         DECK,
         dc(false, false),
         std::slice::from_ref(&automatic),
-        OutputSelectionMode::Automatic,
+        OutputSelectionMode::SaveAll,
     );
     let result = &dc_run.analyses[0];
     assert!(result.success, "{:?}", result.error_message);
-    let wave = &result.waveforms[0];
+    let wave = result
+        .waveforms
+        .iter()
+        .find(|wave| wave.name == "V(pos)")
+        .expect("V(pos)");
     assert_eq!(wave.x.samples(..).collect::<Vec<_>>(), [-1.0, 0.0, 1.0]);
     assert_eq!(wave.y.samples(..).collect::<Vec<_>>(), [-1.0, 0.0, 1.0]);
     assert_eq!(result.saved_output_receipts.len(), 1);
@@ -58,14 +62,14 @@ fn automatic_outputs_retain_dc_sweeps_and_native_noise_results() {
         "Noise automatic\nV1 in 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
         noise,
         &[automatic],
-        OutputSelectionMode::Automatic,
+        OutputSelectionMode::SaveAll,
     );
     let result = noise_run.analyses.last().unwrap();
     assert_eq!(result.analysis_type, crate::state::AnalysisType::Noise);
     assert!(result.success, "{:?}", result.error_message);
     assert!(
         !result.waveforms.is_empty(),
-        "automatic selection erased the noise spectra"
+        "saving everything erased the noise spectra"
     );
     assert!(result.waveforms.iter().any(|wave| {
         wave.y
@@ -690,11 +694,11 @@ fn save_all_names_each_transient_node_voltage_by_its_voltage() {
         [&("V(out)".to_owned(), true)],
         "the probe takes the engine's waveform under its own spelling: {kept:?}"
     );
-    let automatic = run(
+    let selected = run(
         deck,
         transient,
         std::slice::from_ref(&probe),
-        OutputSelectionMode::Automatic,
+        OutputSelectionMode::ExplicitOnly,
     );
     let wave = |run: &SimulationRun| {
         run.analyses[0]
@@ -709,9 +713,5 @@ fn save_all_names_each_transient_node_voltage_by_its_voltage() {
             })
             .expect("the probe")
     };
-    assert_eq!(
-        wave(&probed),
-        wave(&automatic),
-        "the same samples both ways"
-    );
+    assert_eq!(wave(&probed), wave(&selected), "the same samples both ways");
 }

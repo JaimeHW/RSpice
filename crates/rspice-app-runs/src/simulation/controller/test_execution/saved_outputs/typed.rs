@@ -159,10 +159,16 @@ pub fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     plan.edit(id, |target| *target = draft).unwrap();
     state.model.sim_setup.save_policy.output_selection_mode = OutputSelectionMode::SaveAll;
     state.model.sim_setup.save_policy.maximum_storage_bytes = u64::MAX;
-    super::super::run_generated_batch(
+    let mut run = super::super::run_generated_batch(
         state,
         rspice_results::run::SimulationRunLifecycle::Completed,
-    )
+    );
+    // Save all plots this drawing's nets; the caller materializes its own
+    // outputs over the engine's results, so it is handed those alone.
+    for analysis in &mut run.analyses {
+        analysis.saved_output_receipts.clear();
+    }
+    run
 }
 
 fn connect(schematic: &mut crate::state::SchematicState, id: u64, nodes: &[String]) {

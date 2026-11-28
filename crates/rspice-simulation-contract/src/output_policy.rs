@@ -7,32 +7,28 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputSelectionMode {
-    /// Use explicit saved outputs when present; otherwise synthesize a small,
-    /// deterministic set of useful top-level node voltages.
+    /// Every node voltage and source current the engine computes, at every
+    /// level of the hierarchy, beside the plan's own outputs and probes.
     #[default]
-    Automatic,
-    /// Retain only outputs explicitly owned by the simulation plan.
-    ExplicitOnly,
-    /// Retain every result quantity produced by the selected engine analyses.
     SaveAll,
+    /// Only the plan's own outputs and the schematic's probes.
+    ExplicitOnly,
 }
 
 impl OutputSelectionMode {
-    pub const ALL: [Self; 3] = [Self::Automatic, Self::ExplicitOnly, Self::SaveAll];
+    pub const ALL: [Self; 2] = [Self::SaveAll, Self::ExplicitOnly];
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Automatic => "Automatic",
-            Self::ExplicitOnly => "Explicit only",
             Self::SaveAll => "Save all",
+            Self::ExplicitOnly => "Selected only",
         }
     }
 
     pub const fn description(self) -> &'static str {
         match self {
-            Self::Automatic => "Explicit outputs, or a bounded top-level fallback when none exist",
-            Self::ExplicitOnly => "Only plan outputs and schematic probes",
-            Self::SaveAll => "Every engine-produced quantity, subject to the storage ceiling",
+            Self::SaveAll => "Every node voltage and source current, at every level",
+            Self::ExplicitOnly => "Only the plan's outputs and schematic probes",
         }
     }
 }
@@ -61,7 +57,7 @@ pub struct SimulationSavePolicy {
 impl Default for SimulationSavePolicy {
     fn default() -> Self {
         Self {
-            output_selection_mode: OutputSelectionMode::Automatic,
+            output_selection_mode: OutputSelectionMode::SaveAll,
             retained_dataset_limit: 20,
             maximum_storage_bytes: 10 * 1024 * 1024 * 1024,
             live_streaming_enabled: true,

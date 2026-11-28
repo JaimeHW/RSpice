@@ -36,7 +36,6 @@ use crate::project_veriloga::preparation::{
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
-use rspice_simulation_contract::saved_output::SavedOutputOrigin;
 use rspice_vocabulary::canonical::content_digest;
 use rspice_vocabulary::product::ProcessCorner;
 use std::path::Path;
@@ -348,15 +347,14 @@ where
         &occurrences,
         &plan_payload.design_variables,
     )?;
-    let (mut effective_saved_outputs, used_automatic_outputs, capture_membership) =
-        effective_plan_capture(
-            inputs.analysis.sim_setup.save_policy.output_selection_mode,
-            &plan_payload.saved_outputs,
-            &plan_payload.capture_groups,
-            &root_schematic.document().probes,
-            &occurrences,
-            plan.plan_id(),
-        )?;
+    let (mut effective_saved_outputs, capture_membership) = effective_plan_capture(
+        inputs.analysis.sim_setup.save_policy.output_selection_mode,
+        &plan_payload.saved_outputs,
+        &plan_payload.capture_groups,
+        &root_schematic.document().probes,
+        &occurrences,
+        plan.plan_id(),
+    )?;
     effective_saved_outputs
         .iter_mut()
         .for_each(crate::analysis_preparation::spell_output_as_the_deck);
@@ -617,38 +615,6 @@ where
     );
 
     let mut advisories = generated.warnings;
-    if used_automatic_outputs {
-        // The plan's own outputs and its probes are saved beside the automatic
-        // set, so only the automatic ones are counted as its.
-        let automatic_outputs = || {
-            effective_saved_outputs
-                .iter()
-                .filter(|output| output.origin == SavedOutputOrigin::Automatic)
-        };
-        let currents = automatic_outputs()
-            .filter(|output| output.source_expression.starts_with("I("))
-            .count();
-        let automatic = automatic_outputs().count() - currents;
-        let asked = effective_saved_outputs.len() - automatic - currents;
-        advisories.push(if effective_saved_outputs.is_empty() {
-            "Automatic output selection found no eligible node voltage; analyses without selected outputs retain their native results.".to_owned()
-        } else {
-            format!(
-                "Automatic output selection retained {automatic} bounded node voltage{}{}{} for circuit waveforms. Other analyses retain their native results.",
-                if automatic == 1 { "" } else { "s" },
-                match currents {
-                    0 => String::new(),
-                    1 => " and 1 device current".to_owned(),
-                    currents => format!(" and {currents} device currents"),
-                },
-                match asked {
-                    0 => String::new(),
-                    1 => " beside the plan's 1 output and probe".to_owned(),
-                    asked => format!(" beside the plan's {asked} outputs and probes"),
-                }
-            )
-        });
-    }
     advisories.extend(
         drc.warnings()
             .into_iter()

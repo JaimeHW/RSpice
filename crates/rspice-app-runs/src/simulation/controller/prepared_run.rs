@@ -525,9 +525,9 @@ fn activate_campaign_plan(
 
 impl SimulationController {
     /// Resolve the output set shown by Simulation Studio through the same
-    /// configured-root and hierarchy projection used by run preparation.
-    /// This keeps Automatic mode's forecast honest when the editor is showing
-    /// a child sheet or a different library view than the simulation root.
+    /// configured-root and hierarchy projection used by run preparation, so
+    /// the forecast holds when the editor is showing a child sheet or a
+    /// different library view than the simulation root.
     pub fn effective_saved_outputs_preflight(
         &self,
         model: &Model,
@@ -537,7 +537,6 @@ impl SimulationController {
         (
             Vec<crate::state::SavedOutput>,
             Vec<rspice_simulation::output_contract::SavedOutputPreflightReport>,
-            bool,
             crate::state::CaptureGroupMembership,
         ),
         PreparationError,
@@ -565,7 +564,7 @@ impl SimulationController {
         );
         let occurrences =
             projection_occurrence_nets(model.library_manager.catalog(), &projection, nets);
-        let (outputs, automatic_fallback, membership) = effective_plan_capture(
+        let (outputs, membership) = effective_plan_capture(
             selection_mode,
             explicit,
             groups,
@@ -574,7 +573,7 @@ impl SimulationController {
             plan.id(),
         )?;
         let reports = self.saved_outputs_preflight(model, &outputs);
-        Ok((outputs, reports, automatic_fallback, membership))
+        Ok((outputs, reports, membership))
     }
 
     /// Build the analysis-independent executable design deck used by

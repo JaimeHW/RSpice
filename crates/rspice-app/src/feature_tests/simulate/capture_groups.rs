@@ -145,7 +145,7 @@ fn page_capture_ledger(app: &RSpiceApp) -> rspice_simulation::capture_ledger::Ca
         .plan_data(plan_id(&app.state.model))
         .cloned()
         .expect("payload");
-    let (outputs, reports, _, membership) = app
+    let (outputs, reports, membership) = app
         .simulation_controller
         .effective_saved_outputs_preflight(
             &app.state.model,
@@ -232,7 +232,7 @@ fn a_capture_group_override_reaches_the_effective_output_the_run_will_use() {
         .cloned()
         .expect("payload");
 
-    let (outputs, _, _, _) = app
+    let (outputs, _, _) = app
         .simulation_controller
         .effective_saved_outputs_preflight(
             &app.state.model,

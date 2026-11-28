@@ -53,7 +53,6 @@ pub(super) fn capture_groups(
     outputs: &[SavedOutput],
     ledger: &CaptureLedger,
     membership: &CaptureGroupMembership,
-    automatic_fallback: bool,
     selection_error: Option<&str>,
 ) -> Option<GroupCommand> {
     let selection_mode = cx.model.sim_setup.save_policy.output_selection_mode;
@@ -74,14 +73,12 @@ pub(super) fn capture_groups(
     } else if selection_mode == OutputSelectionMode::SaveAll {
         format!("{} Save All ceiling", format_bytes(total))
     } else if indeterminate > 0 {
-        // The plan's own outputs sit beside the automatic set, so one whose
-        // size only the run decides leaves the total a minimum either way.
+        // An output whose size only the run decides leaves the total a
+        // minimum.
         format!(
             "{} minimum · {indeterminate} indeterminate",
             format_bytes(total)
         )
-    } else if automatic_fallback {
-        format!("{} automatic forecast", format_bytes(total))
     } else {
         format!("{} explicit forecast", format_bytes(total))
     };

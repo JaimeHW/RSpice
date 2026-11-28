@@ -1,12 +1,12 @@
 //! Which quantities a plan effectively saves, occurrence by occurrence.
 //!
 //! A run's outputs are decided before its deck exists, from the plan's own
-//! rows, the markers on the drawing, and — when neither names anything — the
-//! design itself. That last case is the reason this module knows about
-//! hierarchy: the design is not one sheet. Two instances of one master carry
-//! two sets of nodes, the engine names them apart, and an automatic selection
-//! that enumerated the master once would ask for one of them and silently
-//! answer for whichever the flattened deck resolved first.
+//! rows, the markers on the drawing, and — for what a run that saves
+//! everything plots — the design itself. That last case is the reason this
+//! module knows about hierarchy: the design is not one sheet. Two instances of
+//! one master carry two sets of nodes, the engine names them apart, and a
+//! selection that enumerated the master once would ask for one of them and
+//! silently answer for whichever the flattened deck resolved first.
 //!
 //! Each occurrence therefore contributes its own rows, named by its own engine
 //! scope, and no occurrence contributes twice. The design root keeps today's
@@ -30,11 +30,8 @@ use rspice_simulation_contract::output_policy::OutputSelectionMode;
 use rspice_simulation_contract::saved_output::{
     SavedOutput, SavedOutputCompatibility, SavedOutputOrigin,
 };
-use rspice_vocabulary::hierarchy_path::{InstancePath, OccurrenceProbeSpelling};
+use rspice_vocabulary::hierarchy_path::InstancePath;
 use rspice_vocabulary::product::{SavedOutputId, SimulationPlanId};
-
-const AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT: usize = 16;
-const AUTOMATIC_OUTPUT_HARD_LIMIT: usize = 32;
 
 /// One occurrence of the executed design and the nets its master owns.
 pub struct OccurrenceNets {
@@ -95,6 +92,12 @@ impl OccurrenceNets {
     #[must_use]
     pub fn nets(&self) -> &[DesignNet] {
         &self.nets
+    }
+
+    /// The parts its master draws that carry one current each.
+    #[must_use]
+    pub fn devices(&self) -> &[OccurrenceDevice] {
+        &self.devices
     }
 }
 
@@ -214,16 +217,13 @@ fn prepared_output_expression_key(expression: &str) -> String {
         .collect()
 }
 
-/// One net automatic selection may retain, ranked before the bound applies.
-struct AutomaticCandidate {
-    depth: usize,
+/// One root net a run that saves everything may plot, ranked.
+struct PlottedCandidate {
     priority: u8,
-    scope: String,
-    /// Engine name of the node, which is both the tie-break and the stable
-    /// identity: it is the one spelling that separates `/X1`'s `n1` from
-    /// `/X2`'s without depending on how either sheet spells the net.
+    /// The node's name in one case: the tie-break and the stable identity.
     canonical: String,
-    spelling: OccurrenceProbeSpelling,
+    /// The node's name as the sheet spells it.
+    name: String,
 }
 
 /// The plan's effective output set, projected onto its capture groups.
@@ -241,11 +241,11 @@ pub fn effective_plan_capture(
     probes: &[SchematicProbe],
     occurrences: &[OccurrenceNets],
     plan_id: SimulationPlanId,
-) -> Result<(Vec<SavedOutput>, bool, CaptureGroupMembership), PreparationError> {
-    let (mut outputs, automatic_fallback) =
+) -> Result<(Vec<SavedOutput>, CaptureGroupMembership), PreparationError> {
+    let mut outputs =
         effective_plan_saved_outputs(selection_mode, explicit, probes, occurrences, plan_id)?;
     let membership = crate::capture_ledger::project_onto_groups(groups, &mut outputs);
-    Ok((outputs, automatic_fallback, membership))
+    Ok((outputs, membership))
 }
 
 /// The distinct expressions the enabled schematic probes would have a run save.
@@ -282,24 +282,23 @@ fn enabled_probe_expressions(
 /// A plan whose own registry is empty is not therefore a plan that saves
 /// nothing: an enabled probe mints an output here, and once the set is
 /// non-empty [`effective_plan_saved_outputs`] returns it in every selection
-/// mode — under `Automatic` beside the bounded automatic set, otherwise in
-/// place of the whole dataset. The studio's Outputs row and its preflight cell
-/// both stated one of those two alone, on a plan that would do neither.
+/// mode — under Save all beside everything the engine computes, under
+/// Selected only in place of the whole dataset.
 #[must_use]
 pub fn enabled_probe_output_count(probes: &[SchematicProbe]) -> usize {
     enabled_probe_expressions(probes).len()
 }
 
 /// Resolve the plan's effective saved-output set without mutating project
-/// data. Automatic outputs belong to the prepared snapshot, use stable IDs,
-/// and therefore remain deterministic for an unchanged plan and topology.
+/// data. The nets Save all plots belong to the prepared snapshot, use stable
+/// IDs, and therefore remain deterministic for an unchanged plan and topology.
 fn effective_plan_saved_outputs(
     selection_mode: OutputSelectionMode,
     explicit: &[SavedOutput],
     probes: &[SchematicProbe],
     occurrences: &[OccurrenceNets],
     plan_id: SimulationPlanId,
-) -> Result<(Vec<SavedOutput>, bool), PreparationError> {
+) -> Result<Vec<SavedOutput>, PreparationError> {
     let mut enabled_probe_outputs =
         std::collections::HashMap::<SavedOutputId, HashSet<String>>::new();
     let enabled_probe_expressions = enabled_probe_expressions(probes);
@@ -397,14 +396,13 @@ fn effective_plan_saved_outputs(
         output.id = SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
         explicit.push(output);
     }
-    if selection_mode != OutputSelectionMode::Automatic {
-        return Ok((explicit, false));
+    if selection_mode != OutputSelectionMode::SaveAll {
+        return Ok(explicit);
     }
-    // What the plan and its probes ask for joins the bounded automatic set
-    // rather than replacing it, as LTspice and QSPICE keep every node however
-    // many are probed: a probe placed after a run must not take the other
-    // nets out of the next one. A net asked for both ways is the plan's.
-    for output in automatic_outputs(occurrences, plan_id)? {
+    // Save all keeps every quantity the engine computes; what joins the plan's
+    // outputs and probes here is only what a run plots, so a first run ends on
+    // a curve. A net asked for both ways is the plan's.
+    for output in plotted_design_nets(occurrences, plan_id)? {
         let name_taken = explicit
             .iter()
             .any(|asked| asked.name.eq_ignore_ascii_case(&output.name));
@@ -414,178 +412,81 @@ fn effective_plan_saved_outputs(
             explicit.push(output);
         }
     }
-    Ok((explicit, true))
+    Ok(explicit)
 }
 
-/// The bounded node-voltage set a plan with no outputs of its own falls back
-/// to, drawn from every occurrence rather than from the root sheet alone.
-/// A small design keeps every node and every part's current, as LTspice and
-/// QSPICE do, so a current can be plotted after the run without running
-/// again; the currents go to the data browser, not the plot.
-///
-/// Shallower occurrences win the bound, because a design's own interface is
-/// what a reader looks at first and a deep instance's internals are what they
-/// ask for by name.
+/// The nets a run that saves everything plots: the design root's output
+/// ports, with no port the nets its sheet names, with nothing named every
+/// node, as ADE plots its outputs on completion. The root's interface is what
+/// a reader looks at first; every other node voltage and current the engine
+/// computes, at every level, is kept beside them in the data browser.
 ///
 /// Each keeps every point the engine accepted, as Spectre and LTspice keep a
 /// saved signal: a transient resampled to its print step reads an edge up to
-/// a step late.
-fn automatic_outputs(
+/// a step late. Each streams while the run goes, so the plot grows as a
+/// transient runs unless the plan turns live delivery off.
+fn plotted_design_nets(
     occurrences: &[OccurrenceNets],
     plan_id: SimulationPlanId,
 ) -> Result<Vec<SavedOutput>, PreparationError> {
-    fn carries_signal(net: &&DesignNet) -> bool {
-        net.class != rspice_design::connectivity::summary::NetClass::Ground
-    }
-
-    // A small design saves its unnamed nets too. Counting stops once the
-    // design is past small.
-    let mut signal_nets = 0_usize;
-    let include_unnamed = occurrences.iter().all(|entry| {
-        signal_nets += entry.nets.iter().filter(carries_signal).count();
-        signal_nets <= AUTOMATIC_OUTPUT_SMALL_DESIGN_LIMIT
+    let Some(root) = occurrences
+        .first()
+        .filter(|entry| entry.occurrence.is_root())
+    else {
+        return Ok(Vec::new());
+    };
+    let mut candidates = root
+        .nets
+        .iter()
+        .filter(|net| net.class != rspice_design::connectivity::summary::NetClass::Ground)
+        .map(|net| PlottedCandidate {
+            priority: match net.port {
+                Some(PortDirection::Out) => 0,
+                Some(PortDirection::InOut) => 1,
+                _ if net.authored_name => 2,
+                _ => 3,
+            },
+            canonical: net.name.to_ascii_lowercase(),
+            name: net.name.clone(),
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        (left.priority, left.canonical.as_str()).cmp(&(right.priority, right.canonical.as_str()))
     });
-    // Shallower occurrences rank first, so once the bound is filled at one
-    // depth nothing deeper can enter it: the occurrences are read a depth at
-    // a time and the deeper ones never at all.
-    let mut by_depth = occurrences.iter().collect::<Vec<_>>();
-    by_depth.sort_by_key(|entry| entry.occurrence.depth());
-    let mut candidates = Vec::new();
-    for level in
-        by_depth.chunk_by(|left, right| left.occurrence.depth() == right.occurrence.depth())
-    {
-        for entry in level {
-            candidates.extend(entry.nets.iter().filter(carries_signal).filter_map(|net| {
-                let priority = match net.port {
-                    Some(PortDirection::Out) => 0,
-                    Some(PortDirection::InOut) => 1,
-                    _ if net.authored_name => 2,
-                    _ if include_unnamed => 3,
-                    _ => return None,
-                };
-                Some(AutomaticCandidate {
-                    depth: entry.occurrence.depth(),
-                    priority,
-                    scope: entry.occurrence.fold_key(),
-                    // The root names a node by its leaf, so a leaf the
-                    // engine grammar cannot spell is still the name the
-                    // deck emitted there.
-                    canonical: entry
-                        .occurrence
-                        .engine_name_for(&net.name)
-                        .unwrap_or_else(|_| net.name.to_ascii_lowercase()),
-                    spelling: OccurrenceProbeSpelling::for_leaf(&entry.occurrence, 'V', &net.name)?,
-                })
-            }));
-        }
-        candidates.sort_by(|left: &AutomaticCandidate, right: &AutomaticCandidate| {
-            (
-                left.depth,
-                left.priority,
-                left.scope.as_str(),
-                left.canonical.as_str(),
-            )
-                .cmp(&(
-                    right.depth,
-                    right.priority,
-                    right.scope.as_str(),
-                    right.canonical.as_str(),
-                ))
-        });
-        candidates
-            .dedup_by(|left, right| left.scope == right.scope && left.canonical == right.canonical);
-        if candidates.len() >= AUTOMATIC_OUTPUT_HARD_LIMIT {
-            break;
-        }
-    }
-
-    candidates.truncate(AUTOMATIC_OUTPUT_HARD_LIMIT);
-    // What the run plots of what it saves: the design's output ports; with no
-    // port, the nets the drawing names; with nothing named, every node of a
-    // small design, the only kind whose unnamed nets are saved. A first run
-    // therefore ends on a curve, as ADE plots its outputs on completion.
+    candidates.dedup_by(|left, right| left.canonical == right.canonical);
+    // Output and bidirectional ports plot together; below them each rank
+    // plots only when nothing outranks it.
     let plotted_rank = candidates
         .iter()
         .map(|candidate| candidate.priority)
         .min()
         .map_or(1, |rank| rank.max(1));
-    let mut outputs = Vec::with_capacity(candidates.len());
-    for candidate in candidates {
-        // What a plan plots streams while the run goes, so the plot grows as a transient runs
-        // unless the plan turns live delivery off. A net kept for the data browser alone is not
-        // streamed.
-        let plotted = candidate.priority <= plotted_rank;
+    let mut outputs = Vec::new();
+    for candidate in candidates
+        .into_iter()
+        .filter(|candidate| candidate.priority <= plotted_rank)
+    {
+        let probe = format!("V({})", candidate.name);
         let mut output = SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
-            candidate.spelling.display().to_owned(),
-            candidate.spelling.engine().to_owned(),
+            probe.clone(),
+            probe.clone(),
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
             SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-            if plotted {
-                SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-            } else {
-                SavedOutputStreaming::StoreOnly
-            },
+            SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
         )
         .map_err(|error| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
-                format!(
-                    "Automatic output {} is invalid: {error}",
-                    candidate.spelling.display()
-                ),
+                format!("Plotted output {probe} is invalid: {error}"),
             )
         })?
         .with_origin(SavedOutputOrigin::Automatic)
-        .with_display_intent(if plotted {
-            SavedOutputDisplayIntent::Plot
-        } else {
-            SavedOutputDisplayIntent::DataBrowserOnly
-        });
+        .with_display_intent(SavedOutputDisplayIntent::Plot);
         let identity = format!("rspice.automatic-node-voltage/v1/{}", candidate.canonical);
         output.id = SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
         outputs.push(output);
-    }
-    if include_unnamed {
-        for entry in &by_depth {
-            for device in entry.devices.iter() {
-                let Some(spelling) = OccurrenceProbeSpelling::for_element(
-                    &entry.occurrence,
-                    'I',
-                    &device.drawn,
-                    &device.written,
-                ) else {
-                    continue;
-                };
-                let mut output = SavedOutput::new(
-                    SavedOutputKind::RawVoltageOrCurrent,
-                    spelling.display().to_owned(),
-                    spelling.engine().to_owned(),
-                    SavedOutputCompatibility::AllCompatibleAnalyses,
-                    SavedOutputPolicy::EveryAcceptedPoint,
-                    SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-                    SavedOutputStreaming::StoreOnly,
-                )
-                .map_err(|error| {
-                    PreparationError::new(
-                        PreparationStage::AnalysisPlan,
-                        format!(
-                            "Automatic output {} is invalid: {error}",
-                            spelling.display()
-                        ),
-                    )
-                })?
-                .with_origin(SavedOutputOrigin::Automatic)
-                .with_display_intent(SavedOutputDisplayIntent::DataBrowserOnly);
-                let identity = format!(
-                    "rspice.automatic-device-current/v1/{}",
-                    spelling.engine().to_ascii_lowercase()
-                );
-                output.id = SavedOutputId::from_namespace(plan_id.as_uuid(), identity.as_bytes());
-                outputs.push(output);
-            }
-        }
     }
     Ok(outputs)
 }

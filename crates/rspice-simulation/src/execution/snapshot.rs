@@ -174,7 +174,6 @@ impl SavePolicy {
         } = self
         {
             writer.u8(match output_selection_mode {
-                rspice_simulation_contract::output_policy::OutputSelectionMode::Automatic => 0,
                 rspice_simulation_contract::output_policy::OutputSelectionMode::ExplicitOnly => 1,
                 rspice_simulation_contract::output_policy::OutputSelectionMode::SaveAll => 2,
             });

@@ -11,9 +11,6 @@ fn output_selection_mode_is_authenticated_by_the_snapshot_digest() {
         live_streaming_enabled: true,
         retain_failure_diagnostics: true,
     };
-    let mut automatic_parts = parts();
-    automatic_parts.save_policy =
-        policy(rspice_simulation_contract::output_policy::OutputSelectionMode::Automatic);
     let mut explicit_parts = parts();
     explicit_parts.save_policy =
         policy(rspice_simulation_contract::output_policy::OutputSelectionMode::ExplicitOnly);
@@ -21,12 +18,9 @@ fn output_selection_mode_is_authenticated_by_the_snapshot_digest() {
     save_all_parts.save_policy =
         policy(rspice_simulation_contract::output_policy::OutputSelectionMode::SaveAll);
 
-    let automatic = PreparedRunSnapshot::new(automatic_parts).expect("automatic snapshot");
     let explicit = PreparedRunSnapshot::new(explicit_parts).expect("explicit snapshot");
     let save_all = PreparedRunSnapshot::new(save_all_parts).expect("save-all snapshot");
 
-    assert_ne!(automatic.digest(), explicit.digest());
-    assert_ne!(automatic.digest(), save_all.digest());
     assert_ne!(explicit.digest(), save_all.digest());
 }
 

@@ -399,7 +399,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
     );
     controller.current_execution_limits = Some(ResourceLimits::default());
     controller.current_save_policy = crate::simulation::execution::SavePolicy::PlanOwned {
-        output_selection_mode: crate::state::OutputSelectionMode::Automatic,
+        output_selection_mode: crate::state::OutputSelectionMode::SaveAll,
         retained_dataset_limit: 10,
         maximum_storage_bytes: 1,
         live_streaming_enabled: true,

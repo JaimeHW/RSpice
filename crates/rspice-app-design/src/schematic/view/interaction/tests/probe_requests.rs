@@ -555,16 +555,15 @@ fn the_net_inspector_plot_before_a_run_is_saved_by_the_next_run() {
             .stable_analysis_plan()
             .expect("stable plan")
             .id();
-        let (effective, _, _) =
-            rspice_simulation::output_contract::selection::effective_plan_capture(
-                state.model.sim_setup.save_policy.output_selection_mode,
-                saved_outputs(state),
-                &[],
-                &state.model.schematic.document().probes,
-                &[],
-                plan_id,
-            )
-            .expect("the plan resolves its outputs");
+        let (effective, _) = rspice_simulation::output_contract::selection::effective_plan_capture(
+            state.model.sim_setup.save_policy.output_selection_mode,
+            saved_outputs(state),
+            &[],
+            &state.model.schematic.document().probes,
+            &[],
+            plan_id,
+        )
+        .expect("the plan resolves its outputs");
         effective
             .iter()
             .any(|output| normalized_probe_expression(&output.source_expression) == "v(out)")

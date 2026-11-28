@@ -50,23 +50,15 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         &payload.saved_outputs,
         &payload.capture_groups,
     );
-    let (effective_outputs, reports, automatic_fallback, membership, selection_error) =
-        match selection {
-            Ok((outputs, reports, automatic_fallback, membership)) => (
-                outputs,
-                reports,
-                automatic_fallback,
-                membership,
-                None::<String>,
-            ),
-            Err(error) => (
-                Vec::new(),
-                Vec::new(),
-                false,
-                CaptureGroupMembership::default(),
-                Some(error.to_string()),
-            ),
-        };
+    let (effective_outputs, reports, membership, selection_error) = match selection {
+        Ok((outputs, reports, membership)) => (outputs, reports, membership, None::<String>),
+        Err(error) => (
+            Vec::new(),
+            Vec::new(),
+            CaptureGroupMembership::default(),
+            Some(error.to_string()),
+        ),
+    };
     // The page states one forecast, and this is where it comes from: the same
     // fold `validate_plan_saved_output_budget` prices the run with, over the
     // same participation-aware workload. The page adds nothing to it.
@@ -92,7 +84,6 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         &effective_outputs,
         &ledger,
         &membership,
-        automatic_fallback,
         selection_error.as_deref(),
     );
     if let Some(command) = command {

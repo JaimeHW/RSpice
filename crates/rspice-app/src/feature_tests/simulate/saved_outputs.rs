@@ -2,7 +2,7 @@
 //! the real run path.
 
 use egui::accesskit::Role;
-use rspice_app_state::state::{SavedOutputMaterializationStatus, SimulationRun};
+use rspice_app_state::state::{Point, SavedOutputMaterializationStatus, SimulationRun};
 
 use crate::feature_tests::engineer::Engineer;
 
@@ -76,6 +76,139 @@ fn an_expression_output_runs_under_every_save_choice() {
         run.analyses[analysis].saved_output_receipts[receipt].status,
         SavedOutputMaterializationStatus::SuppressedOnSuccess
     );
+}
+
+/// A run on the plan's default save keeps every node voltage of a design
+/// with 200 nets, at every level of its hierarchy, and every source's
+/// current: two instances of a 99-resistor ladder, each ending on a 0 V
+/// source, in series across a 1 V supply.
+#[test]
+fn a_default_run_keeps_every_node_voltage_and_source_current_at_every_level() {
+    let mut engineer = Engineer::new_project("ladders");
+    let e = &mut engineer;
+    e.schematic_cell("ladder");
+    ladder(e, RUNG_NETS);
+    e.pins("a", "Input", &[(100, 400)]);
+    e.pins("b", "Output", &[(250, 400)]);
+    e.symbol_from_schematic("ladder");
+
+    e.top_sheet();
+    let pins = e.place(
+        "voltage source",
+        "Voltage Source",
+        (100, 100),
+        &[("Instance", "vin"), ("DC voltage, V", "1")],
+    );
+    e.connect(&pins, &["in", "0"]);
+    for (instance, at, nets) in [
+        ("x1", (500, 100), ["in", "mid"]),
+        ("x2", (900, 100), ["mid", "0"]),
+    ] {
+        let pins = e.place("ladder", "ladder", at, &[("Instance", instance)]);
+        for (port, at) in &pins {
+            let net = if port.eq_ignore_ascii_case("a") {
+                nets[0]
+            } else {
+                nets[1]
+            };
+            if net == "0" {
+                e.ground(*at);
+            } else {
+                e.label(*at, net);
+            }
+        }
+    }
+    e.transient("1u", "2u");
+
+    let run = e.run();
+    let names = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.waveforms)
+        .map(|wave| wave.name.to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    let mut missing = Vec::new();
+    let mut nodes = vec!["v(in)".to_owned(), "v(mid)".to_owned()];
+    for instance in ["x1", "x2"] {
+        nodes.extend((1..=RUNG_NETS).map(|net| format!("v({instance}.n{net})")));
+    }
+    assert_eq!(nodes.len(), 200);
+    for node in &nodes {
+        if !names.contains(node) {
+            missing.push(node.clone());
+        }
+    }
+    for current in ["i(vin)", "i(x1.vm)", "i(x2.vm)"] {
+        if !names.contains(current) {
+            missing.push(current.to_owned());
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "the run lacks {} of the design's node voltages and source currents: {:?}; it holds {:?}",
+        missing.len(),
+        missing.iter().take(12).collect::<Vec<_>>(),
+        {
+            let mut held = names.iter().collect::<Vec<_>>();
+            held.sort();
+            held.into_iter().take(40).collect::<Vec<_>>()
+        }
+    );
+}
+
+/// Nets inside one ladder: `a`, then `n1` to `n99` joined by resistors, then
+/// a 0 V source `vm` from `n99` to `b`.
+const RUNG_NETS: usize = 99;
+
+/// The sheet on show drawn as a ladder of `nets` internal nets: a resistor
+/// between each pair of neighbouring nets from `a` to `n<nets>`, laid in
+/// through the store's own editing calls, and a 0 V source `vm` on to `b`.
+fn ladder(e: &mut Engineer, nets: usize) {
+    use rspice_app_state::state::ComponentType;
+    let net = |index: usize| {
+        if index == 0 {
+            "a".to_owned()
+        } else {
+            format!("n{index}")
+        }
+    };
+    for index in 0..nets {
+        let at = Point::new(
+            1000 + 200 * i32::try_from(index % 10).unwrap(),
+            100 + 200 * i32::try_from(index / 10).unwrap(),
+        );
+        let id = e
+            .replay
+            .app
+            .state
+            .model
+            .schematic
+            .add_component(ComponentType::Resistor, at);
+        let part = e
+            .replay
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .cloned()
+            .expect("the resistor");
+        let pins = e.pins_of(&part);
+        assert_eq!(pins.len(), 2, "a resistor has two pins");
+        let schematic = &mut e.replay.app.state.model.schematic;
+        schematic.add_net_label(pins[0].1, net(index));
+        schematic.add_net_label(pins[1].1, net(index + 1));
+    }
+    let pins = e.place(
+        "voltage source",
+        "Voltage Source",
+        (100, 100),
+        &[("Instance", "vm"), ("DC voltage, V", "0")],
+    );
+    e.connect(&pins, &[&net(nets), "b"]);
 }
 
 /// The analysis and receipt that hold the output `name` in `run`.

@@ -663,13 +663,8 @@ pub(crate) fn run_plan_of_instance(
         })
         .map(|entry| entry.message.clone())
         .collect::<Vec<_>>();
-    // The one advisory a new project's plan raises on every run, about the
-    // outputs it saved for want of a selection, is the plan's and not the
-    // device's; anything else is a problem the flow made.
     assert!(
-        problems
-            .iter()
-            .all(|problem| problem.starts_with("Automatic output selection retained 2 bounded")),
+        problems.is_empty(),
         "the flow raises no problem of its own: {problems:#?}"
     );
 

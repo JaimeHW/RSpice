@@ -139,7 +139,7 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
     let (request, bytes, completed) = completed_checkpoint_fixture();
     let (mut controller, mut state) = controller_fixture(request);
     controller.current_save_policy = crate::simulation::execution::SavePolicy::PlanOwned {
-        output_selection_mode: crate::state::OutputSelectionMode::Automatic,
+        output_selection_mode: crate::state::OutputSelectionMode::SaveAll,
         retained_dataset_limit: 10,
         maximum_storage_bytes: 1,
         live_streaming_enabled: false,
