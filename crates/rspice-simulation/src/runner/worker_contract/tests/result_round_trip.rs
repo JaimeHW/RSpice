@@ -1260,7 +1260,7 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
     assert!(
         WorkerResponseTransport::from_response(response)
             .unwrap_err()
-            .contains("trial population")
+            .contains("trial sequence disagrees")
     );
     let mut worker = WorkerMonteCarloVariable::from(variables[0].clone());
     worker.mean_confidence.as_mut().unwrap().successful_samples = 4;

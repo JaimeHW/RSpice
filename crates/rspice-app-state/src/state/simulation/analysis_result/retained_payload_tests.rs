@@ -297,10 +297,7 @@ fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {
 
     // A NaN value is an unavailable sample, which only an imported result may
     // carry; an infinite value is never valid.
-    for (value, reason) in [
-        (f64::NAN, "unavailable sample"),
-        (f64::INFINITY, "non-finite"),
-    ] {
+    for (value, reason) in [(f64::NAN, "missing sample"), (f64::INFINITY, "non-finite")] {
         let non_finite =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
                 RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.25, value], "#00aaff"),
@@ -321,7 +318,7 @@ fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {
         duplicated
             .validate_retained_evidence()
             .expect_err("duplicate retained identities must fail closed")
-            .contains("duplicated")
+            .contains("appears twice")
     );
 
     let bad_complex = AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
@@ -473,7 +470,7 @@ fn pole_zero_payload_requires_matching_type_and_finite_values() {
         invalid_tolerance
             .validate_for(AnalysisType::PoleZero)
             .expect_err("inflated qualification tolerance is not core-authentic")
-            .contains("pole evidence")
+            .contains("pole check disagrees")
     );
 }
 
@@ -730,7 +727,7 @@ fn soa_payload_requires_complete_rule_coverage_consistent_events_and_axis() {
         payload_without_axis
             .validate_retained_evidence()
             .expect_err("SOA payload requires its time axis")
-            .contains("missing its retained time axis")
+            .contains("missing their time axis")
     );
 
     let mut invalid_event = event.clone();

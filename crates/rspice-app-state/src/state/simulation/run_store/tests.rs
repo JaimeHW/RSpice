@@ -206,7 +206,7 @@ fn a_result_that_does_not_validate_stays_in_memory() {
     analysis.import_source = None;
     let before = analysis.clone();
     let refused = store_analysis_in_memory(&mut analysis).expect_err("a solver NaN is refused");
-    assert!(refused.contains("unavailable sample"), "{refused}");
+    assert!(refused.contains("missing sample"), "{refused}");
     assert!(holds_samples_in_memory(&analysis));
     for (left, right) in before.waveforms.iter().zip(&analysis.waveforms) {
         assert!(
