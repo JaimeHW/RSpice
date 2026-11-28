@@ -7,6 +7,50 @@
 
 use super::*;
 
+const ANALYSIS_CATALOG_GROUP_HEIGHT: f32 = 29.0;
+const ANALYSIS_CATALOG_ROW_HEIGHT: f32 = 57.0;
+/// The action column: as wide as its longest line, "Add another · 9 in plan",
+/// set on one line.
+const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 160.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct AnalysisCatalogRowLayout {
+    height: f32,
+    draw_bottom_border: bool,
+    draw_right_border: bool,
+}
+
+/// Host the analysis catalogue, and act on the kind it chose.
+///
+/// The rows are resolved here rather than lent from the rail that used to draw
+/// it. On eight of the nine setup routes, and on every other workspace,
+/// nothing has resolved the plan by the time this runs, and a plan that does
+/// not resolve at all yields none — so the window opens on an empty slice and
+/// every row reads "Add instance", which is the honest disposition when
+/// nothing can be said about what is already configured. Refusing to open
+/// would be the worse answer: the reader pressed a control, and an insert
+/// against a broken plan refuses in its own words rather than in silence.
+pub(super) fn analysis_catalog(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
+    if !cx.model.sim_setup.session.palette_open {
+        return;
+    }
+    let participation = participation::PlanParticipation::resolve(cx.model);
+    let rows = analysis_stack_rows(cx.model, &participation).unwrap_or_default();
+    let Some(kind) = analysis_catalog_window(ctx, &mut cx.model.sim_setup, &rows) else {
+        return;
+    };
+    let Some(id) = insert_analysis_instance(cx, kind) else {
+        return;
+    };
+    // Whoever adds an analysis means to configure it, and the catalogue can be
+    // opened from anywhere. Carrying the reader to the one route that edits the
+    // new instance is the same move `page_excitations::reveal` makes towards
+    // Design: the insert alone would leave a receipt on a page nobody is on.
+    cx.state.active_analysis_instance = Some(id);
+    cx.state.simulation_page = SimulationPage::Analyses;
+    cx.wb.activate(Workspace::Simulate);
+}
+
 /// Draw the catalogue and report the kind it chose, if any.
 ///
 /// The choice comes back as a value rather than as a stack action written
