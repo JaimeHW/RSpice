@@ -117,8 +117,8 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     );
     let status = harness.model.analysis_lifecycle_status.message().to_owned();
     assert!(
-        status.contains("Remove committed"),
-        "the commit must leave the receipt the immediate route writes, got: {status}"
+        status.ends_with(": removed"),
+        "the commit must leave the line the immediate route writes, got: {status}"
     );
     apply_confirmed_analysis_removal(&mut harness.cx());
     assert_eq!(

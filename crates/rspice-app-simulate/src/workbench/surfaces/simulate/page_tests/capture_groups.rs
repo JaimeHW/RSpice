@@ -49,16 +49,7 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
         "the registry edit commits"
     );
 
-    let detail = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("plan")
-        .configuration_receipts()
-        .last()
-        .expect("the edit wrote a receipt")
-        .detail()
-        .to_owned();
+    let detail = harness.model.analysis_lifecycle_status.message().to_owned();
     assert!(
         detail.starts_with("Added saved output core_m."),
         "the receipt still says what the edit was: {detail}"
@@ -92,16 +83,7 @@ fn an_edit_that_moves_nothing_receipts_only_what_it_changed() {
         "the reorder commits"
     );
 
-    let detail = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("plan")
-        .configuration_receipts()
-        .last()
-        .expect("the edit wrote a receipt")
-        .detail()
-        .to_owned();
+    let detail = harness.model.analysis_lifecycle_status.message().to_owned();
     assert_eq!(
         detail, "Moved capture group Core rails later in resolution order.",
         "nothing changed hands, so nothing is claimed to have"
@@ -164,16 +146,7 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
         watchlist_id,
         "the named group takes the output off the rule group that matched it"
     );
-    let detail = harness
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("plan")
-        .configuration_receipts()
-        .last()
-        .expect("receipt")
-        .detail()
-        .to_owned();
+    let detail = harness.model.analysis_lifecycle_status.message().to_owned();
     assert!(
         detail.contains("core_n moved Core rails → Watchlist"),
         "and the receipt names both ends of the move: {detail}"

@@ -35,6 +35,8 @@ mod registry_honesty;
 mod run_config_chip;
 mod run_host;
 mod run_set;
+#[cfg(not(target_arch = "wasm32"))]
+mod saved_plan;
 mod stage;
 mod statement;
 mod studio;

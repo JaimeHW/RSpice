@@ -83,7 +83,7 @@ fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
     app.state
         .model
         .analysis_lifecycle_status
-        .record_receipt("Receipt #9 · Insert committed for instance 5.");
+        .record_receipt("Transient: stop time 100n");
     let saved = serde_json::to_value(WorkbenchWireRef::capture(&app.state))
         .expect("the workbench serializes");
     let mut restored = AppState::default();

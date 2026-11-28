@@ -527,7 +527,7 @@ fn settle_fields(
                 DraftEdit::Analysis { .. } => {
                     match drafts::new_problem(cx.model, &working, committed) {
                         None => {
-                            commit_draft(cx, instance, working.clone());
+                            commit_draft(cx, instance, working.clone(), Some(&held.field.label));
                             Ok(())
                         }
                         Some(problem) => Err(drafts::field_reason(&held.field.label, &problem)),
@@ -612,7 +612,7 @@ fn settle_fields(
     // Nothing had the keyboard: a switch, a chooser or a press changed the
     // form, and that commits at once.
     if held.is_none() && !drafts::same_draft(&working, committed) {
-        commit_draft(cx, instance, working);
+        commit_draft(cx, instance, working, None);
         changed = true;
     }
     changed

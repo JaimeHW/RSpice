@@ -67,7 +67,6 @@ fn pvt_base_controls_restore_and_mode_changes_preserve_effective_settings() {
             let index = plan.index_of(id).unwrap();
             plan.instances[index].numeric_override = Some(legacy.clone());
         }
-        let history = serde_json::to_value(&plan.receipts).unwrap();
         let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
         restored.prepare_after_restore();
         assert_eq!(
@@ -87,7 +86,6 @@ fn pvt_base_controls_restore_and_mode_changes_preserve_effective_settings() {
         ] {
             assert!(record.value(option).is_none());
         }
-        assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), history);
         let once = snapshot(&restored);
         restored.prepare_after_restore();
         assert_eq!(snapshot(&restored), once);
@@ -125,7 +123,6 @@ fn dc_study_restore_keeps_effective_controls_and_base_changes_are_atomic() {
             let index = plan.index_of(id).unwrap();
             plan.instances[index].numeric_override = Some(legacy.clone());
         }
-        let history = serde_json::to_value(&plan.receipts).unwrap();
         let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
         restored.prepare_after_restore();
         let dc_options = restored.instance(dc).unwrap().numeric_override().unwrap();
@@ -149,7 +146,6 @@ fn dc_study_restore_keeps_effective_controls_and_base_changes_are_atomic() {
                 .is_none(),
             "all study defaults were superseded by the base's own settings"
         );
-        assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), history);
         let once = snapshot(&restored);
         restored.prepare_after_restore();
         assert_eq!(snapshot(&restored), once);
@@ -184,7 +180,6 @@ fn fourier_restore_retires_unused_overrides_and_preserves_its_producer() {
         plan.instances[index].numeric_override = Some(legacy.clone());
     }
     let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
-    let receipts = serde_json::to_value(&restored.receipts).unwrap();
     let before = restored.instance(fourier).unwrap();
     let draft = serde_json::to_value(&before.draft).unwrap();
     let dependencies = serde_json::to_value(&before.dependencies).unwrap();
@@ -200,7 +195,6 @@ fn fourier_restore_retires_unused_overrides_and_preserves_its_producer() {
         restored.instance(transient).unwrap().numeric_override(),
         Some(&legacy)
     );
-    assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), receipts);
     let once = snapshot(&restored);
     restored.prepare_after_restore();
     assert_eq!(snapshot(&restored), once);
@@ -210,7 +204,7 @@ fn fourier_restore_retires_unused_overrides_and_preserves_its_producer() {
 }
 
 #[test]
-fn pss_retention_restore_preserves_reporting_and_receipts() {
+fn pss_retention_restore_preserves_reporting() {
     let mut plan = SimulationPlan::empty();
     let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
     let (empty_pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
@@ -234,7 +228,6 @@ fn pss_retention_restore_preserves_reporting_and_receipts() {
         )
         .unwrap();
     let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
-    let receipts = serde_json::to_value(&restored.receipts).unwrap();
     restored.prepare_after_restore();
     let record = restored.instance(pss).unwrap().numeric_override().unwrap();
     assert!(
@@ -257,7 +250,6 @@ fn pss_retention_restore_preserves_reporting_and_receipts() {
         restored.instance(transient).unwrap().numeric_override(),
         Some(&retention)
     );
-    assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), receipts);
     let once = snapshot(&restored);
     restored.prepare_after_restore();
     assert_eq!(snapshot(&restored), once);
@@ -297,7 +289,6 @@ fn restore_periodic_consumer_solver_ownership_preserves_carriers_and_history() {
         .map(|instance| serde_json::to_value(&instance.draft).unwrap())
         .collect();
     let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
-    let history = serde_json::to_value(&restored.receipts).unwrap();
     restored.prepare_after_restore();
     assert_eq!(
         restored.instance(hb).unwrap().numeric_override(),
@@ -311,7 +302,6 @@ fn restore_periodic_consumer_solver_ownership_preserves_carriers_and_history() {
                 .is_err()
         );
     }
-    assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), history);
     assert_eq!(
         restored
             .instances
@@ -645,7 +635,6 @@ fn empty_plan_is_editable_but_not_dispatchable() {
     assert_eq!(plan.revision(), ObjectRevision::INITIAL);
     assert!(plan.instances().is_empty());
     assert!(plan.tombstones().is_empty());
-    assert!(plan.receipts().is_empty());
     plan.validate_structure()
         .expect("an empty working plan is structurally valid");
     assert!(matches!(
@@ -682,15 +671,13 @@ fn plan_clone_refreshes_all_identities_and_remaps_the_dependency_graph() {
         .expect("disposable instance retires");
     source
         .commit_configuration_change("Design variables were updated.")
-        .expect("source configuration receipt commits");
+        .expect("source configuration change commits");
 
     let clone = source.clone_as_new().expect("valid source plan clones");
 
     assert_ne!(clone.id(), source.id());
     assert_eq!(clone.revision(), ObjectRevision::INITIAL);
     assert!(clone.tombstones().is_empty());
-    assert!(clone.receipts().is_empty());
-    assert!(clone.configuration_receipts().is_empty());
     assert_eq!(clone.instances().len(), source.instances().len());
 
     let source_ids = source
@@ -746,7 +733,7 @@ fn plan_clone_refreshes_all_identities_and_remaps_the_dependency_graph() {
 }
 
 #[test]
-fn configuration_change_has_a_durable_interleaved_revision_receipt() {
+fn a_configuration_change_moves_the_revision_between_analysis_edits() {
     let mut plan = SimulationPlan::new();
     let transient = plan.instances()[0].id();
     let (_, edit_receipt) = plan.edit(transient, |_| ()).expect("analysis edit commits");
@@ -757,9 +744,6 @@ fn configuration_change_has_a_durable_interleaved_revision_receipt() {
         .set_enabled(transient, false)
         .expect("subsequent analysis mutation commits");
 
-    assert_eq!(edit_receipt.sequence(), 1);
-    assert_eq!(configuration_receipt.sequence(), 2);
-    assert_eq!(disable_receipt.sequence(), 3);
     assert_eq!(
         configuration_receipt.source_revision(),
         edit_receipt.committed_revision()
@@ -769,20 +753,19 @@ fn configuration_change_has_a_durable_interleaved_revision_receipt() {
         configuration_receipt.committed_revision()
     );
     assert_eq!(plan.revision(), disable_receipt.committed_revision());
-    assert_eq!(plan.configuration_receipts(), &[configuration_receipt]);
     plan.validate_structure()
-        .expect("interleaved receipt sequence remains structurally valid");
+        .expect("the plan stays structurally valid");
 
     let json = snapshot(&plan);
-    let mut restored: SimulationPlan =
-        serde_json::from_str(&json).expect("configuration receipts round-trip");
+    let mut restored: SimulationPlan = serde_json::from_str(&json).expect("the plan round-trips");
     restored
         .validate_structure()
-        .expect("restored receipt sequence remains valid");
+        .expect("the restored plan stays valid");
     let next = restored
         .commit_configuration_change("Specifications were updated.")
-        .expect("restored sequence remains appendable");
-    assert_eq!(next.sequence(), 4);
+        .expect("the restored plan takes a further change");
+    assert_eq!(next.source_revision(), plan.revision());
+    assert_eq!(restored.revision(), next.committed_revision());
 }
 
 #[test]
@@ -1444,24 +1427,13 @@ fn frozen_projection_is_deterministic_and_excludes_disabled_positions() {
     let transient = plan.instances()[0].id();
     let (disabled, insert_receipt) = plan.insert(AnalysisKind::DcSweep).expect("DC inserts");
     let disable_receipt = plan.set_enabled(disabled, false).expect("DC disables");
-    assert_eq!(insert_receipt.sequence(), 1);
     assert_eq!(insert_receipt.command(), AnalysisLifecycleCommand::Insert);
     assert_eq!(insert_receipt.kind(), AnalysisKind::DcSweep);
     assert_eq!(insert_receipt.outcome(), AnalysisLifecycleState::Draft);
     assert!(!insert_receipt.detail().is_empty());
     assert_eq!(insert_receipt.source_revision(), ObjectRevision::INITIAL);
-    assert_eq!(disable_receipt.sequence(), 2);
     assert_eq!(disable_receipt.command(), AnalysisLifecycleCommand::Disable);
     assert_eq!(disable_receipt.outcome(), AnalysisLifecycleState::Disabled);
-    let persisted_receipt = serde_json::to_value(&disable_receipt).expect("receipt serializes");
-    assert_eq!(persisted_receipt["command"], "disable");
-    assert_eq!(persisted_receipt["kind"], "dc");
-    assert_eq!(persisted_receipt["outcome"], "disabled");
-    assert!(
-        persisted_receipt["detail"]
-            .as_str()
-            .is_some_and(|detail| !detail.is_empty())
-    );
     assert_eq!(
         insert_receipt.committed_revision(),
         disable_receipt.source_revision()

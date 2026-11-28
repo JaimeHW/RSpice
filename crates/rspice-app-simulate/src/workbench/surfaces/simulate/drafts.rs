@@ -144,7 +144,9 @@ pub fn commit_open_drafts(cx: &mut Cx<'_, SimulateFeature>) -> Result<(), String
         return refuse(cx, open, reason);
     }
     let outcome = match &open.edit {
-        DraftEdit::Analysis { instance, draft } => commit_analysis(cx, *instance, draft),
+        DraftEdit::Analysis { instance, draft } => {
+            commit_analysis(cx, *instance, draft, &open.field.label)
+        }
         DraftEdit::AnalysisOption {
             instance,
             option,
@@ -185,12 +187,14 @@ pub(super) fn field_reason(label: &str, reason: &str) -> String {
     format!("{label}: {detail}")
 }
 
-/// Commit an analysis's fields as its form holds them. Refused, with the
-/// reason, when they hold a problem the committed fields do not.
+/// Commit an analysis's fields as its form holds them, after the field
+/// labelled `field` was typed in. Refused, with the reason, when they hold a
+/// problem the committed fields do not.
 pub(super) fn commit_analysis(
     cx: &mut Cx<'_, SimulateFeature>,
     instance: AnalysisInstanceId,
     working: &AnalysisDraft,
+    field: &str,
 ) -> Result<(), String> {
     let Some(committed) = committed_draft(cx.model, instance) else {
         return Ok(());
@@ -201,7 +205,7 @@ pub(super) fn commit_analysis(
     if let Some(problem) = new_problem(cx.model, working, &committed) {
         return Err(problem);
     }
-    super::commit_draft(cx, instance, working.clone());
+    super::commit_draft(cx, instance, working.clone(), Some(field));
     Ok(())
 }
 

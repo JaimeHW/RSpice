@@ -231,29 +231,5 @@ pub(super) fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
         AnalysisPlanIssue::InvalidTombstoneRevision { id } => {
             format!("Retired analysis identity {id} has an invalid revision range.")
         }
-        AnalysisPlanIssue::InvalidReceiptSequence { sequence } => {
-            format!("Lifecycle receipt sequence {sequence} is not contiguous.")
-        }
-        AnalysisPlanIssue::InvalidReceiptRevision { sequence } => {
-            format!("Lifecycle receipt {sequence} has an invalid revision transition.")
-        }
-        AnalysisPlanIssue::DanglingReceiptInstance { sequence, id } => {
-            format!("Lifecycle receipt {sequence} references unknown analysis instance {id}.")
-        }
-        AnalysisPlanIssue::ReceiptKindMismatch {
-            sequence,
-            expected,
-            actual,
-        } => format!(
-            "Lifecycle receipt {sequence} identifies {}, but its retained analysis is {}.",
-            actual.label(),
-            expected.label()
-        ),
-        AnalysisPlanIssue::EmptyReceiptDetail { sequence } => {
-            format!("Lifecycle receipt {sequence} has no status detail.")
-        }
-        AnalysisPlanIssue::InvalidNextReceiptSequence { expected, actual } => {
-            format!("Next lifecycle receipt sequence is {actual}; expected {expected}.")
-        }
     }
 }

@@ -99,28 +99,6 @@ pub enum AnalysisPlanIssue {
     InvalidTombstoneRevision {
         id: AnalysisInstanceId,
     },
-    InvalidReceiptSequence {
-        sequence: u64,
-    },
-    InvalidReceiptRevision {
-        sequence: u64,
-    },
-    DanglingReceiptInstance {
-        sequence: u64,
-        id: AnalysisInstanceId,
-    },
-    ReceiptKindMismatch {
-        sequence: u64,
-        expected: AnalysisKind,
-        actual: AnalysisKind,
-    },
-    EmptyReceiptDetail {
-        sequence: u64,
-    },
-    InvalidNextReceiptSequence {
-        expected: u64,
-        actual: u64,
-    },
 }
 
 impl AnalysisPlanIssue {
@@ -250,34 +228,6 @@ impl fmt::Display for AnalysisPlanIssue {
                 formatter,
                 "Retired analysis {id} has an invalid revision history."
             ),
-            Self::InvalidReceiptSequence { sequence } => write!(
-                formatter,
-                "Analysis lifecycle receipt sequence {sequence} is out of order."
-            ),
-            Self::InvalidReceiptRevision { sequence } => write!(
-                formatter,
-                "Analysis lifecycle receipt {sequence} has an invalid revision transition."
-            ),
-            Self::DanglingReceiptInstance { sequence, id } => write!(
-                formatter,
-                "Analysis lifecycle receipt {sequence} references unknown analysis {id}."
-            ),
-            Self::ReceiptKindMismatch {
-                sequence,
-                expected,
-                actual,
-            } => write!(
-                formatter,
-                "Analysis lifecycle receipt {sequence} identifies {actual}, but its retained analysis is {expected}."
-            ),
-            Self::EmptyReceiptDetail { sequence } => write!(
-                formatter,
-                "Analysis lifecycle receipt {sequence} has no status detail."
-            ),
-            Self::InvalidNextReceiptSequence { expected, actual } => write!(
-                formatter,
-                "The next analysis lifecycle receipt must be {expected}, not {actual}."
-            ),
         }
     }
 }
@@ -356,7 +306,6 @@ pub enum AnalysisPlanError {
         reason: String,
     },
     InvalidConfigurationChangeDetail,
-    ReceiptSequenceExhausted,
     Revision(RevisionError),
     InvalidPlan(Vec<AnalysisPlanIssue>),
 }
@@ -473,9 +422,6 @@ impl fmt::Display for AnalysisPlanError {
             Self::InvalidConfigurationChangeDetail => formatter.write_str(
                 "Plan configuration change detail must be a non-empty single line of at most 512 characters.",
             ),
-            Self::ReceiptSequenceExhausted => {
-                formatter.write_str("The analysis lifecycle receipt sequence is exhausted.")
-            }
             Self::Revision(error) => error.fmt(formatter),
             Self::InvalidPlan(issues) => {
                 let Some(first) = issues.first() else {

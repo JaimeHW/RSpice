@@ -1197,12 +1197,6 @@ fn issue_analysis(
         AnalysisPlanIssue::DependencyCycle { members } => members.first().copied(),
         AnalysisPlanIssue::NoEnabledInstances
         | AnalysisPlanIssue::DuplicateTombstoneId { .. }
-        | AnalysisPlanIssue::InvalidTombstoneRevision { .. }
-        | AnalysisPlanIssue::InvalidReceiptSequence { .. }
-        | AnalysisPlanIssue::InvalidReceiptRevision { .. }
-        | AnalysisPlanIssue::DanglingReceiptInstance { .. }
-        | AnalysisPlanIssue::ReceiptKindMismatch { .. }
-        | AnalysisPlanIssue::EmptyReceiptDetail { .. }
-        | AnalysisPlanIssue::InvalidNextReceiptSequence { .. } => None,
+        | AnalysisPlanIssue::InvalidTombstoneRevision { .. } => None,
     }
 }

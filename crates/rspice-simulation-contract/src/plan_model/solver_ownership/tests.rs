@@ -103,10 +103,6 @@ fn multirate_envelope_owns_numerics_and_keeps_reporting_and_dc_guess_options() {
     assert!(record.stated(O::Itl4).is_none());
     assert!(record.stated(O::Itl1).is_some());
     assert!(record.stated(O::StrobeInterval).is_some());
-    assert_eq!(
-        serde_json::to_value(&restored.receipts).unwrap(),
-        serde_json::to_value(&plan.receipts).unwrap()
-    );
     assert_eq!(restored.revision(), plan.revision());
 }
 
@@ -193,7 +189,6 @@ fn configured_study_defaults_follow_base_ownership_and_restore_without_history_e
         let index = plan.index_of(id).unwrap();
         plan.instances[index].numeric_override =
             Some(serde_json::from_str(r#"{"itl1":60,"itl4":99}"#).unwrap());
-        let receipts = serde_json::to_value(&plan.receipts).unwrap();
         let carrier = plan.instance(tran).unwrap().numeric_override().cloned();
         let mut restored: SimulationPlan =
             serde_json::from_value(serde_json::to_value(&plan).unwrap()).unwrap();
@@ -205,7 +200,6 @@ fn configured_study_defaults_follow_base_ownership_and_restore_without_history_e
             restored.instance(tran).unwrap().numeric_override(),
             carrier.as_ref()
         );
-        assert_eq!(serde_json::to_value(&restored.receipts).unwrap(), receipts);
         let once = serde_json::to_value(&restored).unwrap();
         restored.prepare_after_restore();
         assert_eq!(serde_json::to_value(&restored).unwrap(), once);

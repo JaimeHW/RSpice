@@ -53,7 +53,7 @@ impl fmt::Display for AnalysisLifecycleState {
     }
 }
 
-/// Stable command vocabulary recorded by plan mutation receipts.
+/// Stable command vocabulary of plan mutations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AnalysisLifecycleCommand {

@@ -48,15 +48,26 @@ fn first_instance(app: &RSpiceApp) -> AnalysisInstanceId {
         .id()
 }
 
-/// A committed command is recorded at `Info`, in the receipt's own words.
+/// A committed command is recorded at `Info`, as one plain line: the name
+/// the analysis shows under, then what changed.
 ///
-/// The Console page shows every severity, so this is where a receipt is
-/// readable; the Problems page shows warnings and errors, so a receipt does
-/// not appear there as a problem.
+/// The Console page shows every severity, so this is where the line is
+/// readable; the Problems page shows warnings and errors, so a committed edit
+/// does not appear there as a problem.
 #[test]
-fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
+fn a_committed_plan_command_leaves_one_plain_line_in_the_console() {
     let mut app = RSpiceApp::test_instance();
     let id = first_instance(&app);
+    let name = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the fixture has a stable plan")
+        .instance(id)
+        .expect("the first instance")
+        .display_name()
+        .to_owned();
 
     apply_analysis_action(
         &mut crate::workbench::features::cx(&mut app),
@@ -71,12 +82,12 @@ fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
     assert_eq!(
         entries[0].1,
         app.state.model.analysis_lifecycle_status.message(),
-        "the Console records the receipt itself, not a paraphrase of it"
+        "the Console records the outcome the status states"
     );
-    assert!(
-        entries[0].1.starts_with("Receipt #"),
-        "the record is the receipt, sequence and all: {}",
-        entries[0].1
+    assert_eq!(
+        entries[0].1,
+        format!("{name}: disabled"),
+        "with no receipt number, revision or identity in it"
     );
     assert!(
         app.state.workbench.toasts.activity().is_empty(),
@@ -128,7 +139,7 @@ fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
 /// Three announcing sites sit on the render path and restate a standing
 /// refusal every frame. The funnel logs only when the outcome changes, and the
 /// price of not writing that refusal sixty times a second is that two
-/// consecutive identical receipts are one record.
+/// consecutive identical lines are one record.
 #[test]
 fn a_restated_outcome_is_recorded_once_and_a_changed_one_again() {
     let mut app = RSpiceApp::test_instance();
@@ -142,7 +153,7 @@ fn a_restated_outcome_is_recorded_once_and_a_changed_one_again() {
 
     app.state
         .model
-        .record_plan_receipt("Receipt #2 \u{00b7} Edit committed for instance 1.");
+        .record_plan_receipt("Transient: stop time 100n");
     let entries = plan_entries(&app);
     assert_eq!(entries.len(), 2, "{entries:?}");
     assert_eq!(entries[1].0, LogSeverity::Info);

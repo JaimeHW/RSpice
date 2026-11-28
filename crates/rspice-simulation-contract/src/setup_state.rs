@@ -156,7 +156,7 @@ impl SimulationSetup {
     }
 
     /// A copy without the plan catalog's stored inactive plans, for a reader
-    /// that never consults them: each is held in full — drafts, receipts,
+    /// that never consults them: each is held in full — drafts and
     /// tombstones — and is not copied. The copy carries a stamp of its own,
     /// and this setup is left as it came, stamp and all.
     pub fn clone_without_inactive_plans(&mut self) -> Self {

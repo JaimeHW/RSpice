@@ -351,3 +351,40 @@ fn an_option_typed_and_not_left_is_committed_by_run_and_by_a_workspace_switch() 
         "the option keeps what was typed"
     );
 }
+
+/// What the Console holds from the plan, oldest first.
+fn plan_lines(app: &RSpiceApp) -> Vec<String> {
+    app.state
+        .model
+        .log_buffer
+        .entries()
+        .filter(|entry| entry.source == rspice_app_state::diagnostics::LogSource::Plan)
+        .map(|entry| entry.message.clone())
+        .collect()
+}
+
+/// A value typed and left is one line in the Console, in plain words: the
+/// analysis, the field and the value, with no receipt number, revision or
+/// identity in it. An option is logged the same way.
+#[test]
+fn a_value_left_is_one_plain_line_in_the_console() {
+    let mut replay = analyses_page();
+    let before = plan_lines(&replay.app);
+    type_into(&mut replay, "Stop time", "100n");
+    replay.key(Key::Tab, Modifiers::NONE);
+
+    let lines = plan_lines(&replay.app);
+    assert_eq!(
+        lines[before.len()..],
+        ["Transient: stop time 100n".to_owned()],
+        "one edit is one line"
+    );
+
+    let option = find_field(&mut replay, |label| label.ends_with("TRTOL")).label;
+    type_into(&mut replay, &option, "3");
+    replay.key(Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        plan_lines(&replay.app).last().map(String::as_str),
+        Some("Transient: TRTOL 3")
+    );
+}

@@ -99,7 +99,6 @@ fn cloning_activates_a_fresh_plan_and_retains_an_independent_source() {
     let clone_instance = &setup.analysis_plan.as_ref().unwrap().instances()[0];
     assert_ne!(clone_instance.id(), source_instance_id);
     assert_eq!(clone_instance.lifecycle(), AnalysisLifecycleState::Draft);
-    assert!(setup.analysis_plan.as_ref().unwrap().receipts().is_empty());
     assert!(
         setup
             .analysis_plan

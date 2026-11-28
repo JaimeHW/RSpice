@@ -782,10 +782,7 @@ fn matches_documented_pristine_plan(
     candidate: &rspice_app_state::simulation::plan::SimulationPlan,
     documented: &rspice_app_state::simulation::plan::SimulationPlan,
 ) -> bool {
-    if candidate.revision() != documented.revision()
-        || !candidate.receipts().is_empty()
-        || !candidate.tombstones().is_empty()
-    {
+    if candidate.revision() != documented.revision() || !candidate.tombstones().is_empty() {
         return false;
     }
     let ([candidate], [documented]) = (candidate.instances(), documented.instances()) else {

@@ -51,7 +51,7 @@ use crate::simulation::SimulationController;
 use crate::simulation::dialog::{NoiseReferenceType, PssDialogState};
 use crate::simulation::plan::{
     AnalysisDependency, AnalysisDependencyRepairContext, AnalysisDraft, AnalysisKind,
-    AnalysisLifecycleCommand, AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
+    AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
 };
 use crate::state::SimulationPage;
 use crate::ui::icons::Icon;

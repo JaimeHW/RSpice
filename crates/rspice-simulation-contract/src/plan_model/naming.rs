@@ -5,7 +5,7 @@
 //! its kind label, which is what every project written before names existed
 //! resolves to and what a freshly inserted analysis starts as. Everything that
 //! shows an instance to a person goes through [`AnalysisInstance::display_name`]
-//! so the plan, the picker, the receipts, the jobs manager, and the provenance
+//! so the plan, the picker, the Console, the jobs manager, and the provenance
 //! hops cannot disagree about what one analysis is called.
 
 use std::collections::HashSet;
@@ -229,10 +229,7 @@ impl SimulationPlan {
             id,
             None,
             AnalysisLifecycleState::SameState,
-            format!(
-                "\"{previous}\" ({id}) gave up its name and now shows as {}.",
-                kind.label()
-            ),
+            format!("{previous}: name given up, shows as {}", kind.label()),
             move |candidate, revision| {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;
@@ -264,9 +261,9 @@ impl SimulationPlan {
             .display_name()
             .to_owned();
         let detail = if previous == name {
-            format!("Analysis {id} is now named \"{name}\" outright.")
+            format!("{name}: named")
         } else {
-            format!("Analysis {id} was renamed from \"{previous}\" to \"{name}\".")
+            format!("{previous}: renamed {name}")
         };
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Rename,

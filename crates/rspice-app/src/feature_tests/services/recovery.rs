@@ -22,7 +22,6 @@ fn replacement_guard_compares_initial_plan_draft_to_the_documented_default() {
         plan.revision(),
         rspice_app_state::product::ObjectRevision::INITIAL
     );
-    assert!(plan.receipts().is_empty());
     let rspice_app_state::simulation::plan::AnalysisDraft::Transient(draft) =
         plan.instances()[0].draft()
     else {

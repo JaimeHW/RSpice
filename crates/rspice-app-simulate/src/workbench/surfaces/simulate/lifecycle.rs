@@ -1,8 +1,8 @@
 //! Mutating the analysis stack: insert, commit, validate, remove, repair.
 //!
-//! Every mutation goes through this module and leaves a lifecycle receipt, so
-//! what the surface shows about an analysis is always what actually happened
-//! to it. A draft is validated before it is committed and a failed action
+//! Every mutation goes through this module and leaves one plain line in the
+//! Console, so what the surface shows about an analysis is always what
+//! actually happened to it. A draft is validated before it is committed and a failed action
 //! records the failure rather than the intent, which is why a stale or
 //! rejected edit can never appear as a configured analysis.
 
@@ -322,11 +322,10 @@ pub fn apply_analysis_action(
             cx.model
                 .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
-                Ok((repair, receipt)) => {
+                Ok((repair, _)) => {
                     refresh_analysis_projections(cx);
                     cx.model.record_plan_receipt(format!(
-                        "Receipt #{} committed for instance {id}. Prerequisites repaired: {} added, {} enabled, {} moved earlier, {} bindings updated, and {} invalid bindings removed.",
-                        receipt.sequence(),
+                        "Prerequisites repaired: {} added, {} enabled, {} moved earlier, {} bindings updated, and {} invalid bindings removed.",
                         repair.inserted().len(),
                         repair.enabled().len(),
                         repair.moved().len(),
@@ -374,12 +373,11 @@ pub fn apply_analysis_action(
             cx.model
                 .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
-                Ok((pss_id, receipt)) => {
+                Ok((pss_id, _)) => {
                     refresh_analysis_projections(cx);
                     cx.state.active_analysis_instance = Some(pss_id);
                     cx.model.record_plan_receipt(format!(
-                        "Receipt #{} committed. Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete.",
-                        receipt.sequence(),
+                        "Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete."
                     ));
                 }
                 Err(error) => record_failure(cx, "Configure PSS prerequisite", &error),
@@ -694,12 +692,6 @@ pub(super) fn issue_applies_to(issue: &AnalysisPlanIssue, id: AnalysisInstanceId
         }
         AnalysisPlanIssue::DependencyCycle { members } => members.contains(&id),
         AnalysisPlanIssue::DuplicateTombstoneId { .. }
-        | AnalysisPlanIssue::InvalidTombstoneRevision { .. }
-        | AnalysisPlanIssue::InvalidReceiptSequence { .. }
-        | AnalysisPlanIssue::InvalidReceiptRevision { .. }
-        | AnalysisPlanIssue::DanglingReceiptInstance { .. }
-        | AnalysisPlanIssue::ReceiptKindMismatch { .. }
-        | AnalysisPlanIssue::EmptyReceiptDetail { .. }
-        | AnalysisPlanIssue::InvalidNextReceiptSequence { .. } => false,
+        | AnalysisPlanIssue::InvalidTombstoneRevision { .. } => false,
     }
 }

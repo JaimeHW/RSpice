@@ -5,7 +5,6 @@
 //! plan it executed.
 
 mod dependencies;
-mod digest;
 mod naming;
 mod participation;
 mod solver_ownership;
@@ -130,11 +129,11 @@ impl AnalysisDependencyRepair {
     }
 }
 
-/// Immutable receipt proving one atomic plan mutation committed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// What one atomic plan mutation committed, handed back to the caller that
+/// made it: the command, the analysis it touched, and the words the Console
+/// logs for it. The plan keeps no record of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalysisLifecycleReceipt {
-    sequence: u64,
     command: AnalysisLifecycleCommand,
     instance_id: AnalysisInstanceId,
     kind: AnalysisKind,
@@ -146,9 +145,10 @@ pub struct AnalysisLifecycleReceipt {
 }
 
 impl AnalysisLifecycleReceipt {
+    /// The plan revision the commit made, as a count.
     #[must_use]
     pub const fn sequence(&self) -> u64 {
-        self.sequence
+        self.committed_revision.get()
     }
 
     #[must_use]
@@ -193,28 +193,17 @@ impl AnalysisLifecycleReceipt {
     }
 }
 
-/// Immutable receipt proving that a non-analysis plan configuration domain
-/// committed against one exact plan revision.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// What one change to the plan's configuration outside its analyses
+/// committed, handed back to the caller that made it. The plan keeps no
+/// record of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulationPlanConfigurationReceipt {
-    sequence: u64,
     source_revision: ObjectRevision,
     committed_revision: ObjectRevision,
     detail: String,
-    /// FNV-1a/64 over the plan this receipt adopted. Empty is what a receipt
-    /// written before the digest existed deserializes to, and such a receipt
-    /// reports no digest rather than a wrong one.
-    #[serde(default)]
-    digest: String,
 }
 
 impl SimulationPlanConfigurationReceipt {
-    #[must_use]
-    pub const fn sequence(&self) -> u64 {
-        self.sequence
-    }
-
     #[must_use]
     pub const fn source_revision(&self) -> ObjectRevision {
         self.source_revision
@@ -230,22 +219,12 @@ impl SimulationPlanConfigurationReceipt {
         &self.detail
     }
 
-    /// The digest of the plan this receipt adopted, if it carries one.
-    ///
-    /// A receipt persisted before the digest existed has none, which is
-    /// reported as absence rather than as a digest that would not reproduce.
-    #[must_use]
-    pub fn digest(&self) -> Option<&str> {
-        (!self.digest.is_empty()).then_some(self.digest.as_str())
-    }
-
     /// The receipt as the one line the session's log shows: the change, in the words of the
     /// surface that made it ("Added saved output V(out).").
     ///
     /// Every surface that commits a configuration change reports it the same
     /// way, so the wording lives with the receipt rather than being restated
-    /// at each call site. Its number, the revisions it moved the plan between
-    /// and the plan's digest are the receipt's record, kept with the plan, not
+    /// at each call site. The revisions it moved the plan between are not
     /// words for the reader.
     #[must_use]
     pub fn status_line(&self) -> String {
@@ -551,10 +530,6 @@ pub struct SimulationPlan {
     revision: ObjectRevision,
     instances: Vec<AnalysisInstance>,
     tombstones: Vec<AnalysisTombstone>,
-    receipts: Vec<AnalysisLifecycleReceipt>,
-    #[serde(default)]
-    configuration_receipts: Vec<SimulationPlanConfigurationReceipt>,
-    next_receipt_sequence: u64,
     /// Nobody has edited this plan: it is the one a new project starts with.
     /// Every committed edit clears it, which the revision alone cannot say,
     /// because a plan built from parts starts at the initial revision too.
@@ -583,9 +558,6 @@ impl SimulationPlan {
             revision: ObjectRevision::INITIAL,
             instances: Vec::new(),
             tombstones: Vec::new(),
-            receipts: Vec::new(),
-            configuration_receipts: Vec::new(),
-            next_receipt_sequence: 1,
             untouched: false,
         }
     }
@@ -611,9 +583,6 @@ impl SimulationPlan {
                 },
             )],
             tombstones: Vec::new(),
-            receipts: Vec::new(),
-            configuration_receipts: Vec::new(),
-            next_receipt_sequence: 1,
             untouched: true,
         }
     }
@@ -622,8 +591,8 @@ impl SimulationPlan {
     ///
     /// Every analysis receives a fresh identity and every dependency edge is
     /// remapped to the corresponding clone. Revision and lifecycle history,
-    /// mutation receipts, tombstones, and prior result references belong to
-    /// the source plan and are intentionally not copied. Draft values,
+    /// tombstones, and prior result references belong to the source plan
+    /// and are intentionally not copied. Draft values,
     /// enabled state, order, and dependency roles are preserved exactly.
     pub fn clone_as_new(&self) -> Result<Self, AnalysisPlanError> {
         self.ensure_structurally_valid()?;
@@ -712,9 +681,6 @@ impl SimulationPlan {
             revision,
             instances,
             tombstones: Vec::new(),
-            receipts: Vec::new(),
-            configuration_receipts: Vec::new(),
-            next_receipt_sequence: 1,
             untouched: false,
         };
         cloned.ensure_structurally_valid()?;
@@ -729,54 +695,22 @@ impl SimulationPlan {
         revision: ObjectRevision,
         instances: Vec<AnalysisInstance>,
     ) -> Result<Self, AnalysisPlanError> {
-        Self::from_persisted_parts(id, revision, instances, Vec::new(), Vec::new())
+        Self::from_persisted_parts(id, revision, instances, Vec::new())
     }
 
     /// Reconstruct all durable plan parts while validating their identities,
-    /// revisions, receipts, and dependency graph.
+    /// revisions, and dependency graph.
     pub fn from_persisted_parts(
         id: SimulationPlanId,
         revision: ObjectRevision,
         instances: Vec<AnalysisInstance>,
         tombstones: Vec<AnalysisTombstone>,
-        receipts: Vec<AnalysisLifecycleReceipt>,
     ) -> Result<Self, AnalysisPlanError> {
-        Self::from_all_persisted_parts(id, revision, instances, tombstones, receipts, Vec::new())
-    }
-
-    /// Reconstruct every durable plan receipt domain. This is the lossless
-    /// import boundary for schema-5 and newer plan documents.
-    pub fn from_all_persisted_parts(
-        id: SimulationPlanId,
-        revision: ObjectRevision,
-        instances: Vec<AnalysisInstance>,
-        tombstones: Vec<AnalysisTombstone>,
-        receipts: Vec<AnalysisLifecycleReceipt>,
-        configuration_receipts: Vec<SimulationPlanConfigurationReceipt>,
-    ) -> Result<Self, AnalysisPlanError> {
-        let last_sequence = receipts
-            .iter()
-            .map(AnalysisLifecycleReceipt::sequence)
-            .chain(
-                configuration_receipts
-                    .iter()
-                    .map(SimulationPlanConfigurationReceipt::sequence),
-            )
-            .max();
-        let next_receipt_sequence = match last_sequence {
-            Some(sequence) => sequence
-                .checked_add(1)
-                .ok_or(AnalysisPlanError::ReceiptSequenceExhausted)?,
-            None => 1,
-        };
         let plan = Self {
             id,
             revision,
             instances,
             tombstones,
-            receipts,
-            configuration_receipts,
-            next_receipt_sequence,
             untouched: false,
         };
         plan.ensure_structurally_valid()?;
@@ -810,21 +744,6 @@ impl SimulationPlan {
         &self.tombstones
     }
 
-    #[must_use]
-    pub fn receipts(&self) -> &[AnalysisLifecycleReceipt] {
-        &self.receipts
-    }
-
-    /// The durable log of non-analysis configuration changes this plan adopted.
-    ///
-    /// The registry pages read it to show that an edit committed. Until they
-    /// did, a successful edit was the one outcome with no surface: a refusal
-    /// toasted, and a receipt only advanced a counter.
-    #[must_use]
-    pub fn configuration_receipts(&self) -> &[SimulationPlanConfigurationReceipt] {
-        &self.configuration_receipts
-    }
-
     /// Whether this plan currently owns queued or executing work.
     ///
     /// Replacing an active plan while one of its instances owns runner state
@@ -841,9 +760,9 @@ impl SimulationPlan {
     /// configuration change named `detail`: the same instances in the same
     /// order, each with its settings, name, enablement, dependencies and
     /// participation. An analysis the snapshot does not hold is retired, so
-    /// every receipt still names an analysis the plan knows.
+    /// its identity is never used again.
     ///
-    /// The receipts stay this plan's, and the revision advances once. Every
+    /// The revision advances once. Every
     /// instance whose settings this changes is stamped with that revision and
     /// left a draft, as an edit leaves it, so a revision never names two
     /// different settings of one analysis. Atomic, and refused while this plan
@@ -896,9 +815,10 @@ impl SimulationPlan {
                 }
             })
             .collect::<Vec<_>>();
-        // Every analysis a receipt names stays known: the ones the snapshot
-        // retired stay retired, and one this restore takes out of the list,
-        // an added analysis undone among them, is retired now.
+        // Every analysis the plan held stays known, so no identity is used
+        // twice: the ones the snapshot retired stay retired, and one this
+        // restore takes out of the list, an added analysis undone among
+        // them, is retired now.
         let mut known: HashSet<AnalysisInstanceId> =
             instances.iter().map(|instance| instance.id).collect();
         let mut tombstones = Vec::with_capacity(snapshot.tombstones.len());
@@ -927,8 +847,7 @@ impl SimulationPlan {
     /// an analysis-instance mutation.
     ///
     /// The plan revision advances exactly once, which invalidates preflight
-    /// artifacts pinned to the previous revision. A durable receipt shares
-    /// the same monotonic sequence as analysis lifecycle receipts. The method
+    /// artifacts pinned to the previous revision. The method
     /// is atomic and refuses to replace configuration while this plan owns
     /// queued or executing work.
     pub fn commit_configuration_change(
@@ -939,8 +858,7 @@ impl SimulationPlan {
     }
 
     /// [`Self::commit_configuration_change`], with `change` made on the
-    /// candidate at the revision it commits at, before it is digested and
-    /// validated.
+    /// candidate at the revision it commits at, before it is validated.
     fn commit_configuration_change_with(
         &mut self,
         detail: impl Into<String>,
@@ -967,26 +885,14 @@ impl SimulationPlan {
         let mut candidate = self.clone();
         let source_revision = candidate.revision;
         let committed_revision = source_revision.next()?;
-        let next_sequence = candidate
-            .next_receipt_sequence
-            .checked_add(1)
-            .ok_or(AnalysisPlanError::ReceiptSequenceExhausted)?;
-        let sequence = candidate.next_receipt_sequence;
         candidate.revision = committed_revision;
-        candidate.next_receipt_sequence = next_sequence;
         candidate.untouched = false;
         change(&mut candidate, committed_revision);
-        // The digest states the plan as adopted, so it is taken after the
-        // revision advances and before the receipt that carries it is
-        // retained: a receipt cannot be an input to its own digest.
         let receipt = SimulationPlanConfigurationReceipt {
-            sequence,
             source_revision,
             committed_revision,
             detail: detail.to_owned(),
-            digest: digest::adopted_plan_digest(&candidate),
         };
-        candidate.configuration_receipts.push(receipt.clone());
         candidate.ensure_structurally_valid()?;
         candidate.validate_study_solver_options()?;
         *self = candidate;
@@ -1159,7 +1065,7 @@ impl SimulationPlan {
             let instance = &mut self.instances[index];
             // Fourier now reads its bound transient artifact exclusively.
             // These legacy options never changed the source solve. Do not
-            // transfer them to a potentially shared producer or its receipts.
+            // transfer them to a potentially shared producer.
             if instance.kind == AnalysisKind::Fourier {
                 instance.numeric_override = None;
             }
@@ -1220,8 +1126,7 @@ impl SimulationPlan {
             // Schema migrations may retire a dependency role. Retaining such
             // an edge would make an otherwise valid saved plan structurally
             // corrupt, so restore prunes only roles the current typed draft no
-            // longer owns. Required edges and immutable receipt history remain
-            // untouched.
+            // longer owns. Required edges remain untouched.
             instance
                 .dependencies
                 .retain(|dependency| required_roles.contains(&dependency.prerequisite()));
@@ -1409,134 +1314,6 @@ impl SimulationPlan {
             issues.push(AnalysisPlanIssue::DependencyCycle { members });
         }
 
-        enum RetainedReceipt<'a> {
-            Analysis(&'a AnalysisLifecycleReceipt),
-            Configuration(&'a SimulationPlanConfigurationReceipt),
-        }
-        impl RetainedReceipt<'_> {
-            fn sequence(&self) -> u64 {
-                match self {
-                    Self::Analysis(receipt) => receipt.sequence,
-                    Self::Configuration(receipt) => receipt.sequence,
-                }
-            }
-
-            fn source_revision(&self) -> ObjectRevision {
-                match self {
-                    Self::Analysis(receipt) => receipt.source_revision,
-                    Self::Configuration(receipt) => receipt.source_revision,
-                }
-            }
-
-            fn committed_revision(&self) -> ObjectRevision {
-                match self {
-                    Self::Analysis(receipt) => receipt.committed_revision,
-                    Self::Configuration(receipt) => receipt.committed_revision,
-                }
-            }
-
-            fn detail(&self) -> &str {
-                match self {
-                    Self::Analysis(receipt) => &receipt.detail,
-                    Self::Configuration(receipt) => &receipt.detail,
-                }
-            }
-        }
-
-        for pair in self.receipts.windows(2) {
-            if pair[0].sequence >= pair[1].sequence {
-                issues.push(AnalysisPlanIssue::InvalidReceiptSequence {
-                    sequence: pair[1].sequence,
-                });
-            }
-        }
-        for pair in self.configuration_receipts.windows(2) {
-            if pair[0].sequence >= pair[1].sequence {
-                issues.push(AnalysisPlanIssue::InvalidReceiptSequence {
-                    sequence: pair[1].sequence,
-                });
-            }
-        }
-
-        let mut retained_receipts = self
-            .receipts
-            .iter()
-            .map(RetainedReceipt::Analysis)
-            .chain(
-                self.configuration_receipts
-                    .iter()
-                    .map(RetainedReceipt::Configuration),
-            )
-            .collect::<Vec<_>>();
-        retained_receipts.sort_by_key(RetainedReceipt::sequence);
-
-        let mut expected_sequence = 1;
-        let mut previous_committed_revision = None;
-        for retained in retained_receipts {
-            let sequence = retained.sequence();
-            let source_revision = retained.source_revision();
-            let committed_revision = retained.committed_revision();
-            if sequence != expected_sequence {
-                issues.push(AnalysisPlanIssue::InvalidReceiptSequence { sequence });
-            }
-            expected_sequence = sequence.saturating_add(1);
-            let revisions_are_consecutive = matches!(
-                source_revision.next(),
-                Ok(next) if next == committed_revision
-            );
-            let follows_previous_receipt = match previous_committed_revision {
-                Some(previous) => previous == source_revision,
-                None => true,
-            };
-            if source_revision >= committed_revision
-                || committed_revision > self.revision
-                || !revisions_are_consecutive
-                || !follows_previous_receipt
-            {
-                issues.push(AnalysisPlanIssue::InvalidReceiptRevision { sequence });
-            }
-            let detail = retained.detail();
-            let detail_is_empty = detail.trim().is_empty();
-            let detail_is_invalid = detail.chars().count() > 512
-                || detail
-                    .chars()
-                    .any(|character| matches!(character, '\r' | '\n'));
-            if let RetainedReceipt::Analysis(receipt) = retained {
-                let retained_kind = by_id
-                    .get(&receipt.instance_id)
-                    .map(|instance| instance.kind)
-                    .or_else(|| {
-                        self.tombstones
-                            .iter()
-                            .find(|tombstone| tombstone.id == receipt.instance_id)
-                            .map(|tombstone| tombstone.kind)
-                    });
-                match retained_kind {
-                    Some(expected) if expected != receipt.kind => {
-                        issues.push(AnalysisPlanIssue::ReceiptKindMismatch {
-                            sequence,
-                            expected,
-                            actual: receipt.kind,
-                        });
-                    }
-                    Some(_) => {}
-                    None => issues.push(AnalysisPlanIssue::DanglingReceiptInstance {
-                        sequence,
-                        id: receipt.instance_id,
-                    }),
-                }
-            }
-            if detail_is_empty || detail_is_invalid {
-                issues.push(AnalysisPlanIssue::EmptyReceiptDetail { sequence });
-            }
-            previous_committed_revision = Some(committed_revision);
-        }
-        if self.next_receipt_sequence != expected_sequence {
-            issues.push(AnalysisPlanIssue::InvalidNextReceiptSequence {
-                expected: expected_sequence,
-                actual: self.next_receipt_sequence,
-            });
-        }
         issues
     }
 
@@ -1694,10 +1471,6 @@ impl SimulationPlan {
         let result = mutation(&mut candidate, committed_revision)?;
         candidate.revision = committed_revision;
         candidate.untouched = false;
-        let next_sequence = candidate
-            .next_receipt_sequence
-            .checked_add(1)
-            .ok_or(AnalysisPlanError::ReceiptSequenceExhausted)?;
         let kind = if let Some(instance) = candidate.instance(instance_id) {
             instance.kind
         } else if let Some(tombstone) = candidate
@@ -1710,7 +1483,6 @@ impl SimulationPlan {
             return Err(AnalysisPlanError::InstanceNotFound(instance_id));
         };
         let receipt = AnalysisLifecycleReceipt {
-            sequence: candidate.next_receipt_sequence,
             command,
             instance_id,
             kind,
@@ -1720,8 +1492,6 @@ impl SimulationPlan {
             committed_revision,
             detail,
         };
-        candidate.next_receipt_sequence = next_sequence;
-        candidate.receipts.push(receipt.clone());
         candidate.ensure_structurally_valid()?;
         candidate.validate_study_solver_options()?;
         *self = candidate;
@@ -1769,12 +1539,9 @@ impl SimulationPlan {
             None,
             outcome,
             // A fresh instance is unnamed, so its kind label *is* what it will
-            // be shown as. Every detail below reads the same way.
-            format!(
-                "{} ({id}) was inserted at position {}.",
-                kind.label(),
-                position.saturating_add(1)
-            ),
+            // be shown as. Every detail below reads the same way: the name
+            // the analysis shows under, then what changed.
+            format!("{}: added", kind.label()),
             move |candidate, revision| {
                 candidate.ensure_identity_available(id)?;
                 if position > candidate.instances.len() {
@@ -1826,7 +1593,7 @@ impl SimulationPlan {
             id,
             None,
             outcome,
-            format!("{name} ({id}) draft was updated."),
+            format!("{name}: edited"),
             move |candidate, revision| {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;
@@ -1909,7 +1676,7 @@ impl SimulationPlan {
         let numeric_override = numeric_override.filter(|record| !record.is_empty());
         let detail = match &numeric_override {
             Some(record) => format!(
-                "{name} ({id}) now departs from the plan policy on {}.",
+                "{name}: own solver options {}",
                 record
                     .entries()
                     .iter()
@@ -1917,7 +1684,7 @@ impl SimulationPlan {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            None => format!("{name} ({id}) resolves to the plan policy again."),
+            None => format!("{name}: plan solver options"),
         };
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Edit,
@@ -1977,7 +1744,7 @@ impl SimulationPlan {
             id,
             Some(source),
             outcome,
-            format!("{name} ({source}) was cloned as {id} with independent draft values."),
+            format!("{name}: duplicated"),
             move |candidate, revision| {
                 candidate.ensure_identity_available(id)?;
                 let source_index = candidate.index_of(source)?;
@@ -2037,7 +1804,7 @@ impl SimulationPlan {
             } else {
                 AnalysisLifecycleState::Disabled
             },
-            format!("{name} ({id}) was {disposition}."),
+            format!("{name}: {disposition}"),
             move |candidate, revision| {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;
@@ -2110,10 +1877,7 @@ impl SimulationPlan {
             id,
             None,
             AnalysisLifecycleState::SameState,
-            format!(
-                "{name} ({id}) was moved to position {}.",
-                position.saturating_add(1)
-            ),
+            format!("{name}: moved to position {}", position.saturating_add(1)),
             move |candidate, revision| {
                 if position >= candidate.instances.len() {
                     return Err(AnalysisPlanError::PositionOutOfBounds {
@@ -2148,7 +1912,7 @@ impl SimulationPlan {
             id,
             None,
             AnalysisLifecycleState::Removed,
-            format!("{name} ({id}) was removed; its identity and prior runs remain retained."),
+            format!("{name}: removed"),
             move |candidate, revision| {
                 let index = candidate.index_of(id)?;
                 candidate.ensure_editable(index)?;
