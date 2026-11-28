@@ -121,7 +121,9 @@ pub fn domain_bar(
             .cloned()
             .collect::<Vec<_>>();
         if !addable.is_empty() {
-            let mut options = vec!["+ trace".to_owned()];
+            // A retained response, not a trace calculated from the run's
+            // signals: "+ Trace" beside it is that.
+            let mut options = vec!["+ Response".to_owned()];
             options.extend(addable.iter().cloned());
             if let Some(picked) = select(
                 ui,
@@ -222,12 +224,15 @@ fn reference_field(ui: &mut Ui, sheet: &mut SmithSheetState) {
     bar_label(ui, "\u{3a9}");
 }
 
-/// "+ Expression": a calculator expression to read onto the chart.
+/// "+ Trace": a trace calculated from the run's signals, read onto the
+/// chart, as every viewer's add-trace button reads.
 fn expression_field(ui: &mut Ui, sheet: &mut SmithSheetState) -> Option<String> {
     let Some(mut text) = sheet.expression_draft.take() else {
-        if Button::new("+ Expression")
+        if Button::new(strip::EXPRESSION_ACTION_LABEL)
             .show(ui)
-            .on_hover_text("Add a complex expression, such as V(in)/I(Vin) read as Z")
+            .on_hover_text(
+                "Add a trace calculated from the run's signals, e.g. V(in)/I(Vin) read as Z",
+            )
             .clicked()
         {
             sheet.expression_draft = Some(String::new());
@@ -898,7 +903,7 @@ pub fn show(
     }
     if traces.is_empty() {
         let hint = if sheet.responses.is_empty() {
-            "Add a retained response or an expression such as V(in)/I(Vin)"
+            "Add a retained response, or a calculated trace such as V(in)/I(Vin)"
         } else {
             "None of the listed responses evaluates on this analysis"
         };
