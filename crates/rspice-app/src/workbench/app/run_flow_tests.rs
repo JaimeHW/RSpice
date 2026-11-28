@@ -1317,14 +1317,12 @@ fn a_new_projects_first_run_settles_a_dc_drawing_and_sweeps_an_ac_one() {
         planned(&user)
     );
 
-    // The sweep linearizes about an operating point the plan runs first.
+    // The sweep solves the operating point it linearizes about itself, so the
+    // plan holds the sweep alone.
     let mut user = new_project_driven_by(ComponentType::VoltageSourceAc, "");
     run_to_its_end(&mut user);
     assert!(
-        matches!(
-            planned(&user).as_slice(),
-            [AnalysisDraft::OperatingPoint(_), AnalysisDraft::Ac(_)]
-        ),
+        matches!(planned(&user).as_slice(), [AnalysisDraft::Ac(_)]),
         "{:?}",
         planned(&user)
     );
