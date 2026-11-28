@@ -509,9 +509,8 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     // override. Not an overlay — an analysis's advanced options are fields of
     // its own form now — but it is the same thing every sweep reading this list
     // wants from it: a surface the routes do not reach on their own. The
-    // operating point is the one that matters, because its continuation aids are
-    // the only switch fields the option catalogue offers, and a legacy override
-    // of a global option is the only way one of those fields appears at all.
+    // operating point is the one that matters: its damping strategy is the one
+    // chooser field the option catalogue offers it.
     if let Some(mut app) = studio_form(AnalysisKind::OperatingPoint) {
         let instance = app
             .state
@@ -523,10 +522,10 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
             .set_for_instance(
                 AnalysisKind::OperatingPoint,
                 SolverOwnership::NONE,
-                NumericOverrideOption::Gmin,
-                "1e-13",
+                NumericOverrideOption::Damping,
+                "LINESEARCH",
             )
-            .expect("an inheriting operating point carries its own conductance floor");
+            .expect("an operating point carries its own damping strategy");
         if let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan_mut() {
             let _ = plan.set_numeric_override(instance, Some(record));
         }

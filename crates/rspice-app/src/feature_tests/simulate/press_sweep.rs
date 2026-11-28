@@ -554,7 +554,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
-    ("analysis options · Operating point", 18),
+    ("analysis options · Operating point", 17),
     ("plan manager", 11),
     ("rename analysis", 4),
     ("run points", 12),
@@ -632,7 +632,11 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 ///
 /// The Models page lost its model-qualification gate card, and with it the
 /// card's one button, the only control the sweep pressed there (351).
-const PRESSED_FLOOR: usize = 351;
+///
+/// No analysis form offers a plan-wide solver option any more, even one the
+/// analysis states, so the operating point's options fixture lost the
+/// conductance-floor field it carried for exactly that case (350).
+const PRESSED_FLOOR: usize = 350;
 
 /// Controls that are wired to nothing.
 ///

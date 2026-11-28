@@ -514,6 +514,31 @@ impl NumericOverrideOption {
     pub const ACCURACY_TIER_OWNS_ITERATIONS: &'static str =
         "its accuracy tier owns the Newton budget and is applied after the deck's options";
 
+    /// Whether a plan states this option once for every analysis, and no
+    /// analysis states it alone: the Newton tolerances, the junction and node
+    /// conductances, the pivots, the matrix and device bypass.
+    ///
+    /// No analysis form offers one, and a restored plan retires one an older
+    /// project stored on a single analysis.
+    #[must_use]
+    pub const fn is_plan_wide(self) -> bool {
+        matches!(
+            self,
+            Self::Reltol
+                | Self::Abstol
+                | Self::Vntol
+                | Self::ResidualReltol
+                | Self::Gmin
+                | Self::Rshunt
+                | Self::Pivrel
+                | Self::Pivtol
+                | Self::Solver
+                | Self::Bypass
+                | Self::BypassReltol
+                | Self::BypassAbstol
+        )
+    }
+
     /// This option's catalog entry.
     #[must_use]
     pub fn spec(self) -> &'static OptionSpec {

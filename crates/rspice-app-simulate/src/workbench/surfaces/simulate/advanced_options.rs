@@ -66,6 +66,9 @@ pub(super) struct AdvancedOptionRow {
     /// The value this analysis states, when it states one. `None` means the
     /// row is inherited and there is nothing to clear.
     pub(super) authored: Option<String>,
+    /// Why the field is drawn but cannot be edited, when it cannot: the other
+    /// half of the output schedule is stated, and the engine reads one.
+    pub(super) held_by: Option<&'static str>,
 }
 
 /// One section's rows, in catalog order.
@@ -214,6 +217,7 @@ fn row(
             preset,
             origin: reason,
             authored: None,
+            held_by: None,
         };
     }
     // A bound the plan states no policy for rests at the engine's own value,
@@ -243,6 +247,7 @@ fn row(
                 preset,
                 origin,
                 authored: Some(authored),
+                held_by: None,
             }
         }
         None => AdvancedOptionRow {
@@ -256,6 +261,7 @@ fn row(
             effective: preset.clone(),
             preset,
             authored: None,
+            held_by: None,
         },
     }
 }
@@ -407,11 +413,8 @@ pub(super) enum OptionEdit {
 /// carry earns no field at all: a control that authors a value the solve
 /// discards is worse than no control.
 ///
-/// The one exception is legacy data. A project saved before this partition can
-/// hold a per-analysis override of a global option, and dropping it silently
-/// would change what the run resolves to. So a global option earns a field
-/// exactly while the analysis states one — visible, readable, and clearable —
-/// and there is no path that authors a new one.
+/// The output schedule's two keys are always drawn together. Once one is
+/// stated the other stays on the form, held, with the reason on hover.
 pub(super) fn form_rows(
     kind: AnalysisKind,
     draft: &AnalysisDraft,
@@ -439,17 +442,12 @@ pub(super) fn form_rows_with_ownership(
     // value survives to the solve is the gate that decides whether it earns a
     // control.
     let authorable = NumericOverrideOption::applicable_to_instance(kind, ownership);
-    // Whether this analysis has already chosen the shape of its output
-    // schedule. Read once, because the two keys that answer it are the two
-    // rows that depend on the answer.
-    let schedule_stated = record.is_some_and(|record| {
-        record
-            .value(NumericOverrideOption::StrobeInterval)
-            .is_some()
-            || record
-                .value(NumericOverrideOption::OutputTimePoints)
-                .is_some()
-    });
+    // Which half of the output schedule this analysis states, if either. The
+    // engine reads one, so the other half is held while this one is stated.
+    let states =
+        |option: NumericOverrideOption| record.is_some_and(|record| record.value(option).is_some());
+    let strobe_stated = states(NumericOverrideOption::StrobeInterval);
+    let times_stated = states(NumericOverrideOption::OutputTimePoints);
     let resolved = if ownership.study_inherited_options.is_some() {
         sections_with_ownership(kind, draft, record, options, ownership)
     } else {
@@ -461,13 +459,19 @@ pub(super) fn form_rows_with_ownership(
             section.rows.retain(|row| {
                 authorable.contains(&row.option)
                     && compatibility_refusal(row.option, options).is_none()
-                    && offered_on_the_form(
-                        row.option,
-                        kind,
-                        row.authored.is_some(),
-                        schedule_stated,
-                    )
+                    && offered_on_the_form(row.option, kind, row.authored.is_some())
             });
+            for row in &mut section.rows {
+                row.held_by = match row.option {
+                    NumericOverrideOption::OutputTimePoints if strobe_stated => {
+                        Some(STROBE_HOLDS_THE_SCHEDULE)
+                    }
+                    NumericOverrideOption::StrobeInterval if times_stated => {
+                        Some(TIMES_HOLD_THE_SCHEDULE)
+                    }
+                    _ => None,
+                };
+            }
             section
         })
         .filter(|section| !section.rows.is_empty())
@@ -475,12 +479,7 @@ pub(super) fn form_rows_with_ownership(
 }
 
 /// Whether one option belongs on this kind's own form. See [`form_rows`].
-fn offered_on_the_form(
-    option: NumericOverrideOption,
-    kind: AnalysisKind,
-    authored: bool,
-    schedule_stated: bool,
-) -> bool {
+fn offered_on_the_form(option: NumericOverrideOption, kind: AnalysisKind, authored: bool) -> bool {
     use NumericOverrideOption as O;
 
     match option {
@@ -509,11 +508,11 @@ fn offered_on_the_form(
         | O::TransientNoxSolver
         | O::RetainEverySignal
         | O::HbInitialState => true,
-        // The two output-schedule keys are one control with two shapes. Both
-        // are offered until one is stated, and then only that one, because the
-        // engine's parser refuses a card carrying both and a field that
-        // authored the second would author a deck that cannot be read.
-        O::StrobeInterval | O::OutputTimePoints => authored || !schedule_stated,
+        // The two output-schedule keys are one control with two shapes, and
+        // both are always drawn. The engine's parser refuses a card carrying
+        // both, so once one is stated `form_rows` holds the other rather than
+        // hiding it: a field that vanished would leave nothing to say why.
+        O::StrobeInterval | O::OutputTimePoints => true,
         // Three of the aids are the homotopy chooser's own intent wherever the
         // form carries one: switching a ramp on here and naming it there are
         // two editors of one fact on one form, and the chooser is the
@@ -525,8 +524,36 @@ fn offered_on_the_form(
         // does and an operating point does not.
         O::ArcLength => matches!(kind, AnalysisKind::DcSweep) || authored,
         O::Itl1 | O::Damping => owns_the_dc_recovery(kind) || authored,
-        _ => authored,
+        // The plan-wide options. The Solver page states each once for every
+        // analysis, so no form offers one, stated or not.
+        _ => false,
     }
+}
+
+/// Why the exact report times are held while a strobe interval is stated.
+const STROBE_HOLDS_THE_SCHEDULE: &str = "Strobe interval sets this analysis's output schedule. \
+     Clear it to report at exact times instead.";
+
+/// Why the strobe interval is held while exact report times are stated.
+const TIMES_HOLD_THE_SCHEDULE: &str = "The exact report times set this analysis's output \
+     schedule. Clear them to use a strobe interval instead.";
+
+/// Draw one option's field, or draw it held with its reason on hover.
+///
+/// Held rather than hidden: the reader sees both shapes the output schedule
+/// can take, and the one that cannot be used says what to clear first.
+pub(super) fn draw_field(
+    ui: &mut egui::Ui,
+    row: &AdvancedOptionRow,
+    field: impl FnOnce(&mut egui::Ui, &AdvancedOptionRow) -> Option<OptionEdit>,
+) -> Option<OptionEdit> {
+    let Some(reason) = row.held_by else {
+        return field(ui, row);
+    };
+    ui.add_enabled_ui(false, |ui| field(ui, row))
+        .response
+        .on_disabled_hover_text(reason);
+    None
 }
 
 /// Whether this kind owns how its own DC solve recovers.

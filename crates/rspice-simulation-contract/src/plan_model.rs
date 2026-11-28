@@ -1163,6 +1163,18 @@ impl SimulationPlan {
             if instance.kind == AnalysisKind::Fourier {
                 instance.numeric_override = None;
             }
+            // A plan states its plan-wide solver options once. One an older
+            // project stored on a single analysis is retired: no form shows
+            // it, so it would reach that analysis's deck with nothing on
+            // screen to say so.
+            if let Some(record) = instance.numeric_override.as_mut() {
+                for option in NumericOverrideOption::all().filter(|option| option.is_plan_wide()) {
+                    record.clear(option);
+                }
+                if record.is_empty() {
+                    instance.numeric_override = None;
+                }
+            }
             // Older drafts offered time-integration controls for DC-only
             // studies.
             // Retire only those fields; preserve effective solver departures.

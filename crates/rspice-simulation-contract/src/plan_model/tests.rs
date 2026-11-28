@@ -60,7 +60,7 @@ fn pvt_base_controls_restore_and_mode_changes_preserve_effective_settings() {
         plan.edit(static_base, |draft| select(draft, false))
             .unwrap();
         let legacy: AnalysisNumericOverride = serde_json::from_str(
-            r#"{"reltol":0.0001,"itl4":150,"strobe_interval":0.000001,"retain_every_signal":true}"#,
+            r#"{"itl1":60,"itl4":150,"strobe_interval":0.000001,"retain_every_signal":true}"#,
         )
         .unwrap();
         for id in [dynamic, static_base] {
@@ -79,7 +79,7 @@ fn pvt_base_controls_restore_and_mode_changes_preserve_effective_settings() {
             .unwrap()
             .numeric_override()
             .unwrap();
-        assert!(record.value(NumericOverrideOption::Reltol).is_some());
+        assert!(record.value(NumericOverrideOption::Itl1).is_some());
         for option in [
             NumericOverrideOption::Itl4,
             NumericOverrideOption::StrobeInterval,
@@ -118,8 +118,9 @@ fn dc_study_restore_keeps_effective_controls_and_base_changes_are_atomic() {
         plan.edit(configured, |draft| select(draft, Some(transient)))
             .unwrap();
         let legacy: AnalysisNumericOverride = serde_json::from_str(
-            r#"{"reltol":0.0001,"itl4":150,"strobe_interval":0.00000001,"retain_every_signal":true}"#,
-        ).unwrap();
+            r#"{"itl1":60,"itl4":150,"strobe_interval":0.00000001,"retain_every_signal":true}"#,
+        )
+        .unwrap();
         for id in [dc, configured, transient] {
             let index = plan.index_of(id).unwrap();
             plan.instances[index].numeric_override = Some(legacy.clone());
@@ -128,7 +129,7 @@ fn dc_study_restore_keeps_effective_controls_and_base_changes_are_atomic() {
         let mut restored: SimulationPlan = serde_json::from_str(&snapshot(&plan)).unwrap();
         restored.prepare_after_restore();
         let dc_options = restored.instance(dc).unwrap().numeric_override().unwrap();
-        assert!(dc_options.value(NumericOverrideOption::Reltol).is_some());
+        assert!(dc_options.value(NumericOverrideOption::Itl1).is_some());
         for option in [
             NumericOverrideOption::Itl4,
             NumericOverrideOption::StrobeInterval,
@@ -177,7 +178,7 @@ fn fourier_restore_retires_unused_overrides_and_preserves_its_producer() {
     plan.bind_dependency(fourier, AnalysisKind::Transient, transient)
         .unwrap();
     let legacy: AnalysisNumericOverride =
-        serde_json::from_str(r#"{"reltol":0.0001,"itl4":200,"strobe_interval":0.000001}"#).unwrap();
+        serde_json::from_str(r#"{"itl1":60,"itl4":200,"strobe_interval":0.000001}"#).unwrap();
     for id in [transient, fourier] {
         let index = plan.index_of(id).unwrap();
         plan.instances[index].numeric_override = Some(legacy.clone());
@@ -285,7 +286,7 @@ fn restore_periodic_consumer_solver_ownership_preserves_carriers_and_history() {
         consumers.push(plan.insert(kind).unwrap().0);
     }
     plan.prepare_after_restore();
-    let legacy: AnalysisNumericOverride = serde_json::from_str(r#"{"reltol":0.000001}"#).unwrap();
+    let legacy: AnalysisNumericOverride = serde_json::from_str(r#"{"itl1":60}"#).unwrap();
     for id in std::iter::once(&hb).chain(&consumers) {
         let index = plan.index_of(*id).unwrap();
         plan.instances[index].numeric_override = Some(legacy.clone());

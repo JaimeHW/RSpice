@@ -7,10 +7,8 @@
 //! and what a field edit asks the plan for.
 //!
 //! The partition is the part worth pinning hardest. A global solver bound is
-//! the plan's policy and belongs to the Solver page; the same number resolved
-//! per analysis is not a feature but a way for one deck to disagree with
-//! itself. The one exception is legacy data, and it is an exception precisely
-//! because dropping it would change what a saved project resolves to.
+//! the plan's and belongs to the Solver page; the same number resolved per
+//! analysis is not a feature but a way for one deck to disagree with itself.
 
 use super::*;
 use crate::workbench::framework::feature::harness::FeatureHarness;
@@ -128,10 +126,9 @@ fn configured_study_form_writer_shares_base_ownership() {
         super::super::page_solver::write_numeric_record(&mut harness.cx(), id, O::Itl4, "91")
             .is_err()
     );
-    super::super::page_solver::write_numeric_record(&mut harness.cx(), id, O::Reltol, "1e-5")
-        .unwrap();
-    assert_eq!(row_of(&harness, id, O::Reltol).origin, STUDY_DEFAULT_ORIGIN);
-    assert!(offered(&harness, id).contains(&(O::Reltol, STUDY_DEFAULT_ORIGIN)));
+    super::super::page_solver::write_numeric_record(&mut harness.cx(), id, O::Itl1, "60").unwrap();
+    assert_eq!(row_of(&harness, id, O::Itl1).origin, STUDY_DEFAULT_ORIGIN);
+    assert!(offered(&harness, id).contains(&(O::Itl1, STUDY_DEFAULT_ORIGIN)));
     harness
         .model
         .sim_setup
@@ -280,6 +277,17 @@ fn offered(
     harness: &FeatureHarness<SimulateFeature>,
     instance: AnalysisInstanceId,
 ) -> Vec<(O, &'static str)> {
+    form_fields(harness, instance)
+        .into_iter()
+        .map(|row| (row.option, row.origin))
+        .collect()
+}
+
+/// Every option field one analysis's form draws, whole.
+fn form_fields(
+    harness: &FeatureHarness<SimulateFeature>,
+    instance: AnalysisInstanceId,
+) -> Vec<AdvancedOptionRow> {
     let plan = harness
         .model
         .sim_setup
@@ -297,7 +305,6 @@ fn offered(
     )
     .into_iter()
     .flat_map(|section| section.rows)
-    .map(|row| (row.option, row.origin))
     .collect()
 }
 
@@ -708,58 +715,107 @@ fn a_setting_returned_to_the_plan_clears_its_override() {
     );
 }
 
-/// A legacy override of a global option stays visible until it is cleared.
+/// A plan-wide option is never a field, even on an analysis that states one.
 ///
-/// A project saved before the partition can hold one, and dropping it silently
-/// would change what the run resolves to. So it earns a field on the form for
-/// exactly as long as the analysis states it — readable, clearable, and gone the
-/// moment it is cleared — while no form offers to author a new one.
+/// The Solver page states each of them once for every analysis. A departure on
+/// one analysis can only come from an older project, and a restored plan
+/// retires it, so no analysis is left resolving a bound its form cannot show.
 #[test]
-fn a_legacy_override_of_a_global_option_stays_until_it_is_cleared() {
-    let (mut harness, transient) = studio(AnalysisKind::Transient);
-    assert!(
-        !offered(&harness, transient)
-            .iter()
-            .any(|(option, _)| *option == O::Reltol),
-        "no form offers to author the plan's update bound"
+fn a_plan_wide_option_is_never_a_field_and_a_restored_plan_retires_it() {
+    assert_eq!(
+        O::all()
+            .filter(|option| option.is_plan_wide())
+            .collect::<Vec<_>>(),
+        GLOBAL.to_vec(),
+        "the plan-wide options are exactly the Solver page's own"
     );
-
+    let (mut harness, transient) = studio(AnalysisKind::Transient);
     let mut record = AnalysisNumericOverride::default();
-    record
-        .set_for_instance(
-            AnalysisKind::Transient,
-            SolverOwnership::NONE,
-            O::Reltol,
-            "4e-9",
-        )
-        .expect("every kind carries an update bound");
+    for (option, value) in [(O::Reltol, "4e-9"), (O::Trtol, "5")] {
+        record
+            .set_for_instance(
+                AnalysisKind::Transient,
+                SolverOwnership::NONE,
+                option,
+                value,
+            )
+            .expect("the record carries both");
+    }
     harness
         .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the test instance holds a stable plan")
         .set_numeric_override(transient, Some(record))
-        .expect("the plan accepts a bound the transient can use");
+        .expect("the plan takes the record");
 
-    assert_eq!(
-        offered(&harness, transient)
+    let fields: Vec<O> = offered(&harness, transient)
+        .into_iter()
+        .map(|(option, _)| option)
+        .collect();
+    for global in GLOBAL {
+        assert!(
+            !fields.contains(&global),
+            "{} is the plan's, stated or not",
+            global.key()
+        );
+    }
+    assert!(fields.contains(&O::Trtol));
+
+    let mut restored = harness
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the test instance holds a stable plan")
+        .clone();
+    restored.prepare_after_restore();
+    let kept = restored
+        .instance(transient)
+        .and_then(|target| target.numeric_override())
+        .expect("the transient's own departure survives");
+    assert_eq!(kept.value(O::Reltol), None, "the plan-wide one is retired");
+    assert!(kept.value(O::Trtol).is_some());
+}
+
+/// Both shapes of the output schedule stay on the form. Once one is stated
+/// the other is held, with the reason on hover, rather than taken away.
+#[test]
+fn the_output_schedule_pair_stays_drawn_and_the_unstated_half_is_held() {
+    let (mut harness, transient) = studio(AnalysisKind::Transient);
+    let held = |harness: &FeatureHarness<SimulateFeature>, option: O| {
+        form_fields(harness, transient)
             .into_iter()
-            .find(|(option, _)| *option == O::Reltol)
-            .map(|(_, origin)| origin),
-        Some(OVERRIDE_ORIGIN),
-        "a stated global bound is a field, resolved from the analysis that states it"
-    );
+            .find(|row| row.option == option)
+            .unwrap_or_else(|| panic!("{} stays on the form", option.key()))
+            .held_by
+    };
+    assert_eq!(held(&harness, O::StrobeInterval), None);
+    assert_eq!(held(&harness, O::OutputTimePoints), None);
+
+    super::super::page_solver::write_numeric_record(
+        &mut harness.cx(),
+        transient,
+        O::StrobeInterval,
+        "1u",
+    )
+    .unwrap();
+    assert_eq!(held(&harness, O::StrobeInterval), None);
+    let reason = held(&harness, O::OutputTimePoints).expect("the exact times are held");
+    assert!(reason.contains("Strobe interval"), "{reason}");
 
     commit(
         &mut harness.cx(),
         transient,
-        &[OptionEdit::Clear(O::Reltol)],
+        &[OptionEdit::Clear(O::StrobeInterval)],
     );
-    assert_eq!(authored(&harness, transient, O::Reltol), None);
-    assert!(
-        !offered(&harness, transient)
-            .iter()
-            .any(|(option, _)| *option == O::Reltol),
-        "and once it is cleared the field is gone with it"
-    );
+    super::super::page_solver::write_numeric_record(
+        &mut harness.cx(),
+        transient,
+        O::OutputTimePoints,
+        "0 1u",
+    )
+    .unwrap();
+    assert_eq!(held(&harness, O::OutputTimePoints), None);
+    let reason = held(&harness, O::StrobeInterval).expect("the strobe interval is held");
+    assert!(reason.contains("report times"), "{reason}");
 }

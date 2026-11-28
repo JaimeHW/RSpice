@@ -123,10 +123,10 @@ fn configured_study_defaults_follow_base_ownership_and_restore_without_history_e
         let ac = plan.insert(AnalysisKind::Ac).unwrap().0;
         let tran = plan.insert(AnalysisKind::Transient).unwrap().0;
         let id = study(&mut plan, kind, ac);
-        assert!(accepts(&plan, id, O::Reltol));
+        assert!(accepts(&plan, id, O::Itl1));
         assert!(!accepts(&plan, id, O::Itl4));
         assert!(set(&mut plan, id, O::Itl4, "99").is_err());
-        set(&mut plan, id, O::Reltol, "1e-5").unwrap();
+        set(&mut plan, id, O::Itl1, "60").unwrap();
         select(&mut plan, id, tran);
         set(&mut plan, id, O::MaximumTimestep, "2n").unwrap();
         set(&mut plan, id, O::OutputTimePoints, "0 1n").unwrap();
@@ -192,14 +192,14 @@ fn configured_study_defaults_follow_base_ownership_and_restore_without_history_e
         // A restored record bypassed the current authoring gate.
         let index = plan.index_of(id).unwrap();
         plan.instances[index].numeric_override =
-            Some(serde_json::from_str(r#"{"reltol":0.00001,"itl4":99}"#).unwrap());
+            Some(serde_json::from_str(r#"{"itl1":60,"itl4":99}"#).unwrap());
         let receipts = serde_json::to_value(&plan.receipts).unwrap();
         let carrier = plan.instance(tran).unwrap().numeric_override().cloned();
         let mut restored: SimulationPlan =
             serde_json::from_value(serde_json::to_value(&plan).unwrap()).unwrap();
         restored.prepare_after_restore();
         let record = restored.instance(id).unwrap().numeric_override().unwrap();
-        assert!(record.stated(O::Reltol).is_some());
+        assert!(record.stated(O::Itl1).is_some());
         assert!(record.stated(O::Itl4).is_none());
         assert_eq!(
             restored.instance(tran).unwrap().numeric_override(),

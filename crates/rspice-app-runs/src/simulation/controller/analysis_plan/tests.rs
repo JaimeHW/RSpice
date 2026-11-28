@@ -240,7 +240,7 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
             .unwrap();
             let mut numeric = AnalysisNumericOverride::default();
             numeric
-                .set_for_instance(kind, plan.solver_ownership(base), O::Gmin, "1e-9")
+                .set_for_instance(kind, plan.solver_ownership(base), O::Damping, "LINESEARCH")
                 .unwrap();
             plan.set_numeric_override(base, Some(numeric)).unwrap();
             let study = plan.insert(wrapper).unwrap().0;
@@ -256,11 +256,16 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
                 _ => unreachable!(),
             })
             .unwrap();
-            let mut numeric = AnalysisNumericOverride::default();
-            numeric
-                .set_for_instance(wrapper, plan.solver_ownership(study), O::Pivrel, "1e-4")
-                .unwrap();
-            plan.set_numeric_override(study, Some(numeric)).unwrap();
+            // A study default the base inherits. An operating point's tier
+            // owns its Newton budget, so that base takes none.
+            let study_default = (kind != AnalysisKind::OperatingPoint).then_some(O::Itl1);
+            if let Some(option) = study_default {
+                let mut numeric = AnalysisNumericOverride::default();
+                numeric
+                    .set_for_instance(wrapper, plan.solver_ownership(study), option, "60")
+                    .unwrap();
+                plan.set_numeric_override(study, Some(numeric)).unwrap();
+            }
             let mut restored: SimulationPlan =
                 serde_json::from_value(serde_json::to_value(&*plan).unwrap()).unwrap();
             restored.prepare_after_restore();
@@ -384,8 +389,10 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
                 other => panic!("wrong bound base: {other:?}"),
             }
             let numeric = queued.numeric_override.as_ref().unwrap();
-            assert!(numeric.stated(O::Gmin).is_some());
-            assert!(numeric.stated(O::Pivrel).is_some());
+            assert!(numeric.stated(O::Damping).is_some());
+            if let Some(option) = study_default {
+                assert!(numeric.stated(option).is_some());
+            }
             restored.set_enabled(base, false).unwrap();
             let errors = SimulationController::build_queue_from_plan(
                 &state.model,

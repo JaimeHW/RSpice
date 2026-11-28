@@ -83,7 +83,7 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
     for (heading, rows) in grouped(&offered) {
         super::sub_header(ui, heading);
         for row in rows {
-            if let Some(edit) = field(ui, row) {
+            if let Some(edit) = advanced_options::draw_field(ui, row, field) {
                 edits.push(edit);
             }
         }
