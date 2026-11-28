@@ -747,14 +747,14 @@ fn apply_real_binary_op(
         (RealValue::Scalar(l), RealValue::Waveform(rx, ry)) => {
             let new_y = ry
                 .into_iter()
-                .map(|r_val| apply_op_scalar(op, l, r_val))
+                .map(|r_val| apply_op_sample(op, l, r_val))
                 .collect();
             Ok(RealValue::create_waveform(rx, new_y))
         }
         (RealValue::Waveform(lx, ly), RealValue::Scalar(r)) => {
             let new_y = ly
                 .into_iter()
-                .map(|l_val| apply_op_scalar(op, l_val, r))
+                .map(|l_val| apply_op_sample(op, l_val, r))
                 .collect();
             Ok(RealValue::create_waveform(lx, new_y))
         }
@@ -773,12 +773,20 @@ fn apply_real_binary_op(
             let new_y: Vec<f64> = left_y
                 .iter()
                 .zip(right_y.iter())
-                .map(|(l, r)| apply_op_scalar(op, *l, *r))
+                .map(|(l, r)| apply_op_sample(op, *l, *r))
                 .collect();
 
             Ok(RealValue::create_waveform(out_x, new_y))
         }
     }
+}
+
+/// `op` at one sample of a series: where the arithmetic is undefined or
+/// unbounded (a division by zero, an overflow) the series has a gap, as
+/// Spectre's and ADS's calculators leave one.
+fn apply_op_sample(op: BinaryOp, l: f64, r: f64) -> f64 {
+    let value = apply_op_scalar(op, l, r);
+    if value.is_finite() { value } else { f64::NAN }
 }
 
 fn apply_op_scalar(op: BinaryOp, l: f64, r: f64) -> f64 {
@@ -789,7 +797,7 @@ fn apply_op_scalar(op: BinaryOp, l: f64, r: f64) -> f64 {
         BinaryOp::Add => l + r,
         BinaryOp::Sub => l - r,
         BinaryOp::Mul => l * r,
-        BinaryOp::Div => l / r, // Undefined samples remain gaps; checked scalars report an error.
+        BinaryOp::Div => l / r, // A series holes it; checked scalars report an error.
         BinaryOp::Pow => l.powf(r),
         BinaryOp::Lt => f64::from(l < r),
         BinaryOp::Gt => f64::from(l > r),
@@ -1099,6 +1107,35 @@ mod tests {
             super::CalcValue::Real(value) => Ok(value),
             other => Err(format!("{text} is complex: {other:?}")),
         }
+    }
+
+    /// Where a series' arithmetic is undefined or unbounded it holds a gap,
+    /// and every other sample reads the arithmetic: 0/0 and 1/0 are gaps, and
+    /// dB of the ratio is a gap where the ratio is.
+    #[test]
+    fn a_series_is_a_gap_where_its_arithmetic_is_undefined() {
+        let x = vec![0.0, 1.0, 2.0, 3.0];
+        let traces = Traces(vec![
+            ("V(in)", x.clone(), vec![0.0, 0.0, 2.0, -4.0]),
+            ("V(out)", x.clone(), vec![0.0, 1.0, 1.0, 2.0]),
+        ]);
+        let series = |text: &str| match evaluated(&traces, text) {
+            Ok(CalcValue::Waveform(at, y)) => {
+                assert_eq!(at, x, "{text} keeps the axis");
+                y
+            }
+            other => panic!("{text}: {other:?}"),
+        };
+        let ratio = series("V(out)/V(in)");
+        assert!(ratio[0].is_nan() && ratio[1].is_nan(), "{ratio:?}");
+        assert_eq!(ratio[2..], [0.5, -0.5]);
+        let gain = series("db(V(out)/V(in))");
+        assert!(gain[0].is_nan() && gain[1].is_nan(), "{gain:?}");
+        let half = 20.0 * 0.5_f64.log10();
+        assert!((gain[2] - half).abs() < 1e-12 && (gain[3] - half).abs() < 1e-12);
+        let scaled = series("1/V(in)");
+        assert!(scaled[0].is_nan() && scaled[1].is_nan(), "{scaled:?}");
+        assert_eq!(scaled[2..], [0.5, -0.25]);
     }
 
     /// Traces and a placed cursor pair.

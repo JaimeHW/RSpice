@@ -1070,22 +1070,32 @@ mod tests {
     }
 
     #[test]
-    fn avg_and_rms_refuse_a_series_with_holes() {
+    fn avg_and_rms_read_the_defined_part_of_a_series_with_holes() {
         // `sqrt` of a series that dips negative leaves exactly the hole this
-        // module's domain policy promises. An integral over a window with a
-        // missing region is not the mean it claims to be, so both aggregates
-        // must refuse — the failure mode being guarded is silent, not loud:
-        // `avg` used to print "= NaN" in the success colour, and `rms`, whose
-        // `.max(0.0)` swallowed the NaN, used to print a confident "= 0".
+        // module's domain policy promises. Both aggregates skip it, as the
+        // trace is drawn around it, and read the part that is defined: here
+        // the one segment from 3 to 4, whose mean is 3.5 and whose RMS is
+        // √(37/3). The failure mode guarded is silent: `avg` once printed
+        // "= NaN" in the success colour, and `rms`, whose `.max(0.0)`
+        // swallowed the NaN, a confident "= 0". A series with nothing
+        // defined is refused.
         let x = vec![0.0, 1.0, 2.0, 3.0];
-        let (hx, hy) = series_of("sqrt", vec![wave(x, vec![4.0, -1.0, 9.0, 16.0])]);
+        let (hx, hy) = series_of("sqrt", vec![wave(x.clone(), vec![4.0, -1.0, 9.0, 16.0])]);
         assert!(hy[1].is_nan(), "the fixture must actually carry a hole");
         let holed = wave(hx, hy);
-        for name in ["avg", "rms"] {
+        for (name, expected) in [("avg", 3.5), ("rms", (37.0_f64 / 3.0).sqrt())] {
             let outcome = call(name, vec![holed.clone()]);
             assert!(
+                matches!(outcome, Ok(CalcValue::Scalar(value)) if (value - expected).abs() < 1e-12),
+                "{name} of the defined part is {expected}, got {outcome:?}"
+            );
+        }
+        let (ux, uy) = series_of("sqrt", vec![wave(x, vec![-1.0; 4])]);
+        for name in ["avg", "rms"] {
+            let outcome = call(name, vec![wave(ux.clone(), uy.clone())]);
+            assert!(
                 outcome.is_err(),
-                "{name} of a holed series must refuse, got {outcome:?}"
+                "{name} of a series with nothing defined must refuse, got {outcome:?}"
             );
         }
     }

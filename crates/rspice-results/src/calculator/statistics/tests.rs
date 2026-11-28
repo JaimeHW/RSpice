@@ -275,15 +275,24 @@ fn a_reduction_over_a_stored_trace_reads_it_a_block_at_a_time() {
     }
 }
 
-/// The stored path refuses what the in-memory one refuses.
+/// A stored trace's undefined sample is a gap the statistics skip: beside
+/// it, the ramp from 2 to 3 is all that is defined, whose deviation is
+/// 1/√12. A trace with nothing defined is refused, saying so, and so is a
+/// window past the trace.
 #[test]
-fn a_stored_trace_is_refused_where_its_samples_are_undefined() {
+fn a_stored_trace_is_read_around_its_undefined_samples() {
     let (_, x) = stored(vec![0.0, 1.0, 2.0, 3.0]);
     let (_, y) = stored(vec![0.0, f64::NAN, 2.0, 3.0]);
     let on_disk = vec![RetainedWaveform::new("V(h)", x, y)];
     let context = WaveformsContext::new(&on_disk);
-    let error = measure(&context, "stddev(V(h))").unwrap_err();
-    assert!(error.contains("undefined samples"), "{error}");
+    close(&context, "stddev(V(h))", (1.0_f64 / 12.0).sqrt(), 1e-12);
+    close(&context, "median(V(h))", 2.5, 1e-9);
     let error = measure(&context, "stddev(clip(V(h), 5, 6))").unwrap_err();
     assert!(error.contains("lies outside the trace"), "{error}");
+    let (_, x) = stored(vec![0.0, 1.0, 2.0]);
+    let (_, y) = stored(vec![f64::NAN; 3]);
+    let on_disk = vec![RetainedWaveform::new("V(u)", x, y)];
+    let context = WaveformsContext::new(&on_disk);
+    let error = measure(&context, "stddev(V(u))").unwrap_err();
+    assert!(error.contains("no defined span"), "{error}");
 }

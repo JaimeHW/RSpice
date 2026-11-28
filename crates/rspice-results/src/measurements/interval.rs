@@ -49,8 +49,12 @@ impl fmt::Display for MeasurementError {
 ///
 /// Reversed endpoints are equivalent. Duplicate coordinates represent vertical
 /// edges: both values contribute to extrema but the edge has zero area. At a
-/// zero-width interval, a unique finite value is required. No extrapolation or
-/// integration across holes is allowed. Callers must split sweep branches.
+/// zero-width interval, a unique finite value is required. There is no
+/// extrapolation, and no integration across a hole: an undefined sample is a
+/// gap the measurement skips, as the trace is drawn around it, and the mean and
+/// RMS are of the part that is defined. A window past the trace's ends, or one
+/// with nothing defined in it, is refused with how much of it the trace covers.
+/// Callers must split sweep branches.
 pub fn measure_interval(
     x: &[f64],
     y: &[f64],
@@ -119,20 +123,21 @@ pub(crate) fn measure_pairs<I: Iterator<Item = (f64, f64)>>(
     let (mut rises, mut falls) = (false, false);
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
-    let mut complete = lo >= first.min(last) && hi <= first.max(last);
+    let within = lo >= first.min(last) && hi <= first.max(last);
+    let mut holed = false;
     let mut scale: f64 = 0.0;
     let mut coverage = Sum::default();
     let mut previous: Option<(f64, f64)> = None;
     for (at, value) in pairs() {
         nonfinite_axis |= !at.is_finite();
         // Retained samples include both sides of a vertical edge, even when the
-        // edge lies exactly on a cursor. Do not silently discard undefined points.
+        // edge lies exactly on a cursor. An undefined point is a gap, skipped.
         if spans && at >= lo && at <= hi {
             if value.is_finite() {
                 min = min.min(value);
                 max = max.max(value);
             } else {
-                complete = false;
+                holed = true;
             }
         }
         if let Some((before_at, before_value)) = previous.replace((at, value)) {
@@ -148,7 +153,7 @@ pub(crate) fn measure_pairs<I: Iterator<Item = (f64, f64)>>(
                     scale = scale.max(u.abs()).max(v.abs());
                     coverage.add(fraction(left, right, lo, hi));
                 } else {
-                    complete = false;
+                    holed = true;
                 }
             }
         }
@@ -166,10 +171,9 @@ pub(crate) fn measure_pairs<I: Iterator<Item = (f64, f64)>>(
     if lo == hi {
         return point_statistics(pairs(), lo);
     }
-    if !complete {
-        return Err(MeasurementError::IncompleteCoverage {
-            fraction: coverage.value().clamp(0.0, 1.0),
-        });
+    let covered = coverage.value().clamp(0.0, 1.0);
+    if !within || covered == 0.0 {
+        return Err(MeasurementError::IncompleteCoverage { fraction: covered });
     }
 
     let mut mean = Sum::default();
@@ -196,6 +200,9 @@ pub(crate) fn measure_pairs<I: Iterator<Item = (f64, f64)>>(
             let Some((left, right)) = clipped_span(&xs, lo, hi) else {
                 continue;
             };
+            if !ys.iter().all(|v| v.is_finite()) {
+                continue;
+            }
             let (u, v) = clipped_values(&xs, &ys, left, right);
             let root_weight = || sqrt_span(left, right) / sqrt_span(lo, hi);
             let weight = fraction(left, right, lo, hi);
@@ -226,12 +233,18 @@ pub(crate) fn measure_pairs<I: Iterator<Item = (f64, f64)>>(
             }
         }
     }
+    // Over a trace with gaps the mean and RMS are of the part that is defined.
+    let share = if holed { covered } else { 1.0 };
     Ok(IntervalStatistics {
         min,
         max,
         // A mean and RMS cannot exceed the contributing signal's magnitude.
-        mean: mean.value().clamp(-scale / mean_scale, scale / mean_scale) * mean_scale,
-        rms: squares.value().sqrt().hypot(small_rms).min(1.0) * scale,
+        mean: (mean.value() / share).clamp(-scale / mean_scale, scale / mean_scale) * mean_scale,
+        rms: (squares.value() / share)
+            .sqrt()
+            .hypot(small_rms / share.sqrt())
+            .min(1.0)
+            * scale,
     })
 }
 
@@ -370,13 +383,31 @@ mod tests {
         }
     }
 
+    /// An undefined sample is a gap the measurement skips: the mean and RMS
+    /// are of the defined part, a ramp from 0 to 2 beside a gap reading its
+    /// own mean 1 and RMS 2/√3. A window past the trace, or one with nothing
+    /// defined in it, is refused with how much of it the trace covers.
     #[test]
-    fn missing_coverage_is_not_a_complete_measurement() {
+    fn a_gap_is_skipped_and_a_window_past_the_trace_is_refused() {
         let x = [0.0, 1.0, 2.0, 3.0, 4.0];
         let y = [1.0, 1.0, f64::NAN, 1.0, 1.0];
         assert_eq!(
             measure_interval(&x, &y, None),
-            Err(MeasurementError::IncompleteCoverage { fraction: 0.5 })
+            Ok(IntervalStatistics {
+                min: 1.0,
+                max: 1.0,
+                mean: 1.0,
+                rms: 1.0
+            })
+        );
+        let stats = measure_interval(&[0.0, 1.0, 2.0, 3.0], &[0.0, 2.0, f64::NAN, 4.0], None)
+            .expect("the defined part is measured");
+        assert_eq!((stats.min, stats.max), (0.0, 4.0));
+        close(stats.mean, 1.0);
+        close(stats.rms, 2.0 / 3.0_f64.sqrt());
+        assert_eq!(
+            measure_interval(&[0.0, 1.0, 2.0], &[f64::NAN; 3], None),
+            Err(MeasurementError::IncompleteCoverage { fraction: 0.0 })
         );
         assert_eq!(
             measure_interval(&[0.0, 1.0], &[1.0; 2], Some((-1.0, 1.0))),

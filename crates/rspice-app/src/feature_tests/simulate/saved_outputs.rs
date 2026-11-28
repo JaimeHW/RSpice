@@ -255,6 +255,12 @@ fn divider(e: &mut Engineer) {
         &[("Instance", "vin"), ("DC voltage, V", "1")],
     );
     e.connect(&pins, &["in", "0"]);
+    divider_resistors(e);
+}
+
+/// Two 1 kΩ resistors, `in` to `out` to ground, and a 10 µs transient over
+/// them.
+fn divider_resistors(e: &mut Engineer) {
     let pins = e.place(
         "resistor",
         "Resistor",
@@ -485,4 +491,123 @@ fn lowering_datasets_kept_deletes_no_run_until_the_next_run() {
         after.iter().all(|sequence| *sequence + 3 >= newest),
         "the newest runs are the ones kept: {after:?} after {held:?}"
     );
+}
+
+/// An expression undefined at a point is a gap there, as Spectre's and ADS's
+/// calculators leave one, and is drawn everywhere else: `db(V(out)/V(in))`
+/// across the divider driven by a sine from 0 V is 0/0 at t = 0 and
+/// 20·log10(1/2) at every later point, whether the run keeps it or Results
+/// computes it on demand. The run plots it, and `avg()` over it reads the
+/// part that is defined.
+#[test]
+fn an_expression_undefined_at_a_point_keeps_a_gap_there_and_plots() {
+    let mut engineer = Engineer::new_project("gap");
+    let e = &mut engineer;
+    sine_divider(e);
+    add_expression(e, "gain_db", "db(V(out)/V(in))", None);
+    add_expression(
+        e,
+        "gain_later",
+        "db(V(out)/V(in))",
+        Some("On demand from retained state"),
+    );
+
+    let run = e.run();
+    let (analysis, receipt) = receipt_of(&run, "gain_db");
+    assert!(
+        matches!(
+            run.analyses[analysis].saved_output_receipts[receipt].status,
+            SavedOutputMaterializationStatus::Materialized { .. }
+        ),
+        "the run keeps gain_db: {:?}",
+        run.analyses[analysis].saved_output_receipts[receipt].status
+    );
+    assert_gap_then_half(&run, "gain_db");
+    let plotted = e
+        .replay
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .visualization_documents
+        .iter()
+        .filter(|document| document.working_view().is_some())
+        .flat_map(|document| document.traces())
+        .any(|trace| trace.label == "gain_db" && trace.visible);
+    assert!(plotted, "the run's view plots gain_db");
+
+    let (analysis, receipt) = receipt_of(&run, "gain_later");
+    let analysis_id = run.analyses[analysis].id;
+    e.replay
+        .app
+        .state
+        .model
+        .simulation
+        .materialize_deferred_saved_output(run.run_id, analysis_id, receipt)
+        .expect("Results computes the output kept on demand, its undefined point a gap");
+    let kept = e
+        .replay
+        .app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .find(|kept| kept.run_id == run.run_id)
+        .expect("the run is kept")
+        .clone();
+    assert_gap_then_half(&kept, "gain_later");
+
+    let average = e.measure("avg(gain_db)");
+    assert!(
+        (average - HALF_IN_DB).abs() < 1e-6,
+        "avg() over the defined part reads {average} dB, not {HALF_IN_DB}"
+    );
+}
+
+/// `name`'s waveform in `run` is undefined at t = 0 and reads 20·log10(1/2)
+/// at every later point.
+fn assert_gap_then_half(run: &SimulationRun, name: &str) {
+    let wave = run
+        .analyses
+        .iter()
+        .flat_map(|analysis| &analysis.waveforms)
+        .find(|wave| wave.name == name)
+        .unwrap_or_else(|| panic!("no {name} in the run"));
+    let times = wave.x.samples(..).collect::<Vec<f64>>();
+    let values = wave.y.samples(..).collect::<Vec<f64>>();
+    assert!(values.len() > 2, "{name} holds {} samples", values.len());
+    assert_eq!(times[0], 0.0, "{name} starts at t = 0");
+    assert!(
+        values[0].is_nan(),
+        "{name} at t = 0 is a gap, not {}",
+        values[0]
+    );
+    for (time, value) in times.iter().zip(&values).skip(1) {
+        assert!(
+            (value - HALF_IN_DB).abs() < 1e-6,
+            "{name} at {time} s reads {value} dB, not {HALF_IN_DB}"
+        );
+    }
+}
+
+/// The divider, driven by a 1 V, 10 kHz sine from 0 V, so `in` and `out` are
+/// both 0 V at t = 0 and neither is again before the transient's 10 µs end.
+fn sine_divider(e: &mut Engineer) {
+    e.top_sheet();
+    let pins = e.place(
+        "sine",
+        "Sinusoidal Voltage Source",
+        (100, 100),
+        &[
+            ("Instance", "vin"),
+            ("DC offset (VO), V", "0"),
+            ("Amplitude (VA), V", "1"),
+            ("Frequency (FREQ), Hz", "10k"),
+        ],
+    );
+    e.connect(&pins, &["in", "0"]);
+    divider_resistors(e);
 }

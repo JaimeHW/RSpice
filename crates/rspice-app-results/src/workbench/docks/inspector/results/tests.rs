@@ -84,21 +84,23 @@ fn result_trace_statistics_ignore_non_finite_samples() {
     );
     assert_eq!(statistics.extremes, Some((-2.0, 4.0)));
     assert_eq!((statistics.finite, statistics.samples), (3, 5));
+    assert_eq!(
+        statistics.average,
+        Ok(-0.5),
+        "the average is of the one defined segment, -2 to 1, as avg() reads it"
+    );
+    let undefined = measure(
+        &vec![0.0, 1.0].into(),
+        &vec![f64::NAN, f64::INFINITY].into(),
+    );
+    assert_eq!(undefined.extremes, None);
     assert!(
-        statistics
+        undefined
             .average
             .as_ref()
             .is_err_and(|reason| reason.contains("missing or undefined samples")),
-        "an average over holes is refused, as avg() refuses it: {:?}",
-        statistics.average
-    );
-    assert_eq!(
-        measure(
-            &vec![0.0, 1.0].into(),
-            &vec![f64::NAN, f64::INFINITY].into()
-        )
-        .extremes,
-        None
+        "a trace with nothing defined says why it has no average: {:?}",
+        undefined.average
     );
 }
 

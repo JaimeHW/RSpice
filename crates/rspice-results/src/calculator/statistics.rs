@@ -9,6 +9,10 @@
 //! samples alone, unweighted, as a statistical sample divided by N − 1, as
 //! ViVA's `?type "sample"` does.
 //!
+//! An undefined sample is a gap, as the trace is drawn around it: a segment
+//! that ends on one holds no span, and the statistics are of the part that is
+//! defined. A trace with nothing defined is refused, saying so.
+//!
 //! Every pass reads the samples through [`Series`], so a stored trace is
 //! read a block at a time, however long.
 
@@ -39,13 +43,18 @@ struct Moments {
     fourth: f64,
 }
 
+/// Whether a segment from `y0` to `y1` is defined: neither end is a gap.
+fn defined(y0: f64, y1: f64) -> bool {
+    y0.is_finite() && y1.is_finite()
+}
+
 /// The trace's checks, made in the first pass: an x-axis that runs one way
-/// with some width, and every value defined.
+/// with some width, and some of it defined. Its defined span and mean.
 fn first_pass(name: &str, series: &Series) -> Result<(f64, f64), EvaluationError> {
     let (mut span, mut area) = (0.0, 0.0);
     let (mut rises, mut falls) = (false, false);
     let mut previous: Option<(f64, f64)> = None;
-    let mut count = 0usize;
+    let (mut count, mut undefined) = (0usize, false);
     for (x, y) in series.pairs() {
         count += 1;
         if !x.is_finite() {
@@ -53,23 +62,26 @@ fn first_pass(name: &str, series: &Series) -> Result<(f64, f64), EvaluationError
                 "{name} reads a trace whose x-axis has an undefined sample"
             )));
         }
-        if !y.is_finite() {
-            return Err(EvaluationError::MathError(format!(
-                "{name} reads a trace with undefined samples; clip() it to where it is defined"
-            )));
-        }
+        undefined |= !y.is_finite();
         if let Some((x0, y0)) = previous {
             rises |= x > x0;
             falls |= x < x0;
-            let dx = (x - x0).abs();
-            span += dx;
-            area += dx * (y0 + y) / 2.0;
+            if defined(y0, y) {
+                let dx = (x - x0).abs();
+                span += dx;
+                area += dx * (y0 + y) / 2.0;
+            }
         }
         previous = Some((x, y));
     }
     if rises && falls {
         return Err(EvaluationError::MathError(format!(
             "{name} needs an x-axis that runs one way; this sweep turns back"
+        )));
+    }
+    if count > 0 && span == 0.0 && undefined {
+        return Err(EvaluationError::MathError(format!(
+            "{name} reads a trace with no defined span: its samples are undefined"
         )));
     }
     if count == 0 || span == 0.0 {
@@ -89,7 +101,9 @@ fn moments(name: &str, series: &Series) -> Result<Moments, EvaluationError> {
     let mut previous: Option<(f64, f64)> = None;
     for (x, y) in series.pairs() {
         let b = y - mean;
-        if let Some((x0, a)) = previous {
+        if let Some((x0, a)) = previous
+            && defined(a, b)
+        {
             let dx = (x - x0).abs();
             let (a2, b2) = (a * a, b * b);
             second += dx * (a2 + a * b + b2) / 3.0;
@@ -112,25 +126,24 @@ fn reads_a_sample(name: &str, rest: &[Argument]) -> Result<bool, EvaluationError
     Ok(keyword(name, "type", rest, 0, &["population", "sample"])? == Some("sample"))
 }
 
-/// The unweighted variance of the samples, divided by N − 1.
+/// The unweighted variance of the defined samples, divided by N − 1.
 fn sample_variance(name: &str, series: &Series) -> Result<f64, EvaluationError> {
     let (mut count, mut sum) = (0usize, 0.0);
-    for (_, y) in series.pairs() {
-        if !y.is_finite() {
-            return Err(EvaluationError::MathError(format!(
-                "{name} reads a trace with undefined samples; clip() it to where it is defined"
-            )));
-        }
+    for (_, y) in series.pairs().filter(|(_, y)| y.is_finite()) {
         count += 1;
         sum += y;
     }
     if count < 2 {
         return Err(EvaluationError::MathError(format!(
-            "{name} of a sample needs at least two samples"
+            "{name} of a sample needs at least two defined samples"
         )));
     }
     let mean = sum / count as f64;
-    let squares: f64 = series.pairs().map(|(_, y)| (y - mean) * (y - mean)).sum();
+    let squares: f64 = series
+        .pairs()
+        .filter(|(_, y)| y.is_finite())
+        .map(|(_, y)| (y - mean) * (y - mean))
+        .sum();
     Ok(squares / (count - 1) as f64)
 }
 
@@ -181,14 +194,16 @@ fn kurtosis(name: &str, series: &Series, _: &[Argument]) -> Result<RealValue, Ev
     standardized(name, series, 4).map(RealValue::Scalar)
 }
 
-/// The share of the trace's x-span over which its value is at most `level`:
-/// a segment's share by where `level` cuts it, a flat one whole or not at
-/// all.
+/// The share of the trace's defined x-span over which its value is at most
+/// `level`: a segment's share by where `level` cuts it, a flat one whole or
+/// not at all.
 fn share_at_most(series: &Series, level: f64) -> f64 {
     let (mut below, mut span) = (0.0, 0.0);
     let mut previous: Option<(f64, f64)> = None;
     for (x, y) in series.pairs() {
-        if let Some((x0, y0)) = previous {
+        if let Some((x0, y0)) = previous
+            && defined(y0, y)
+        {
             let dx = (x - x0).abs();
             span += dx;
             let (low, high) = (y0.min(y), y0.max(y));
@@ -209,6 +224,7 @@ fn quantile(name: &str, series: &Series, share: f64) -> Result<f64, EvaluationEr
     first_pass(name, series)?;
     let (mut low, mut high) = series
         .pairs()
+        .filter(|(_, y)| y.is_finite())
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), (_, y)| {
             (low.min(y), high.max(y))
         });

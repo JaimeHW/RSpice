@@ -1,5 +1,6 @@
-//! Retained result measurements use the calculator's interval mathematics and
-//! report sweep branches and missing coverage in the visible readout.
+//! Retained result measurements use the calculator's interval mathematics,
+//! skip a trace's gaps, and report sweep branches and a window with nothing
+//! defined in the visible readout.
 
 use super::*;
 
@@ -217,30 +218,68 @@ fn measurement_readout_identifies_each_sweep_branch() {
     }
 }
 
+/// A gap in a trace is skipped, as the trace is drawn around it: the
+/// readings are of the part that is defined. A trace with nothing defined
+/// says why it has no readings.
 #[test]
-fn measurement_readout_explains_missing_coverage_instead_of_hiding_it() {
-    let mut state = transient(
-        vec![0.0, 1.0, 2.0, 3.0, 4.0],
-        vec![1.0, 1.0, f64::NAN, 1.0, 1.0],
+fn measurement_readout_skips_a_gap_and_says_why_when_nothing_is_defined() {
+    let readings = |y: Vec<f64>| {
+        let mut state = transient(vec![0.0, 1.0, 2.0, 3.0, 4.0], y);
+        let models = cached_models(
+            &state.model.simulation,
+            &mut state.results.results,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            &Tokens::default(),
+        );
+        let model = &models[0];
+        readout::measurement_values(
+            &mut state.results.results.session.derived,
+            model,
+            None,
+            8,
+            state.model.preferences.quantity_presentation_policy(),
+            &rspice_results_ui::waves::as_returned,
+        )
+        .into_iter()
+        .map(|row| {
+            let one = model.format_trace_value(
+                &model.traces[0],
+                1.0,
+                8,
+                state.model.preferences.quantity_presentation_policy(),
+            );
+            (row.label, row.value == one, row.value)
+        })
+        .collect::<Vec<_>>()
+    };
+    let gapped = readings(vec![1.0, 1.0, f64::NAN, 1.0, 1.0]);
+    assert_eq!(
+        gapped
+            .iter()
+            .map(|(label, ..)| label.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "V(out) min",
+            "V(out) max",
+            "V(out) p-p",
+            "V(out) avg",
+            "V(out) rms"
+        ]
     );
-    let models = cached_models(
-        &state.model.simulation,
-        &mut state.results.results,
-        ComplexNumberDisplay::MagnitudePhaseDegrees,
-        &Tokens::default(),
+    for (label, reads_one, value) in &gapped {
+        assert!(
+            *reads_one || label.ends_with("p-p"),
+            "{label} reads {value}, the defined part's 1"
+        );
+    }
+    let undefined = readings(vec![f64::NAN; 5]);
+    assert_eq!(undefined.len(), 1);
+    assert_eq!(undefined[0].0, "V(out)");
+    assert!(undefined[0].2.contains("Unavailable"), "{undefined:?}");
+    assert!(
+        undefined[0].2.contains("0.0% interval coverage"),
+        "{undefined:?}"
     );
-    let rows = readout::measurement_values(
-        &mut state.results.results.session.derived,
-        &models[0],
-        None,
-        8,
-        state.model.preferences.quantity_presentation_policy(),
-        &rspice_results_ui::waves::as_returned,
-    );
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].label, "V(out)");
-    assert!(rows[0].value.contains("Unavailable"));
-    assert!(rows[0].value.contains("50.0% interval coverage"));
 }
 
 #[test]

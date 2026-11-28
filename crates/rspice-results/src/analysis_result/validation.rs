@@ -23,6 +23,17 @@ fn contains_retained_coordinate(sorted: &[f64], target: f64) -> bool {
 }
 
 impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
+    /// Whether `name` is a waveform a saved derived expression materialized.
+    fn is_saved_expression(&self, name: &str) -> bool {
+        self.saved_output_receipts.iter().any(|receipt| {
+            receipt.output_kind == crate::saved_output::SavedOutputKind::DerivedExpression
+                && receipt
+                    .status
+                    .materialized_waveforms()
+                    .any(|(waveform, _)| waveform == name)
+        })
+    }
+
     /// Validate relationships between independently versioned retained fields.
     /// Historical analyses may legitimately lack a newer payload; when both
     /// fields exist they must describe one coherent execution.
@@ -87,14 +98,19 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             }
             // Imported adapters explicitly admit unavailable source samples.
             // Native derived PXF delay gaps must be reproducible from finite
-            // retained transfer samples. An analysis that did not finish holds
-            // what the live plot drew, which breaks its trace where it let points
-            // go. A solver NaN in a finished result is still invalid.
+            // retained transfer samples. A saved expression is undefined where
+            // its arithmetic is (a division by zero, the logarithm of zero or a
+            // negative, an operand's own gap) and holds a gap there, as
+            // Spectre's and ADS's calculators leave one. An analysis that did
+            // not finish holds what the live plot drew, which breaks its trace
+            // where it let points go. A solver NaN in a finished result is
+            // still invalid.
             if self.import_source.is_none()
                 && self.success
                 && !stored
                 && waveform.has_missing_samples()
                 && !pxf::verified_group_delay(self, waveform)
+                && !self.is_saved_expression(&waveform.name)
             {
                 return Err(format!(
                     "signal '{}' has a missing sample that neither an import nor a derived calculation explains",
