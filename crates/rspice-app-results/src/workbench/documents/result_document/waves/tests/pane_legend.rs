@@ -22,12 +22,35 @@ fn run(ctx: &egui::Context, state: &mut ResultsTestHost, events: Vec<egui::Event
 }
 
 /// A settled frame, the pointer off the strip so no hover readout covers
-/// it: evaluation, routing and sizing take a pass each.
+/// it. An expression over the run's stored samples evaluates on a Results
+/// job, and a frame drawn while the job is out names it pending: the first
+/// frame holds the jobs it starts, so every run waits for them as a slow
+/// machine must, and each lands on the frame after it ends. Routing and
+/// sizing then take a pass each.
 fn settled(ctx: &egui::Context, state: &mut ResultsTestHost) -> FullOutput {
     ctx.enable_accesskit();
+    crate::workbench::results_job::hold_jobs_for_tests(true);
     run(ctx, state, vec![egui::Event::PointerGone]);
+    crate::workbench::results_job::hold_jobs_for_tests(false);
+    while awaited_expressions(state) {
+        run(ctx, state, Vec::new());
+    }
     run(ctx, state, Vec::new());
     run(ctx, state, Vec::new())
+}
+
+/// Release every job evaluating an expression and wait for it to end:
+/// whether one was out.
+fn awaited_expressions(state: &ResultsTestHost) -> bool {
+    let jobs = &state.results.results.expression_jobs;
+    for evaluating in jobs.values() {
+        evaluating.job.release();
+        assert!(
+            evaluating.job.wait(std::time::Duration::from_secs(120)),
+            "an expression's evaluation ends"
+        );
+    }
+    !jobs.is_empty()
 }
 
 /// Every control the frame publishes, by its role, its name and where it is.
