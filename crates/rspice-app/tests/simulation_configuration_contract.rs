@@ -1,8 +1,7 @@
 use rspice_app::{
     AnalysisInstanceId, DesignVariable, DesignVariableQuantity, DesignVariableRange,
     ProjectWorkspace, SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputStreaming, SimulationPlanId, SimulationPlanPayload,
-    SimulationPlanPayloadRecord,
+    SavedOutputStreaming, SimulationPlanId, SimulationPlanPayload, SimulationPlanPayloadRecord,
 };
 use rspice_simulation::netlist_gen::design_variable_parameter_lines;
 
