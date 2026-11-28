@@ -798,20 +798,6 @@ fn lifecycle_toolbar(
                 {
                     *action = Some(AnalysisAction::Later(selected.position + 1));
                 }
-                let can_bind_existing = selected
-                    .prerequisite_candidates
-                    .iter()
-                    .any(|(_, candidates)| !candidates.is_empty());
-                if Button::new("Bind existing")
-                    .enabled(can_bind_existing)
-                    .show(ui)
-                    .on_disabled_hover_text(
-                        "No compatible enabled prerequisite is already positioned earlier in the plan. Use the guided prerequisite action below to create or repair the required chain.",
-                    )
-                    .clicked()
-                {
-                    *action = Some(AnalysisAction::BindDependencies);
-                }
                 if Button::new("Validate").icon(Icon::Check).show(ui).clicked() {
                     *action = Some(AnalysisAction::Validate);
                 }

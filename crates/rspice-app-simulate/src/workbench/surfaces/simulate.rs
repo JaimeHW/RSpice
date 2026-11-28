@@ -116,7 +116,6 @@ pub enum AnalysisAction {
     Clone,
     Earlier(usize),
     Later(usize),
-    BindDependencies,
     BindDependency {
         prerequisite: AnalysisKind,
         target: AnalysisInstanceId,

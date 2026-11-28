@@ -271,26 +271,6 @@ pub fn apply_analysis_action(
                 Err(error) => record_failure(cx, "Reorder", &error),
             }
         }
-        AnalysisAction::BindDependencies => {
-            let repair_context =
-                build_envelope_source_catalog(cx.model).dependency_repair_context();
-            let step = cx.model.setup_snapshot(SetupParts::ANALYSES);
-            let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
-                Ok(plan) => plan
-                    .auto_bind_dependencies_with_context(id, &repair_context)
-                    .map_err(|error| error.to_string()),
-                Err(error) => Err(error),
-            };
-            cx.model
-                .record_setup_change(SimulationPage::Analyses.label(), step);
-            match result {
-                Ok(receipt) => {
-                    refresh_analysis_projections(cx);
-                    record_receipt(cx, &receipt);
-                }
-                Err(error) => record_failure(cx, "Bind dependencies", &error),
-            }
-        }
         AnalysisAction::BindDependency {
             prerequisite,
             target,
