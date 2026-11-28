@@ -174,7 +174,7 @@ impl RSpicePartFacet {
 /// Models-manager selections and filters that do not own engineering data.
 /// Stable strings are used only for presentation; every mutation re-resolves
 /// the live library/source identity and fails closed if it changed.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModelsWorkbenchViewState {
     #[serde(default)]
     pub catalog_scope: ModelsCatalogScope,
@@ -215,29 +215,6 @@ pub struct ModelsWorkbenchViewState {
     pub model_import_label: Option<String>,
     #[serde(skip)]
     pub dialog: Option<ModelsWorkbenchDialog>,
-}
-
-impl Default for ModelsWorkbenchViewState {
-    fn default() -> Self {
-        Self {
-            catalog_scope: ModelsCatalogScope::default(),
-            project_facet: ProjectModelFacet::default(),
-            part_facet: RSpicePartFacet::default(),
-            catalog_query: String::new(),
-            catalog_sort: ModelsTableSort::default(),
-            selected_part: None,
-            part_catalog_offset: 0,
-            selected_corner: None,
-            selected_bin_family: None,
-            include_selected_source: None,
-            include_direct_only: false,
-            include_definition_query: String::new(),
-            action_receipt: None,
-            model_import_in_progress: false,
-            model_import_label: None,
-            dialog: None,
-        }
-    }
 }
 
 impl ModelsWorkbenchViewState {
