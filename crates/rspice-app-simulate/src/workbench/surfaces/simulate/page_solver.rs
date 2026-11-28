@@ -42,8 +42,8 @@ use crate::workbench::simulate::{SimulateFeature, invalidate_preflight, record_p
 mod startup;
 
 use super::page_kit::{
-    CARD_PAD_X, Tone, card, card_body, card_row, cell_ui, field_pair, ledger_group,
-    ledger_row_cells,
+    CARD_PAD_X, TWO_COLUMN_BREAKPOINT, Tone, card, card_body, card_row, cell_ui, field_pair,
+    ledger_group, ledger_row_cells,
 };
 
 /// What choosing each named policy means, positionally matched to
@@ -68,14 +68,117 @@ pub(super) fn active_preset(model: &Model) -> Option<&'static str> {
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     policy_strip(ui, cx);
     compatibility_policy(ui, cx);
-    card_row(ui, cx, convergence_criteria, continuation_ladder);
+    even_card_row(
+        ui,
+        cx,
+        "criteria",
+        convergence_criteria,
+        continuation_ladder,
+    );
     startup::show(ui, cx);
-    card_row(ui, cx, iteration_budgets, time_integration);
-    card_row(ui, cx, matrix_policy, |ui, cx| {
+    even_card_row(ui, cx, "limits", iteration_budgets, time_integration);
+    even_card_row(ui, cx, "matrix", matrix_policy, |ui, cx| {
         if temperature_reference(ui, &mut cx.model.sim_setup) {
             commit_draft(cx);
         }
     });
+}
+
+// ------------------------------------------------------------------ card rows
+
+/// Where an [`even_card`] learns which pair it belongs to.
+const EVEN_CARD: &str = "simulation.solver.even-card";
+
+/// The two halves of one side-by-side pair: where this card keeps its natural
+/// height, and where its neighbour keeps its own.
+#[derive(Clone, Copy)]
+struct EvenCard {
+    mine: egui::Id,
+    other: egui::Id,
+}
+
+/// Two cards side by side whose frames end on one line, or stacked where the
+/// page is too narrow for two.
+///
+/// Every pair on this page differs in height by a row or more, and two frames
+/// ending at different heights read as a mistake. Each half is drawn with an
+/// [`even_card`], which pads its body down to the taller of the pair.
+fn even_card_row<T>(
+    ui: &mut Ui,
+    subject: &mut T,
+    row: &'static str,
+    left: impl FnOnce(&mut Ui, &mut T),
+    right: impl FnOnce(&mut Ui, &mut T),
+) {
+    if ui.available_width() < TWO_COLUMN_BREAKPOINT {
+        card_row(ui, subject, left, right);
+        return;
+    }
+    let left_id = egui::Id::new((EVEN_CARD, row, "left"));
+    let right_id = egui::Id::new((EVEN_CARD, row, "right"));
+    let handed = egui::Id::new(EVEN_CARD);
+    card_row(
+        ui,
+        subject,
+        |ui, subject| {
+            let pair = EvenCard {
+                mine: left_id,
+                other: right_id,
+            };
+            ui.data_mut(|data| data.insert_temp(handed, pair));
+            left(ui, subject);
+            ui.data_mut(|data| data.remove::<EvenCard>(handed));
+        },
+        |ui, subject| {
+            let pair = EvenCard {
+                mine: right_id,
+                other: left_id,
+            };
+            ui.data_mut(|data| data.insert_temp(handed, pair));
+            right(ui, subject);
+            ui.data_mut(|data| data.remove::<EvenCard>(handed));
+        },
+    );
+}
+
+/// A [`card`] that, drawn as half of an [`even_card_row`], pads its body to the
+/// taller half's height.
+///
+/// The neighbour's height is the one it had on the previous frame, so a card
+/// whose own height changed asks for one more frame, and the pair settles
+/// before it is seen. Outside a pair it is a plain card.
+fn even_card<R>(
+    ui: &mut Ui,
+    title: &str,
+    status: Option<(&str, Tone)>,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let handed = egui::Id::new(EVEN_CARD);
+    let pair = ui.data_mut(|data| {
+        let pair = data.get_temp::<EvenCard>(handed);
+        data.remove::<EvenCard>(handed);
+        pair
+    });
+    card(ui, title, status, |ui| {
+        let inner = body(ui);
+        if let Some(pair) = pair {
+            let natural = ui.min_rect().height();
+            let (was, other) = ui.data_mut(|data| {
+                let was = data.get_temp::<f32>(pair.mine);
+                data.insert_temp(pair.mine, natural);
+                (was, data.get_temp::<f32>(pair.other))
+            });
+            if was != Some(natural) {
+                ui.ctx().request_repaint();
+            }
+            // Measured from the card's own top: `set_min_height` would count
+            // from the cursor and add the neighbour's height below this card's.
+            if let Some(other) = other {
+                ui.expand_to_include_y(ui.min_rect().top() + natural.max(other));
+            }
+        }
+        inner
+    })
 }
 
 // ---------------------------------------------------------------- preset strip
@@ -278,7 +381,7 @@ pub(super) fn commit_options_transaction(
 const CRITERIA_COLUMNS: [f32; 3] = [0.36, 0.34, 0.30];
 
 fn convergence_criteria(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    card(
+    even_card(
         ui,
         "Convergence criteria",
         Some(("two tests · judged per node", Tone::Neutral)),
@@ -340,7 +443,7 @@ fn criterion_row(
 const BUDGET_COLUMNS: [f32; 3] = [0.18, 0.52, 0.30];
 
 fn iteration_budgets(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    card(
+    even_card(
         ui,
         "Iteration limits",
         Some(("per stage, not per task", Tone::Neutral)),
@@ -475,7 +578,7 @@ fn continuation_ladder(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
         + usize::from(cx.model.sim_setup.session.options_draft.pseudo_transient)
         + usize::from(cx.model.sim_setup.session.options_draft.arc_length);
     let status = format!("{enabled_rungs} of 5 rungs enabled");
-    card(
+    even_card(
         ui,
         "Continuation ladder",
         Some((status.as_str(), Tone::Neutral)),
@@ -624,7 +727,7 @@ fn ladder_stage(
 // ------------------------------------------------------------- time integration
 
 fn time_integration(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    card(
+    even_card(
         ui,
         "Time integration",
         Some(("every time-domain analysis", Tone::Neutral)),
@@ -739,7 +842,7 @@ fn time_integration(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 // -------------------------------------------------------- matrix & determinism
 
 fn matrix_policy(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
-    card(ui, "Matrix, pivoting & conditioning", None, |ui| {
+    even_card(ui, "Matrix, pivoting & conditioning", None, |ui| {
         card_body(ui, |ui| {
             let solvers: Vec<String> = MatrixSolver::all()
                 .iter()
@@ -851,7 +954,7 @@ fn matrix_policy(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 /// edits the setup it is given and does not reach the rest of the application.
 fn temperature_reference(ui: &mut Ui, setup: &mut SimSetupState) -> bool {
     let mut release = false;
-    card(ui, "Temperature reference", None, |ui| {
+    even_card(ui, "Temperature reference", None, |ui| {
         card_body(ui, |ui| {
             let mut tnom = None;
             field_pair(
