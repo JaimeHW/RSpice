@@ -21,7 +21,7 @@ use rspice_simulation::capture_ledger::CaptureLedger;
 use rspice_simulation::capture_ledger::CaptureWorkload;
 pub(super) use rspice_simulation_contract::run_set::format_bytes;
 
-use crate::ui::widgets::select;
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select};
 
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_note, card_row, field_pair, ledger_group, ledger_head,
@@ -161,11 +161,11 @@ const STORAGE_BUDGET_CHOICES: [u64; 5] = [
 const DATASETS_LISTED: usize = 6;
 
 /// The retention rules the controls cannot state on their own.
-const RETENTION_NOTE: &str = "A dataset is sealed against the manifest that produced it, so a \
+const RETENTION_NOTE: &str = "A dataset is sealed against the plan that produced it, so a \
                               retained result can still be trusted after the plan has moved on. \
-                              Lowering the limit discards the oldest datasets immediately, \
-                              except pinned ones and those a saved result document reads, and \
-                              raising it never recovers one already discarded. \
+                              A limit below the datasets held asks before it discards the \
+                              oldest, never pinned ones or those a saved result document reads, \
+                              and raising it never recovers one already discarded. \
                               Discarding a dataset also discards the netlist the simulator read \
                               for it.";
 
@@ -656,11 +656,86 @@ fn retention_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     if let Some(index) = picked
         && let Some(depth) = RETENTION_CHOICES.get(index)
     {
-        let mut policy = cx.model.sim_setup.save_policy;
-        policy.retained_dataset_limit = *depth;
-        if commit_save_policy(cx, policy, "Save policy · dataset retention") {
-            cx.model.hold_document_datasets();
-            cx.model.simulation.prune_plan_runs(plan_id, *depth);
+        // A limit that discards nothing applies at once; one that would
+        // discard runs asks first, with how many.
+        cx.model.hold_document_datasets();
+        if cx.model.simulation.plan_runs_pruned_at(plan_id, *depth) == 0 {
+            keep_runs(cx, plan_id, *depth);
+        } else {
+            cx.state.retention_confirmation = Some(*depth);
+        }
+    }
+}
+
+/// Keep `depth` of this plan's runs, discarding the oldest beyond it.
+fn keep_runs(
+    cx: &mut Cx<'_, SimulateFeature>,
+    plan_id: crate::product::SimulationPlanId,
+    depth: usize,
+) {
+    let mut policy = cx.model.sim_setup.save_policy;
+    policy.retained_dataset_limit = depth;
+    if commit_save_policy(cx, policy, "Save policy · dataset retention") {
+        cx.model.hold_document_datasets();
+        cx.model.simulation.prune_plan_runs(plan_id, depth);
+    }
+}
+
+impl SimulateFeature {
+    /// Ask before a lower "Datasets kept" discards runs: "Keep 5 runs? 15
+    /// older runs of this test will be deleted." Cancel changes nothing.
+    pub fn render_retention_confirmation(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
+        let Some(depth) = cx.state.retention_confirmation else {
+            return;
+        };
+        let Ok(plan_id) = cx
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .map(|plan| plan.id())
+        else {
+            cx.state.retention_confirmation = None;
+            return;
+        };
+        let discarded = cx.model.simulation.plan_runs_pruned_at(plan_id, depth);
+        if discarded == 0 {
+            // Runs went another way while it was open: nothing is left to
+            // ask about.
+            cx.state.retention_confirmation = None;
+            keep_runs(cx, plan_id, depth);
+            return;
+        }
+        let runs = |count: usize| if count == 1 { "run" } else { "runs" };
+        let choice = Dialog::new(
+            format!("Keep {depth} {}?", runs(depth)),
+            format!("Delete {discarded} {}", runs(discarded)),
+        )
+        .description(format!(
+            "{discarded} older {} of this test will be deleted.",
+            runs(discarded)
+        ))
+        .size(DialogSize::Transaction)
+        .ghost("Cancel")
+        .show(ctx, |ui| {
+            card_note(
+                ui,
+                &format!(
+                    "{discarded} older {} of this test will be deleted. The selected run, \
+                     baselines and runs a saved result document reads are kept. Deleted runs \
+                     cannot be restored.",
+                    runs(discarded)
+                ),
+            );
+        });
+        match choice {
+            DialogChoice::Primary => {
+                cx.state.retention_confirmation = None;
+                keep_runs(cx, plan_id, depth);
+            }
+            DialogChoice::Ghost | DialogChoice::Cancelled => {
+                cx.state.retention_confirmation = None;
+            }
+            DialogChoice::Secondary | DialogChoice::None => {}
         }
     }
 }

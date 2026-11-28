@@ -501,6 +501,15 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         },
     },
     DialogSpec {
+        key: DialogKey("simulate.retention_confirmation"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| state.simulate.retention_confirmation.is_some()),
+        render: |app, ctx| {
+            SimulateFeature::render_retention_confirmation(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
+    },
+    DialogSpec {
         key: DialogKey("simulate.plan_removal_refusal"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.simulate.plan_removal_refusal.analysis.is_some()),

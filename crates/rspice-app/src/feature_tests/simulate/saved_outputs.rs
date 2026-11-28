@@ -362,3 +362,57 @@ fn a_name_the_design_lacks_is_flagged_on_its_row_and_by_check() {
         SimulationPage::Outputs
     );
 }
+
+/// Lowering "Datasets kept" below the runs a plan holds asks first, naming
+/// how many go, and Cancel changes nothing; the yes keeps the newest.
+/// Raising it applies at once.
+#[test]
+fn lowering_datasets_kept_asks_before_it_deletes_runs() {
+    let mut engineer = Engineer::new_project("kept");
+    let e = &mut engineer;
+    divider(e);
+    for _ in 0..20 {
+        e.run();
+    }
+    let state = |e: &Engineer| {
+        let model = &e.replay.app.state.model;
+        let plan = model.sim_setup.analysis_plan.as_ref().expect("a plan").id();
+        (
+            model
+                .simulation
+                .retained
+                .runs
+                .retained_plan_dataset_count(plan),
+            model.sim_setup.save_policy.retained_dataset_limit,
+        )
+    };
+    assert_eq!(state(e), (20, 20));
+
+    let lower = |e: &mut Engineer, to: &str| {
+        e.setup_page("Save, streaming & retention policy");
+        e.press("Datasets kept", Role::ComboBox);
+        e.press(to, Role::ListBoxOption);
+    };
+    lower(e, "5 datasets");
+    let painted = e.painted();
+    assert!(
+        painted.contains("Keep 5 runs?")
+            && painted.contains("15 older runs of this test will be deleted."),
+        "lowering the limit asks first:\n{painted}"
+    );
+    assert_eq!(state(e), (20, 20), "nothing is deleted before the yes");
+    e.press("Cancel", Role::Button);
+    assert_eq!(state(e), (20, 20), "Cancel changes nothing");
+    assert!(e.replay.app.state.simulate.retention_confirmation.is_none());
+
+    lower(e, "5 datasets");
+    e.press("Delete 15 runs", Role::Button);
+    assert_eq!(state(e), (5, 5), "the yes keeps the newest five");
+
+    lower(e, "50 datasets");
+    assert!(
+        e.replay.app.state.simulate.retention_confirmation.is_none(),
+        "raising the limit asks nothing"
+    );
+    assert_eq!(state(e), (5, 50));
+}

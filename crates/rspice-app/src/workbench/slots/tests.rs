@@ -260,6 +260,9 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs.simulate.plan_removal_refusal.analysis =
             Some(rspice_app_state::product::AnalysisInstanceId::new());
     }),
+    ("retention_confirmation", |dialogs| {
+        dialogs.simulate.retention_confirmation = Some(5);
+    }),
     ("dataset_export", |dialogs| {
         dialogs.results.dataset_export = Some(DatasetExportPicker {
             format: 0,
