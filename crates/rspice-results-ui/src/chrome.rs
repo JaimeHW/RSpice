@@ -258,8 +258,12 @@ pub fn instrument_segment(
     );
     let width = (galley.size().x + 12.0).max(26.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    // Named by the words it shows, as the kit's buttons are, and described
+    // by what its hover says.
     response
-        .widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), active, tooltip));
+        .widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), active, label));
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_description(tooltip));
     if ui.is_rect_visible(rect) {
         let hover = response.hovered();
         // A segment is marked by its fill alone, the neutral one a lit
