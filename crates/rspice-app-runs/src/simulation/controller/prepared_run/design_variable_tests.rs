@@ -85,8 +85,7 @@ fn refusal(state: &mut RunTestHost) -> String {
     state.model.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
     state.sync_active_schematic_to_workspace();
     SimulationController::build_prepared_snapshot(&*state, SimulationRunIntent::SimulateRunSet)
-        .err()
-        .expect("the run is refused")
+        .expect_err("the run is refused")
         .to_string()
 }
 
