@@ -675,13 +675,15 @@ fn malformed_execution_context_is_never_silently_defaulted() {
         "{error}"
     );
 
-    let mut mismatched_pvt = valid.clone();
-    mismatched_pvt["execution_context"]["simulation_plan"]["options"]["temp"] =
+    // The run set's reference point is the plan's one temperature; the solver
+    // options record states none of its own.
+    let mut second_temperature = valid.clone();
+    second_temperature["execution_context"]["simulation_plan"]["options"]["temp"] =
         serde_json::json!(125.0);
-    let error = load_project_text(&mismatched_pvt.to_string(), None)
-        .expect_err("conflicting execution temperatures must fail")
+    let error = load_project_text(&second_temperature.to_string(), None)
+        .expect_err("a second stored temperature must fail")
         .console_text();
-    assert!(error.contains("disagrees with solver option temp"));
+    assert!(error.contains("unknown field `temp`"), "{error}");
 
     let mut unknown_input = valid.clone();
     serialized_analysis_instance_mut(&mut unknown_input, "tran")["draft"]["draft"]["future_mode"] =
