@@ -327,7 +327,7 @@ impl BarControl {
             ControlKind::Segment(label) => {
                 let galley = ui.painter().layout_no_wrap(
                     label.clone(),
-                    theme::mono(tokens::FS_0, FontWeight::Medium),
+                    super::segment_font(),
                     egui::Color32::WHITE,
                 );
                 (galley.size().x + 12.0).max(26.0)

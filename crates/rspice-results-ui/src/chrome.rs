@@ -249,7 +249,7 @@ pub fn instrument_segment(
     let t = Tokens::get(ui.ctx());
     let galley = ui.painter().layout_no_wrap(
         label.to_owned(),
-        theme::mono(tokens::FS_0, FontWeight::Medium),
+        segment_font(),
         if active {
             t.color.text
         } else {
@@ -297,6 +297,12 @@ pub fn instrument_segment(
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(tooltip)
+}
+
+/// The words of a segment of the bar's tool group: the face and size the
+/// kit's buttons beside it print in, so the band reads in one hand.
+pub(crate) fn segment_font() -> egui::FontId {
+    theme::sans(tokens::FS_1, FontWeight::Regular)
 }
 
 pub fn instrument_separator(ui: &mut Ui) {
