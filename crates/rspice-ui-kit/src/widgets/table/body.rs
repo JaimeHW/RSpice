@@ -629,7 +629,8 @@ impl DataTable<'_> {
         }
         // A row ending on the body's edge leaves its rule to what the table
         // ends on, when that draws one; plain rows draw none.
-        if !self.plain_rows && !(self.ends_on_rule && rect.bottom() >= bottom - 0.5) {
+        let left_to_what_follows = self.ends_on_rule && rect.bottom() >= bottom - 0.5;
+        if !(self.plain_rows || left_to_what_follows) {
             ui.painter().hline(
                 rect.x_range(),
                 rect.bottom() - 0.5,
