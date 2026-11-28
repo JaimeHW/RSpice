@@ -20,18 +20,18 @@
 //!   sweep variable, a noise input, a PSS tone, an envelope modulation source.
 //!   Rename the instance and the binding breaks.
 //! - **Whole-design.** The analysis reads every placed source and names none of
-//!   them. An `.ac` card sweeps whatever carries an AC magnitude, so that
-//!   binding is derived from the instance's own `ac` parameter and reported
-//!   against every AC analysis in the plan. A transient — and every analysis
-//!   built on one — re-evaluates every source at every accepted timestep
+//!   them. Every analysis solves an operating point — on its own, as the DC
+//!   start of a periodic or transient solve, or inside the analysis it
+//!   repeats — and an operating point reads every source's DC value
+//!   (`rspice-core/src/engine/source_values.rs`, whose `extract_dc_value`
+//!   match over `SourceSpec` is total). A transient — and every analysis built
+//!   on one — goes on to re-evaluate every source at every accepted timestep
 //!   (`VoltageSources::update_transient_rhs`,
 //!   `rspice-core/src/circuit/storage/sources.rs:845-867`;
-//!   `CurrentSources::update_transient_rhs`, same file `:2280-2305`), and an
-//!   operating point reads every source's DC value
-//!   (`rspice-core/src/engine/source_values.rs`, whose `extract_dc_value`
-//!   match over `SourceSpec` is total). Those are recorded against every
-//!   source, because without them a PULSE in a transient-only plan reads as one
-//!   that nothing looks at.
+//!   `CurrentSources::update_transient_rhs`, same file `:2280-2305`). An `.ac`
+//!   card sweeps whatever carries an AC magnitude, so a source with one is read
+//!   as the excitation rather than for its bias. So every enabled analysis
+//!   reads every source, and a source is unread only when no analysis runs.
 //!
 //! `.four` is not a third shape. The Fourier analysis runs a transient and
 //! decomposes one output of it (rspice-simulation's transient bridge hands
@@ -879,142 +879,123 @@ fn port_consumers_for(plan: &SimulationPlan) -> Vec<SourceConsumer> {
     })
 }
 
+/// What a source is read as by an analysis that names nothing about it: the
+/// DC value its operating point reads.
+const DC_BIAS: &str = "DC bias";
+
 /// The one place a plan is read for source references.
 ///
-/// Every arm names a field that exists on the draft; a draft whose analysis
-/// takes no source contributes nothing rather than an empty row.
+/// Every enabled analysis reads every placed source, once. Each one solves an
+/// operating point — on its own, as the DC start of a periodic or transient
+/// solve, or inside the analysis it repeats — and an operating point reads
+/// every source's DC value; a transient goes on to re-evaluate every source at
+/// every accepted timestep. So an analysis contributes exactly one consumer
+/// per source, and [`source_role`] says which part the source plays in it.
 fn consumers_for(
     plan: &SimulationPlan,
     reference: &str,
     drive: SourceDrive,
 ) -> Vec<SourceConsumer> {
     attribute_plan(plan, |draft, record| {
-        match draft {
-            AnalysisDraft::Ac(_) => {
-                // The analysis names nothing; the instance carries the drive.
-                if drive.ac {
-                    record("AC excitation");
-                }
+        record(source_role(draft, reference, drive));
+    })
+}
+
+/// The part one source plays in one analysis.
+///
+/// The narrower part where there is one: the analysis names the instance in
+/// its draft (a DC sweep variable, a noise input, a PSS tone), or the instance
+/// carries what the analysis drives (an AC magnitude, a distortion tone). A
+/// transient and the analyses built on one drive every source; everything else
+/// reads the source's DC value for its operating point.
+///
+/// The match is total, so a kind added to the plan has to say what it reads.
+fn source_role(draft: &AnalysisDraft, reference: &str, drive: SourceDrive) -> &'static str {
+    let named = |field: &str, role: &'static str| names(field, reference).then_some(role);
+    let narrower = match draft {
+        // The analysis names nothing; the instance carries the drive.
+        AnalysisDraft::Ac(_) | AnalysisDraft::AcData(_) => drive.ac.then_some("AC excitation"),
+        AnalysisDraft::Disto(disto) => {
+            // The analysis names nothing; the instance carries the tone. A
+            // distortion run takes its excitation only from the
+            // `DISTOF1`/`DISTOF2` annotations the instance's distortion
+            // properties emit — `build_distortion_rhs` in
+            // `rspice-core/src/engine/distortion.rs` skips every source whose
+            // spec carries no tone — so an AC magnitude contributes nothing
+            // here. The second-tone vector is built only by a run whose draft
+            // requests a ratio, so a source carrying only `DISTOF2` is driven
+            // by exactly those runs.
+            (drive.distof1 || (requests_second_tone(&disto.f2_over_f1) && drive.distof2))
+                .then_some("distortion drive")
+        }
+        // A transient re-evaluates every source at every accepted timestep,
+        // and Fourier, FFT, transient-noise and SOA runs are transients with a
+        // projection or a check on top.
+        AnalysisDraft::Transient(_) | AnalysisDraft::Fft(_) | AnalysisDraft::Soa(_) => {
+            Some("transient drive")
+        }
+        AnalysisDraft::TransientNoise(_) => Some("noise-transient drive"),
+        AnalysisDraft::Fourier(_) => Some("Fourier transient drive"),
+        // Both shapes at once: the envelope run is a transient, and the sources
+        // it names are the ones whose modulation it tracks. The named role wins
+        // so the row states the stronger relationship.
+        AnalysisDraft::Envelope(envelope) => {
+            Some(if names_any(&envelope.modulation_sources, reference) {
+                "envelope modulation source"
+            } else {
+                "envelope transient drive"
+            })
+        }
+        AnalysisDraft::Pss(pss) => names_any(&pss.tone_sources, reference).then_some("PSS tone"),
+        AnalysisDraft::Noise(noise) => named(&noise.input, "noise input"),
+        AnalysisDraft::DcSweep(dc) => named(&dc.source, "DC sweep variable").or_else(|| {
+            if dc.nested {
+                named(&dc.source2, "DC inner sweep")
+            } else {
+                None
             }
-            AnalysisDraft::Disto(disto) => {
-                // The analysis names nothing; the instance carries the tone. A
-                // distortion run takes its excitation only from the
-                // `DISTOF1`/`DISTOF2` annotations the instance's distortion
-                // properties emit — `build_distortion_rhs` in
-                // `rspice-core/src/engine/distortion.rs` skips every source
-                // whose spec carries no tone — so an AC magnitude contributes
-                // nothing here. The second-tone vector is built only by a run
-                // whose draft requests a ratio, so a source carrying only
-                // `DISTOF2` is read by exactly those runs.
-                if drive.distof1 || (requests_second_tone(&disto.f2_over_f1) && drive.distof2) {
-                    record("distortion drive");
-                }
-            }
-            // Whole-design readers. A transient re-evaluates every source at
-            // every accepted timestep, and Fourier and transient-noise runs are
-            // transients with a projection bolted on; an operating point reads
-            // every source's DC value. None of them names an instance, so the
-            // binding is recorded against all of them.
-            AnalysisDraft::Transient(_) => record("transient drive"),
-            AnalysisDraft::TransientNoise(_) => record("noise-transient drive"),
-            AnalysisDraft::Fourier(_) => record("Fourier transient drive"),
-            AnalysisDraft::OperatingPoint(_) => record("operating-point bias"),
-            AnalysisDraft::Envelope(envelope) => {
-                // Both shapes at once: the envelope run is a transient, and the
-                // sources it names are the ones whose modulation it tracks. The
-                // named role wins so the row states the stronger relationship.
-                if names_any(&envelope.modulation_sources, reference) {
-                    record("envelope modulation source");
-                } else {
-                    record("envelope transient drive");
-                }
-            }
-            AnalysisDraft::Pss(pss) => {
-                if names_any(&pss.tone_sources, reference) {
-                    record("PSS tone");
-                }
-            }
-            AnalysisDraft::Noise(noise) => {
-                if names(&noise.input, reference) {
-                    record("noise input");
-                }
-            }
-            AnalysisDraft::DcSweep(dc) => {
-                if names(&dc.source, reference) {
-                    record("DC sweep variable");
-                }
-                if dc.nested && names(&dc.source2, reference) {
-                    record("DC inner sweep");
-                }
-            }
-            AnalysisDraft::Stb(stb) => {
-                if names(&stb.probe_source, reference) {
-                    record("loop probe source");
-                }
-            }
-            AnalysisDraft::TransferFunction(xf) => {
-                if names(&xf.input_source, reference) {
-                    record("transfer-function input");
-                }
-            }
-            AnalysisDraft::Pac(pac) => {
-                if names(&pac.input_source, reference) {
-                    record("periodic AC input");
-                }
-            }
-            AnalysisDraft::Pnoise(pnoise) => {
-                if names(&pnoise.input_source, reference) {
-                    record("periodic noise input");
-                }
-            }
-            AnalysisDraft::Pxf(pxf) => {
-                if names(&pxf.input_source, reference) {
-                    record("periodic transfer input");
-                }
-            }
-            AnalysisDraft::HarmonicBalance(hb) => {
-                if names(&hb.fundamental_source, reference) {
-                    record("HB fundamental");
-                } else if hb
-                    .additional_tones
+        }),
+        AnalysisDraft::Stb(stb) => named(&stb.probe_source, "loop probe source"),
+        AnalysisDraft::TransferFunction(xf) => named(&xf.input_source, "transfer-function input"),
+        AnalysisDraft::Pac(pac) => named(&pac.input_source, "periodic AC input"),
+        AnalysisDraft::Pnoise(pnoise) => named(&pnoise.input_source, "periodic noise input"),
+        AnalysisDraft::Pxf(pxf) => named(&pxf.input_source, "periodic transfer input"),
+        AnalysisDraft::HarmonicBalance(hb) => named(&hb.fundamental_source, "HB fundamental")
+            .or_else(|| {
+                hb.additional_tones
                     .iter()
                     .any(|tone| names(&tone.source, reference))
-                {
-                    record("HB tone");
-                }
+                    .then_some("HB tone")
+            }),
+        AnalysisDraft::Hbnoise(hbnoise) => named(&hbnoise.input_source, "HB noise input"),
+        AnalysisDraft::Qpac(qpac) => named(&qpac.input_source, "quasi-periodic AC input"),
+        AnalysisDraft::Qpnoise(qpnoise) => {
+            if qpnoise.input_referral {
+                named(&qpnoise.input_source, "quasi-periodic noise input")
+            } else {
+                None
             }
-            AnalysisDraft::Hbnoise(hbnoise) => {
-                if names(&hbnoise.input_source, reference) {
-                    record("HB noise input");
-                }
-            }
-            AnalysisDraft::Qpac(qpac) => {
-                if names(&qpac.input_source, reference) {
-                    record("quasi-periodic AC input");
-                }
-            }
-            AnalysisDraft::Qpnoise(qpnoise) => {
-                if qpnoise.input_referral && names(&qpnoise.input_source, reference) {
-                    record("quasi-periodic noise input");
-                }
-            }
-            AnalysisDraft::Qpxf(qpxf) => {
-                if names(&qpxf.input_source, reference) {
-                    record("quasi-periodic transfer input");
-                }
-            }
-            // Everything else contributes only what its draft names, and these
-            // drafts name nothing. A corner run carries a supply-source list on
-            // its *config*, which is built at dispatch from the design rather
-            // than authored in the draft; inventing the reference from the
-            // config would report a binding the user never made. The periodic
-            // and quasi-periodic steady-state solves reach a transient too, but
-            // the plan's control over which sources they read is the tone list
-            // this file already reads, so claiming the rest would state a
-            // relationship the user cannot see or change.
-            _ => {}
         }
-    })
+        AnalysisDraft::Qpxf(qpxf) => named(&qpxf.input_source, "quasi-periodic transfer input"),
+        // These drafts name no source. A corner run carries a supply-source
+        // list on its *config*, which is built at dispatch from the design
+        // rather than authored in the draft; inventing the reference from the
+        // config would report a binding the user never made.
+        AnalysisDraft::OperatingPoint(_)
+        | AnalysisDraft::PoleZero(_)
+        | AnalysisDraft::Sensitivity(_)
+        | AnalysisDraft::SParameter(_)
+        | AnalysisDraft::DcMismatch(_)
+        | AnalysisDraft::Qpss(_)
+        | AnalysisDraft::Pstb(_)
+        | AnalysisDraft::Hbsp(_)
+        | AnalysisDraft::Psp(_)
+        | AnalysisDraft::MonteCarlo(_)
+        | AnalysisDraft::Temperature(_)
+        | AnalysisDraft::Corner(_)
+        | AnalysisDraft::Optimization(_) => None,
+    };
+    narrower.unwrap_or(DC_BIAS)
 }
 
 /// Whether a plan's source field names this instance.
@@ -1482,7 +1463,8 @@ mod tests {
     }
 
     /// An `.sp` run indexes the ports the design places; it names none of them
-    /// in its draft, so the binding is recorded against all of them.
+    /// in its draft, so the binding is recorded against all of them. An
+    /// independent source it reads only for the operating point.
     #[test]
     fn an_s_parameter_analysis_reads_every_placed_port() {
         let schematic = schematic_with(vec![
@@ -1500,11 +1482,15 @@ mod tests {
                 && port.is_read()),
             "{listed:?}"
         );
-        assert!(
-            placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan))[0]
-                .consumers
-                .is_empty(),
-            "an S-parameter run reads ports, not independent sources"
+        let roles: Vec<_> = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan))[0]
+            .consumers
+            .iter()
+            .map(|consumer| consumer.role)
+            .collect();
+        assert_eq!(
+            roles,
+            vec!["DC bias"],
+            "an S-parameter run drives its ports, and reads an independent source only for the operating point it linearizes about"
         );
     }
 
@@ -1701,14 +1687,17 @@ mod tests {
         };
 
         let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
-        assert!(
-            listed[0].consumers.is_empty(),
-            "an AC magnitude and a zero tone do not drive a distortion run: {listed:?}"
+        assert_eq!(
+            roles(&listed, 0),
+            vec!["DC bias"],
+            "an AC magnitude and a zero tone do not drive a distortion run; its \
+             operating point still reads the source"
         );
         assert_eq!(roles(&listed, 1), vec!["distortion drive"]);
-        assert!(
-            listed[2].consumers.is_empty(),
-            "a single-tone run never builds the DISTOF2 vector: {listed:?}"
+        assert_eq!(
+            roles(&listed, 2),
+            vec!["DC bias"],
+            "a single-tone run never builds the DISTOF2 vector"
         );
 
         plan.edit(disto, |draft| {
@@ -1763,10 +1752,9 @@ mod tests {
             vec!["PSS tone"],
             "V1 is named in the tone list"
         );
-        assert!(
-            listed[1].consumers.is_empty(),
-            "V2 is not named and a PSS names no other source: {:?}",
-            listed[1].consumers
+        assert_eq!(
+            listed[1].consumers[0].role, "DC bias",
+            "V2 is not named; the PSS's DC start reads it"
         );
     }
 
@@ -1844,25 +1832,83 @@ mod tests {
             listed.iter().all(|source| source
                 .consumers
                 .iter()
-                .any(|consumer| consumer.role == "operating-point bias")),
+                .any(|consumer| consumer.role == "DC bias")),
             "{listed:?}"
         );
     }
 
-    /// The unread state still exists, and still means what the page says: an
-    /// AC-only plan reads nothing about a source that carries no AC magnitude.
+    /// An AC analysis solves an operating point before it sweeps, and that
+    /// operating point reads every source's DC value: the supply that carries
+    /// no AC magnitude is read for its bias, and the source that carries one
+    /// is read as the excitation.
     #[test]
-    fn a_source_no_analysis_names_or_drives_stays_unread() {
+    fn an_ac_only_plan_reads_every_source() {
         let mut plan = SimulationPlan::empty();
         plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        let schematic = schematic_with(vec![
+            source(1, ComponentType::VoltageSource, "VDD", ""),
+            source(2, ComponentType::VoltageSourceSin, "VIN", "ac=1 freq=1k"),
+        ]);
+        let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
+        let roles = |reference: &str| -> Vec<&'static str> {
+            listed
+                .iter()
+                .find(|source| source.reference == reference)
+                .expect("the fixture places the source")
+                .consumers
+                .iter()
+                .map(|consumer| consumer.role)
+                .collect()
+        };
+        assert_eq!(roles("VDD"), vec!["DC bias"]);
+        assert_eq!(roles("VIN"), vec!["AC excitation"]);
+        assert!(listed.iter().all(PlacedSource::is_read), "{listed:?}");
+    }
+
+    /// Every analysis the plan can hold solves an operating point — itself,
+    /// as the DC start of a periodic or transient solve, or inside the analysis
+    /// it repeats — so every one of them reads a supply no analysis names, and
+    /// each reads it once.
+    #[test]
+    fn every_analysis_reads_every_sources_dc_value() {
+        let schematic = schematic_with(vec![source(1, ComponentType::VoltageSource, "VDD", "")]);
+        for kind in AnalysisKind::ALL {
+            let mut plan = SimulationPlan::empty();
+            plan.insert(kind).expect("every kind inserts");
+            let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
+            assert!(listed[0].is_read(), "{kind:?} does not read VDD");
+            assert_eq!(
+                listed[0].consumers.len(),
+                1,
+                "{kind:?} reads VDD once: {:?}",
+                listed[0].consumers
+            );
+        }
+    }
+
+    /// The unread state is a plan with no enabled analysis: nothing runs, so
+    /// nothing reads the source.
+    #[test]
+    fn a_source_is_unread_only_when_no_enabled_analysis_runs() {
         let schematic = schematic_with(vec![source(
             1,
             ComponentType::VoltageSourcePulse,
             "V1",
             "per=1m",
         )]);
+        let empty = placed_sources(
+            &schematic,
+            &StimulusLibrary::default(),
+            Some(&SimulationPlan::empty()),
+        );
+        assert!(empty[0].consumers.is_empty(), "{:?}", empty[0].consumers);
+
+        let mut plan = SimulationPlan::empty();
+        let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+        plan.set_enabled(ac, false)
+            .expect("the fixture AC disables");
         let listed = placed_sources(&schematic, &StimulusLibrary::default(), Some(&plan));
-        assert!(listed[0].consumers.is_empty(), "{:?}", listed[0].consumers);
+        assert!(!listed[0].is_read(), "{:?}", listed[0].consumers);
     }
 
     /// Both list-valued fields are split by their drafts on separators a source

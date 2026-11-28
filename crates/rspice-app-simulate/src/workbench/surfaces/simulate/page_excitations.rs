@@ -628,8 +628,8 @@ fn readopt(
 #[cfg(test)]
 mod tests {
     use super::{
-        ProvenanceState, SourceVerb, Tone, definition_tone, duplicate_port_note, source_verbs,
-        verdict,
+        ProvenanceState, SourceVerb, Tone, definition_tone, duplicate_port_note, readers_cell,
+        source_verbs, verdict,
     };
     use crate::simulation::placed_sources::{placed_rf_ports, placed_sources};
     use crate::simulation::plan::{AnalysisKind, SimulationPlan};
@@ -749,14 +749,24 @@ mod tests {
             None,
             "every source read is the normal state, and states nothing"
         );
+    }
 
+    /// An AC analysis solves an operating point, which reads the supply's DC
+    /// value: a plan with only AC reads VDD, and the page warns about nothing.
+    #[test]
+    fn a_plan_with_only_ac_reads_the_supply_and_warns_about_nothing() {
+        let schematic = schematic_with(vec![
+            Component::new(1, ComponentType::VoltageSource, Point::origin())
+                .with_name_value("VDD", "1.8"),
+        ]);
         let ac_only = plan_with(AnalysisKind::Ac, true);
+        let ac = ac_only.instances()[0].display_name().to_owned();
         let sources = placed_sources(&schematic, &StimulusLibrary::default(), Some(&ac_only));
-        let ports = placed_rf_ports(&schematic, Some(&ac_only));
+
+        assert_eq!(verdict(&sources, &[]), None);
         assert_eq!(
-            verdict(&sources, &ports),
-            Some(("sources with no reader".to_owned(), Tone::Warn)),
-            "a PULSE carries no AC magnitude, so an AC-only plan reads it not at all"
+            readers_cell(&sources[0].consumers, ("no reader", Tone::Warn)),
+            (format!("{ac} \u{00b7} DC bias"), Tone::Neutral)
         );
     }
 
