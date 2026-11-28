@@ -741,11 +741,7 @@ fn a_run_whose_results_are_on_screen_raises_no_notice() {
         user.named.iter().map(|(name, _)| name).collect::<Vec<_>>()
     );
     let kept = user.app.state.workbench.toasts.activity();
-    assert_eq!(
-        kept[0].title(),
-        "Run 1 complete",
-        "the bell keeps it"
-    );
+    assert_eq!(kept[0].title(), "Run 1 complete", "the bell keeps it");
     assert_eq!(kept[0].action(), None);
 }
 
