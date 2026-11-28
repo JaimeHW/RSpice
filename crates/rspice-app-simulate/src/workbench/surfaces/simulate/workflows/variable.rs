@@ -1,0 +1,292 @@
+//! Adding or editing a design variable, and finding the analyses that read one.
+
+use super::*;
+
+pub(super) fn design_variable_dialog(
+    ctx: &egui::Context,
+    cx: &mut Cx<'_, SimulateFeature>,
+    mut draft: DesignVariableDraft,
+) {
+    draft.validation_error = validate_design_variable_draft(cx, &draft).err();
+    let enabled = draft.validation_error.is_none();
+    let consumer_summary = design_variable_consumers(cx, &draft);
+    let resolved_value = design_variable_from_draft(cx.model, cx.state, &draft)
+        .and_then(|variable| variable.resolved_value_si())
+        .map_or_else(
+            |_| "unresolved".to_owned(),
+            // Engineering notation: `1.00000000e4 SI` spent eight mantissa
+            // digits and an exponent on `10k`, which is what the author typed
+            // and how every other surface shows the same quantity. The display
+            // spelling, not the deck's: this row is read, not parsed, and the
+            // deck spelling put `1.000Meg SI` in front of a reader who writes
+            // that quantity `1.000M`.
+            |value| {
+                format!(
+                    "{} SI",
+                    crate::state::property_types::format_engineering_display(value)
+                )
+            },
+        );
+    let name_conflicts = if draft
+        .validation_error
+        .as_deref()
+        .is_some_and(|error| error.to_ascii_lowercase().contains("name"))
+    {
+        "resolve validation error"
+    } else {
+        "none"
+    };
+    let choice = Dialog::new("Create design variable", "Create variable")
+    .description(
+        "Create a typed, scoped simulation parameter with explicit constraints and deterministic netlist ownership.",
+    )
+    .size(DialogSize::SimulationWorkflow)
+    .flush_body()
+    .ghost("Cancel")
+    .primary_enabled(enabled)
+    .show(ctx, |ui| {
+        workflow_split(ui, |ui| {
+            workflow_text_field(ui, "Name", &mut draft.name, true);
+            workflow_text_field(ui, "Expression", &mut draft.expression, true);
+            workflow_select_field(
+                ui,
+                "design-variable-quantity",
+                "Quantity",
+                &mut draft.quantity,
+                &[
+                    "Resistance",
+                    "Capacitance",
+                    "Voltage",
+                    "Current",
+                    "Temperature",
+                    "Dimensionless",
+                ],
+            );
+            workflow_select_field(
+                ui,
+                "design-variable-scope",
+                "Ownership scope",
+                &mut draft.scope,
+                &[
+                    "Testbench",
+                    "Project",
+                    "Selected cell",
+                    "Selected analysis only",
+                ],
+            );
+            workflow_text_field(ui, "Description", &mut draft.description, false);
+        }, |ui| {
+            workflow_section_heading(ui, "Constraints and consumers");
+            workflow_text_field(ui, "Allowed range", &mut draft.allowed_range, true);
+            workflow_select_field(
+                ui,
+                "design-variable-sweep",
+                "Sweep eligibility",
+                &mut draft.sweep_eligibility,
+                &["Nested sweep + optimization", "Optimization only", "Fixed parameter"],
+            );
+            workflow_select_field(
+                ui,
+                "design-variable-override",
+                "Override policy",
+                &mut draft.override_policy,
+                &["Explicit test-local override", "Inherit owner only"],
+            );
+            ui.add_space(8.0);
+            property_row(ui, "Resolved value", &resolved_value);
+            property_row(ui, "Name conflicts", name_conflicts);
+            property_row_wrapped(ui, "Prospective consumers", &consumer_summary);
+            property_row(ui, "Result effect", "dependent future runs only");
+        });
+        workflow_validation_message(ui, draft.validation_error.as_deref());
+    });
+    finish_workflow_choice(cx, choice, draft, commit_design_variable);
+}
+
+pub(crate) fn design_variable_from_draft(
+    model: &Model,
+    simulate: &SimulateState,
+    draft: &DesignVariableDraft,
+) -> Result<crate::state::DesignVariable, String> {
+    design_variable_from_draft_categorized(model, simulate, draft).map_err(|(_, message)| message)
+}
+
+/// [`design_variable_from_draft`], with the failed contract named beside the
+/// sentence.
+///
+/// The selections a draft carries are indices into option lists this surface
+/// owns, so an index no list claims is a defect of the *record* rather than of
+/// the variable — nothing was asserted about a name, a dimension or a bound. A
+/// half-written allowed range is a bound; everything past the conversion is
+/// [`DesignVariable::validate_defect`]'s answer, unchanged.
+pub(crate) fn design_variable_from_draft_categorized(
+    model: &Model,
+    simulate: &SimulateState,
+    draft: &DesignVariableDraft,
+) -> Result<crate::state::DesignVariable, (crate::state::DesignVariableDefect, String)> {
+    use crate::state::{
+        DesignVariable, DesignVariableDefect as Defect, DesignVariableOverridePolicy,
+        DesignVariableQuantity, DesignVariableScope, DesignVariableSweepEligibility,
+    };
+
+    let record = |message: String| (Defect::Record, message);
+    let quantity = DesignVariableQuantity::ALL
+        .get(draft.quantity)
+        .copied()
+        .ok_or_else(|| record("Quantity selection is invalid.".to_owned()))?;
+    let scope = match draft.scope {
+        0 => DesignVariableScope::Testbench,
+        1 => DesignVariableScope::Project,
+        2 => DesignVariableScope::SelectedCell {
+            cell: model.workspace.content.active_view.clone(),
+        },
+        3 => DesignVariableScope::SelectedAnalysis {
+            analysis_id: simulate.active_analysis_instance.ok_or_else(|| {
+                record("Select an analysis before using analysis-only scope.".to_owned())
+            })?,
+        },
+        _ => return Err(record("Ownership scope selection is invalid.".to_owned())),
+    };
+    let allowed_range = parse_design_variable_range(&draft.allowed_range)
+        .map_err(|message| (Defect::Bounds, message))?;
+    let sweep_eligibility = DesignVariableSweepEligibility::ALL
+        .get(draft.sweep_eligibility)
+        .copied()
+        .ok_or_else(|| record("Sweep eligibility selection is invalid.".to_owned()))?;
+    let override_policy = DesignVariableOverridePolicy::ALL
+        .get(draft.override_policy)
+        .copied()
+        .ok_or_else(|| record("Override policy selection is invalid.".to_owned()))?;
+    DesignVariable::new_defect(
+        draft.name.clone(),
+        draft.expression.clone(),
+        quantity,
+        scope,
+        draft.description.clone(),
+        allowed_range,
+        sweep_eligibility,
+        override_policy,
+    )
+}
+
+pub(super) fn parse_design_variable_range(
+    value: &str,
+) -> Result<Option<crate::state::DesignVariableRange>, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let split = value
+        .split_once('…')
+        .or_else(|| value.split_once("..="))
+        .or_else(|| value.split_once(".."));
+    let Some((minimum, maximum)) = split else {
+        return Err("Allowed range must be written as minimum … maximum.".to_owned());
+    };
+    let minimum = minimum.trim();
+    let maximum = maximum.trim();
+    if minimum.is_empty() || maximum.is_empty() {
+        return Err("Allowed range requires both a minimum and maximum.".to_owned());
+    }
+    Ok(Some(crate::state::DesignVariableRange {
+        minimum: minimum.to_owned(),
+        maximum: maximum.to_owned(),
+    }))
+}
+
+pub(super) fn validate_design_variable_draft(
+    cx: &Cx<'_, SimulateFeature>,
+    draft: &DesignVariableDraft,
+) -> Result<(), String> {
+    let variable = design_variable_from_draft(cx.model, cx.state, draft)?;
+    let plan_id = cx.model.sim_setup.stable_analysis_plan()?.id();
+    let mut workspace = cx.model.workspace.clone();
+    workspace
+        .content
+        .add_design_variable(plan_id, variable)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .content
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn commit_design_variable(
+    cx: &mut Cx<'_, SimulateFeature>,
+    draft: &DesignVariableDraft,
+) -> Result<String, String> {
+    let variable = design_variable_from_draft(cx.model, cx.state, draft)?;
+    let variable_name = variable.name.clone();
+    let step = cx.model.setup_snapshot(SetupParts::PLAN_DATA);
+    let mut setup = cx.model.sim_setup.clone();
+    let mut workspace = cx.model.workspace.clone();
+    let plan_id = setup.stable_analysis_plan()?.id();
+    workspace
+        .content
+        .add_design_variable(plan_id, variable)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .content
+        .validate_simulation_configuration()
+        .map_err(|error| error.to_string())?;
+    let receipt = setup
+        .commit_active_plan_configuration_change(format!(
+            "Created design variable {variable_name}."
+        ))
+        .map_err(|error| error.to_string())?;
+    cx.model.sim_setup = setup;
+    cx.model.workspace = workspace;
+    cx.model
+        .record_setup_change(cx.state.simulation_page.label(), step);
+    crate::workbench::simulate::invalidate_preflight(cx);
+    cx.model.record_plan_receipt(receipt.status_line());
+    Ok(format!(
+        "Created design variable {variable_name} in plan {}.",
+        cx.model.sim_setup.active_plan_name()
+    ))
+}
+
+pub(super) fn design_variable_consumers(
+    cx: &Cx<'_, SimulateFeature>,
+    draft: &DesignVariableDraft,
+) -> String {
+    design_variable_consumers_scoped(
+        cx.model,
+        (draft.scope == 3).then_some(cx.state.active_analysis_instance),
+    )
+}
+
+/// Which enabled analyses resolve a variable of this scope.
+///
+/// `narrowed_to` is `Some(instance)` for a variable scoped to one analysis and
+/// `None` for one the whole plan resolves. One derivation for both the
+/// Create-variable dialog's preview and the registry's "Used by" column: the
+/// two answer the same question about the same plan, and a column deriving it
+/// separately would be free to disagree with the dialog that authored it.
+pub(crate) fn design_variable_consumers_scoped(
+    model: &Model,
+    narrowed_to: Option<Option<crate::product::AnalysisInstanceId>>,
+) -> String {
+    let Ok(plan) = model.sim_setup.stable_analysis_plan() else {
+        return "plan unavailable".to_owned();
+    };
+    let selected_only = narrowed_to;
+    let labels = plan
+        .instances()
+        .iter()
+        .enumerate()
+        .filter(|(_, instance)| instance.enabled())
+        .filter(|(_, instance)| {
+            selected_only.is_none_or(|selected| selected == Some(instance.id()))
+        })
+        .map(|(index, instance)| {
+            plan.instance_list_label(index)
+                .unwrap_or_else(|| instance.display_name().to_owned())
+        })
+        .collect::<Vec<_>>();
+    if labels.is_empty() {
+        "no enabled analysis consumers".to_owned()
+    } else {
+        labels.join(" · ")
+    }
+}
