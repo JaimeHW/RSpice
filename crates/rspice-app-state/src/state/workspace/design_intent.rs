@@ -8,6 +8,6 @@ pub use rspice_results::specification::{
     SpecificationDefinition, SpecificationPolicy, SpecificationRole,
 };
 pub use rspice_simulation_contract::design_variable::{
-    DesignVariable, DesignVariableDefect, DesignVariableRange, DesignVariableSweepEligibility,
+    DesignVariable, DesignVariableDefect, DesignVariableRange,
 };
 pub use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;

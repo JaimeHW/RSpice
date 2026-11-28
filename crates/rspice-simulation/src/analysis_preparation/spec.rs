@@ -402,7 +402,7 @@ pub fn build_optimization_spec(
         .to_config()
         .map_err(|e| format!("invalid optimization settings: {}", e))?;
 
-    reject_optimization_of_fixed_design_variables(sim_setup, plan_payloads, &cfg.variables)?;
+    reject_optimization_of_untunable_design_variables(sim_setup, plan_payloads, &cfg.variables)?;
 
     Ok(AnalysisSpec::Optimization {
         search: cfg.search,
@@ -451,14 +451,14 @@ pub fn build_optimization_spec(
     })
 }
 
-/// Refuse to optimize a variable its owner declared fixed.
+/// Refuse to optimize a declared variable that is not ticked Tunable.
 ///
-/// The sweep role on the Variables page is the designer's statement about
-/// what may move. An optimizer that quietly drove a variable marked
-/// "Fixed parameter" would make that statement decorative, and would hand
-/// back a design nobody agreed to. Names are matched case-insensitively,
+/// The Tunable tick on the Variables page is the designer's statement about
+/// what may move. An optimizer that quietly drove a variable left unticked
+/// would make that statement decorative, and would hand back a design nobody
+/// agreed to. Names are matched case-insensitively,
 /// the way every other design-variable reference is resolved.
-fn reject_optimization_of_fixed_design_variables(
+fn reject_optimization_of_untunable_design_variables(
     sim_setup: &SimulationSetup,
     plan_payloads: &[rspice_simulation_contract::plan_payload::SimulationPlanPayloadRecord],
     variables: &[rspice_simulation_contract::optimization_draft::OptimizationVariableConfig],
@@ -483,8 +483,7 @@ fn reject_optimization_of_fixed_design_variables(
             .design_variables
             .iter()
             .find(|candidate| candidate.name.eq_ignore_ascii_case(&variable.name))
-            && declared.sweep_eligibility
-                == rspice_simulation_contract::design_variable::DesignVariableSweepEligibility::FixedParameter
+            && !declared.tunable
         {
             fixed.push(declared.name.as_str());
         }
@@ -493,15 +492,15 @@ fn reject_optimization_of_fixed_design_variables(
     if fixed.is_empty() {
         return Ok(());
     }
+    let (subject, verb) = if fixed.len() == 1 {
+        ("this design variable", "is")
+    } else {
+        ("these design variables", "are")
+    };
     Err(format!(
-        "optimization cannot vary {}: {} declared a fixed parameter on the Variables page. \
-         Change the sweep role, or optimize a different variable.",
-        if fixed.len() == 1 {
-            "this design variable"
-        } else {
-            "these design variables"
-        },
-        fixed.join(", ")
+        "optimization cannot vary {subject}: {} {verb} not ticked Tunable on the Variables \
+         page. Tick Tunable, or optimize a different variable.",
+        fixed.join(", "),
     ))
 }
 

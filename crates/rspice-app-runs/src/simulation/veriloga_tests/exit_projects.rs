@@ -587,9 +587,7 @@ impl Drawing {
 
     /// A design variable the netlist states as `.param name=value`.
     fn variable(&mut self, name: &str, value: &str) {
-        use rspice_simulation_contract::design_variable::{
-            DesignVariable, DesignVariableSweepEligibility,
-        };
+        use rspice_simulation_contract::design_variable::DesignVariable;
         use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
         let plan = self.plan_id();
         self.state
@@ -605,7 +603,7 @@ impl Drawing {
                     DesignVariableQuantity::Dimensionless,
                     "",
                     None,
-                    DesignVariableSweepEligibility::FixedParameter,
+                    false,
                 )
                 .expect("a design variable"),
             );

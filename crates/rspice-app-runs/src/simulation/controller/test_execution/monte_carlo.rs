@@ -4,7 +4,7 @@ use super::*;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use rspice_simulation::execution_options::SpecExecutionOptions;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
-use rspice_simulation_contract::design_variable::{DesignVariable, DesignVariableSweepEligibility};
+use rspice_simulation_contract::design_variable::DesignVariable;
 use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 use rspice_simulation_contract::mc_checkpoint::McCheckpointConfig;
 use rspice_simulation_contract::mc_draft::{McConfig, McDialogState, McDistribution};
@@ -73,7 +73,7 @@ pub fn checkpoint_state() -> RunTestHost {
             DesignVariableQuantity::Dimensionless,
             "",
             None,
-            DesignVariableSweepEligibility::FixedParameter,
+            false,
         )
         .unwrap(),
     ];

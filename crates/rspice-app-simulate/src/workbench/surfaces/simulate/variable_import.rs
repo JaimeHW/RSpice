@@ -32,7 +32,7 @@ use egui::Ui;
 
 use crate::io::file_exchange::{self, FileKind};
 use crate::product::SimulationPlanId;
-use crate::state::{DesignVariableDefect, DesignVariableQuantity, DesignVariableSweepEligibility};
+use crate::state::{DesignVariableDefect, DesignVariableQuantity};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, select};
@@ -86,7 +86,7 @@ const COLUMNS: [&str; 7] = [
     "expression",
     "minimum",
     "maximum",
-    "sweep role",
+    "tunable",
     "description",
 ];
 
@@ -95,7 +95,7 @@ const QUANTITY: usize = 1;
 const EXPRESSION: usize = 2;
 const MINIMUM: usize = 3;
 const MAXIMUM: usize = 4;
-const SWEEP_ROLE: usize = 5;
+const TUNABLE: usize = 5;
 const DESCRIPTION: usize = 6;
 
 const REQUIRED: [usize; 2] = [NAME, EXPRESSION];
@@ -806,8 +806,8 @@ fn commit_selected_rows(
     Ok(detail)
 }
 
-/// Header names are matched on their letters and digits alone, so `Sweep role`,
-/// `sweep_role` and `SweepRole` all bind the same column.
+/// Header names are matched on their letters and digits alone, so `Tunable`,
+/// `TUNABLE` and `tunable?` all bind the same column.
 fn same_column(column: &str, header: &str) -> bool {
     fn key(text: &str) -> String {
         text.chars()
@@ -868,13 +868,9 @@ fn draft_from_row(
                 detail,
             }
         })?,
-        sweep_eligibility: enumerated(
-            "sweep role",
-            cell(SWEEP_ROLE),
-            &sweep_role_choices(),
-            Some(0),
-        )
-        .map_err(unknown_option)?,
+        tunable: enumerated("tunable", cell(TUNABLE), &TUNABLE_CHOICES, Some(0))
+            .map_err(unknown_option)?
+            == 1,
         validation_error: None,
     })
 }
@@ -964,12 +960,17 @@ fn unlabelled() -> usize {
         .unwrap_or_default()
 }
 
-fn sweep_role_choices() -> Vec<(&'static str, usize)> {
-    spellings(
-        &DesignVariableSweepEligibility::ALL.map(DesignVariableSweepEligibility::label),
-        &[("sweep", 0), ("optimization", 1), ("fixed", 2)],
-    )
-}
+/// A tunable cell is a yes or a no, in the spellings a sheet is likely to use.
+const TUNABLE_CHOICES: [(&str, usize); 8] = [
+    ("no", 0),
+    ("yes", 1),
+    ("false", 0),
+    ("true", 1),
+    ("0", 0),
+    ("1", 1),
+    ("fixed", 0),
+    ("tunable", 1),
+];
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -978,9 +979,9 @@ pub(crate) mod tests {
     use crate::workbench::framework::feature::harness::FeatureHarness;
     use crate::workbench::simulate::test_host::SimulateTestHost;
 
-    const SHEET: &str = "name,quantity,expression,minimum,maximum,sweep role,description\n\
-         RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,sweep,Output load\n\
-         CFILT,Capacitance,4.7 nF,1 nF,10 nF,fixed,Filter cap\n\
+    const SHEET: &str = "name,quantity,expression,minimum,maximum,tunable,description\n\
+         RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,yes,Output load\n\
+         CFILT,Capacitance,4.7 nF,1 nF,10 nF,no,Filter cap\n\
          VBIAS,Voltage,1.8 V,,,,\n";
 
     fn registry(
@@ -1058,10 +1059,7 @@ pub(crate) mod tests {
             .expect("plan payload")
             .design_variables[0];
         assert_eq!(imported.quantity, DesignVariableQuantity::Resistance);
-        assert_eq!(
-            imported.sweep_eligibility,
-            DesignVariableSweepEligibility::NestedSweepAndOptimization
-        );
+        assert!(imported.tunable, "the sheet ticks RLOAD tunable");
         assert_eq!(imported.description, "Output load");
         assert_eq!(
             imported

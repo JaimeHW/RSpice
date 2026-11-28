@@ -17,30 +17,6 @@ pub struct DesignVariableRange {
     pub maximum: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DesignVariableSweepEligibility {
-    NestedSweepAndOptimization,
-    OptimizationOnly,
-    FixedParameter,
-}
-
-impl DesignVariableSweepEligibility {
-    pub const ALL: [Self; 3] = [
-        Self::NestedSweepAndOptimization,
-        Self::OptimizationOnly,
-        Self::FixedParameter,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::NestedSweepAndOptimization => "Nested sweep + optimization",
-            Self::OptimizationOnly => "Optimization only",
-            Self::FixedParameter => "Fixed parameter",
-        }
-    }
-}
-
 /// Persisted, typed simulation-plan parameter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -55,7 +31,10 @@ pub struct DesignVariable {
     pub description: String,
     #[serde(default)]
     pub allowed_range: Option<DesignVariableRange>,
-    pub sweep_eligibility: DesignVariableSweepEligibility,
+    /// Whether the optimizer may tune this variable within its range. A run-set
+    /// axis may sweep any variable, ticked or not.
+    #[serde(default)]
+    pub tunable: bool,
 }
 
 /// Which contract a design variable failed.
@@ -85,7 +64,7 @@ impl DesignVariable {
         quantity: DesignVariableQuantity,
         description: impl Into<String>,
         allowed_range: Option<DesignVariableRange>,
-        sweep_eligibility: DesignVariableSweepEligibility,
+        tunable: bool,
     ) -> Result<Self, String> {
         Self::new_defect(
             name,
@@ -93,7 +72,7 @@ impl DesignVariable {
             quantity,
             description,
             allowed_range,
-            sweep_eligibility,
+            tunable,
         )
         .map_err(|(_, message)| message)
     }
@@ -106,7 +85,7 @@ impl DesignVariable {
         quantity: DesignVariableQuantity,
         description: impl Into<String>,
         allowed_range: Option<DesignVariableRange>,
-        sweep_eligibility: DesignVariableSweepEligibility,
+        tunable: bool,
     ) -> Result<Self, (DesignVariableDefect, String)> {
         let variable = Self {
             id: DesignVariableId::new(),
@@ -116,7 +95,7 @@ impl DesignVariable {
             quantity,
             description: description.into(),
             allowed_range,
-            sweep_eligibility,
+            tunable,
         };
         variable.validate_defect()?;
         Ok(variable)
@@ -263,7 +242,7 @@ mod tests {
                 minimum: "1 kohm".to_owned(),
                 maximum: "1 Mohm".to_owned(),
             }),
-            DesignVariableSweepEligibility::NestedSweepAndOptimization,
+            true,
         )
         .expect("fixture variable is valid")
     }

@@ -413,9 +413,7 @@ fn point_traces(
 /// The RC with a design variable `vstart` of 250 mV, which the run set
 /// sweeps over 0.25 V and 0.5 V.
 fn rc_swept_over_vstart() -> RSpiceApp {
-    use rspice_app_state::state::{
-        DesignVariable, DesignVariableQuantity, DesignVariableSweepEligibility,
-    };
+    use rspice_app_state::state::{DesignVariable, DesignVariableQuantity};
     use rspice_simulation_contract::run_set::{
         DESIGN_VARIABLE_SOURCE_PREFIX, RunSetDimension, RunSetDimensionKind,
     };
@@ -434,7 +432,7 @@ fn rc_swept_over_vstart() -> RSpiceApp {
         DesignVariableQuantity::Voltage,
         "where the capacitor starts",
         None,
-        DesignVariableSweepEligibility::NestedSweepAndOptimization,
+        true,
     )
     .expect("a valid design variable");
     app.state

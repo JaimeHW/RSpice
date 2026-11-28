@@ -228,7 +228,7 @@ fn a_param_the_plan_also_defines_stops_the_run_on_the_notes_line() {
             rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity::Dimensionless,
             String::new(),
             None,
-            rspice_simulation_contract::design_variable::DesignVariableSweepEligibility::NestedSweepAndOptimization,
+            true,
         )
         .expect("a design variable"),
     );

@@ -8,8 +8,8 @@
 use egui::Ui;
 
 use crate::product::{DesignVariableId, SimulationPlanId};
+use crate::state::DesignVariableQuantity;
 use crate::state::workspace::SimulationPlanPayload;
-use crate::state::{DesignVariableQuantity, DesignVariableSweepEligibility};
 use crate::ui::widgets::Button;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
@@ -73,20 +73,15 @@ fn registry(
     let selected_index = selected
         .as_ref()
         .and_then(|name| variables.iter().position(|variable| &variable.name == name));
-    // "Optimizable" rather than "sweepable": the sweep role is enforced at
-    // dispatch by the optimizer, which refuses a variable declared fixed.
-    // There is no design-variable axis in the run set yet, so counting these
-    // as sweepable would name a capability the plan cannot execute.
+    // The optimizer tunes only ticked variables; a run-set axis may sweep
+    // any of them.
     let status = format!(
-        "{} typed · {} optimizable",
-        variables.len(),
-        variables
-            .iter()
-            .filter(|variable| !matches!(
-                variable.sweep_eligibility,
-                crate::state::DesignVariableSweepEligibility::FixedParameter
-            ))
-            .count()
+        "{} \u{b7} {} tunable",
+        match variables.len() {
+            1 => "1 variable".to_owned(),
+            count => format!("{count} variables"),
+        },
+        variables.iter().filter(|variable| variable.tunable).count()
     );
     // A spec sheet the picker has finished reading is adopted before the head
     // is drawn, so the rows it adds are in this frame's registry.
@@ -133,7 +128,7 @@ fn registry(
                     "Expression",
                     "Resolved",
                     "Bounds",
-                    "Sweep role",
+                    "Tunable",
                 ],
             );
             if variables.is_empty() {
@@ -174,7 +169,7 @@ fn registry(
                         (variable.expression.as_str(), Tone::Neutral),
                         (value.as_str(), value_tone),
                         (bounds.as_str(), Tone::Neutral),
-                        (variable.sweep_eligibility.label(), Tone::Neutral),
+                        (if variable.tunable { "yes" } else { "no" }, Tone::Neutral),
                     ],
                     selected_index == Some(index),
                     RowPress::Taken,
@@ -196,7 +191,9 @@ fn registry(
                  clamped: \
                  the same check refuses the record at construction, refuses to emit the \
                  deck's parameter lines and refuses to validate the stored simulation \
-                 configuration. An out-of-range value therefore cannot reach a run by any route.",
+                 configuration. An out-of-range value therefore cannot reach a run by any route. \
+                 The optimizer tunes only a variable ticked Tunable, within its bounds; a run-set \
+                 axis may sweep any variable.",
             );
         },
     );
@@ -298,7 +295,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                 card_note(
                     ui,
                     "Select a row above to see its complete record: value, quantity, bounds \
-                     and sweep role.",
+                     and whether the optimizer may tune it.",
                 );
             },
         );
@@ -324,10 +321,6 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
     let quantities: Vec<String> = DesignVariableQuantity::ALL
         .iter()
         .map(|quantity| quantity.label().to_owned())
-        .collect();
-    let sweep_roles: Vec<String> = DesignVariableSweepEligibility::ALL
-        .iter()
-        .map(|role| role.label().to_owned())
         .collect();
 
     // One slot for the whole card: `field_pair` holds two controls at once,
@@ -363,24 +356,10 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                     }
                 })),
             );
-            field_pair(
-                ui,
-                ("Sweep role", &mut |ui: &mut Ui, width: f32| {
-                    if let Some(index) = select(
-                        ui,
-                        "simulation.variables.sweep",
-                        "Sweep role",
-                        variable.sweep_eligibility.label(),
-                        &sweep_roles,
-                        width,
-                    ) {
-                        edit.set(Some(VariableEdit::SweepRole(
-                            DesignVariableSweepEligibility::ALL[index],
-                        )));
-                    }
-                }),
-                None,
-            );
+            let mut tunable = variable.tunable;
+            if super::page_kit::switch_row(ui, "Tunable", &mut tunable) {
+                edit.set(Some(VariableEdit::Tunable(tunable)));
+            }
             // Bounds are expressions, not numbers, so suffixes and owner
             // variables survive the round trip. Clearing both makes the
             // variable unbounded, which is a real choice rather than a
@@ -467,14 +446,14 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
 /// One accepted change to a design variable's typed contract.
 enum VariableEdit {
     Quantity(DesignVariableQuantity),
-    SweepRole(DesignVariableSweepEligibility),
+    Tunable(bool),
 }
 
 impl VariableEdit {
     fn apply(self, target: &mut crate::state::DesignVariable) {
         match self {
             Self::Quantity(quantity) => target.quantity = quantity,
-            Self::SweepRole(role) => target.sweep_eligibility = role,
+            Self::Tunable(tunable) => target.tunable = tunable,
         }
     }
 
@@ -484,10 +463,8 @@ impl VariableEdit {
                 "Typed design variable {name} as {}.",
                 quantity.label().to_lowercase()
             ),
-            Self::SweepRole(role) => format!(
-                "Set design variable {name} to {}.",
-                role.label().to_lowercase()
-            ),
+            Self::Tunable(true) => format!("Made design variable {name} tunable."),
+            Self::Tunable(false) => format!("Made design variable {name} not tunable."),
         }
     }
 }

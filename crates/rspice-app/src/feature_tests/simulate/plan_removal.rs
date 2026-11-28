@@ -14,9 +14,9 @@ use rspice_app_simulate::workbench::surfaces::simulate::lifecycle;
 use rspice_app_state::product::SimulationPlanId;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{
-    CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableQuantity,
-    DesignVariableSweepEligibility, InstancePath, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
+    CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableQuantity, InstancePath,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
 };
 
 /// One setup page, rendered with its controls announced so a test can press
@@ -270,7 +270,7 @@ fn seed_variable(state: &mut AppState, name: &str, value: &str) {
         DesignVariableQuantity::Dimensionless,
         "",
         None,
-        DesignVariableSweepEligibility::FixedParameter,
+        false,
     )
     .expect("valid design variable");
     state

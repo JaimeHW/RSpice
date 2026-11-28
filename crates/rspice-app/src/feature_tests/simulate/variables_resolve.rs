@@ -4,9 +4,7 @@
 
 use super::page_contracts::render_with;
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
-use rspice_app_state::state::{
-    DesignVariable, DesignVariableQuantity, DesignVariableSweepEligibility, SimulationPage,
-};
+use rspice_app_state::state::{DesignVariable, DesignVariableQuantity, SimulationPage};
 
 /// The Variables page over a plan holding `rows`, each added through the
 /// workspace store.
@@ -18,15 +16,8 @@ fn page_with(rows: &[(&str, &str, DesignVariableQuantity)]) -> String {
     render_with(SimulationPage::Variables, 1600.0, move |app| {
         let id = plan_id(&app.state.model);
         for (name, value, quantity) in rows {
-            let variable = DesignVariable::new(
-                name,
-                value,
-                quantity,
-                "",
-                None,
-                DesignVariableSweepEligibility::NestedSweepAndOptimization,
-            )
-            .expect("a well-formed variable");
+            let variable = DesignVariable::new(name, value, quantity, "", None, true)
+                .expect("a well-formed variable");
             app.state
                 .model
                 .workspace

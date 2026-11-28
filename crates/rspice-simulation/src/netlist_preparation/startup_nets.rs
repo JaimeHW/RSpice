@@ -173,9 +173,7 @@ pub fn check_startup_nets(
 #[cfg(test)]
 mod tests {
     use super::startup_value;
-    use rspice_simulation_contract::design_variable::{
-        DesignVariable, DesignVariableSweepEligibility,
-    };
+    use rspice_simulation_contract::design_variable::DesignVariable;
     use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 
     fn vdd() -> DesignVariable {
@@ -185,7 +183,7 @@ mod tests {
             DesignVariableQuantity::Voltage,
             "supply",
             None,
-            DesignVariableSweepEligibility::NestedSweepAndOptimization,
+            true,
         )
         .expect("a valid design variable")
     }

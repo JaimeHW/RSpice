@@ -463,7 +463,9 @@ pub struct DesignVariableDraft {
     pub quantity: usize,
     pub description: String,
     pub allowed_range: String,
-    pub sweep_eligibility: usize,
+    /// Whether the optimizer may tune it. A new variable is not tunable until
+    /// its author says so.
+    pub tunable: bool,
     pub validation_error: Option<String>,
 }
 
@@ -477,7 +479,7 @@ impl Default for DesignVariableDraft {
             quantity: 0,
             description: String::new(),
             allowed_range: String::new(),
-            sweep_eligibility: 0,
+            tunable: false,
             validation_error: None,
         }
     }

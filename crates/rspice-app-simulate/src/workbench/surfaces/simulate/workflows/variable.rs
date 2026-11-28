@@ -65,13 +65,7 @@ pub(super) fn design_variable_dialog(
         }, |ui| {
             workflow_section_heading(ui, "Constraints");
             workflow_text_field(ui, "Allowed range", &mut draft.allowed_range, true);
-            workflow_select_field(
-                ui,
-                "design-variable-sweep",
-                "Sweep eligibility",
-                &mut draft.sweep_eligibility,
-                &["Nested sweep + optimization", "Optimization only", "Fixed parameter"],
-            );
+            workflow_switch(ui, "Tunable", &mut draft.tunable);
             ui.add_space(8.0);
             property_row(ui, "Resolved value", &resolved_value);
             property_row(ui, "Name conflicts", name_conflicts);
@@ -119,10 +113,7 @@ pub(crate) fn design_variable_from_draft(
 pub(crate) fn design_variable_from_draft_categorized(
     draft: &DesignVariableDraft,
 ) -> Result<crate::state::DesignVariable, (crate::state::DesignVariableDefect, String)> {
-    use crate::state::{
-        DesignVariable, DesignVariableDefect as Defect, DesignVariableQuantity,
-        DesignVariableSweepEligibility,
-    };
+    use crate::state::{DesignVariable, DesignVariableDefect as Defect, DesignVariableQuantity};
 
     let record = |message: String| (Defect::Record, message);
     let quantity = DesignVariableQuantity::ALL
@@ -131,17 +122,13 @@ pub(crate) fn design_variable_from_draft_categorized(
         .ok_or_else(|| record("Quantity selection is invalid.".to_owned()))?;
     let allowed_range = parse_design_variable_range(&draft.allowed_range)
         .map_err(|message| (Defect::Bounds, message))?;
-    let sweep_eligibility = DesignVariableSweepEligibility::ALL
-        .get(draft.sweep_eligibility)
-        .copied()
-        .ok_or_else(|| record("Sweep eligibility selection is invalid.".to_owned()))?;
     DesignVariable::new_defect(
         draft.name.clone(),
         draft.expression.clone(),
         quantity,
         draft.description.clone(),
         allowed_range,
-        sweep_eligibility,
+        draft.tunable,
     )
 }
 

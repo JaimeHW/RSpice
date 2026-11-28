@@ -776,7 +776,7 @@ mod tests {
             rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity::Resistance,
             "netlist fixture",
             None,
-            rspice_simulation_contract::design_variable::DesignVariableSweepEligibility::FixedParameter,
+            false,
         )
         .expect("fixture variable is valid")
     }

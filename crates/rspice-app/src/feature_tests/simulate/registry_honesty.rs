@@ -234,9 +234,7 @@ impl Registry {
 /// arranges — the exact refusal the page's "Out of bounds · the edit is
 /// refused" rule promises.
 fn bounded_variable() -> rspice_app_state::state::DesignVariable {
-    use rspice_app_state::state::{
-        DesignVariable, DesignVariableQuantity, DesignVariableRange, DesignVariableSweepEligibility,
-    };
+    use rspice_app_state::state::{DesignVariable, DesignVariableQuantity, DesignVariableRange};
 
     DesignVariable::new(
         "rload",
@@ -247,7 +245,7 @@ fn bounded_variable() -> rspice_app_state::state::DesignVariable {
             minimum: "1kohm".to_owned(),
             maximum: "10kohm".to_owned(),
         }),
-        DesignVariableSweepEligibility::FixedParameter,
+        false,
     )
     .expect("a bounded design variable")
 }

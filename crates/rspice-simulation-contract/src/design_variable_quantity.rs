@@ -142,19 +142,12 @@ fn split_number(text: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::design_variable::{DesignVariable, DesignVariableSweepEligibility};
+    use crate::design_variable::DesignVariable;
     use crate::design_variable_resolution::resolve_design_variables;
 
     fn resolved(text: &str, quantity: DesignVariableQuantity) -> f64 {
-        let variable = DesignVariable::new(
-            "X",
-            text,
-            quantity,
-            "",
-            None,
-            DesignVariableSweepEligibility::NestedSweepAndOptimization,
-        )
-        .unwrap_or_else(|error| panic!("{text} is refused: {error}"));
+        let variable = DesignVariable::new("X", text, quantity, "", None, true)
+            .unwrap_or_else(|error| panic!("{text} is refused: {error}"));
         *resolve_design_variables(&[variable])
             .value(0)
             .unwrap()

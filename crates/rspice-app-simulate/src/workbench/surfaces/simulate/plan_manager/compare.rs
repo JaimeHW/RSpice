@@ -781,7 +781,7 @@ mod tests {
                     crate::state::DesignVariableQuantity::Voltage,
                     "comparison fixture",
                     None,
-                    crate::state::DesignVariableSweepEligibility::FixedParameter,
+                    false,
                 )
                 .expect("a valid project variable"),
             )
