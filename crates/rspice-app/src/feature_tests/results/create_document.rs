@@ -1305,8 +1305,7 @@ fn the_bars_strip_tools_act_on_the_documents_active_pane() {
         "restored, the strips offer maximize again"
     );
 
-    let (expression, _, _) =
-        bar_tool(&nodes, "+ Trace").expect("the bar offers + Trace");
+    let (expression, _, _) = bar_tool(&nodes, "+ Trace").expect("the bar offers + Trace");
     window.click(expression);
     assert!(
         window
