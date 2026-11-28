@@ -72,7 +72,7 @@ pub fn open(
     plan_id: SimulationPlanId,
     sheet: &str,
 ) -> DesignVariableImportDraft {
-    let draft = import_draft_for_sheet(model, simulate, plan_id, "spec.csv", sheet);
+    let draft = import_draft_for_sheet(model, plan_id, "spec.csv", sheet);
     simulate.simulation_workflow = Some(SimulationWorkflowDialog::DesignVariableImport(draft));
     match simulate.simulation_workflow.clone() {
         Some(SimulationWorkflowDialog::DesignVariableImport(draft)) => draft,

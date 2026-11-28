@@ -61,12 +61,11 @@ fn a_library_saved_in_a_legacy_encoding_still_declares_its_subcircuit() {
     std::fs::remove_file(path).expect("remove Latin-1 library fixture");
 }
 
-fn resistance_variable(name: &str, expression: &str, scope: DesignVariableScope) -> DesignVariable {
+fn resistance_variable(name: &str, expression: &str) -> DesignVariable {
     DesignVariable::new(
         name,
         expression,
         DesignVariableQuantity::Resistance,
-        scope,
         "fixture",
         Some(DesignVariableRange {
             minimum: "1 kohm".to_owned(),
@@ -242,7 +241,7 @@ fn legacy_projection_edit_does_not_flatten_unchanged_equality_semantics() {
 fn design_variable_expression_update_preserves_identity_and_metadata() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
-    let original = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+    let original = resistance_variable("RLOAD", "10 kohm");
     let variable_id = original.id;
     workspace
         .content
@@ -263,7 +262,6 @@ fn design_variable_expression_update_preserves_identity_and_metadata() {
     assert_eq!(updated.name, original.name);
     assert_eq!(updated.expression, "22 kohm");
     assert_eq!(updated.quantity, original.quantity);
-    assert_eq!(updated.scope, original.scope);
     assert_eq!(updated.description, original.description);
     assert_eq!(updated.allowed_range, original.allowed_range);
     assert_eq!(updated.sweep_eligibility, original.sweep_eligibility);
@@ -274,7 +272,7 @@ fn design_variable_expression_update_preserves_identity_and_metadata() {
 fn out_of_range_design_variable_update_is_rejected_atomically() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
-    let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+    let variable = resistance_variable("RLOAD", "10 kohm");
     let variable_id = variable.id;
     workspace
         .content
@@ -290,7 +288,7 @@ fn out_of_range_design_variable_update_is_rejected_atomically() {
     assert!(matches!(
         error,
         SimulationConfigurationError::InvalidDesignVariable { message, .. }
-            if message.contains("outside the inclusive allowed range")
+            if message.contains("is outside its range")
     ));
     assert_eq!(
         serde_json::to_value(&workspace).expect("workspace still serializes"),
@@ -302,7 +300,7 @@ fn out_of_range_design_variable_update_is_rejected_atomically() {
 fn design_variable_update_rejects_a_missing_stable_identity() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
-    let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+    let variable = resistance_variable("RLOAD", "10 kohm");
     workspace
         .content
         .add_design_variable(plan_id, variable)
@@ -329,7 +327,7 @@ fn design_variable_update_rejects_a_missing_stable_identity() {
 fn committed_design_variable_update_advances_revision_once() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
-    let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+    let variable = resistance_variable("RLOAD", "10 kohm");
     let variable_id = variable.id;
     let initial_revision = variable.revision;
     workspace
@@ -358,8 +356,8 @@ fn committed_design_variable_update_advances_revision_once() {
 fn bulk_design_variable_update_is_all_or_nothing() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
-    let first = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
-    let second = resistance_variable("RBIAS", "15 kohm", DesignVariableScope::Project);
+    let first = resistance_variable("RLOAD", "10 kohm");
+    let second = resistance_variable("RBIAS", "15 kohm");
     let updates = vec![
         (first.id, "22 kohm".to_owned()),
         (second.id, "2 Mohm".to_owned()),
@@ -390,7 +388,7 @@ fn bulk_design_variable_update_is_all_or_nothing() {
 fn bulk_design_variable_update_rejects_duplicate_identities_atomically() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
-    let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+    let variable = resistance_variable("RLOAD", "10 kohm");
     let variable_id = variable.id;
     workspace
         .content
@@ -424,8 +422,8 @@ fn bulk_design_variable_add_commits_the_whole_batch() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
     let batch = vec![
-        resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
-        resistance_variable("RBIAS", "15 kohm", DesignVariableScope::Project),
+        resistance_variable("RLOAD", "10 kohm"),
+        resistance_variable("RBIAS", "15 kohm"),
     ];
 
     workspace
@@ -448,18 +446,15 @@ fn bulk_design_variable_add_commits_the_whole_batch() {
 fn bulk_design_variable_add_rejects_an_invalid_member_atomically() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
-    let mut outside = resistance_variable("RBIAS", "15 kohm", DesignVariableScope::Project);
+    let mut outside = resistance_variable("RBIAS", "15 kohm");
     outside.expression = "2 Mohm".to_owned();
-    let batch = vec![
-        resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
-        outside,
-    ];
+    let batch = vec![resistance_variable("RLOAD", "10 kohm"), outside];
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
 
     assert!(matches!(
         workspace.content.add_design_variables(plan_id, batch),
         Err(SimulationConfigurationError::InvalidDesignVariable { message, .. })
-            if message.contains("outside the inclusive allowed range")
+            if message.contains("is outside its range")
     ));
     assert_eq!(
         serde_json::to_value(&workspace).expect("workspace still serializes"),
@@ -472,8 +467,8 @@ fn bulk_design_variable_add_rejects_a_name_repeated_within_the_batch() {
     let plan_id = SimulationPlanId::new();
     let mut workspace = ProjectWorkspace::default();
     let batch = vec![
-        resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
-        resistance_variable("rload", "22 kohm", DesignVariableScope::Project),
+        resistance_variable("RLOAD", "10 kohm"),
+        resistance_variable("rload", "22 kohm"),
     ];
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
 
@@ -496,15 +491,12 @@ fn bulk_design_variable_add_rejects_a_name_the_plan_already_owns() {
     let mut workspace = ProjectWorkspace::default();
     workspace
         .content
-        .add_design_variable(
-            plan_id,
-            resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project),
-        )
+        .add_design_variable(plan_id, resistance_variable("RLOAD", "10 kohm"))
         .expect("fixture variable is accepted");
     let before = serde_json::to_value(&workspace).expect("workspace serializes");
     let batch = vec![
-        resistance_variable("RTERM", "50 kohm", DesignVariableScope::Project),
-        resistance_variable("RLOAD", "22 kohm", DesignVariableScope::Project),
+        resistance_variable("RTERM", "50 kohm"),
+        resistance_variable("RLOAD", "22 kohm"),
     ];
 
     assert_eq!(
@@ -561,13 +553,7 @@ fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
     let source_analysis = AnalysisInstanceId::new();
     let cloned_analysis = AnalysisInstanceId::new();
     let mut workspace = ProjectWorkspace::default();
-    let variable = resistance_variable(
-        "RLOAD",
-        "10 kohm",
-        DesignVariableScope::SelectedAnalysis {
-            analysis_id: source_analysis,
-        },
-    );
+    let variable = resistance_variable("RLOAD", "10 kohm");
     let output = raw_output(
         "VOUT",
         "V(out)",
@@ -621,11 +607,6 @@ fn plan_payload_clone_refreshes_row_ids_and_analysis_references() {
     let cloned = workspace.content.plan_data(cloned_plan_id).unwrap();
     assert_ne!(cloned.design_variables[0].id, variable_id);
     assert_ne!(cloned.saved_outputs[0].id, output_id);
-    assert!(matches!(
-        cloned.design_variables[0].scope,
-        DesignVariableScope::SelectedAnalysis { analysis_id }
-            if analysis_id == cloned_analysis
-    ));
     assert_eq!(cloned.regression_tolerances.len(), 1);
     assert_eq!(
         cloned.regression_tolerances[0].target.source_instance_id,

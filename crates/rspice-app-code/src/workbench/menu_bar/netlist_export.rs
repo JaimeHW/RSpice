@@ -183,15 +183,6 @@ pub fn build_menu_netlist_in(
         model.library_manager.catalog(),
         &execution_projection,
     );
-    let analysis_instances = model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .into_iter()
-        .flat_map(|plan| plan.instances())
-        .filter(|instance| instance.enabled())
-        .map(crate::simulation::plan::AnalysisInstance::id)
-        .collect::<Vec<_>>();
     let Some(plan_id) = model
         .sim_setup
         .analysis_plan
@@ -210,10 +201,7 @@ pub fn build_menu_netlist_in(
         &[],
         &hierarchy,
         &plan_payload.design_variables,
-        rspice_simulation::netlist_gen::DesignVariableNetlistContext {
-            active_cell: &root_reference,
-            analysis_instances: &analysis_instances,
-        },
+        &root_reference,
         &rspice_simulation::netlist_gen::NetlistSourceData::new(
             &crate::simulation::table_route::SourceFiles,
         ),

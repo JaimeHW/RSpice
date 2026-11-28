@@ -29,7 +29,7 @@ mod tests {
     use super::*;
     use crate::state::{
         BusDeclaration, BusSlice, BusTapOrientation, ComponentType, DesignNote, DesignNoteKind,
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
         DesignVariableSweepEligibility, DocumentationShape, DocumentationShapeGeometry, Point,
         SimulationPlanPayloadRecord,
     };
@@ -240,7 +240,6 @@ mod tests {
             "RLOAD",
             "10 kohm",
             DesignVariableQuantity::Resistance,
-            DesignVariableScope::Testbench,
             "Load resistance",
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,

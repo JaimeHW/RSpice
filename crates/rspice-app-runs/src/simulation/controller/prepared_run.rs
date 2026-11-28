@@ -743,22 +743,13 @@ impl SimulationController {
                 &payload.design_variables,
             )?;
         }
-        let analysis_instances = plan
-            .instances()
-            .iter()
-            .filter(|instance| instance.enabled())
-            .map(crate::simulation::plan::AnalysisInstance::id)
-            .collect::<Vec<_>>();
         let generated =
             rspice_simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
                 root_schematic,
                 &[],
                 &hierarchy,
                 &payload.design_variables,
-                rspice_simulation::netlist_gen::DesignVariableNetlistContext {
-                    active_cell: &root_reference,
-                    analysis_instances: &analysis_instances,
-                },
+                &root_reference,
                 &source_data,
             );
         let mut defects = generated.defects.clone();

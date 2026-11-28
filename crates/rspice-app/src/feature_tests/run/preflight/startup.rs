@@ -414,7 +414,7 @@ fn point_traces(
 /// sweeps over 0.25 V and 0.5 V.
 fn rc_swept_over_vstart() -> RSpiceApp {
     use rspice_app_state::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
         DesignVariableSweepEligibility,
     };
     use rspice_simulation_contract::run_set::{
@@ -433,7 +433,6 @@ fn rc_swept_over_vstart() -> RSpiceApp {
         "vstart",
         "250mV",
         DesignVariableQuantity::Voltage,
-        DesignVariableScope::Testbench,
         "where the capacitor starts",
         None,
         DesignVariableSweepEligibility::NestedSweepAndOptimization,

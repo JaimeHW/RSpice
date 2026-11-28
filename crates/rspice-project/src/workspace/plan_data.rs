@@ -807,11 +807,8 @@ impl ProjectWorkspace {
             let design_variables = source
                 .design_variables
                 .iter()
-                .map(|variable| variable.cloned_for_new_plan(&remap))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|analysis_id| {
-                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
-                })?;
+                .map(|variable| variable.cloned_for_new_plan())
+                .collect::<Vec<_>>();
             let saved_outputs = source
                 .saved_outputs
                 .iter()
@@ -916,15 +913,11 @@ impl ProjectWorkspace {
             .iter()
             .copied()
             .collect::<HashMap<_, _>>();
-        let design_variables =
-            source
-                .design_variables
-                .iter()
-                .map(|variable| variable.cloned_for_new_plan(&remap))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|analysis_id| {
-                    SimulationConfigurationError::MissingClonedAnalysisMapping { analysis_id }
-                })?;
+        let design_variables = source
+            .design_variables
+            .iter()
+            .map(|variable| variable.cloned_for_new_plan())
+            .collect::<Vec<_>>();
         let saved_outputs =
             source
                 .saved_outputs

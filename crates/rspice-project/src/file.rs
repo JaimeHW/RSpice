@@ -512,28 +512,6 @@ impl ProjectFile {
                     "workspace.simulation_plan_payloads[{plan_id}] has no owning simulation plan"
                 ))
             })?;
-            for (index, variable) in record.payload.design_variables.iter().enumerate() {
-                match &variable.scope {
-                    rspice_simulation_contract::design_variable::DesignVariableScope::SelectedCell { cell } => {
-                        self.validate_library_reference(
-                            &format!(
-                                "workspace.simulation_plan_payloads[{plan_id}].design_variables[{index}].scope.cell"
-                            ),
-                            cell,
-                        )?;
-                    }
-                    rspice_simulation_contract::design_variable::DesignVariableScope::SelectedAnalysis { analysis_id } => {
-                        if plan.instance(*analysis_id).is_none() {
-                            return Err(ProjectIoError::InvalidData(format!(
-                                "workspace.simulation_plan_payloads[{plan_id}].design_variables[{index}].scope.analysis_id references analysis {analysis_id}, which is absent from its owning plan"
-                            )));
-                        }
-                    }
-                    rspice_simulation_contract::design_variable::DesignVariableScope::Testbench
-                    | rspice_simulation_contract::design_variable::DesignVariableScope::Project => {}
-                }
-            }
-
             for (index, output) in record.payload.saved_outputs.iter().enumerate() {
                 if let rspice_simulation_contract::saved_output::SavedOutputCompatibility::SelectedAnalysis { analysis_id } =
                     &output.compatible_analyses

@@ -9,6 +9,6 @@ pub use rspice_results::specification::{
 };
 pub use rspice_simulation_contract::design_variable::{
     DesignVariable, DesignVariableDefect, DesignVariableOverridePolicy, DesignVariableRange,
-    DesignVariableScope, DesignVariableSweepEligibility,
+    DesignVariableSweepEligibility,
 };
 pub use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;

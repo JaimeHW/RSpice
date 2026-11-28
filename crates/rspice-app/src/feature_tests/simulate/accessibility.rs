@@ -610,13 +610,12 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
         .id();
     let draft = variable_import::import_draft_for_sheet(
         &app.state.model,
-        &app.state.simulate,
         plan_id,
         "spec.csv",
-        "name,quantity,expression,minimum,maximum,scope,description\n\
-         RFB,resistance,47k,10k,100k,testbench,feedback resistor\n\
-         CFB,capacitance,2.2p,,,testbench,feedback capacitor\n\
-         IBIAS,current,banana,,,testbench,not a current\n",
+        "name,quantity,expression,minimum,maximum,description\n\
+         RFB,resistance,47k,10k,100k,feedback resistor\n\
+         CFB,capacitance,2.2p,,,feedback capacitor\n\
+         IBIAS,current,banana,,,not a current\n",
     );
     app.state.simulate.simulation_workflow =
         Some(SimulationWorkflowDialog::DesignVariableImport(draft));

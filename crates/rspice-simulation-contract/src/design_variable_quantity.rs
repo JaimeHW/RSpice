@@ -143,8 +143,7 @@ fn split_number(text: &str) -> Option<(&str, &str)> {
 mod tests {
     use super::*;
     use crate::design_variable::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableScope,
-        DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
     };
     use crate::design_variable_resolution::resolve_design_variables;
 
@@ -153,7 +152,6 @@ mod tests {
             "X",
             text,
             quantity,
-            DesignVariableScope::Testbench,
             "",
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,

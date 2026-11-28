@@ -437,11 +437,6 @@ where
         .filter(|task| task.authored_ac_data_cards().is_none())
         .map(|task| task.queued_analysis().analysis_line.clone())
         .collect::<Vec<_>>();
-    let analysis_instances = plan
-        .instances()
-        .iter()
-        .map(rspice_simulation_contract::plan_model::FrozenAnalysisInstance::id)
-        .collect::<Vec<_>>();
     let reference_process = inputs.analysis.sim_setup.reference_pvt.process;
     let model_library_veriloga_runtimes =
         prepared_model_library_veriloga_runtimes(&sealed_models, reference_process)?;
@@ -459,10 +454,7 @@ where
         &analysis_lines,
         &hierarchy,
         &plan_payload.design_variables,
-        crate::netlist_gen::DesignVariableNetlistContext {
-            active_cell: &root_reference,
-            analysis_instances: &analysis_instances,
-        },
+        &root_reference,
         &source_data,
     );
     let sim_setup = inputs.analysis.sim_setup;

@@ -1,43 +1,12 @@
 //! Authored simulation-plan design variables and exact validation.
 
-use std::collections::HashMap;
-
-use rspice_design_model::cell_view::CellViewRef;
-use rspice_vocabulary::product::{AnalysisInstanceId, DesignVariableId, ObjectRevision};
+use rspice_vocabulary::product::{DesignVariableId, ObjectRevision};
 use serde::{Deserialize, Serialize};
 
 use crate::design_variable_quantity::{DesignVariableQuantity, number_written_with_unit};
 use rspice_vocabulary::text_validation::{
     validate_bounded_text, validate_parameter_name, validate_single_line_expression,
 };
-
-/// Exact ownership boundary for a design variable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum DesignVariableScope {
-    Testbench,
-    Project,
-    SelectedCell { cell: CellViewRef },
-    SelectedAnalysis { analysis_id: AnalysisInstanceId },
-}
-
-impl DesignVariableScope {
-    /// The ownership boundary, named as a boundary.
-    ///
-    /// `Testbench` read "Lab characterization · testbench", which baked the
-    /// *default plan name* into a scope label: rename the plan and the label
-    /// went on naming the old one, in a column whose other three entries name
-    /// nothing but boundaries. The spec-sheet importer accepts these spellings
-    /// as cell values, so the rename travels there too.
-    pub const fn label(&self) -> &'static str {
-        match self {
-            Self::Testbench => "Testbench",
-            Self::Project => "Project",
-            Self::SelectedCell { .. } => "Selected cell",
-            Self::SelectedAnalysis { .. } => "Selected analysis only",
-        }
-    }
-}
 
 /// Inclusive engineering bounds for a variable. Bounds remain expressions so
 /// suffixes and owner variables survive a lossless project round trip.
@@ -100,7 +69,6 @@ pub struct DesignVariable {
     pub name: String,
     pub expression: String,
     pub quantity: DesignVariableQuantity,
-    pub scope: DesignVariableScope,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -125,20 +93,15 @@ pub enum DesignVariableDefect {
     /// The allowed range is inconsistent, or the resolved value falls outside
     /// it.
     Bounds,
-    /// The rest of the record contract: description length, ownership scope.
+    /// The rest of the record: the description's length.
     Record,
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "preserve the existing authored-variable constructor API while moving its owner"
-)]
 impl DesignVariable {
     pub fn new(
         name: impl Into<String>,
         expression: impl Into<String>,
         quantity: DesignVariableQuantity,
-        scope: DesignVariableScope,
         description: impl Into<String>,
         allowed_range: Option<DesignVariableRange>,
         sweep_eligibility: DesignVariableSweepEligibility,
@@ -148,7 +111,6 @@ impl DesignVariable {
             name,
             expression,
             quantity,
-            scope,
             description,
             allowed_range,
             sweep_eligibility,
@@ -163,7 +125,6 @@ impl DesignVariable {
         name: impl Into<String>,
         expression: impl Into<String>,
         quantity: DesignVariableQuantity,
-        scope: DesignVariableScope,
         description: impl Into<String>,
         allowed_range: Option<DesignVariableRange>,
         sweep_eligibility: DesignVariableSweepEligibility,
@@ -175,7 +136,6 @@ impl DesignVariable {
             name: name.into(),
             expression: expression.into(),
             quantity,
-            scope,
             description: description.into(),
             allowed_range,
             sweep_eligibility,
@@ -249,11 +209,6 @@ impl DesignVariable {
         }
         validate_bounded_text("description", &self.description, 1_024, true)
             .map_err(tag(Defect::Record))?;
-        if let DesignVariableScope::SelectedCell { cell } = &self.scope {
-            cell.validate_name_segments()
-                .map_err(|error| format!("selected cell is invalid: {error}"))
-                .map_err(tag(Defect::Record))?;
-        }
         Ok(())
     }
 
@@ -272,20 +227,12 @@ impl DesignVariable {
         format!(".param {}={{{}}}", self.name, self.deck_expression())
     }
 
-    pub fn cloned_for_new_plan(
-        &self,
-        analysis_identity_map: &HashMap<AnalysisInstanceId, AnalysisInstanceId>,
-    ) -> Result<Self, AnalysisInstanceId> {
+    /// A copy for another plan: the same variable under a new row identity.
+    pub fn cloned_for_new_plan(&self) -> Self {
         let mut cloned = self.clone();
         cloned.id = DesignVariableId::new();
         cloned.revision = ObjectRevision::INITIAL;
-        if let DesignVariableScope::SelectedAnalysis { analysis_id } = &mut cloned.scope {
-            *analysis_id = analysis_identity_map
-                .get(analysis_id)
-                .copied()
-                .ok_or(*analysis_id)?;
-        }
-        Ok(cloned)
+        cloned
     }
 }
 
@@ -329,16 +276,11 @@ fn standalone_value(text: &str, quantity: DesignVariableQuantity) -> Result<Opti
 mod tests {
     use super::*;
 
-    fn resistance_variable(
-        name: &str,
-        expression: &str,
-        scope: DesignVariableScope,
-    ) -> DesignVariable {
+    fn resistance_variable(name: &str, expression: &str) -> DesignVariable {
         DesignVariable::new(
             name,
             expression,
             DesignVariableQuantity::Resistance,
-            scope,
             "fixture",
             Some(DesignVariableRange {
                 minimum: "1 kohm".to_owned(),
@@ -354,7 +296,7 @@ mod tests {
     /// and a typed value outside its own range is refused as it is typed.
     #[test]
     fn a_typed_value_reaches_the_deck_and_one_outside_its_range_is_refused() {
-        let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let variable = resistance_variable("RLOAD", "10 kohm");
         let statement = variable.netlist_statement();
         assert!(statement.starts_with(".param RLOAD={"), "{statement}");
         let deck = format!("card\n{statement}\n.end\n");
@@ -371,7 +313,7 @@ mod tests {
     /// read at all is refused.
     #[test]
     fn an_expression_naming_another_variable_is_accepted_and_a_garbled_one_refused() {
-        let mut variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let mut variable = resistance_variable("RLOAD", "10 kohm");
         variable.expression = "2*RBASE".to_owned();
         variable.validate().expect("the plan resolves RBASE");
         assert_eq!(variable.netlist_statement(), ".param RLOAD={2*RBASE}");
@@ -382,7 +324,7 @@ mod tests {
 
     #[test]
     fn a_missing_or_null_row_identity_is_rejected() {
-        let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        let variable = resistance_variable("RLOAD", "10 kohm");
         let mut value = serde_json::to_value(variable).unwrap();
         value.as_object_mut().unwrap().remove("id");
         assert!(serde_json::from_value::<DesignVariable>(value.clone()).is_err());

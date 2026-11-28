@@ -9,8 +9,7 @@ use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::SimulationRun;
 use rspice_results::run::SimulationRunLifecycle;
 use rspice_simulation_contract::design_variable::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableScope,
-    DesignVariableSweepEligibility,
+    DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
 };
 use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 
@@ -57,7 +56,6 @@ fn add(state: &mut RunTestHost, name: &str, expression: &str, quantity: DesignVa
         name,
         expression,
         quantity,
-        DesignVariableScope::Testbench,
         "",
         None,
         DesignVariableSweepEligibility::NestedSweepAndOptimization,

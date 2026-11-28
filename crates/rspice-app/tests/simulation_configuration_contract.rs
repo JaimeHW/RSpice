@@ -1,20 +1,16 @@
 use rspice_app::{
-    AnalysisInstanceId, CellViewRef, DesignVariable, DesignVariableOverridePolicy,
-    DesignVariableQuantity, DesignVariableRange, DesignVariableScope,
-    DesignVariableSweepEligibility, ProjectWorkspace, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    SimulationPlanId, SimulationPlanPayload, SimulationPlanPayloadRecord,
+    AnalysisInstanceId, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
+    DesignVariableRange, DesignVariableSweepEligibility, ProjectWorkspace, SavedOutput,
+    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SimulationPlanId, SimulationPlanPayload, SimulationPlanPayloadRecord,
 };
-use rspice_simulation::netlist_gen::{
-    DesignVariableNetlistContext, design_variable_parameter_lines,
-};
+use rspice_simulation::netlist_gen::design_variable_parameter_lines;
 
-fn resistance_variable(name: &str, expression: &str, scope: DesignVariableScope) -> DesignVariable {
+fn resistance_variable(name: &str, expression: &str) -> DesignVariable {
     DesignVariable::new(
         name,
         expression,
         DesignVariableQuantity::Resistance,
-        scope,
         "integration contract",
         Some(DesignVariableRange {
             minimum: "1 kohm".to_owned(),
@@ -45,40 +41,18 @@ fn raw_output(
 
 #[test]
 fn typed_values_emit_canonical_deterministic_parameter_lines() {
-    let active_cell = CellViewRef::default_top();
-    let selected_analysis = AnalysisInstanceId::new();
     let variables = vec![
-        resistance_variable("ZLOAD", "20 kohm", DesignVariableScope::Project),
-        resistance_variable("ALOAD", "10 kohm", DesignVariableScope::Testbench),
-        resistance_variable(
-            "OTHER_CELL",
-            "30 kohm",
-            DesignVariableScope::SelectedCell {
-                cell: CellViewRef::new("user", "other", "schematic"),
-            },
-        ),
-        resistance_variable(
-            "ANALYSIS_ONLY",
-            "40 kohm",
-            DesignVariableScope::SelectedAnalysis {
-                analysis_id: selected_analysis,
-            },
-        ),
+        resistance_variable("ZLOAD", "20 kohm"),
+        resistance_variable("ALOAD", "10 kohm"),
+        resistance_variable("MLOAD", "40 kohm"),
     ];
 
-    let lines = design_variable_parameter_lines(
-        &variables,
-        DesignVariableNetlistContext {
-            active_cell: &active_cell,
-            analysis_instances: &[selected_analysis],
-        },
-    )
-    .unwrap();
+    let lines = design_variable_parameter_lines(&variables).unwrap();
     assert_eq!(
         lines,
         [
             ".param ALOAD={10k}",
-            ".param ANALYSIS_ONLY={40k}",
+            ".param MLOAD={40k}",
             ".param ZLOAD={20k}",
         ]
     );
@@ -94,11 +68,7 @@ fn plan_payload_round_trip_preserves_nested_ownership() {
     workspace.content.simulation_plan_payloads = vec![SimulationPlanPayloadRecord {
         plan_id,
         payload: SimulationPlanPayload {
-            design_variables: vec![resistance_variable(
-                "RLOAD",
-                "10 kohm",
-                DesignVariableScope::Testbench,
-            )],
+            design_variables: vec![resistance_variable("RLOAD", "10 kohm")],
             saved_outputs: vec![raw_output(
                 "VOUT",
                 "V(out)",
@@ -125,13 +95,7 @@ fn cloning_refreshes_row_identity_and_remaps_analysis_ownership() {
     let cloned_plan = SimulationPlanId::new();
     let source_analysis = AnalysisInstanceId::new();
     let cloned_analysis = AnalysisInstanceId::new();
-    let variable = resistance_variable(
-        "RLOAD",
-        "10 kohm",
-        DesignVariableScope::SelectedAnalysis {
-            analysis_id: source_analysis,
-        },
-    );
+    let variable = resistance_variable("RLOAD", "10 kohm");
     let output = raw_output(
         "VOUT",
         "V(out)",
@@ -164,11 +128,6 @@ fn cloning_refreshes_row_identity_and_remaps_analysis_ownership() {
     let cloned = workspace.content.plan_data(cloned_plan).unwrap();
     assert_ne!(cloned.design_variables[0].id, variable_id);
     assert_ne!(cloned.saved_outputs[0].id, output_id);
-    assert!(matches!(
-        cloned.design_variables[0].scope,
-        DesignVariableScope::SelectedAnalysis { analysis_id }
-            if analysis_id == cloned_analysis
-    ));
     assert!(matches!(
         cloned.saved_outputs[0].compatible_analyses,
         SavedOutputCompatibility::SelectedAnalysis { analysis_id }

@@ -174,8 +174,7 @@ pub fn check_startup_nets(
 mod tests {
     use super::startup_value;
     use rspice_simulation_contract::design_variable::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableScope,
-        DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
     };
     use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 
@@ -184,7 +183,6 @@ mod tests {
             "vdd",
             "3.3V",
             DesignVariableQuantity::Voltage,
-            DesignVariableScope::Testbench,
             "supply",
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,

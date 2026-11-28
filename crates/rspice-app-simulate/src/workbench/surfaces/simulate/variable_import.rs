@@ -15,7 +15,7 @@
 //!
 //! So the file is read once and then *shown*: which of the sheet's columns
 //! feeds which field, what each row would become, which rows cannot be adopted
-//! and why, and what scope the whole import is owned at. Every refusal carries
+//! and why. Every refusal carries
 //! a [`VariableImportRefusal`] identity — `VARIMP-SCHEMA`, `VARIMP-IDENTIFIER`,
 //! `VARIMP-DIMENSION`, `VARIMP-BOUNDS`, `VARIMP-COLLISION` — so a refusal can
 //! be counted, searched for and asserted, which a sentence cannot.
@@ -42,7 +42,6 @@ use crate::ui::widgets::{Dialog, DialogSize, select};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::{SimulateFeature, record_plan_refusal};
-use crate::workbench::slots::SimulateState;
 use crate::workbench::state::{
     DesignVariableDraft, DesignVariableImportDraft, DesignVariableImportRow,
     SimulationWorkflowDialog, VariableImportRefusal,
@@ -84,13 +83,12 @@ fn exchange_id() -> egui::Id {
 /// the rest fall back to the values the create dialog opens with, which is
 /// what makes a two-column sheet a complete import rather than a partial one.
 /// A row with no quantity is a plain number, because the quantity is a label.
-const COLUMNS: [&str; 9] = [
+const COLUMNS: [&str; 8] = [
     "name",
     "quantity",
     "expression",
     "minimum",
     "maximum",
-    "scope",
     "sweep role",
     "override policy",
     "description",
@@ -101,34 +99,11 @@ const QUANTITY: usize = 1;
 const EXPRESSION: usize = 2;
 const MINIMUM: usize = 3;
 const MAXIMUM: usize = 4;
-const SCOPE: usize = 5;
-const SWEEP_ROLE: usize = 6;
-const OVERRIDE_POLICY: usize = 7;
-const DESCRIPTION: usize = 8;
+const SWEEP_ROLE: usize = 5;
+const OVERRIDE_POLICY: usize = 6;
+const DESCRIPTION: usize = 7;
 
 const REQUIRED: [usize; 2] = [NAME, EXPRESSION];
-
-/// The ownership scopes, spelled as `design_variable_from_draft` indexes them.
-/// `cell` and `analysis` resolve against the active view and the selected
-/// analysis, so an analysis-scoped row is refused when nothing is selected —
-/// the same refusal the create dialog gives.
-///
-/// Unlike the other enumerated columns these cannot be derived from an `ALL`
-/// array: two of the four variants carry payloads, so there is no value to call
-/// `label()` on without inventing a cell reference. The spellings are therefore
-/// copied, and `scope_spellings_match_the_scopes_they_name` pins the copy to the
-/// original — a renamed scope must fail that test rather than silently stop
-/// matching the column an engineer wrote.
-const SCOPE_CHOICES: [(&str, usize); 6] = [
-    // Matching is case-insensitive, so the abbreviation a sheet may write for
-    // the testbench scope is now the label itself.
-    ("Testbench", 0),
-    ("Project", 1),
-    ("Selected cell", 2),
-    ("cell", 2),
-    ("Selected analysis only", 3),
-    ("analysis", 3),
-];
 
 /// Start an import by asking for the sheet.
 ///
@@ -155,8 +130,7 @@ pub(super) fn poll_pending_import(
 ) {
     match file_exchange::take_opened(ctx, exchange_id()) {
         Some(Ok(Some(sheet))) => {
-            let draft =
-                import_draft_for_sheet(cx.model, cx.state, plan_id, &sheet.name, &sheet.text);
+            let draft = import_draft_for_sheet(cx.model, plan_id, &sheet.name, &sheet.text);
             cx.state.simulation_workflow =
                 Some(SimulationWorkflowDialog::DesignVariableImport(draft));
         }
@@ -240,16 +214,6 @@ fn schema(line: u64, detail: String) -> VariableImportRefusal {
 // The guided import
 //=============================================================================
 
-/// The scopes the adopt-at control offers, in `DesignVariableDraft::scope`
-/// order. These are the same four [`SCOPE_CHOICES`] indexes, spelled as the
-/// studio shows them rather than as a sheet may abbreviate them.
-const SCOPE_LABELS: [&str; 4] = [
-    "Testbench",
-    "Project",
-    "Selected cell",
-    "Selected analysis only",
-];
-
 /// Decode the bounded CSV shape, retaining the import's existing refusal vocabulary.
 fn read_sheet(source: &str) -> Result<CsvSheet, VariableImportRefusal> {
     decode_csv_sheet(source, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS).map_err(|error| {
@@ -310,7 +274,6 @@ fn auto_binding(headers: &[String]) -> Result<Vec<Option<usize>>, VariableImport
 /// opens; this only decides what is in it.
 pub fn import_draft_for_sheet(
     model: &Model,
-    simulate: &SimulateState,
     plan_id: SimulationPlanId,
     file_name: &str,
     source: &str,
@@ -325,7 +288,7 @@ pub fn import_draft_for_sheet(
         ))
     }) {
         Ok(mut draft) => {
-            resolve_rows(model, simulate, plan_id, &mut draft);
+            resolve_rows(model, plan_id, &mut draft);
             draft
         }
         // A sheet that cannot be read at all still opens the dialog, because
@@ -335,7 +298,7 @@ pub fn import_draft_for_sheet(
     }
 }
 
-/// Resolve every row against the mapping and scope the dialog is showing.
+/// Resolve every row against the mapping the dialog is showing.
 ///
 /// Called when a choice changes, never per frame: five hundred rows is several
 /// hundred quantity parses, and a dialog resolving them at frame rate would do
@@ -344,12 +307,7 @@ pub fn import_draft_for_sheet(
 /// Ticks are preserved across a re-resolve where the row is still adoptable, so
 /// correcting one column's binding does not discard a selection made over the
 /// rest of the sheet.
-fn resolve_rows(
-    model: &Model,
-    simulate: &SimulateState,
-    plan_id: SimulationPlanId,
-    draft: &mut DesignVariableImportDraft,
-) {
+fn resolve_rows(model: &Model, plan_id: SimulationPlanId, draft: &mut DesignVariableImportDraft) {
     let previously_declined = draft
         .rows
         .iter()
@@ -383,15 +341,10 @@ fn resolve_rows(
 
     let mut rows = Vec::with_capacity(draft.cells.len());
     for (line, cells) in &draft.cells {
-        let resolved = draft_from_row(cells, &binding).map(|mut row_draft| {
-            if draft.override_scope {
-                row_draft.scope = draft.scope;
-            }
-            row_draft
-        });
+        let resolved = draft_from_row(cells, &binding);
         let (row_draft, refusal) = match resolved {
             Ok(row_draft) => {
-                let refusal = design_variable_from_draft_categorized(model, simulate, &row_draft)
+                let refusal = design_variable_from_draft_categorized(&row_draft)
                     .err()
                     .map(|(defect, detail)| {
                         refusal_for_defect(defect, *line, &row_draft.name, detail)
@@ -574,8 +527,6 @@ pub(super) fn design_variable_import_dialog(
                         },
                     );
                 }
-                workflow_section_heading(ui, "Adopt at");
-                changed |= scope_rows(ui, draft);
             },
             |ui, draft| {
                 workflow_section_heading(
@@ -603,7 +554,7 @@ pub(super) fn design_variable_import_dialog(
     });
 
     if changed {
-        resolve_rows(cx.model, cx.state, plan_id, &mut draft);
+        resolve_rows(cx.model, plan_id, &mut draft);
     }
     finish_workflow_choice(cx, choice, draft, commit_selected_rows);
 }
@@ -682,68 +633,6 @@ fn unread_columns(draft: &DesignVariableImportDraft) -> Option<String> {
         .map(|(_, header)| format!("'{header}'"))
         .collect::<Vec<_>>();
     (!unread.is_empty()).then(|| unread.join(", "))
-}
-
-/// The ownership scope every imported variable is adopted at.
-fn scope_rows(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
-    let mut changed = false;
-    let sheet_declares = draft.binding.get(SCOPE).copied().flatten().is_some();
-    workflow_setting_row(
-        ui,
-        "Ownership",
-        if sheet_declares {
-            "This sheet declares a scope per row. Override it to adopt the whole sheet at one scope."
-        } else {
-            "This sheet declares no scope, so every row is adopted at the scope chosen here."
-        },
-        |ui| {
-            let mut override_scope = draft.override_scope || !sheet_declares;
-            if ui
-                .add_enabled_ui(sheet_declares, |ui| {
-                    super::page_kit::switch_row(ui, "Override the sheet", &mut override_scope)
-                })
-                .inner
-            {
-                draft.override_scope = override_scope;
-                changed = true;
-            }
-        },
-    );
-    let applies = draft.override_scope || !sheet_declares;
-    workflow_setting_row(
-        ui,
-        "Scope",
-        "Where the imported variables are owned.",
-        |ui| {
-            let options = SCOPE_LABELS.map(str::to_owned).to_vec();
-            let current = SCOPE_LABELS
-                .get(draft.scope)
-                .copied()
-                .unwrap_or(SCOPE_LABELS[0])
-                .to_owned();
-            ui.add_enabled_ui(applies, |ui| {
-                if let Some(picked) = select(
-                    ui,
-                    "variable-import-scope",
-                    "Scope",
-                    &current,
-                    &options,
-                    ui.available_width().min(260.0),
-                ) && picked != draft.scope
-                {
-                    draft.scope = picked;
-                    draft.override_scope = true;
-                    changed = true;
-                }
-            });
-        },
-    );
-    if !draft.override_scope && !sheet_declares && draft.scope != 0 {
-        // Nothing in the sheet to override, so the choice simply applies.
-        draft.override_scope = true;
-        changed = true;
-    }
-    changed
 }
 
 /// The height the row table takes, and why it is not a constant.
@@ -896,8 +785,8 @@ fn commit_selected_rows(
 
     let mut variables = Vec::new();
     for row in draft.accepted_rows() {
-        let variable = design_variable_from_draft_categorized(cx.model, cx.state, &row.draft)
-            .map_err(|(defect, detail)| {
+        let variable =
+            design_variable_from_draft_categorized(&row.draft).map_err(|(defect, detail)| {
                 refusal_for_defect(defect, row.line, &row.name, detail).message()
             })?;
         variables.push(variable);
@@ -976,7 +865,6 @@ fn draft_from_row(
             Some(unlabelled()),
         )
         .map_err(unknown_option)?,
-        scope: enumerated("scope", cell(SCOPE), &SCOPE_CHOICES, Some(0)).map_err(unknown_option)?,
         description: cell(DESCRIPTION).to_owned(),
         allowed_range: allowed_range(cell(MINIMUM), cell(MAXIMUM)).map_err(|detail| {
             VariableImportRefusal::Bounds {
@@ -1109,10 +997,10 @@ pub(crate) mod tests {
     use crate::workbench::framework::feature::harness::FeatureHarness;
     use crate::workbench::simulate::test_host::SimulateTestHost;
 
-    const SHEET: &str = "name,quantity,expression,minimum,maximum,scope,sweep role,override policy,description\n\
-         RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,project,sweep,override,Output load\n\
-         CFILT,Capacitance,4.7 nF,1 nF,10 nF,testbench,fixed,inherit,Filter cap\n\
-         VBIAS,Voltage,1.8 V,,,,,,\n";
+    const SHEET: &str = "name,quantity,expression,minimum,maximum,sweep role,override policy,description\n\
+         RLOAD,Resistance,10 kohm,1 kohm,1 Mohm,sweep,override,Output load\n\
+         CFILT,Capacitance,4.7 nF,1 nF,10 nF,fixed,inherit,Filter cap\n\
+         VBIAS,Voltage,1.8 V,,,,,\n";
 
     fn registry(
         harness: &FeatureHarness<SimulateFeature>,
@@ -1189,7 +1077,6 @@ pub(crate) mod tests {
             .expect("plan payload")
             .design_variables[0];
         assert_eq!(imported.quantity, DesignVariableQuantity::Resistance);
-        assert_eq!(imported.scope, crate::state::DesignVariableScope::Project);
         assert_eq!(
             imported.sweep_eligibility,
             DesignVariableSweepEligibility::NestedSweepAndOptimization
@@ -1389,7 +1276,7 @@ pub(crate) mod tests {
         assert_eq!(row_ids(&draft), [Some("VARIMP-BOUNDS")]);
 
         draft.binding[MINIMUM] = Some(3);
-        resolve_rows(&harness.model, &harness.state, plan_id, &mut draft);
+        resolve_rows(&harness.model, plan_id, &mut draft);
 
         assert_eq!(row_ids(&draft), [None]);
         assert_eq!(draft.rows[0].draft.allowed_range, "1 kohm \u{2026} 1 Mohm");
@@ -1455,47 +1342,10 @@ pub(crate) mod tests {
         );
 
         draft.binding[EXPRESSION] = Some(2);
-        resolve_rows(&harness.model, &harness.state, plan_id, &mut draft);
+        resolve_rows(&harness.model, plan_id, &mut draft);
 
         assert!(draft.sheet_refusal.is_none());
         assert_eq!(row_ids(&draft), [None]);
-    }
-
-    /// Adopting the whole sheet at one scope is the common case for a sheet
-    /// written without scopes in mind, and it must override what the sheet says
-    /// rather than being ignored where the sheet declares one.
-    #[test]
-    fn adopting_at_one_scope_overrides_the_scope_column() {
-        let mut harness = SimulateTestHost::harness();
-        let plan_id = plan(&harness.model);
-        let mut draft = open(
-            &harness.model,
-            &mut harness.state,
-            plan_id,
-            "name,quantity,expression,scope\n\
-             RLOAD,Resistance,10 kohm,testbench\n\
-             CFILT,Capacitance,4.7 nF,testbench\n",
-        );
-        assert_eq!(draft.rows[0].draft.scope, 0, "the sheet says testbench");
-
-        draft.scope = 1;
-        draft.override_scope = true;
-        resolve_rows(&harness.model, &harness.state, plan_id, &mut draft);
-
-        assert!(draft.rows.iter().all(|row| row.draft.scope == 1));
-        commit_selected_rows(&mut harness.cx(), &draft)
-            .expect("the sheet adopts at the chosen scope");
-        assert!(
-            harness
-                .model
-                .workspace
-                .content
-                .plan_data(plan_id)
-                .expect("plan payload")
-                .design_variables
-                .iter()
-                .all(|variable| variable.scope == crate::state::DesignVariableScope::Project)
-        );
     }
 
     #[test]
@@ -1575,37 +1425,5 @@ pub(crate) mod tests {
             "{}",
             refusal.message()
         );
-    }
-
-    /// `SCOPE_CHOICES` copies the scope labels because two variants carry
-    /// payloads and cannot be enumerated. This is the pin that keeps the copy
-    /// honest: rename a scope and the spelling a spec sheet is allowed to use
-    /// must be renamed with it, rather than quietly ceasing to match.
-    #[test]
-    fn scope_spellings_match_the_scopes_they_name() {
-        use crate::state::DesignVariableScope;
-
-        let harness = SimulateTestHost::harness();
-        let scopes = [
-            DesignVariableScope::Testbench,
-            DesignVariableScope::Project,
-            DesignVariableScope::SelectedCell {
-                cell: harness.model.workspace.content.active_view.clone(),
-            },
-            DesignVariableScope::SelectedAnalysis {
-                analysis_id: crate::product::AnalysisInstanceId::new(),
-            },
-        ];
-        for (index, scope) in scopes.iter().enumerate() {
-            assert!(
-                SCOPE_CHOICES
-                    .iter()
-                    .any(|(spelling, choice)| *choice == index && *spelling == scope.label()),
-                "scope {index} is labelled {:?}, which no spec-sheet spelling accepts",
-                scope.label()
-            );
-            // The adopt-at control offers the same four, in the same order.
-            assert_eq!(SCOPE_LABELS[index], scope.label());
-        }
     }
 }

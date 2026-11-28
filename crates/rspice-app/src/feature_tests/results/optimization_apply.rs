@@ -5,7 +5,7 @@ use crate::workbench::RSpiceApp;
 use rspice_app_results::workbench::documents::result_document::apply_best_to_design;
 use rspice_app_results::workbench::documents::result_document::test_fixtures::optimization_analysis;
 use rspice_app_state::state::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+    DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableSweepEligibility, SimulationRun, SimulationRunLifecycle,
 };
 
@@ -26,7 +26,6 @@ fn app_with(variables: &[&str]) -> RSpiceApp {
             name,
             "1u",
             DesignVariableQuantity::Dimensionless,
-            DesignVariableScope::Testbench,
             "channel width",
             None,
             DesignVariableSweepEligibility::FixedParameter,

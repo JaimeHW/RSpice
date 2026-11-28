@@ -571,7 +571,7 @@ fn a_run_space_change_moves_the_plan_revision() {
 #[test]
 fn a_design_variable_expression_can_be_edited_in_place() {
     use crate::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
         DesignVariableSweepEligibility,
     };
 
@@ -586,7 +586,6 @@ fn a_design_variable_expression_can_be_edited_in_place() {
         "rload",
         "1kohm",
         DesignVariableQuantity::Resistance,
-        DesignVariableScope::Testbench,
         "load resistance",
         None,
         DesignVariableSweepEligibility::NestedSweepAndOptimization,
@@ -629,15 +628,15 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     );
 }
 
-/// A variable's typed contract — quantity, scope, sweep role, override policy
-/// and bounds — decides what a sweep may do with it and what preflight may
+/// A variable's typed contract — quantity, sweep role, override policy and
+/// bounds — decides what a sweep may do with it and what preflight may
 /// reject. All of it has to be reachable after authoring, and an unbounded
 /// variable has to be able to become bounded.
 #[test]
 fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() {
     use crate::state::{
         DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
-        DesignVariableScope, DesignVariableSweepEligibility,
+        DesignVariableSweepEligibility,
     };
 
     let mut harness = SimulateTestHost::harness();
@@ -651,7 +650,6 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
         "rload",
         "1kohm",
         DesignVariableQuantity::Resistance,
-        DesignVariableScope::Testbench,
         "load resistance",
         None,
         DesignVariableSweepEligibility::FixedParameter,
@@ -673,7 +671,6 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     let mut replacement = variable.clone();
     replacement.sweep_eligibility = DesignVariableSweepEligibility::NestedSweepAndOptimization;
     replacement.override_policy = DesignVariableOverridePolicy::ExplicitTestLocalOverride;
-    replacement.scope = DesignVariableScope::Project;
     replacement.allowed_range = Some(DesignVariableRange {
         minimum: "500ohm".to_owned(),
         maximum: "2kohm".to_owned(),
@@ -704,7 +701,6 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
         stored.override_policy,
         DesignVariableOverridePolicy::ExplicitTestLocalOverride
     );
-    assert_eq!(stored.scope, DesignVariableScope::Project);
     assert_eq!(
         stored
             .allowed_range
@@ -888,19 +884,16 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
 #[test]
 fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
     use crate::state::{
-        CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-        DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility,
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
+        DesignVariableSweepEligibility,
     };
-    use rspice_simulation::netlist_gen::{
-        DesignVariableNetlistContext, design_variable_parameter_lines,
-    };
+    use rspice_simulation::netlist_gen::design_variable_parameter_lines;
 
     let build = |expression: &str| {
         DesignVariable::new(
             "rload",
             expression,
             DesignVariableQuantity::Resistance,
-            DesignVariableScope::Project,
             "load resistance",
             Some(DesignVariableRange {
                 minimum: "100ohm".to_owned(),
@@ -921,16 +914,8 @@ fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
     // arrive, so the remaining gates are the ones under test.
     variable.expression = "50kohm".to_owned();
 
-    let cell = CellViewRef::default_top();
     assert!(
-        design_variable_parameter_lines(
-            std::slice::from_ref(&variable),
-            DesignVariableNetlistContext {
-                active_cell: &cell,
-                analysis_instances: &[],
-            },
-        )
-        .is_err(),
+        design_variable_parameter_lines(std::slice::from_ref(&variable)).is_err(),
         "netlist generation refuses to emit a parameter line for it"
     );
 

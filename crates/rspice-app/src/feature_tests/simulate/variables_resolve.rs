@@ -5,7 +5,7 @@
 use super::page_contracts::render_with;
 use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
 use rspice_app_state::state::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+    DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
     DesignVariableSweepEligibility, SimulationPage,
 };
 
@@ -23,7 +23,6 @@ fn page_with(rows: &[(&str, &str, DesignVariableQuantity)]) -> String {
                 name,
                 value,
                 quantity,
-                DesignVariableScope::Testbench,
                 "",
                 None,
                 DesignVariableSweepEligibility::NestedSweepAndOptimization,

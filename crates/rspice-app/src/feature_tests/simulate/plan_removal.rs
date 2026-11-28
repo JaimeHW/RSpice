@@ -14,9 +14,9 @@ use rspice_app_state::product::SimulationPlanId;
 use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{
     CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableOverridePolicy,
-    DesignVariableQuantity, DesignVariableScope, DesignVariableSweepEligibility, InstancePath,
-    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
+    DesignVariableQuantity, DesignVariableSweepEligibility, InstancePath, SavedOutput,
+    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SpecEntry,
 };
 
 /// One setup page, rendered with its controls announced so a test can press
@@ -234,7 +234,6 @@ fn seed_variable(state: &mut AppState, name: &str) {
         name,
         "1kohm",
         DesignVariableQuantity::Resistance,
-        DesignVariableScope::Testbench,
         "load resistance",
         None,
         DesignVariableSweepEligibility::FixedParameter,

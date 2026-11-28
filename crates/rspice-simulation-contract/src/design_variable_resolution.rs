@@ -312,8 +312,7 @@ fn deck_order(variables: &[DesignVariable], needs: &[BTreeSet<usize>]) -> Vec<us
 mod tests {
     use super::*;
     use crate::design_variable::{
-        DesignVariableOverridePolicy, DesignVariableRange, DesignVariableScope,
-        DesignVariableSweepEligibility,
+        DesignVariableOverridePolicy, DesignVariableRange, DesignVariableSweepEligibility,
     };
     use crate::design_variable_quantity::DesignVariableQuantity;
 
@@ -322,7 +321,6 @@ mod tests {
             name,
             expression,
             DesignVariableQuantity::Dimensionless,
-            DesignVariableScope::Testbench,
             "",
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,

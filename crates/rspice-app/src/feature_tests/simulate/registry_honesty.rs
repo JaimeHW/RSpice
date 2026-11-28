@@ -236,14 +236,13 @@ impl Registry {
 fn bounded_variable() -> rspice_app_state::state::DesignVariable {
     use rspice_app_state::state::{
         DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
-        DesignVariableScope, DesignVariableSweepEligibility,
+        DesignVariableSweepEligibility,
     };
 
     DesignVariable::new(
         "rload",
         "1kohm",
         DesignVariableQuantity::Resistance,
-        DesignVariableScope::Testbench,
         "load resistance",
         Some(DesignVariableRange {
             minimum: "1kohm".to_owned(),

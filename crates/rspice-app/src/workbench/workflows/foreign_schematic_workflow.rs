@@ -28,8 +28,7 @@ use rspice_design::foreign_schematic::{
 };
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_simulation_contract::design_variable::{
-    DesignVariable, DesignVariableOverridePolicy, DesignVariableScope,
-    DesignVariableSweepEligibility,
+    DesignVariable, DesignVariableOverridePolicy, DesignVariableSweepEligibility,
 };
 use rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity;
 use rspice_simulation_contract::run_set::{RunSetDimensionKind, RunSetState, value_id};
@@ -1104,7 +1103,6 @@ fn commit_plan(
             name.clone(),
             value.clone(),
             DesignVariableQuantity::Dimensionless,
-            DesignVariableScope::Testbench,
             String::new(),
             None,
             DesignVariableSweepEligibility::NestedSweepAndOptimization,

@@ -24,7 +24,6 @@ use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
-use crate::workbench::slots::SimulateState;
 
 use crate::state::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,

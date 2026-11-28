@@ -86,7 +86,7 @@ pub use rspice_app_state::product::{AnalysisInstanceId, SimulationPlanId};
 /// The persisted project model the configuration contract exercises.
 pub use rspice_app_state::state::{
     CellViewRef, DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
-    DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, ProjectWorkspace,
-    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord,
+    DesignVariableRange, DesignVariableSweepEligibility, ProjectWorkspace, SavedOutput,
+    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
+    SavedOutputStreaming, SimulationPlanPayload, SimulationPlanPayloadRecord,
 };

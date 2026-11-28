@@ -9,8 +9,8 @@ pub(super) fn design_variable_dialog(
 ) {
     draft.validation_error = validate_design_variable_draft(cx, &draft).err();
     let enabled = draft.validation_error.is_none();
-    let consumer_summary = design_variable_consumers(cx, &draft);
-    let resolved_value = design_variable_from_draft(cx.model, cx.state, &draft)
+    let consumer_summary = design_variable_consumers(cx);
+    let resolved_value = design_variable_from_draft(&draft)
         .and_then(|variable| resolved_in_plan(cx.model, variable))
         .map_or_else(
             |_| "unresolved".to_owned(),
@@ -38,7 +38,7 @@ pub(super) fn design_variable_dialog(
     };
     let choice = Dialog::new("Create design variable", "Create variable")
     .description(
-        "Create a typed, scoped simulation parameter with explicit constraints and deterministic netlist ownership.",
+        "Create a simulation parameter every analysis in this plan reads. Its value may name other variables.",
     )
     .size(DialogSize::SimulationWorkflow)
     .flush_body()
@@ -60,18 +60,6 @@ pub(super) fn design_variable_dialog(
                     "Current",
                     "Temperature",
                     "Dimensionless",
-                ],
-            );
-            workflow_select_field(
-                ui,
-                "design-variable-scope",
-                "Ownership scope",
-                &mut draft.scope,
-                &[
-                    "Testbench",
-                    "Project",
-                    "Selected cell",
-                    "Selected analysis only",
                 ],
             );
             workflow_text_field(ui, "Description", &mut draft.description, false);
@@ -124,11 +112,9 @@ fn resolved_in_plan(model: &Model, variable: crate::state::DesignVariable) -> Re
 }
 
 pub(crate) fn design_variable_from_draft(
-    model: &Model,
-    simulate: &SimulateState,
     draft: &DesignVariableDraft,
 ) -> Result<crate::state::DesignVariable, String> {
-    design_variable_from_draft_categorized(model, simulate, draft).map_err(|(_, message)| message)
+    design_variable_from_draft_categorized(draft).map_err(|(_, message)| message)
 }
 
 /// [`design_variable_from_draft`], with the failed contract named beside the
@@ -140,13 +126,11 @@ pub(crate) fn design_variable_from_draft(
 /// half-written allowed range is a bound; everything past the conversion is
 /// [`DesignVariable::validate_defect`]'s answer, unchanged.
 pub(crate) fn design_variable_from_draft_categorized(
-    model: &Model,
-    simulate: &SimulateState,
     draft: &DesignVariableDraft,
 ) -> Result<crate::state::DesignVariable, (crate::state::DesignVariableDefect, String)> {
     use crate::state::{
         DesignVariable, DesignVariableDefect as Defect, DesignVariableOverridePolicy,
-        DesignVariableQuantity, DesignVariableScope, DesignVariableSweepEligibility,
+        DesignVariableQuantity, DesignVariableSweepEligibility,
     };
 
     let record = |message: String| (Defect::Record, message);
@@ -154,19 +138,6 @@ pub(crate) fn design_variable_from_draft_categorized(
         .get(draft.quantity)
         .copied()
         .ok_or_else(|| record("Quantity selection is invalid.".to_owned()))?;
-    let scope = match draft.scope {
-        0 => DesignVariableScope::Testbench,
-        1 => DesignVariableScope::Project,
-        2 => DesignVariableScope::SelectedCell {
-            cell: model.workspace.content.active_view.clone(),
-        },
-        3 => DesignVariableScope::SelectedAnalysis {
-            analysis_id: simulate.active_analysis_instance.ok_or_else(|| {
-                record("Select an analysis before using analysis-only scope.".to_owned())
-            })?,
-        },
-        _ => return Err(record("Ownership scope selection is invalid.".to_owned())),
-    };
     let allowed_range = parse_design_variable_range(&draft.allowed_range)
         .map_err(|message| (Defect::Bounds, message))?;
     let sweep_eligibility = DesignVariableSweepEligibility::ALL
@@ -181,7 +152,6 @@ pub(crate) fn design_variable_from_draft_categorized(
         draft.name.clone(),
         draft.expression.clone(),
         quantity,
-        scope,
         draft.description.clone(),
         allowed_range,
         sweep_eligibility,
@@ -218,7 +188,7 @@ pub(super) fn validate_design_variable_draft(
     cx: &Cx<'_, SimulateFeature>,
     draft: &DesignVariableDraft,
 ) -> Result<(), String> {
-    let variable = design_variable_from_draft(cx.model, cx.state, draft)?;
+    let variable = design_variable_from_draft(draft)?;
     let plan_id = cx.model.sim_setup.stable_analysis_plan()?.id();
     let mut workspace = cx.model.workspace.clone();
     workspace
@@ -235,7 +205,7 @@ pub(crate) fn commit_design_variable(
     cx: &mut Cx<'_, SimulateFeature>,
     draft: &DesignVariableDraft,
 ) -> Result<String, String> {
-    let variable = design_variable_from_draft(cx.model, cx.state, draft)?;
+    let variable = design_variable_from_draft(draft)?;
     let variable_name = variable.name.clone();
     let step = cx.model.setup_snapshot(SetupParts::PLAN_DATA);
     let mut setup = cx.model.sim_setup.clone();
@@ -266,14 +236,8 @@ pub(crate) fn commit_design_variable(
     ))
 }
 
-pub(super) fn design_variable_consumers(
-    cx: &Cx<'_, SimulateFeature>,
-    draft: &DesignVariableDraft,
-) -> String {
-    design_variable_consumers_scoped(
-        cx.model,
-        (draft.scope == 3).then_some(cx.state.active_analysis_instance),
-    )
+pub(super) fn design_variable_consumers(cx: &Cx<'_, SimulateFeature>) -> String {
+    design_variable_consumers_scoped(cx.model, None)
 }
 
 /// Which enabled analyses resolve a variable of this scope.

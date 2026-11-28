@@ -228,7 +228,7 @@ impl DesignVariableImportRow {
 /// A spec sheet part-way through being imported.
 ///
 /// The sheet is read once and kept as cells. Everything the dialog offers —
-/// which column feeds which field, which rows to take, what scope to adopt at —
+/// which column feeds which field and which rows to take —
 /// re-resolves those same cells, so changing a mapping does not ask for the
 /// file again and no control edits the sheet.
 ///
@@ -250,12 +250,6 @@ pub struct DesignVariableImportDraft {
     /// column, holding a position in [`Self::headers`]. `None` is a column the
     /// sheet does not supply, which falls back to the create dialog's default.
     pub binding: Vec<Option<usize>>,
-    /// The ownership scope this import adopts at.
-    pub scope: usize,
-    /// Whether [`Self::scope`] replaces the sheet's own scope column. Off, each
-    /// row keeps what it declares; on, one choice covers the whole sheet, which
-    /// is the common case for a sheet written without scopes in mind.
-    pub override_scope: bool,
     /// The resolved rows, in file order.
     pub rows: Vec<DesignVariableImportRow>,
     /// A refusal about the sheet itself rather than any row of it. While this
@@ -282,8 +276,6 @@ impl DesignVariableImportDraft {
             headers,
             cells,
             binding,
-            scope: 0,
-            override_scope: false,
             rows: Vec::new(),
             sheet_refusal: None,
             validation_error: None,
@@ -298,8 +290,6 @@ impl DesignVariableImportDraft {
             headers: Vec::new(),
             cells: Vec::new(),
             binding: Vec::new(),
-            scope: 0,
-            override_scope: false,
             rows: Vec::new(),
             sheet_refusal: Some(refusal),
             validation_error: None,
@@ -471,7 +461,6 @@ pub struct DesignVariableDraft {
     pub name: String,
     pub expression: String,
     pub quantity: usize,
-    pub scope: usize,
     pub description: String,
     pub allowed_range: String,
     pub sweep_eligibility: usize,
@@ -487,7 +476,6 @@ impl Default for DesignVariableDraft {
             name: String::new(),
             expression: String::new(),
             quantity: 0,
-            scope: 0,
             description: String::new(),
             allowed_range: String::new(),
             sweep_eligibility: 0,

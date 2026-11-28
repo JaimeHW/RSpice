@@ -779,7 +779,6 @@ mod tests {
                     ADDED_VARIABLE,
                     "1.98 V",
                     crate::state::DesignVariableQuantity::Voltage,
-                    crate::state::DesignVariableScope::Project,
                     "comparison fixture",
                     None,
                     crate::state::DesignVariableSweepEligibility::FixedParameter,

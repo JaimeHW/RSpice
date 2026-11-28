@@ -10,8 +10,7 @@ use egui::Ui;
 use crate::product::{DesignVariableId, SimulationPlanId};
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
-    DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
-    DesignVariableSweepEligibility,
+    DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableSweepEligibility,
 };
 use crate::ui::widgets::Button;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
@@ -27,7 +26,7 @@ use super::page_kit::{
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
-const REGISTRY_COLUMNS: [f32; 8] = [0.11, 0.10, 0.14, 0.19, 0.12, 0.10, 0.12, 0.12];
+const REGISTRY_COLUMNS: [f32; 7] = [0.12, 0.11, 0.15, 0.19, 0.14, 0.15, 0.14];
 
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let Some((plan_id, payload)) = plan_payload(cx.model) else {
@@ -142,7 +141,6 @@ fn registry(
                     "Expression",
                     "Resolved",
                     "Bounds",
-                    "Scope",
                     "Used by",
                     "Sweep role",
                 ],
@@ -159,7 +157,6 @@ fn registry(
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
                     ],
                     false,
                     RowPress::Ignored,
@@ -170,20 +167,7 @@ fn registry(
                     || "unbounded".to_owned(),
                     |range| format!("{} … {}", range.minimum, range.maximum),
                 );
-                // Which analyses resolve this variable, from the derivation the
-                // Create-variable dialog previews it with. The registry showed
-                // scope but not reach: "Project" says where the variable is
-                // declared and nothing about which of this plan's analyses
-                // actually read it.
-                let used_by = super::workflows::design_variable_consumers_scoped(
-                    cx.model,
-                    match &variable.scope {
-                        crate::state::DesignVariableScope::SelectedAnalysis { analysis_id } => {
-                            Some(Some(*analysis_id))
-                        }
-                        _ => None,
-                    },
-                );
+                let used_by = super::workflows::design_variable_consumers_scoped(cx.model, None);
                 let (value, value_tone) = match resolved.value(index) {
                     Some(Ok(value)) => (
                         resolved_text(*value, variable.quantity, digits),
@@ -201,7 +185,6 @@ fn registry(
                         (variable.expression.as_str(), Tone::Neutral),
                         (value.as_str(), value_tone),
                         (bounds.as_str(), Tone::Neutral),
-                        (variable.scope.label(), Tone::Neutral),
                         (used_by.as_str(), Tone::Neutral),
                         (variable.sweep_eligibility.label(), Tone::Neutral),
                     ],
@@ -221,8 +204,8 @@ fn registry(
             }
             card_note(
                 ui,
-                "A variable is plan-scoped: every analysis in this plan resolves the same value \
-                 unless it declares an explicit override. A bound is hard and is never clamped: \
+                "Every analysis in this plan reads the same value. A bound is hard and is never \
+                 clamped: \
                  the same check refuses the record at construction, refuses to emit the \
                  deck's parameter lines and refuses to validate the stored simulation \
                  configuration. An out-of-range value therefore cannot reach a run by any route.",
@@ -292,7 +275,7 @@ fn registry(
             // removal that costs something: the expressions that named it are
             // left naming nothing. Removing one nothing reads costs nothing, so
             // it is not worth a modal.
-            match removal_consequences(cx.model, &variables[index]) {
+            match removal_consequences(cx.model) {
                 Some(consequences) => cx.state.plan_removal_review.open(
                     PlanRemovalTarget::Variable { plan: plan_id, id },
                     name,
@@ -350,17 +333,8 @@ fn resolved_text(value: f64, quantity: DesignVariableQuantity, digits: usize) ->
 /// about the same plan.
 ///
 /// [`design_variable_consumers_scoped`]: super::workflows::design_variable_consumers_scoped
-fn removal_consequences(
-    model: &Model,
-    variable: &crate::state::DesignVariable,
-) -> Option<Vec<PlanRemovalConsequence>> {
-    let readers = super::workflows::design_variable_consumers_scoped(
-        model,
-        match &variable.scope {
-            DesignVariableScope::SelectedAnalysis { analysis_id } => Some(Some(*analysis_id)),
-            _ => None,
-        },
-    );
+fn removal_consequences(model: &Model) -> Option<Vec<PlanRemovalConsequence>> {
+    let readers = super::workflows::design_variable_consumers_scoped(model, None);
     if readers == "no enabled analysis consumers" || readers == "plan unavailable" {
         return None;
     }
@@ -369,8 +343,6 @@ fn removal_consequences(
             PlanRemovalTone::Warn,
             "These analyses will not run until the name is removed or declared again.",
         ),
-        PlanRemovalConsequence::stated("Scope it is declared at", variable.scope.label())
-            .explained(PlanRemovalTone::Aside, "Results of earlier runs are kept."),
     ])
 }
 
@@ -389,7 +361,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
             |ui| {
                 card_note(
                     ui,
-                    "Select a row above to see its complete record: quantity, bounds, scope, and \
+                    "Select a row above to see its complete record: quantity, bounds, and \
                      the policy that decides whether an analysis may override it.",
                 );
             },
@@ -425,9 +397,6 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
         .iter()
         .map(|policy| policy.label().to_owned())
         .collect();
-    let scopes = scope_options(cx.model, &variable.scope);
-    let scope_labels: Vec<String> = scopes.iter().map(|(label, _)| label.clone()).collect();
-    let current_scope = scope_label(&variable.scope, &scopes);
 
     // One slot for the whole card: `field_pair` holds two controls at once,
     // and two closures cannot borrow the same variable mutably.
@@ -464,19 +433,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
             );
             field_pair(
                 ui,
-                ("Scope", &mut |ui: &mut Ui, width: f32| {
-                    if let Some(index) = select(
-                        ui,
-                        "simulation.variables.scope",
-                        "Scope",
-                        &current_scope,
-                        &scope_labels,
-                        width,
-                    ) {
-                        edit.set(Some(VariableEdit::Scope(scopes[index].1.clone())));
-                    }
-                }),
-                Some(("Sweep role", &mut |ui: &mut Ui, width: f32| {
+                ("Sweep role", &mut |ui: &mut Ui, width: f32| {
                     if let Some(index) = select(
                         ui,
                         "simulation.variables.sweep",
@@ -489,11 +446,8 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                             DesignVariableSweepEligibility::ALL[index],
                         )));
                     }
-                })),
-            );
-            field_pair(
-                ui,
-                ("Override policy", &mut |ui: &mut Ui, width: f32| {
+                }),
+                Some(("Override policy", &mut |ui: &mut Ui, width: f32| {
                     if let Some(index) = select(
                         ui,
                         "simulation.variables.override",
@@ -506,8 +460,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                             DesignVariableOverridePolicy::ALL[index],
                         )));
                     }
-                }),
-                None,
+                })),
             );
             // Bounds are expressions, not numbers, so suffixes and owner
             // variables survive the round trip. Clearing both makes the
@@ -556,7 +509,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
     });
 
     if let Some(edit) = edit.take() {
-        let detail = edit.detail(&variable.name, &scopes);
+        let detail = edit.detail(&variable.name);
         replace_variable(cx, variable_id, &detail, |target| edit.apply(target));
         return;
     }
@@ -595,7 +548,6 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
 /// One accepted change to a design variable's typed contract.
 enum VariableEdit {
     Quantity(DesignVariableQuantity),
-    Scope(DesignVariableScope),
     SweepRole(DesignVariableSweepEligibility),
     OverridePolicy(DesignVariableOverridePolicy),
 }
@@ -604,21 +556,16 @@ impl VariableEdit {
     fn apply(self, target: &mut crate::state::DesignVariable) {
         match self {
             Self::Quantity(quantity) => target.quantity = quantity,
-            Self::Scope(scope) => target.scope = scope,
             Self::SweepRole(role) => target.sweep_eligibility = role,
             Self::OverridePolicy(policy) => target.override_policy = policy,
         }
     }
 
-    fn detail(&self, name: &str, scopes: &[(String, DesignVariableScope)]) -> String {
+    fn detail(&self, name: &str) -> String {
         match self {
             Self::Quantity(quantity) => format!(
                 "Typed design variable {name} as {}.",
                 quantity.label().to_lowercase()
-            ),
-            Self::Scope(scope) => format!(
-                "Scoped design variable {name} to {}.",
-                scope_label(scope, scopes)
             ),
             Self::SweepRole(role) => format!(
                 "Set design variable {name} to {}.",
@@ -630,64 +577,6 @@ impl VariableEdit {
             ),
         }
     }
-}
-
-/// The scopes a variable may take: the two project-wide ones, one entry per
-/// analysis the plan owns, and — when it already holds one — the cell scope it
-/// was authored with, so selecting nothing else preserves it.
-fn scope_options(
-    model: &Model,
-    current: &DesignVariableScope,
-) -> Vec<(String, DesignVariableScope)> {
-    let mut options = vec![
-        (
-            DesignVariableScope::Project.label().to_owned(),
-            DesignVariableScope::Project,
-        ),
-        (
-            DesignVariableScope::Testbench.label().to_owned(),
-            DesignVariableScope::Testbench,
-        ),
-    ];
-    if let DesignVariableScope::SelectedCell { cell } = current {
-        options.push((
-            format!("Only cell {}", cell.cell),
-            DesignVariableScope::SelectedCell { cell: cell.clone() },
-        ));
-    }
-    if let Ok(plan) = model.sim_setup.stable_analysis_plan() {
-        options.extend(
-            plan.instances()
-                .iter()
-                .enumerate()
-                .map(|(index, instance)| {
-                    (
-                        format!(
-                            "Only {}",
-                            plan.instance_list_label(index)
-                                .unwrap_or_else(|| instance.display_name().to_owned())
-                        ),
-                        DesignVariableScope::SelectedAnalysis {
-                            analysis_id: instance.id(),
-                        },
-                    )
-                }),
-        );
-    }
-    options
-}
-
-/// The label for a stored scope, resolved against the offered options. A scope
-/// bound to an analysis the plan no longer owns says so rather than silently
-/// reading as one of the offered choices.
-fn scope_label(scope: &DesignVariableScope, options: &[(String, DesignVariableScope)]) -> String {
-    options
-        .iter()
-        .find(|(_, candidate)| candidate == scope)
-        .map_or_else(
-            || "Selected analysis · no longer in the plan".to_owned(),
-            |(label, _)| label.clone(),
-        )
 }
 
 /// Replace one variable's typed contract as a single validated transaction.

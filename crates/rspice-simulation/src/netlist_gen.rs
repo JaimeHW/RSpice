@@ -36,9 +36,8 @@ use rspice_design::schematic::owned::Schematic;
 use rspice_design::schematic::wire::Wire;
 use rspice_design_model::Point;
 use rspice_design_model::cell_view::CellViewRef;
-use rspice_simulation_contract::design_variable::{DesignVariable, DesignVariableScope};
+use rspice_simulation_contract::design_variable::DesignVariable;
 use rspice_vocabulary::hierarchy_path::InstancePath;
-use rspice_vocabulary::product::AnalysisInstanceId;
 
 mod added_lines;
 mod connectivity;
@@ -188,26 +187,18 @@ pub fn generate_netlist_hierarchical(
     NetlistGenerator::with_hierarchy(schematic, hierarchy, *source_data).finish(analysis_lines, &[])
 }
 
-/// Resolution context for project design variables. Scope matching uses exact
-/// persisted identities; display labels never participate in execution.
-#[derive(Debug, Clone, Copy)]
-pub struct DesignVariableNetlistContext<'a> {
-    pub active_cell: &'a CellViewRef,
-    pub analysis_instances: &'a [AnalysisInstanceId],
-}
-
-/// Generate a self-contained hierarchical deck with the exact design
-/// variables applicable to this cell/view and run set.
+/// Generate a self-contained hierarchical deck of `active_cell` carrying every
+/// design variable of the plan: a plan's variables are plan-wide.
 pub fn generate_netlist_hierarchical_with_variables(
     schematic: &impl AsRef<SchematicDocument>,
     analysis_lines: &[String],
     hierarchy: &HierarchySource<'_>,
     variables: &[DesignVariable],
-    context: DesignVariableNetlistContext<'_>,
+    active_cell: &CellViewRef,
     source_data: &NetlistSourceData<'_>,
 ) -> NetlistResult {
     let schematic = schematic.as_ref();
-    let parameter_lines = match design_variable_parameter_lines(variables, context) {
+    let parameter_lines = match design_variable_parameter_lines(variables) {
         Ok(lines) => lines,
         Err(errors) => {
             let mut result = NetlistGenerator::with_hierarchy(schematic, hierarchy, *source_data)
@@ -217,7 +208,7 @@ pub fn generate_netlist_hierarchical_with_variables(
         }
     };
     let mut generator = NetlistGenerator::with_hierarchy(schematic, hierarchy, *source_data);
-    generator.cell_view = Some(context.active_cell.clone());
+    generator.cell_view = Some(active_cell.clone());
     generator.finish(analysis_lines, &parameter_lines)
 }
 
@@ -228,7 +219,6 @@ pub fn generate_netlist_hierarchical_with_variables(
 /// range) refuses the deck and says why.
 pub fn design_variable_parameter_lines(
     variables: &[DesignVariable],
-    context: DesignVariableNetlistContext<'_>,
 ) -> Result<Vec<String>, Vec<String>> {
     let mut errors = Vec::new();
     let mut names = std::collections::HashSet::<String>::new();
@@ -261,26 +251,8 @@ pub fn design_variable_parameter_lines(
     Ok(resolved
         .deck_order()
         .iter()
-        .map(|&index| &variables[index])
-        .filter(|variable| design_variable_applies(variable, context))
-        .map(DesignVariable::netlist_statement)
+        .map(|&index| variables[index].netlist_statement())
         .collect())
-}
-
-fn design_variable_applies(
-    variable: &DesignVariable,
-    context: DesignVariableNetlistContext<'_>,
-) -> bool {
-    match &variable.scope {
-        DesignVariableScope::Project => true,
-        // The payload owner is the active named simulation plan/testbench.
-        // Presentation view type is not execution authority.
-        DesignVariableScope::Testbench => true,
-        DesignVariableScope::SelectedCell { cell } => cell == context.active_cell,
-        DesignVariableScope::SelectedAnalysis { analysis_id } => {
-            context.analysis_instances.contains(analysis_id)
-        }
-    }
 }
 
 impl NetlistGenerator<'_> {
@@ -797,12 +769,11 @@ mod tests {
             .with_library_cell(binding)
     }
 
-    fn variable(name: &str, expression: &str, scope: DesignVariableScope) -> DesignVariable {
+    fn variable(name: &str, expression: &str) -> DesignVariable {
         DesignVariable::new(
             name,
             expression,
             rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity::Resistance,
-            scope,
             "netlist fixture",
             None,
             rspice_simulation_contract::design_variable::DesignVariableSweepEligibility::FixedParameter,
@@ -811,40 +782,21 @@ mod tests {
         .expect("fixture variable is valid")
     }
 
+    /// Every variable of the plan is written, in name order, whatever order
+    /// the plan holds them in.
     #[test]
-    fn design_variable_parameter_lines_are_canonical_and_plan_scoped() {
-        let active_cell = CellViewRef::default_top();
-        let other_cell = CellViewRef::new("user", "other", "schematic");
-        let selected_analysis = AnalysisInstanceId::new();
+    fn design_variable_parameter_lines_are_canonical_and_plan_wide() {
         let variables = vec![
-            variable("ZLOAD", "20 kohm", DesignVariableScope::Project),
-            variable("ALOAD", "10 kohm", DesignVariableScope::Testbench),
-            variable(
-                "CELL_ONLY",
-                "30 kohm",
-                DesignVariableScope::SelectedCell { cell: other_cell },
-            ),
-            variable(
-                "ANALYSIS_ONLY",
-                "40 kohm",
-                DesignVariableScope::SelectedAnalysis {
-                    analysis_id: selected_analysis,
-                },
-            ),
+            variable("ZLOAD", "20 kohm"),
+            variable("ALOAD", "10 kohm"),
+            variable("MLOAD", "30 kohm"),
         ];
-        let lines = design_variable_parameter_lines(
-            &variables,
-            DesignVariableNetlistContext {
-                active_cell: &active_cell,
-                analysis_instances: &[selected_analysis],
-            },
-        )
-        .unwrap();
+        let lines = design_variable_parameter_lines(&variables).unwrap();
         assert_eq!(
             lines,
             [
                 ".param ALOAD={10k}",
-                ".param ANALYSIS_ONLY={40k}",
+                ".param MLOAD={30k}",
                 ".param ZLOAD={20k}",
             ]
         );
@@ -854,29 +806,15 @@ mod tests {
     /// names' order, and a loop refuses the deck naming both variables.
     #[test]
     fn a_variable_is_written_after_the_variables_it_names() {
-        let active_cell = CellViewRef::default_top();
-        let context = DesignVariableNetlistContext {
-            active_cell: &active_cell,
-            analysis_instances: &[],
-        };
-        let lines = design_variable_parameter_lines(
-            &[
-                variable("A_LOAD", "2*Z_BASE", DesignVariableScope::Testbench),
-                variable("Z_BASE", "1k", DesignVariableScope::Testbench),
-            ],
-            context,
-        )
+        let lines = design_variable_parameter_lines(&[
+            variable("A_LOAD", "2*Z_BASE"),
+            variable("Z_BASE", "1k"),
+        ])
         .unwrap();
         assert_eq!(lines, [".param Z_BASE={1k}", ".param A_LOAD={2*Z_BASE}"]);
 
-        let errors = design_variable_parameter_lines(
-            &[
-                variable("A", "B", DesignVariableScope::Testbench),
-                variable("B", "A", DesignVariableScope::Testbench),
-            ],
-            context,
-        )
-        .unwrap_err();
+        let errors =
+            design_variable_parameter_lines(&[variable("A", "B"), variable("B", "A")]).unwrap_err();
         assert!(
             errors
                 .iter()

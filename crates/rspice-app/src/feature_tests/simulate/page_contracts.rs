@@ -85,7 +85,7 @@ pub(super) fn render_with(
 #[test]
 fn a_selected_record_paints_every_field_of_its_contract() {
     use rspice_app_state::state::{
-        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableScope,
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity,
         DesignVariableSweepEligibility, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
         SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
     };
@@ -130,7 +130,6 @@ fn a_selected_record_paints_every_field_of_its_contract() {
             "rload",
             "1kohm",
             DesignVariableQuantity::Resistance,
-            DesignVariableScope::Testbench,
             "load resistance",
             None,
             DesignVariableSweepEligibility::FixedParameter,
@@ -148,7 +147,6 @@ fn a_selected_record_paints_every_field_of_its_contract() {
     for field in [
         "Expression",
         "Quantity",
-        "Scope",
         "Sweep role",
         "Override policy",
         "Minimum",

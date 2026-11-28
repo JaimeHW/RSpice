@@ -226,7 +226,6 @@ fn a_param_the_plan_also_defines_stops_the_run_on_the_notes_line() {
             "rtop".to_owned(),
             "2k".to_owned(),
             rspice_simulation_contract::design_variable_quantity::DesignVariableQuantity::Dimensionless,
-            rspice_simulation_contract::design_variable::DesignVariableScope::Testbench,
             String::new(),
             None,
             rspice_simulation_contract::design_variable::DesignVariableSweepEligibility::NestedSweepAndOptimization,
