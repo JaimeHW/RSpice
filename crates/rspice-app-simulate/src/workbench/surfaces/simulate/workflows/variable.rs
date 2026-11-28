@@ -9,23 +9,25 @@ pub(super) fn design_variable_dialog(
 ) {
     draft.validation_error = validate_design_variable_draft(cx, &draft).err();
     let enabled = draft.validation_error.is_none();
-    let resolved_value = design_variable_from_draft(&draft)
-        .and_then(|variable| resolved_in_plan(cx.model, variable))
-        .map_or_else(
-            |_| "unresolved".to_owned(),
-            // Engineering notation: `1.00000000e4 SI` spent eight mantissa
-            // digits and an exponent on `10k`, which is what the author typed
-            // and how every other surface shows the same quantity. The display
-            // spelling, not the deck's: this row is read, not parsed, and the
-            // deck spelling put `1.000Meg SI` in front of a reader who writes
-            // that quantity `1.000M`.
-            |value| {
-                format!(
-                    "{} SI",
-                    crate::state::property_types::format_engineering_display(value)
-                )
-            },
-        );
+    // The number the plan would give the engine, read as the registry's
+    // Resolved column reads it; where the plan cannot resolve it, the reason.
+    let digits = usize::from(
+        cx.model
+            .preferences
+            .result_presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    );
+    let resolved_value = match design_variable_from_draft(&draft) {
+        Ok(variable) => {
+            let quantity = variable.quantity;
+            resolved_in_plan(cx.model, variable).map_or_else(
+                |reason| reason,
+                |value| super::super::page_variables::resolved_text(value, quantity, digits),
+            )
+        }
+        Err(_) => "\u{2014}".to_owned(),
+    };
     let name_conflicts = if draft
         .validation_error
         .as_deref()

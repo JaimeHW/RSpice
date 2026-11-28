@@ -262,7 +262,7 @@ fn registry(
 
 /// A resolved value as the Resolved column reads it: the reader's significant
 /// digits, an SI prefix, and the unit the variable's label names, if any.
-fn resolved_text(value: f64, quantity: DesignVariableQuantity, digits: usize) -> String {
+pub(super) fn resolved_text(value: f64, quantity: DesignVariableQuantity, digits: usize) -> String {
     use rspice_results::number_format::{fmt_column_reading, fmt_register_reading};
     let unit = match quantity {
         DesignVariableQuantity::Resistance => "\u{3a9}",
