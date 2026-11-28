@@ -125,7 +125,7 @@ fn the_timeint_card_leaves_the_global_tolerances_alone() {
     // and they must not land on the global tolerances either.
     let options = SimulationOptions {
         reltol: 4.0e-4,
-        abstol: 6.0e-13,
+        iabstol: 6.0e-13,
         transient_lte_reltol: Some(2.5e-7),
         transient_lte_abstol: Some(3.5e-11),
         temp: 85.0,
@@ -427,7 +427,6 @@ fn an_authored_option_wins_over_the_plan_block_that_states_the_same_key() {
     let options = SimulationOptions {
         reltol: 1.0e-4,
         residual_reltol: 2.0e-4,
-        abstol: 3.0e-13,
         iabstol: 4.0e-13,
         vntol: 5.0e-7,
         chgtol: 6.0e-15,
@@ -600,7 +599,6 @@ fn solver_options_preserve_full_precision_through_the_deck() {
     let options = SimulationOptions {
         reltol: 1.234_567_891_234e-5,
         residual_reltol: 2.345_678_912_345e-5,
-        abstol: 3.456_789_123_456e-13,
         iabstol: 4.567_891_234_567e-13,
         vntol: 5.678_912_345_678e-7,
         chgtol: 6.789_123_456_789e-15,
@@ -628,7 +626,6 @@ fn solver_options_preserve_full_precision_through_the_deck() {
             options.residual_reltol,
             netlist.options.residual_reltol.unwrap(),
         ),
-        ("ABSTOL", options.abstol, netlist.options.abstol.unwrap()),
         ("IABSTOL", options.iabstol, netlist.options.iabstol.unwrap()),
         ("VNTOL", options.vntol, netlist.options.vntol.unwrap()),
         ("CHGTOL", options.chgtol, netlist.options.chgtol.unwrap()),
@@ -679,7 +676,6 @@ fn solver_options_preserve_changes_adjacent_to_defaults() {
     let options = SimulationOptions {
         reltol: default.reltol.next_up(),
         residual_reltol: default.residual_reltol.next_up(),
-        abstol: default.abstol.next_up(),
         iabstol: default.iabstol.next_up(),
         vntol: default.vntol.next_up(),
         chgtol: default.chgtol.next_up(),
@@ -700,7 +696,6 @@ fn solver_options_preserve_changes_adjacent_to_defaults() {
             options.residual_reltol,
             parsed.residual_reltol,
         ),
-        ("ABSTOL", options.abstol, parsed.abstol),
         ("IABSTOL", options.iabstol, parsed.iabstol),
         ("VNTOL", options.vntol, parsed.vntol),
         ("CHGTOL", options.chgtol, parsed.chgtol),

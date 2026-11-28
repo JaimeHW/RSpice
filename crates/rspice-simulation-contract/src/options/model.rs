@@ -30,7 +30,8 @@ pub struct SimulationOptions {
     pub reltol: f64,
     pub residual_reltol: f64,
     pub vntol: f64,
-    pub abstol: f64,
+    /// The one current tolerance, stated on the deck as `IABSTOL`: the
+    /// spelling the resolver prefers over `ABSTOL`.
     pub iabstol: f64,
     pub chgtol: f64,
     pub pivrel: f64,
@@ -145,7 +146,6 @@ struct PersistedSimulationOptions {
     reltol: f64,
     residual_reltol: f64,
     vntol: f64,
-    abstol: f64,
     iabstol: f64,
     chgtol: f64,
     pivrel: f64,
@@ -195,7 +195,6 @@ impl From<PersistedSimulationOptions> for SimulationOptions {
             reltol: fields.reltol,
             residual_reltol: fields.residual_reltol,
             vntol: fields.vntol,
-            abstol: fields.abstol,
             iabstol: fields.iabstol,
             chgtol: fields.chgtol,
             pivrel: fields.pivrel,
@@ -238,7 +237,6 @@ impl Default for SimulationOptions {
             reltol: 1e-3,
             residual_reltol: 1e-3,
             vntol: 1e-6,
-            abstol: 1e-12,
             iabstol: 1e-12,
             chgtol: 1e-14,
             pivrel: 1e-3,
@@ -279,7 +277,6 @@ impl SimulationOptions {
         Self {
             reltol: 1e-2,
             residual_reltol: 1e-2,
-            abstol: 1e-9,
             iabstol: 1e-9,
             itl1: 30,
             itl4: 4,
@@ -297,7 +294,6 @@ impl SimulationOptions {
             reltol: 1e-4,
             residual_reltol: 1e-4,
             vntol: 1e-7,
-            abstol: 1e-14,
             iabstol: 1e-14,
             chgtol: 1e-16,
             itl1: 100,
@@ -352,7 +348,6 @@ impl SimulationOptions {
             reltol: preset.reltol,
             residual_reltol: preset.residual_reltol,
             vntol: preset.vntol,
-            abstol: preset.abstol,
             iabstol: preset.iabstol,
             chgtol: preset.chgtol,
             trtol: preset.trtol,
@@ -450,7 +445,7 @@ impl SimulationOptions {
             transient_new_bp_stepping: None,
             convergence_preset: None,
             reltol: Some(self.reltol),
-            abstol: Some(self.abstol),
+            abstol: None,
             voltage_abstol: Some(self.vntol),
             current_abstol: Some(self.iabstol),
             charge_abstol: Some(self.chgtol),
@@ -508,7 +503,6 @@ impl SimulationOptions {
             ("reltol", self.reltol),
             ("residual_reltol", self.residual_reltol),
             ("vntol", self.vntol),
-            ("abstol", self.abstol),
             ("iabstol", self.iabstol),
             ("chgtol", self.chgtol),
             ("pivtol", self.pivtol),
@@ -627,9 +621,6 @@ impl SimulationOptions {
         }
         if self.residual_reltol != default.residual_reltol {
             lines.push(format!("+ RESIDUAL_RELTOL={:e}", self.residual_reltol));
-        }
-        if self.abstol != default.abstol {
-            lines.push(format!("+ ABSTOL={:e}", self.abstol));
         }
         if self.vntol != default.vntol {
             lines.push(format!("+ VNTOL={:e}", self.vntol));

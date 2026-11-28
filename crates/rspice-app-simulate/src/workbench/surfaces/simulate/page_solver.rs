@@ -400,14 +400,13 @@ fn convergence_criteria(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
                 &mut draft.reltol
             });
             criterion_row(ui, cx, "VNTOL", "voltage floor", |draft| &mut draft.vntol);
-            criterion_row(ui, cx, "ABSTOL", "current floor", |draft| &mut draft.abstol);
+            criterion_row(ui, cx, "IABSTOL", "current tolerance", |draft| {
+                &mut draft.iabstol
+            });
             criterion_row(ui, cx, "CHGTOL", "charge floor", |draft| &mut draft.chgtol);
             ledger_group(ui, "Equation residual · per node, tested separately");
             criterion_row(ui, cx, "RESIDUAL_RELTOL", "relative residual", |draft| {
                 &mut draft.residual_reltol
-            });
-            criterion_row(ui, cx, "IABSTOL", "residual floor", |draft| {
-                &mut draft.iabstol
             });
             card_note(
                 ui,
@@ -1378,9 +1377,7 @@ pub(super) fn plan_preset_value(
     use NumericOverrideOption as O;
     match option {
         O::Reltol => format_value(options.reltol),
-        // The resolver reads `iabstol.or(abstol)`, so the plan's effective
-        // current floor is its `iabstol` exactly when the plan states one.
-        O::Abstol => format_value(plan_current_floor(options)),
+        O::Abstol => format_value(options.iabstol),
         O::Vntol => format_value(options.vntol),
         O::ResidualReltol => format_value(options.residual_reltol),
         O::Gmin => format_value(options.gmin),
@@ -1427,16 +1424,6 @@ pub(super) fn plan_preset_value(
         | O::OutputTimePoints
         | O::RetainEverySignal
         | O::HbInitialState => super::advanced_options::ENGINE_ORIGIN.to_owned(),
-    }
-}
-
-/// The current floor the plan's block resolves to.
-fn plan_current_floor(options: &SimulationOptions) -> f64 {
-    let default = SimulationOptions::default();
-    if (options.iabstol - default.iabstol).abs() > 1e-20 {
-        options.iabstol
-    } else {
-        options.abstol
     }
 }
 

@@ -78,7 +78,6 @@ fn every_edited_option_survives_a_draft_round_trip() {
         reltol: 4.5e-5,
         residual_reltol: 6.5e-5,
         vntol: 3.5e-7,
-        abstol: 7.5e-13,
         iabstol: 8.5e-13,
         chgtol: 9.5e-15,
         ..SimulationOptions::default()

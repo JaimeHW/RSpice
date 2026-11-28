@@ -39,6 +39,38 @@ fn a_solver_preset_leaves_the_temperature_tnom_and_seed_alone() {
     }
 }
 
+/// The plan holds one current tolerance: the number the page shows, the deck
+/// states and the engine's convergence test reads, whichever preset came first.
+#[test]
+fn the_current_tolerance_is_one_stored_number_the_engine_reads() {
+    let mut harness = SimulateTestHost::harness();
+    page_solver::apply_preset(&mut harness.cx(), "Fast");
+    harness.model.sim_setup.session.options_draft.iabstol = "1e-10".to_owned();
+    page_solver::commit_draft(&mut harness.cx());
+
+    let options = &harness.model.sim_setup.options;
+    let stored = serde_json::to_value(options).unwrap();
+    assert!(stored.get("abstol").is_none(), "{stored}");
+    assert_eq!(options.iabstol, 1e-10);
+    let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
+        "current tolerance\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n",
+        options,
+    );
+    let stated: Vec<&str> = deck
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("+ ABSTOL") || line.starts_with("+ IABSTOL"))
+        .collect();
+    assert_eq!(stated, ["+ IABSTOL=1e-10"], "{deck}");
+    let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    assert_eq!(
+        rspice_simulation::netlist_preparation::build_engine_config(&parsed, None)
+            .convergence_config
+            .current_abstol,
+        1e-10
+    );
+}
+
 #[test]
 fn solver_options_iteration_edit_preserves_precise_temperatures() {
     let mut harness = SimulateTestHost::harness();

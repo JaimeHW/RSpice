@@ -22,7 +22,6 @@ pub struct OptionsDialogState {
     pub source_simulator: rspice_simulation_contract::options::SourceSimulator,
     pub reltol: String,
     pub residual_reltol: String,
-    pub abstol: String,
     pub vntol: String,
     pub iabstol: String,
     pub chgtol: String,
@@ -77,7 +76,6 @@ impl OptionsDialogState {
             source_simulator: opts.source_simulator,
             reltol: format_si_value(opts.reltol),
             residual_reltol: format_si_value(opts.residual_reltol),
-            abstol: format_si_value(opts.abstol),
             vntol: format_si_value(opts.vntol),
             iabstol: format_si_value(opts.iabstol),
             chgtol: format_si_value(opts.chgtol),
@@ -138,7 +136,6 @@ impl OptionsDialogState {
         let reltol = parse_field(&self.reltol, "reltol", 1e-3, &mut errors);
         let residual_reltol =
             parse_field(&self.residual_reltol, "residual_reltol", 1e-3, &mut errors);
-        let abstol = parse_field(&self.abstol, "abstol", 1e-12, &mut errors);
         let vntol = parse_field(&self.vntol, "vntol", 1e-6, &mut errors);
         let iabstol = parse_field(&self.iabstol, "iabstol", 1e-12, &mut errors);
         let chgtol = parse_field(&self.chgtol, "chgtol", 1e-14, &mut errors);
@@ -184,7 +181,6 @@ impl OptionsDialogState {
             source_simulator: self.source_simulator,
             reltol,
             residual_reltol,
-            abstol,
             vntol,
             iabstol,
             chgtol,

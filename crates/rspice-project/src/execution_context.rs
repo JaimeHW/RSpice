@@ -401,7 +401,6 @@ fn validate_solver_options(plan: &SimulationSetup) -> Result<(), String> {
         ("reltol", options.reltol),
         ("residual_reltol", options.residual_reltol),
         ("vntol", options.vntol),
-        ("abstol", options.abstol),
         ("iabstol", options.iabstol),
         ("chgtol", options.chgtol),
         ("pivrel", options.pivrel),

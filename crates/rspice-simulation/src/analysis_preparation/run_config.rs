@@ -418,7 +418,7 @@ fn transient_study_base_mode(
 
 pub(super) fn periodic_solver_tolerances(state: &SimulationSetup) -> (f64, f64) {
     let opts = &state.options;
-    (opts.reltol, opts.abstol)
+    (opts.reltol, opts.iabstol)
 }
 
 /// The tolerances a periodic small-signal run solves at.

@@ -96,7 +96,6 @@ pub fn project_with_execution_context() -> ProjectSnapshot {
     setup.options.reltol = 2e-4;
     setup.options.residual_reltol = 3e-4;
     setup.options.vntol = 4e-7;
-    setup.options.abstol = 5e-13;
     setup.options.iabstol = 6e-13;
     setup.options.chgtol = 7e-15;
     setup.options.pivrel = 8e-4;

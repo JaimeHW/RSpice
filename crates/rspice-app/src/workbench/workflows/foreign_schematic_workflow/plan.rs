@@ -633,7 +633,7 @@ fn options(plan: &mut ForeignPlan, card: ForeignCard) {
                 true
             }
             ("abstol", Some(number), _) => {
-                options.abstol = number;
+                options.iabstol = number;
                 true
             }
             ("vntol", Some(number), _) => {
