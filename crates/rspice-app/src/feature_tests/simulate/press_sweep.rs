@@ -529,9 +529,9 @@ fn announced(node: &Node) -> String {
 /// empty registry, so its enabled controls are the toolbar's.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Analyses/Transient", 49),
-    ("Analyses/Ac", 7),
+    ("Analyses/Ac", 5),
     ("Analyses/DcSweep", 13),
-    ("Analyses/Noise", 11),
+    ("Analyses/Noise", 10),
     ("Analyses/Stb", 8),
     ("Analyses/Pss", 30),
     ("Analyses/Temperature", 7),
@@ -635,8 +635,11 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 ///
 /// No analysis form offers a plan-wide solver option any more, even one the
 /// analysis states, so the operating point's options fixture lost the
-/// conductance-floor field it carried for exactly that case (350).
-const PRESSED_FLOOR: usize = 350;
+/// conductance-floor field it carried for exactly that case; and an AC or
+/// noise analysis no longer needs an operating point before it, so their
+/// forms lost the prerequisite row and its bind control, three presses
+/// between them (347).
+const PRESSED_FLOOR: usize = 347;
 
 /// Controls that are wired to nothing.
 ///

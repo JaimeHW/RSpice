@@ -1078,15 +1078,9 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
     let (ac_id, _) = source_plan
         .insert_at(AnalysisKind::Ac, 1)
         .expect("AC inserts second");
-    source_plan
-        .bind_dependency(ac_id, AnalysisKind::OperatingPoint, op_id)
-        .expect("AC binds exact OP");
     let (noise_id, _) = source_plan
         .insert_at(AnalysisKind::Noise, 2)
         .expect("noise inserts third");
-    source_plan
-        .bind_dependency(noise_id, AnalysisKind::OperatingPoint, op_id)
-        .expect("noise binds exact OP");
     source.model.sim_setup.options.reltol = 2e-4;
     source.model.sim_setup.options.method = IntegrationMethod::Gear2;
     source.model.sim_setup.options.solver = MatrixSolver::SparseLu;
@@ -1149,22 +1143,6 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
             .map(|instance| instance.id())
             .collect::<Vec<_>>(),
         vec![op_id, ac_id, noise_id, transient_id]
-    );
-    assert_eq!(
-        restored
-            .instance(ac_id)
-            .expect("AC restored")
-            .dependencies()[0]
-            .target(),
-        op_id
-    );
-    assert_eq!(
-        restored
-            .instance(noise_id)
-            .expect("noise restored")
-            .dependencies()[0]
-            .target(),
-        op_id
     );
     assert!(restored.instances().iter().all(|instance| {
         instance.enabled() && instance.lifecycle() == AnalysisLifecycleState::Draft

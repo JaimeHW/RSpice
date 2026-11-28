@@ -227,23 +227,8 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the fixture plan is migrated");
-        // Both small-signal kinds take their linearization from an operating
-        // point, and a plan whose prerequisites are unbound does not freeze.
-        // The lookups finish before `insert` borrows the plan mutably, so each
+        // The lookup finishes before `insert` borrows the plan mutably, so it
         // is two statements rather than one `unwrap_or_else`.
-        let existing_op = plan
-            .instances()
-            .iter()
-            .find(|instance| instance.kind() == AnalysisKind::OperatingPoint)
-            .map(|instance| instance.id());
-        let op = match existing_op {
-            Some(id) => id,
-            None => {
-                plan.insert_at(AnalysisKind::OperatingPoint, 0)
-                    .expect("OP inserts")
-                    .0
-            }
-        };
         let existing_ac = plan
             .instances()
             .iter()
@@ -253,8 +238,6 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
             Some(id) => id,
             None => plan.insert(AnalysisKind::Ac).expect("AC inserts").0,
         };
-        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
-            .expect("AC binds its operating point");
         plan.edit(ac, |draft| {
             let AnalysisDraft::Ac(draft) = draft else {
                 panic!("an AC instance holds an AC draft");
@@ -281,8 +264,6 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
             draft.fstop = "100k".to_owned();
         })
         .expect("the noise axis is authorable");
-        plan.bind_dependency(noise, AnalysisKind::OperatingPoint, op)
-            .expect("NOISE binds its operating point");
         (ac, noise)
     };
 

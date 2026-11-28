@@ -566,10 +566,10 @@ fn removing_an_empty_capture_group_needs_no_review() {
 
 /// A plan with one analysis bound to another, both named distinctly.
 ///
-/// Returns the application it built, then `(dependent, prerequisite)`. The
-/// names are authored rather than left as the kind labels so an assertion about
-/// a name cannot pass on a coincidence: "AC" is a word two default labels and a
-/// receipt already carry.
+/// Returns the application it built, then `(dependent, prerequisite)`: an FFT
+/// and the transient it reads. The names are authored rather than left as the
+/// kind labels so an assertion about a name cannot pass on a coincidence:
+/// "Transient" is a word two default labels and a receipt already carry.
 fn bound_pair() -> (
     RSpiceApp,
     rspice_app_state::product::AnalysisInstanceId,
@@ -584,8 +584,8 @@ fn bound_pair() -> (
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("stable plan")
-        .insert(AnalysisKind::Ac)
-        .expect("AC inserts")
+        .insert(AnalysisKind::Fft)
+        .expect("FFT inserts")
         .0;
     lifecycle::apply_analysis_action(
         &mut crate::workbench::features::cx(&mut app),
@@ -599,7 +599,7 @@ fn bound_pair() -> (
         .stable_analysis_plan()
         .expect("stable plan")
         .instance(dependent)
-        .expect("AC is in the plan")
+        .expect("FFT is in the plan")
         .dependencies()[0]
         .target();
     let plan = app
@@ -608,9 +608,9 @@ fn bound_pair() -> (
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("stable plan");
-    plan.set_instance_name(dependent, "Gain sweep")
+    plan.set_instance_name(dependent, "Output spectrum")
         .expect("the dependent takes a name");
-    plan.set_instance_name(prerequisite, "Bias point")
+    plan.set_instance_name(prerequisite, "Settling run")
         .expect("the prerequisite takes a name");
     (app, dependent, prerequisite)
 }
@@ -650,12 +650,12 @@ fn an_analysis_something_is_bound_to_refuses_removal_instead_of_reviewing_it() {
         "stating a refusal must not remove the analysis"
     );
     assert_eq!(
-        app.state.simulate.plan_removal_refusal.label, "Bias point",
+        app.state.simulate.plan_removal_refusal.label, "Settling run",
         "the refusal must name the analysis by what it shows under"
     );
     assert_eq!(
         app.state.simulate.plan_removal_refusal.blockers,
-        vec![(dependent, "Gain sweep".to_owned())],
+        vec![(dependent, "Output spectrum".to_owned())],
         "the blocker must be carried by display name, and by id for the hop"
     );
     assert!(
@@ -738,7 +738,7 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
         rspice_app_simulate::workbench::app::dialogs::plan_removal::PlanRemovalTarget::Analysis(
             prerequisite,
         ),
-        "Bias point".to_owned(),
+        "Settling run".to_owned(),
         Vec::new(),
     );
     app.state.simulate.plan_removal_review.confirmed = true;
@@ -765,7 +765,7 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
         "the transaction must still refuse fail-closed, got: {status}"
     );
     assert!(
-        status.contains("Bias point") && status.contains("Gain sweep"),
+        status.contains("Settling run") && status.contains("Output spectrum"),
         "the refusal must name both analyses by what they show under, got: {status}"
     );
     assert!(

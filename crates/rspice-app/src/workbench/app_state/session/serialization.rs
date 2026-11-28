@@ -1110,7 +1110,7 @@ mod tests {
         .expect("transient draft edit commits");
         let (op_id, _) = plan
             .insert_at(AnalysisKind::OperatingPoint, 0)
-            .expect("OP inserts before dependent analyses");
+            .expect("OP inserts first");
         let (ac_id, _) = plan
             .insert_at(AnalysisKind::Ac, 1)
             .expect("AC inserts in explicit order");
@@ -1121,8 +1121,6 @@ mod tests {
             ac.points = "also unfinished".to_owned();
         })
         .expect("AC draft edit commits");
-        plan.bind_dependency(ac_id, AnalysisKind::OperatingPoint, op_id)
-            .expect("AC binds the exact OP identity");
         state.model.model_library_manager.clear();
         let mut library = ModelLibrary::new("unsaved_session_models");
         let mut model = DeviceModel::new("nch_session", ModelType::Nmos);
@@ -1150,8 +1148,6 @@ mod tests {
             panic!("AC identity must retain its draft kind");
         };
         assert_eq!(ac_draft.points, "also unfinished");
-        assert_eq!(ac.dependencies().len(), 1);
-        assert_eq!(ac.dependencies()[0].target(), op_id);
         let transient = restored_plan
             .instance(transient_id)
             .expect("transient identity retained");

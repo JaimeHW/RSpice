@@ -219,10 +219,10 @@ fn pss_source_catalog_requires_the_complete_exact_tone_set() {
 fn dependency_repair_cta_describes_the_first_repairable_issue() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
     let (dependent, _) = plan
-        .insert(AnalysisKind::Ac)
+        .insert(AnalysisKind::Fft)
         .expect("dependent analysis inserts");
     let target = AnalysisInstanceId::new();
-    let dependency = AnalysisDependency::new(AnalysisKind::OperatingPoint, target);
+    let dependency = AnalysisDependency::new(AnalysisKind::Transient, target);
 
     assert_eq!(
         dependency_repair_cta(
@@ -231,55 +231,58 @@ fn dependency_repair_cta_describes_the_first_repairable_issue() {
                 AnalysisPlanIssue::NoEnabledInstances,
                 AnalysisPlanIssue::MissingPrerequisite {
                     dependent,
-                    prerequisite: AnalysisKind::OperatingPoint,
+                    prerequisite: AnalysisKind::Transient,
                 },
             ],
             &[],
         )
         .as_deref(),
-        Some("Add Operating point")
+        Some("Add compatible Transient")
     );
-    let (op, _) = plan
-        .insert_at(AnalysisKind::OperatingPoint, 0)
-        .expect("candidate OP inserts");
-    plan.set_enabled(op, false).expect("candidate OP disables");
+    let (transient, _) = plan
+        .insert_at(AnalysisKind::Transient, 0)
+        .expect("candidate transient inserts");
+    plan.set_enabled(transient, false)
+        .expect("candidate transient disables");
     assert_eq!(
         dependency_repair_cta(
             &plan,
             &[AnalysisPlanIssue::MissingPrerequisite {
                 dependent,
-                prerequisite: AnalysisKind::OperatingPoint,
+                prerequisite: AnalysisKind::Transient,
             }],
             &[],
         )
         .as_deref(),
-        Some("Enable Operating point")
+        Some("Enable compatible Transient")
     );
-    plan.set_enabled(op, true).expect("candidate OP enables");
+    plan.set_enabled(transient, true)
+        .expect("candidate transient enables");
     assert_eq!(
         dependency_repair_cta(
             &plan,
             &[AnalysisPlanIssue::MissingPrerequisite {
                 dependent,
-                prerequisite: AnalysisKind::OperatingPoint,
+                prerequisite: AnalysisKind::Transient,
             }],
             &[],
         )
         .as_deref(),
-        Some("Bind Operating point")
+        Some("Bind compatible Transient")
     );
-    plan.reorder(op, 1).expect("unbound OP can move later");
+    plan.reorder(transient, 1)
+        .expect("unbound transient can move later");
     assert_eq!(
         dependency_repair_cta(
             &plan,
             &[AnalysisPlanIssue::MissingPrerequisite {
                 dependent,
-                prerequisite: AnalysisKind::OperatingPoint,
+                prerequisite: AnalysisKind::Transient,
             }],
             &[],
         )
         .as_deref(),
-        Some("Move Operating point earlier")
+        Some("Move compatible Transient earlier")
     );
     assert_eq!(
         dependency_repair_cta(
@@ -288,7 +291,7 @@ fn dependency_repair_cta_describes_the_first_repairable_issue() {
             &[dependency],
         )
         .as_deref(),
-        Some("Enable Operating point")
+        Some("Enable Transient")
     );
     assert_eq!(
         dependency_repair_cta(
@@ -300,7 +303,7 @@ fn dependency_repair_cta_describes_the_first_repairable_issue() {
             &[dependency],
         )
         .as_deref(),
-        Some("Enable and move Operating point earlier")
+        Some("Enable and move Transient earlier")
     );
     assert_eq!(
         dependency_repair_cta(
@@ -309,21 +312,21 @@ fn dependency_repair_cta_describes_the_first_repairable_issue() {
             &[dependency],
         )
         .as_deref(),
-        Some("Move Operating point earlier")
+        Some("Move Transient earlier")
     );
     assert_eq!(
         dependency_repair_cta(
             &plan,
             &[AnalysisPlanIssue::WrongDependencyKind {
                 dependent,
-                prerequisite: AnalysisKind::OperatingPoint,
+                prerequisite: AnalysisKind::Transient,
                 target,
-                actual: AnalysisKind::Transient,
+                actual: AnalysisKind::OperatingPoint,
             }],
             &[dependency],
         )
         .as_deref(),
-        Some("Move Operating point earlier")
+        Some("Move compatible Transient earlier")
     );
     assert_eq!(
         dependency_repair_cta(
@@ -332,21 +335,21 @@ fn dependency_repair_cta_describes_the_first_repairable_issue() {
             &[dependency],
         )
         .as_deref(),
-        Some("Move Operating point earlier")
+        Some("Move compatible Transient earlier")
     );
     assert_eq!(
         dependency_repair_cta(
             &plan,
             &[AnalysisPlanIssue::DuplicateDependencyRole {
                 dependent,
-                prerequisite: AnalysisKind::OperatingPoint,
+                prerequisite: AnalysisKind::Transient,
             }],
             &[dependency],
         )
         .as_deref(),
-        Some("Resolve duplicate Operating point binding")
+        Some("Resolve duplicate Transient binding")
     );
-    let self_dependency = AnalysisDependency::new(AnalysisKind::OperatingPoint, dependent);
+    let self_dependency = AnalysisDependency::new(AnalysisKind::Transient, dependent);
     assert_eq!(
         dependency_repair_cta(
             &plan,
@@ -354,50 +357,52 @@ fn dependency_repair_cta_describes_the_first_repairable_issue() {
             &[self_dependency],
         )
         .as_deref(),
-        Some("Move Operating point earlier")
+        Some("Move compatible Transient earlier")
     );
 
     let mut no_prerequisites = crate::simulation::plan::SimulationPlan::empty();
-    let (op, _) = no_prerequisites
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("OP inserts");
-    let unexpected_self = AnalysisDependency::new(AnalysisKind::Ac, op);
+    let (transient, _) = no_prerequisites
+        .insert(AnalysisKind::Transient)
+        .expect("transient inserts");
+    let unexpected_self = AnalysisDependency::new(AnalysisKind::Fft, transient);
     assert_eq!(
         dependency_repair_cta(
             &no_prerequisites,
             &[
                 AnalysisPlanIssue::UnexpectedDependencyRole {
-                    dependent: op,
-                    prerequisite: AnalysisKind::Ac,
+                    dependent: transient,
+                    prerequisite: AnalysisKind::Fft,
                 },
-                AnalysisPlanIssue::SelfDependency { dependent: op },
+                AnalysisPlanIssue::SelfDependency {
+                    dependent: transient
+                },
             ],
             &[unexpected_self],
         )
         .as_deref(),
-        Some("Remove unexpected AC response binding"),
+        Some("Remove unexpected FFT spectrum binding"),
         "an unexpected legacy edge must be removable with one atomic quick repair"
     );
 
     let mut mixed_corruption = crate::simulation::plan::SimulationPlan::empty();
-    let (ac, _) = mixed_corruption
-        .insert(AnalysisKind::Ac)
-        .expect("AC inserts");
-    let unexpected_self = AnalysisDependency::new(AnalysisKind::Ac, ac);
+    let (fft, _) = mixed_corruption
+        .insert(AnalysisKind::Fft)
+        .expect("FFT inserts");
+    let unexpected_self = AnalysisDependency::new(AnalysisKind::Fft, fft);
     assert_eq!(
         dependency_repair_cta(
             &mixed_corruption,
             &[
-                AnalysisPlanIssue::SelfDependency { dependent: ac },
+                AnalysisPlanIssue::SelfDependency { dependent: fft },
                 AnalysisPlanIssue::MissingPrerequisite {
-                    dependent: ac,
-                    prerequisite: AnalysisKind::OperatingPoint,
+                    dependent: fft,
+                    prerequisite: AnalysisKind::Transient,
                 },
             ],
             &[unexpected_self],
         )
         .as_deref(),
-        Some("Add Operating point"),
+        Some("Add compatible Transient"),
         "an undeclared corrupt edge must not hide a repairable declared prerequisite"
     );
 }
@@ -408,7 +413,7 @@ fn every_declared_prerequisite_kind_has_a_contextual_add_action() {
         .into_iter()
         .filter(|kind| !kind.prerequisites().is_empty())
         .collect::<Vec<_>>();
-    assert_eq!(dependent_kinds.len(), 26);
+    assert_eq!(dependent_kinds.len(), 15);
 
     for kind in dependent_kinds {
         let mut plan = crate::simulation::plan::SimulationPlan::empty();
@@ -582,59 +587,53 @@ fn dependent_surfaces_include_transitive_prerequisite_failures() {
 #[test]
 fn selected_dependency_closure_ignores_wrong_dangling_self_and_duplicate_edges() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
     let (pss, _) = plan.insert(AnalysisKind::Pss).expect("PSS inserts");
     name_pss_tone(&mut plan, pss);
-    let (first_op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("first OP inserts");
-    let (second_op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("second OP inserts");
+    let (first_transient, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("first transient inserts");
+    let (second_transient, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("second transient inserts");
 
     let with_dependencies = |dependencies: Vec<AnalysisDependency>| {
         let mut encoded = serde_json::to_value(&plan).expect("plan serializes");
         let instances = encoded["instances"]
             .as_array_mut()
             .expect("instances serialize as an array");
-        let ac_instance = instances
+        let fft_instance = instances
             .iter_mut()
-            .find(|instance| instance["id"] == serde_json::json!(ac))
-            .expect("serialized AC remains present");
-        ac_instance["dependencies"] =
+            .find(|instance| instance["id"] == serde_json::json!(fft))
+            .expect("serialized FFT remains present");
+        fft_instance["dependencies"] =
             serde_json::to_value(dependencies).expect("dependencies serialize");
         serde_json::from_value::<crate::simulation::plan::SimulationPlan>(encoded)
             .expect("raw corrupt fixture deserializes")
     };
     let assert_root_only = |dependencies| {
         let corrupt = with_dependencies(dependencies);
-        assert_eq!(dependency_closure_ids(&corrupt, ac), HashSet::from([ac]));
+        assert_eq!(dependency_closure_ids(&corrupt, fft), HashSet::from([fft]));
     };
 
+    assert_root_only(vec![AnalysisDependency::new(AnalysisKind::Transient, pss)]);
     assert_root_only(vec![AnalysisDependency::new(
-        AnalysisKind::OperatingPoint,
-        pss,
-    )]);
-    assert_root_only(vec![AnalysisDependency::new(
-        AnalysisKind::OperatingPoint,
+        AnalysisKind::Transient,
         AnalysisInstanceId::new(),
     )]);
-    assert_root_only(vec![AnalysisDependency::new(
-        AnalysisKind::OperatingPoint,
-        ac,
-    )]);
+    assert_root_only(vec![AnalysisDependency::new(AnalysisKind::Transient, fft)]);
     assert_root_only(vec![
-        AnalysisDependency::new(AnalysisKind::OperatingPoint, first_op),
-        AnalysisDependency::new(AnalysisKind::OperatingPoint, second_op),
+        AnalysisDependency::new(AnalysisKind::Transient, first_transient),
+        AnalysisDependency::new(AnalysisKind::Transient, second_transient),
     ]);
 
     let valid = with_dependencies(vec![AnalysisDependency::new(
-        AnalysisKind::OperatingPoint,
-        first_op,
+        AnalysisKind::Transient,
+        first_transient,
     )]);
     assert_eq!(
-        dependency_closure_ids(&valid, ac),
-        HashSet::from([ac, first_op])
+        dependency_closure_ids(&valid, fft),
+        HashSet::from([fft, first_transient])
     );
 }
 
@@ -686,19 +685,19 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
 #[test]
 fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
-    let (first_op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("first OP inserts");
-    let (second_op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("second OP inserts");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    plan.bind_dependency(ac, AnalysisKind::OperatingPoint, first_op)
-        .expect("exact first OP binding succeeds");
+    let (first_transient, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("first transient inserts");
+    let (second_transient, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("second transient inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    plan.bind_dependency(fft, AnalysisKind::Transient, first_transient)
+        .expect("exact first transient binding succeeds");
 
     let mut harness = SimulateTestHost::harness();
     harness.model.sim_setup.analysis_plan = Some(plan);
-    harness.state.active_analysis_instance = Some(ac);
+    harness.state.active_analysis_instance = Some(fft);
     let dependency_sources = EnvelopeSourceCatalog {
         source_digest: ContentDigest::from_bytes([7; 32]),
         names: vec!["VIN_DIFF".to_owned()],
@@ -711,24 +710,25 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
     let candidates = selected
         .prerequisite_candidates
         .iter()
-        .find_map(|(kind, candidates)| {
-            (*kind == AnalysisKind::OperatingPoint).then_some(candidates)
-        })
-        .expect("OP candidates are available");
+        .find_map(|(kind, candidates)| (*kind == AnalysisKind::Transient).then_some(candidates))
+        .expect("transient candidates are available");
     assert_eq!(candidates.len(), 2);
-    assert_eq!(candidates[0].id, first_op);
-    assert_eq!(candidates[1].id, second_op);
+    assert_eq!(candidates[0].id, first_transient);
+    assert_eq!(candidates[1].id, second_transient);
     // A bound prerequisite is named by what it is called, never its id.
     let first_name = harness
         .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the plan is stable")
-        .instance(first_op)
-        .expect("the first OP is in the plan")
+        .instance(first_transient)
+        .expect("the first transient is in the plan")
         .display_name()
         .to_owned();
-    assert_eq!(selected.dependency_names, vec![(first_op, first_name)]);
+    assert_eq!(
+        selected.dependency_names,
+        vec![(first_transient, first_name)]
+    );
 }
 
 #[test]
@@ -791,28 +791,28 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
 #[test]
 fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     let mut plan = crate::simulation::plan::SimulationPlan::empty();
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    plan.set_enabled(ac, false).expect("AC disables");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    plan.set_enabled(fft, false).expect("FFT disables");
     let mut harness = SimulateTestHost::harness();
     harness.model.sim_setup.analysis_plan = Some(plan);
-    harness.state.active_analysis_instance = Some(ac);
+    harness.state.active_analysis_instance = Some(fft);
     let sources = build_envelope_source_catalog(&harness.model);
 
     let selected = selected_analysis(&harness.model, &harness.state, &sources)
         .expect("selection resolves")
-        .expect("AC remains selected");
+        .expect("FFT remains selected");
     assert!(!selected.enabled);
     assert_eq!(
         selected.repair_label.as_deref(),
-        Some("Add Operating point")
+        Some("Add compatible Transient")
     );
 
-    apply_analysis_action(&mut harness.cx(), ac, AnalysisAction::RepairDependencies);
+    apply_analysis_action(&mut harness.cx(), fft, AnalysisAction::RepairDependencies);
     let plan = harness.model.sim_setup.stable_analysis_plan().unwrap();
-    let dependency = plan.instance(ac).unwrap().dependencies()[0];
-    let op = plan.instance(dependency.target()).unwrap();
-    assert_eq!(op.kind(), AnalysisKind::OperatingPoint);
-    assert!(op.enabled());
+    let dependency = plan.instance(fft).unwrap().dependencies()[0];
+    let transient = plan.instance(dependency.target()).unwrap();
+    assert_eq!(transient.kind(), AnalysisKind::Transient);
+    assert!(transient.enabled());
     assert!(
         harness
             .model

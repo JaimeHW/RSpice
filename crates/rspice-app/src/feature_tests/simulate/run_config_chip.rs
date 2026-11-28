@@ -123,8 +123,9 @@ fn three_analyses() -> RSpiceApp {
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the default plan");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("an AC sweep");
-    plan.repair_dependencies(ac).expect("its operating point");
+    plan.insert(AnalysisKind::OperatingPoint)
+        .expect("an operating point");
+    plan.insert(AnalysisKind::Ac).expect("an AC sweep");
     app
 }
 
@@ -323,7 +324,7 @@ fn unticking_an_analysis_keeps_it_in_the_plan_and_out_of_the_run() {
     assert!(
         chip(&user)
             .0
-            .starts_with("Analysis AC \u{b7} 1 Hz to 1 GHz, plan "),
+            .starts_with("Analysis Operating point +1, plan "),
         "{}",
         chip(&user).0
     );

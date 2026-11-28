@@ -1397,13 +1397,10 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
     use rspice_simulation_contract::mc_draft::{McConfig, McDialogState};
     let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
-    let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (ac, _) = plan.insert(AnalysisKind::Ac).unwrap();
     let (other, _) = plan.insert(AnalysisKind::Ac).unwrap();
     let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
     for (id, stop) in [(ac, "1000"), (other, "9000")] {
-        plan.bind_dependency(id, AnalysisKind::OperatingPoint, op)
-            .unwrap();
         plan.edit(id, |draft| {
             let AnalysisDraft::Ac(draft) = draft else {
                 unreachable!()
@@ -1580,10 +1577,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
     }];
     let mut state = RunTestHost::default();
     let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
-    let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (ac, _) = plan.insert(AnalysisKind::Ac).unwrap();
-    plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
-        .unwrap();
     let (opt, _) = plan.insert(AnalysisKind::Optimization).unwrap();
     let mut setup = OptimizationDialogState::from_config(&OptimizationConfig {
         base_analysis: Some(ac),
@@ -1708,9 +1702,6 @@ fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
         .analysis_plan
         .as_mut()
         .expect("stable plan");
-    let (op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("OP inserts");
     let (noise, _) = plan.insert(AnalysisKind::Noise).expect("noise inserts");
     plan.edit(noise, |draft| {
         let AnalysisDraft::Noise(draft) = draft else {
@@ -1724,8 +1715,6 @@ fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
         draft.integration_mode = crate::simulation::config::NoiseIntegrationMode::Disabled;
     })
     .expect("noise edits");
-    plan.bind_dependency(noise, AnalysisKind::OperatingPoint, op)
-        .expect("noise binds OP");
 
     let frozen =
         SimulationController::build_analysis_plan(&state.model.sim_setup).expect("plan freezes");
@@ -1842,19 +1831,12 @@ fn same_kind_sparameter_instances_freeze_independent_export_policies() {
         .analysis_plan
         .as_mut()
         .expect("new state owns a stable plan");
-    let (op_id, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("operating-point prerequisite inserts");
     let (v1_id, _) = plan
         .insert(AnalysisKind::SParameter)
         .expect("first S-parameter analysis inserts");
     let (disabled_id, _) = plan
         .insert(AnalysisKind::SParameter)
         .expect("second S-parameter analysis inserts");
-    plan.bind_dependency(v1_id, AnalysisKind::OperatingPoint, op_id)
-        .expect("first S-parameter analysis binds OP");
-    plan.bind_dependency(disabled_id, AnalysisKind::OperatingPoint, op_id)
-        .expect("second S-parameter analysis binds OP");
     plan.edit(v1_id, |draft| {
         let AnalysisDraft::SParameter(draft) = draft else {
             panic!("expected S-parameter draft");

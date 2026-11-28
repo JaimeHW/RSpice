@@ -656,12 +656,9 @@ fn plan_clone_refreshes_all_identities_and_remaps_the_dependency_graph() {
             draft.stop = "19u".to_owned();
         })
         .expect("source draft edits");
-    let (op, _) = source
-        .insert_at(AnalysisKind::OperatingPoint, 0)
-        .expect("OP inserts");
-    let (ac, _) = source.insert(AnalysisKind::Ac).expect("AC inserts");
+    let (fft, _) = source.insert(AnalysisKind::Fft).expect("FFT inserts");
     source
-        .bind_dependency(ac, AnalysisKind::OperatingPoint, op)
+        .bind_dependency(fft, AnalysisKind::Transient, transient)
         .expect("dependency binds");
     let (retired, _) = source
         .insert(AnalysisKind::DcSweep)
@@ -711,22 +708,22 @@ fn plan_clone_refreshes_all_identities_and_remaps_the_dependency_graph() {
         );
     }
 
-    let cloned_op = clone
+    let cloned_transient = clone
         .instances()
         .iter()
-        .find(|instance| instance.kind() == AnalysisKind::OperatingPoint)
-        .expect("cloned OP exists")
+        .find(|instance| instance.kind() == AnalysisKind::Transient)
+        .expect("cloned transient exists")
         .id();
-    let cloned_ac = clone
+    let cloned_fft = clone
         .instances()
         .iter()
-        .find(|instance| instance.kind() == AnalysisKind::Ac)
-        .expect("cloned AC exists");
+        .find(|instance| instance.kind() == AnalysisKind::Fft)
+        .expect("cloned FFT exists");
     assert_eq!(
-        cloned_ac.dependencies(),
+        cloned_fft.dependencies(),
         &[AnalysisDependency::new(
-            AnalysisKind::OperatingPoint,
-            cloned_op
+            AnalysisKind::Transient,
+            cloned_transient
         )]
     );
     clone.validate_structure().expect("clone remains valid");
@@ -804,12 +801,12 @@ fn restore_relinquishes_execution_authority_without_changing_identity_or_revisio
 #[test]
 fn insertion_allows_missing_prerequisite_but_freeze_rejects_it() {
     let mut plan = SimulationPlan::new();
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
     assert!(
         plan.validation_issues()
             .contains(&AnalysisPlanIssue::MissingPrerequisite {
-                dependent: ac,
-                prerequisite: AnalysisKind::OperatingPoint,
+                dependent: fft,
+                prerequisite: AnalysisKind::Transient,
             })
     );
     plan.validate_structure()
@@ -846,72 +843,72 @@ fn quasi_periodic_dependencies_form_a_stable_explicit_graph() {
 #[test]
 fn dependency_repair_inserts_a_missing_prerequisite_before_its_consumer() {
     let mut plan = SimulationPlan::empty();
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
 
     let (repair, receipt) = plan
-        .repair_dependencies(ac)
-        .expect("missing OP repairs atomically");
+        .repair_dependencies(fft)
+        .expect("missing transient repairs atomically");
 
-    assert_eq!(repair.dependent(), ac);
+    assert_eq!(repair.dependent(), fft);
     assert_eq!(repair.inserted().len(), 1);
     assert!(repair.enabled().is_empty());
     assert!(repair.moved().is_empty());
     assert_eq!(repair.bound().len(), 1);
-    let op = repair.inserted()[0];
-    assert_eq!(plan.instances()[0].id(), op);
-    assert_eq!(plan.instances()[1].id(), ac);
+    let tran = repair.inserted()[0];
+    assert_eq!(plan.instances()[0].id(), tran);
+    assert_eq!(plan.instances()[1].id(), fft);
     assert_eq!(
-        plan.instance(ac).unwrap().dependencies(),
-        &[AnalysisDependency::new(AnalysisKind::OperatingPoint, op)]
+        plan.instance(fft).unwrap().dependencies(),
+        &[AnalysisDependency::new(AnalysisKind::Transient, tran)]
     );
     assert_eq!(receipt.command(), AnalysisLifecycleCommand::Dependency);
-    assert_eq!(receipt.instance_id(), ac);
+    assert_eq!(receipt.instance_id(), fft);
     assert!(plan.freeze().is_ok());
 }
 
 #[test]
 fn dependency_repair_reuses_and_enables_a_disabled_prerequisite_identity() {
     let mut plan = SimulationPlan::empty();
-    let op = AnalysisInstanceId::new();
+    let tran = AnalysisInstanceId::new();
     plan.insert_draft_with_id(
-        op,
-        AnalysisDraft::for_kind(AnalysisKind::OperatingPoint),
+        tran,
+        AnalysisDraft::for_kind(AnalysisKind::Transient),
         false,
         0,
     )
-    .expect("disabled OP inserts");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
+    .expect("disabled transient inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
 
     let (repair, _) = plan
-        .repair_dependencies(ac)
-        .expect("disabled OP is enabled and bound");
+        .repair_dependencies(fft)
+        .expect("disabled transient is enabled and bound");
 
     assert!(repair.inserted().is_empty());
-    assert_eq!(repair.enabled(), &[op]);
+    assert_eq!(repair.enabled(), &[tran]);
     assert!(repair.moved().is_empty());
-    assert!(plan.instance(op).unwrap().enabled());
-    assert_eq!(plan.instance(ac).unwrap().dependencies()[0].target(), op);
+    assert!(plan.instance(tran).unwrap().enabled());
+    assert_eq!(plan.instance(fft).unwrap().dependencies()[0].target(), tran);
     assert!(plan.freeze().is_ok());
 }
 
 #[test]
 fn dependency_repair_moves_a_later_prerequisite_without_replacing_its_identity() {
     let mut plan = SimulationPlan::empty();
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    let (op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("later OP inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    let (tran, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("later transient inserts");
 
     let (repair, _) = plan
-        .repair_dependencies(ac)
-        .expect("later OP is moved and bound");
+        .repair_dependencies(fft)
+        .expect("later transient is moved and bound");
 
     assert!(repair.inserted().is_empty());
     assert!(repair.enabled().is_empty());
-    assert_eq!(repair.moved(), &[op]);
-    assert_eq!(plan.instances()[0].id(), op);
-    assert_eq!(plan.instances()[1].id(), ac);
-    assert_eq!(plan.instance(ac).unwrap().dependencies()[0].target(), op);
+    assert_eq!(repair.moved(), &[tran]);
+    assert_eq!(plan.instances()[0].id(), tran);
+    assert_eq!(plan.instances()[1].id(), fft);
+    assert_eq!(plan.instance(fft).unwrap().dependencies()[0].target(), tran);
     assert!(plan.freeze().is_ok());
 }
 
@@ -979,59 +976,59 @@ fn dependency_repair_replaces_self_dangling_wrong_kind_and_duplicate_bindings() 
     }
 
     let mut self_bound = SimulationPlan::empty();
-    let (ac, _) = self_bound.insert(AnalysisKind::Ac).expect("AC inserts");
+    let (fft, _) = self_bound.insert(AnalysisKind::Fft).expect("FFT inserts");
     self_bound.instances[0]
         .dependencies
-        .push(AnalysisDependency::new(AnalysisKind::OperatingPoint, ac));
-    assert_repaired(self_bound, ac);
+        .push(AnalysisDependency::new(AnalysisKind::Transient, fft));
+    assert_repaired(self_bound, fft);
 
     let mut dangling = SimulationPlan::empty();
-    let (ac, _) = dangling.insert(AnalysisKind::Ac).expect("AC inserts");
+    let (fft, _) = dangling.insert(AnalysisKind::Fft).expect("FFT inserts");
     dangling.instances[0]
         .dependencies
         .push(AnalysisDependency::new(
-            AnalysisKind::OperatingPoint,
+            AnalysisKind::Transient,
             AnalysisInstanceId::new(),
         ));
-    assert_repaired(dangling, ac);
+    assert_repaired(dangling, fft);
 
     let mut wrong_kind = SimulationPlan::empty();
-    let (transient, _) = wrong_kind
-        .insert(AnalysisKind::Transient)
-        .expect("Transient inserts");
-    let (ac, _) = wrong_kind.insert(AnalysisKind::Ac).expect("AC inserts");
-    let ac_index = wrong_kind.index_of(ac).expect("AC index");
-    wrong_kind.instances[ac_index]
+    let (operating_point, _) = wrong_kind
+        .insert(AnalysisKind::OperatingPoint)
+        .expect("operating point inserts");
+    let (fft, _) = wrong_kind.insert(AnalysisKind::Fft).expect("FFT inserts");
+    let fft_index = wrong_kind.index_of(fft).expect("FFT index");
+    wrong_kind.instances[fft_index]
         .dependencies
         .push(AnalysisDependency::new(
-            AnalysisKind::OperatingPoint,
-            transient,
+            AnalysisKind::Transient,
+            operating_point,
         ));
-    assert_repaired(wrong_kind, ac);
+    assert_repaired(wrong_kind, fft);
 
     let mut duplicate = SimulationPlan::empty();
-    let (first_op, _) = duplicate
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("first OP inserts");
-    let (second_op, _) = duplicate
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("second OP inserts");
-    let (ac, _) = duplicate.insert(AnalysisKind::Ac).expect("AC inserts");
-    let ac_index = duplicate.index_of(ac).expect("AC index");
-    duplicate.instances[ac_index].dependencies.extend([
-        AnalysisDependency::new(AnalysisKind::OperatingPoint, first_op),
-        AnalysisDependency::new(AnalysisKind::OperatingPoint, second_op),
+    let (first_tran, _) = duplicate
+        .insert(AnalysisKind::Transient)
+        .expect("first transient inserts");
+    let (second_tran, _) = duplicate
+        .insert(AnalysisKind::Transient)
+        .expect("second transient inserts");
+    let (fft, _) = duplicate.insert(AnalysisKind::Fft).expect("FFT inserts");
+    let fft_index = duplicate.index_of(fft).expect("FFT index");
+    duplicate.instances[fft_index].dependencies.extend([
+        AnalysisDependency::new(AnalysisKind::Transient, first_tran),
+        AnalysisDependency::new(AnalysisKind::Transient, second_tran),
     ]);
-    assert_repaired(duplicate, ac);
+    assert_repaired(duplicate, fft);
 
     let mut unexpected = SimulationPlan::empty();
-    let (ac, _) = unexpected.insert(AnalysisKind::Ac).expect("AC inserts");
+    let (fft, _) = unexpected.insert(AnalysisKind::Fft).expect("FFT inserts");
     unexpected.instances[0]
         .dependencies
-        .push(AnalysisDependency::new(AnalysisKind::Transient, ac));
+        .push(AnalysisDependency::new(AnalysisKind::OperatingPoint, fft));
     let (repair, _) = unexpected
-        .repair_dependencies(ac)
-        .expect("unexpected edge is removed while the required OP is repaired");
+        .repair_dependencies(fft)
+        .expect("unexpected edge is removed while the required transient is repaired");
     assert_eq!(repair.removed().len(), 1);
     assert_eq!(repair.inserted().len(), 1);
     assert!(unexpected.validation_issues().is_empty());
@@ -1041,21 +1038,21 @@ fn dependency_repair_replaces_self_dangling_wrong_kind_and_duplicate_bindings() 
 #[test]
 fn dependency_repair_preserves_an_existing_valid_binding() {
     let mut plan = SimulationPlan::empty();
-    let (op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("OP inserts");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
-        .expect("AC binds OP");
+    let (tran, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("transient inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    plan.bind_dependency(fft, AnalysisKind::Transient, tran)
+        .expect("FFT binds transient");
     let identities = plan
         .instances()
         .iter()
         .map(AnalysisInstance::id)
         .collect::<Vec<_>>();
-    let dependencies = plan.instance(ac).unwrap().dependencies().to_vec();
+    let dependencies = plan.instance(fft).unwrap().dependencies().to_vec();
 
     let (repair, receipt) = plan
-        .repair_dependencies(ac)
+        .repair_dependencies(fft)
         .expect("valid binding remains valid");
 
     assert!(!repair.changed());
@@ -1066,25 +1063,25 @@ fn dependency_repair_preserves_an_existing_valid_binding() {
             .collect::<Vec<_>>(),
         identities
     );
-    assert_eq!(plan.instance(ac).unwrap().dependencies(), dependencies);
-    assert_eq!(receipt.instance_id(), ac);
+    assert_eq!(plan.instance(fft).unwrap().dependencies(), dependencies);
+    assert_eq!(receipt.instance_id(), fft);
     assert!(plan.freeze().is_ok());
 }
 
 #[test]
 fn dependency_repair_rolls_back_when_a_reused_target_is_executing() {
     let mut plan = SimulationPlan::empty();
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    let (op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("later OP inserts");
-    let op_index = plan.index_of(op).unwrap();
-    plan.instances[op_index].lifecycle = AnalysisLifecycleState::Running;
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    let (tran, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("later transient inserts");
+    let tran_index = plan.index_of(tran).unwrap();
+    plan.instances[tran_index].lifecycle = AnalysisLifecycleState::Running;
     let before = snapshot(&plan);
 
     assert_eq!(
-        plan.repair_dependencies(ac),
-        Err(AnalysisPlanError::InstanceExecuting(op))
+        plan.repair_dependencies(fft),
+        Err(AnalysisPlanError::InstanceExecuting(tran))
     );
     assert_eq!(snapshot(&plan), before);
 }
@@ -1134,19 +1131,19 @@ fn failed_kind_changing_edit_is_fully_atomic() {
 #[test]
 fn referenced_target_cannot_be_disabled_removed_or_reordered_after_dependent() {
     let mut plan = SimulationPlan::new();
-    let (op, _) = plan
-        .insert_at(AnalysisKind::OperatingPoint, 0)
-        .expect("OP inserts");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
+    let (tran, _) = plan
+        .insert_at(AnalysisKind::Transient, 0)
+        .expect("transient inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    plan.bind_dependency(fft, AnalysisKind::Transient, tran)
         .expect("binds");
 
     for action in [0, 1, 2] {
         let before = snapshot(&plan);
         let result = match action {
-            0 => plan.set_enabled(op, false).map(|_| ()),
-            1 => plan.remove(op, Vec::new()).map(|_| ()),
-            _ => plan.reorder(op, plan.instances().len() - 1).map(|_| ()),
+            0 => plan.set_enabled(tran, false).map(|_| ()),
+            1 => plan.remove(tran, Vec::new()).map(|_| ()),
+            _ => plan.reorder(tran, plan.instances().len() - 1).map(|_| ()),
         };
         assert!(result.is_err());
         assert_eq!(snapshot(&plan), before);
@@ -1155,79 +1152,77 @@ fn referenced_target_cannot_be_disabled_removed_or_reordered_after_dependent() {
 
 #[test]
 fn disabled_consumers_release_prerequisites_and_reenable_for_explicit_repair() {
-    let mut plan = SimulationPlan::new();
-    let (op, _) = plan
-        .insert_at(AnalysisKind::OperatingPoint, 0)
-        .expect("OP inserts");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
-        .expect("AC binds OP");
+    let mut plan = SimulationPlan::empty();
+    let (tran, _) = plan
+        .insert_at(AnalysisKind::Transient, 0)
+        .expect("transient inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    plan.bind_dependency(fft, AnalysisKind::Transient, tran)
+        .expect("FFT binds transient");
 
-    plan.set_enabled(ac, false).expect("AC disables");
-    plan.set_enabled(op, false)
-        .expect("disabled AC no longer forces OP enabled");
+    plan.set_enabled(fft, false).expect("FFT disables");
+    plan.set_enabled(tran, false)
+        .expect("disabled FFT no longer forces transient enabled");
     assert!(plan.validation_issues().iter().all(|issue| {
         !matches!(
             issue,
-            AnalysisPlanIssue::DisabledDependency { dependent, .. } if *dependent == ac
+            AnalysisPlanIssue::DisabledDependency { dependent, .. } if *dependent == fft
         )
     }));
 
-    let enable_receipt = plan.set_enabled(ac, true).expect("AC reenables as a draft");
+    let enable_receipt = plan
+        .set_enabled(fft, true)
+        .expect("FFT reenables as a draft");
     assert_eq!(enable_receipt.command(), AnalysisLifecycleCommand::Enable);
     assert!(
         plan.validation_issues()
             .contains(&AnalysisPlanIssue::MissingPrerequisite {
-                dependent: ac,
-                prerequisite: AnalysisKind::OperatingPoint,
+                dependent: fft,
+                prerequisite: AnalysisKind::Transient,
             })
     );
     plan.validate_structure()
         .expect("a reenabled analysis may await explicit prerequisite repair");
 
     let (repair, _) = plan
-        .repair_dependencies(ac)
-        .expect("repair reuses and enables the retained OP identity");
-    assert_eq!(repair.enabled(), &[op]);
+        .repair_dependencies(fft)
+        .expect("repair reuses and enables the retained transient identity");
+    assert_eq!(repair.enabled(), &[tran]);
     assert!(plan.validation_issues().is_empty());
 }
 
 #[test]
 fn reenable_preserves_a_valid_exact_prerequisite_binding() {
     let mut plan = SimulationPlan::empty();
-    let (first_op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("first OP inserts");
-    let (_second_op, _) = plan
-        .insert(AnalysisKind::OperatingPoint)
-        .expect("second OP inserts");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    plan.bind_dependency(ac, AnalysisKind::OperatingPoint, first_op)
-        .expect("AC binds the first exact OP identity");
+    let (first_tran, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("first transient inserts");
+    let (_second_tran, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("second transient inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    plan.bind_dependency(fft, AnalysisKind::Transient, first_tran)
+        .expect("FFT binds the first exact transient identity");
 
-    plan.set_enabled(ac, false).expect("AC disables");
-    plan.set_enabled(ac, true).expect("AC reenables");
+    plan.set_enabled(fft, false).expect("FFT disables");
+    plan.set_enabled(fft, true).expect("FFT reenables");
 
     assert_eq!(
-        plan.instance(ac).unwrap().dependencies(),
-        &[AnalysisDependency::new(
-            AnalysisKind::OperatingPoint,
-            first_op
-        )]
+        plan.instance(fft).unwrap().dependencies(),
+        &[AnalysisDependency::new(AnalysisKind::Transient, first_tran)]
     );
 }
 
 #[test]
 fn disabled_instances_still_fail_closed_on_structural_dependency_corruption() {
     let mut plan = SimulationPlan::empty();
-    let ac = AnalysisInstanceId::new();
-    plan.insert_draft_with_id(ac, AnalysisDraft::for_kind(AnalysisKind::Ac), false, 0)
-        .expect("disabled AC inserts");
+    let fft = AnalysisInstanceId::new();
+    plan.insert_draft_with_id(fft, AnalysisDraft::for_kind(AnalysisKind::Fft), false, 0)
+        .expect("disabled FFT inserts");
     let missing = AnalysisInstanceId::new();
-    plan.instances[0].dependencies.push(AnalysisDependency::new(
-        AnalysisKind::OperatingPoint,
-        missing,
-    ));
+    plan.instances[0]
+        .dependencies
+        .push(AnalysisDependency::new(AnalysisKind::Transient, missing));
 
     let error = plan
         .validate_structure()
@@ -1236,67 +1231,71 @@ fn disabled_instances_still_fail_closed_on_structural_dependency_corruption() {
         panic!("expected structural validation failure");
     };
     assert!(issues.contains(&AnalysisPlanIssue::DanglingDependency {
-        dependent: ac,
+        dependent: fft,
         target: missing,
     }));
 }
 
 #[test]
 fn binding_rejects_self_dangling_wrong_disabled_and_later_targets() {
-    let mut plan = SimulationPlan::new();
-    let transient = plan.instances()[0].id();
-    let (op, _) = plan
-        .insert_at(AnalysisKind::OperatingPoint, 0)
-        .expect("OP inserts");
-    let (disabled_op, _) = plan
-        .insert_at(AnalysisKind::OperatingPoint, 1)
-        .expect("OP inserts");
-    plan.set_enabled(disabled_op, false).expect("disables");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    let (later_op, _) = plan
+    let mut plan = SimulationPlan::empty();
+    let (operating_point, _) = plan
         .insert(AnalysisKind::OperatingPoint)
-        .expect("OP inserts");
+        .expect("operating point inserts");
+    let (tran, _) = plan
+        .insert_at(AnalysisKind::Transient, 0)
+        .expect("transient inserts");
+    let (disabled_tran, _) = plan
+        .insert_at(AnalysisKind::Transient, 1)
+        .expect("transient inserts");
+    plan.set_enabled(disabled_tran, false).expect("disables");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    let (later_tran, _) = plan
+        .insert(AnalysisKind::Transient)
+        .expect("transient inserts");
 
     assert!(matches!(
-        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, ac),
+        plan.bind_dependency(fft, AnalysisKind::Transient, fft),
         Err(AnalysisPlanError::SelfDependency { .. })
     ));
     assert!(matches!(
-        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, AnalysisInstanceId::new()),
+        plan.bind_dependency(fft, AnalysisKind::Transient, AnalysisInstanceId::new()),
         Err(AnalysisPlanError::DependencyTargetMissing { .. })
     ));
     assert!(matches!(
-        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, transient),
+        plan.bind_dependency(fft, AnalysisKind::Transient, operating_point),
         Err(AnalysisPlanError::DependencyTargetWrongKind { .. })
     ));
     assert!(matches!(
-        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, disabled_op),
+        plan.bind_dependency(fft, AnalysisKind::Transient, disabled_tran),
         Err(AnalysisPlanError::DependencyTargetDisabled { .. })
     ));
     assert!(matches!(
-        plan.bind_dependency(ac, AnalysisKind::OperatingPoint, later_op),
+        plan.bind_dependency(fft, AnalysisKind::Transient, later_tran),
         Err(AnalysisPlanError::DependencyTargetNotEarlier { .. })
     ));
-    plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
+    plan.bind_dependency(fft, AnalysisKind::Transient, tran)
         .expect("valid target binds");
 }
 
 #[test]
 fn auto_bind_chooses_latest_enabled_matching_predecessor() {
-    let mut plan = SimulationPlan::new();
+    let mut plan = SimulationPlan::empty();
     let (first, _) = plan
-        .insert_at(AnalysisKind::OperatingPoint, 0)
-        .expect("OP inserts");
+        .insert_at(AnalysisKind::Transient, 0)
+        .expect("transient inserts");
     let (latest, _) = plan
-        .insert_at(AnalysisKind::OperatingPoint, 1)
-        .expect("OP inserts");
-    let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
-    let receipt = plan.auto_bind_dependencies(ac).expect("auto-bind succeeds");
+        .insert_at(AnalysisKind::Transient, 1)
+        .expect("transient inserts");
+    let (fft, _) = plan.insert(AnalysisKind::Fft).expect("FFT inserts");
+    let receipt = plan
+        .auto_bind_dependencies(fft)
+        .expect("auto-bind succeeds");
     assert_eq!(receipt.command(), AnalysisLifecycleCommand::Dependency);
-    assert_eq!(receipt.kind(), AnalysisKind::Ac);
+    assert_eq!(receipt.kind(), AnalysisKind::Fft);
     assert!(!receipt.detail().is_empty());
     assert_eq!(
-        plan.instance(ac).unwrap().dependencies()[0].target(),
+        plan.instance(fft).unwrap().dependencies()[0].target(),
         latest
     );
     assert_ne!(first, latest);

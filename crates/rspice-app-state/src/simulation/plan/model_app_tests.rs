@@ -38,7 +38,7 @@ fn every_declared_prerequisite_kind_repairs_to_an_exact_frozen_closure() {
         .into_iter()
         .filter(|kind| !kind.prerequisites().is_empty())
         .collect::<Vec<_>>();
-    assert_eq!(dependent_kinds.len(), 26);
+    assert_eq!(dependent_kinds.len(), 15);
 
     // The carrier positions the three periodic small-signal kinds offer are
     // part of this closure, not an exemption from it: each position declares a

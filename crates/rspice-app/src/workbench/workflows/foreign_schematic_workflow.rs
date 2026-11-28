@@ -1179,7 +1179,7 @@ fn commit_plan(
     }
 }
 
-/// A deck's `.ac` or `.noise` solves its own operating point; a plan states
+/// A deck's `.pss`, `.hb` or `.qpss` finds its own DC point; a plan states
 /// it, so the analyses that need one get one ahead of them and bind it.
 fn bind_implied_operating_point(
     analyses: &mut rspice_simulation_contract::plan_model::SimulationPlan,

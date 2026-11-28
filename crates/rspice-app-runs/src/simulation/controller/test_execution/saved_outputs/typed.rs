@@ -1,7 +1,7 @@
 //! Typed DC retrace and noise controls that do not round-trip through SPICE cards.
 
 use super::{AnalysisSpec, OutputSelectionMode, SimulationRun};
-use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+use crate::simulation::plan::AnalysisDraft;
 use crate::state::{ComponentType, Point};
 use rspice_core::netlist::{ElementKind, SourceSpec};
 use rspice_simulation_contract::drafts::{DcSetup, NoiseDraft};
@@ -155,14 +155,8 @@ pub fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     {
         plan.set_enabled(id, false).unwrap();
     }
-    let op = matches!(spec, AnalysisSpec::Noise { .. })
-        .then(|| plan.insert(AnalysisKind::OperatingPoint).unwrap().0);
     let (id, _) = plan.insert(draft.kind()).unwrap();
     plan.edit(id, |target| *target = draft).unwrap();
-    if let Some(op) = op {
-        plan.bind_dependency(id, AnalysisKind::OperatingPoint, op)
-            .unwrap();
-    }
     state.model.sim_setup.save_policy.output_selection_mode = OutputSelectionMode::SaveAll;
     state.model.sim_setup.save_policy.maximum_storage_bytes = u64::MAX;
     super::super::run_generated_batch(

@@ -1091,6 +1091,7 @@ mod autonomous_periodic;
 mod periodic_port_noise;
 mod run_checks;
 mod run_log;
+mod small_signal_bias;
 
 mod pvt_family;
 mod step_family;

@@ -676,43 +676,46 @@ impl AnalysisKind {
         )
     }
 
-    /// Exact prerequisite kinds declared by the canonical mockup manifest.
+    /// The analyses whose result this kind reads, which a test therefore runs
+    /// before it and hands over: the periodic steady state a periodic
+    /// small-signal analysis linearizes about, the transient a Fourier or FFT
+    /// analysis reads, and the DC solution a periodic solve starts from. Every
+    /// other kind solves its own operating point, as Spectre's do, so an AC,
+    /// noise or transfer-function analysis needs nothing before it.
     pub const fn prerequisites(self) -> &'static [Self] {
         const OP: &[AnalysisKind] = &[AnalysisKind::OperatingPoint];
         const TRAN: &[AnalysisKind] = &[AnalysisKind::Transient];
-        const AC: &[AnalysisKind] = &[AnalysisKind::Ac];
         const PSS: &[AnalysisKind] = &[AnalysisKind::Pss];
         const HB: &[AnalysisKind] = &[AnalysisKind::HarmonicBalance];
         const QPSS: &[AnalysisKind] = &[AnalysisKind::Qpss];
         const NONE: &[AnalysisKind] = &[];
 
         match self {
-            Self::Ac
-            | Self::AcData
-            | Self::Noise
-            | Self::PoleZero
-            | Self::Sensitivity
-            | Self::Pss
-            | Self::Stb
-            | Self::HarmonicBalance
-            | Self::SParameter
-            | Self::TransferFunction => OP,
-            Self::Qpss => OP,
             Self::Pac | Self::Pnoise | Self::Pxf | Self::Pstb | Self::Psp => PSS,
             Self::Hbsp | Self::Hbnoise => HB,
             Self::Qpac | Self::Qpnoise | Self::Qpxf => QPSS,
-            Self::Fourier | Self::TransientNoise | Self::Fft => TRAN,
-            Self::DcMismatch => OP,
-            Self::Disto => AC,
+            Self::Fourier | Self::Fft => TRAN,
+            Self::Pss | Self::HarmonicBalance | Self::Qpss => OP,
             Self::OperatingPoint
             | Self::Transient
+            | Self::Ac
+            | Self::AcData
             | Self::DcSweep
+            | Self::Noise
+            | Self::PoleZero
+            | Self::Sensitivity
             | Self::MonteCarlo
+            | Self::Stb
             | Self::Temperature
+            | Self::SParameter
+            | Self::TransferFunction
             | Self::Corner
             | Self::Envelope
             | Self::Optimization
-            | Self::Soa => NONE,
+            | Self::Soa
+            | Self::Disto
+            | Self::TransientNoise
+            | Self::DcMismatch => NONE,
         }
     }
 
@@ -812,37 +815,26 @@ mod tests {
     }
 
     #[test]
-    fn prerequisite_map_matches_the_canonical_current_kind_contract() {
+    fn only_an_analysis_that_reads_another_ones_result_needs_it() {
         let expected = [
-            (AnalysisKind::Ac, AnalysisKind::OperatingPoint),
-            (AnalysisKind::AcData, AnalysisKind::OperatingPoint),
-            (AnalysisKind::Noise, AnalysisKind::OperatingPoint),
-            (AnalysisKind::PoleZero, AnalysisKind::OperatingPoint),
-            (AnalysisKind::Sensitivity, AnalysisKind::OperatingPoint),
-            (AnalysisKind::Stb, AnalysisKind::OperatingPoint),
-            (AnalysisKind::TransferFunction, AnalysisKind::OperatingPoint),
-            (AnalysisKind::Pss, AnalysisKind::OperatingPoint),
-            (AnalysisKind::HarmonicBalance, AnalysisKind::OperatingPoint),
-            (AnalysisKind::SParameter, AnalysisKind::OperatingPoint),
             (AnalysisKind::Pac, AnalysisKind::Pss),
             (AnalysisKind::Pnoise, AnalysisKind::Pss),
             (AnalysisKind::Pxf, AnalysisKind::Pss),
             (AnalysisKind::Pstb, AnalysisKind::Pss),
-            (AnalysisKind::Fourier, AnalysisKind::Transient),
-            (AnalysisKind::Fft, AnalysisKind::Transient),
-            (AnalysisKind::Disto, AnalysisKind::Ac),
-            (AnalysisKind::Qpss, AnalysisKind::OperatingPoint),
+            (AnalysisKind::Psp, AnalysisKind::Pss),
             (AnalysisKind::Hbsp, AnalysisKind::HarmonicBalance),
             (AnalysisKind::Hbnoise, AnalysisKind::HarmonicBalance),
-            (AnalysisKind::Psp, AnalysisKind::Pss),
             (AnalysisKind::Qpac, AnalysisKind::Qpss),
             (AnalysisKind::Qpnoise, AnalysisKind::Qpss),
             (AnalysisKind::Qpxf, AnalysisKind::Qpss),
-            (AnalysisKind::TransientNoise, AnalysisKind::Transient),
-            (AnalysisKind::DcMismatch, AnalysisKind::OperatingPoint),
+            (AnalysisKind::Fourier, AnalysisKind::Transient),
+            (AnalysisKind::Fft, AnalysisKind::Transient),
+            (AnalysisKind::Pss, AnalysisKind::OperatingPoint),
+            (AnalysisKind::HarmonicBalance, AnalysisKind::OperatingPoint),
+            (AnalysisKind::Qpss, AnalysisKind::OperatingPoint),
         ];
         for (kind, prerequisite) in expected {
-            assert_eq!(kind.prerequisites(), &[prerequisite]);
+            assert_eq!(kind.prerequisites(), &[prerequisite], "{kind}");
         }
         assert_eq!(
             AnalysisKind::ALL
@@ -851,6 +843,21 @@ mod tests {
                 .count(),
             expected.len()
         );
+        for kind in [
+            AnalysisKind::Ac,
+            AnalysisKind::AcData,
+            AnalysisKind::Noise,
+            AnalysisKind::PoleZero,
+            AnalysisKind::Sensitivity,
+            AnalysisKind::Stb,
+            AnalysisKind::SParameter,
+            AnalysisKind::TransferFunction,
+            AnalysisKind::DcMismatch,
+            AnalysisKind::Disto,
+            AnalysisKind::TransientNoise,
+        ] {
+            assert!(kind.prerequisites().is_empty(), "{kind} needs nothing");
+        }
     }
 
     #[test]

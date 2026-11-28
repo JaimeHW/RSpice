@@ -1285,10 +1285,10 @@ R1 a 0 1k
     assert!(!qspice.contains("RSPICE_EXP_REPEAT"), "{qspice}");
 }
 
-/// A deck's `.ac` needs no `.op` of its own. A plan's AC analysis reads the
-/// operating point the plan states, so the import states one and binds it.
+/// A deck's `.ac` needs no `.op` of its own, and neither does a plan's AC
+/// analysis: the import adds nothing beside it, and it checks clean alone.
 #[test]
-fn an_imported_ac_analysis_binds_the_operating_point_the_plan_states_for_it() {
+fn an_imported_ac_analysis_arrives_alone_and_needs_nothing_before_it() {
     let folder = drawing_folder();
     let file = folder.join("ac.asc");
     std::fs::write(
@@ -1313,12 +1313,16 @@ SYMATTR Value 1k
         .sim_setup
         .stable_analysis_plan()
         .expect("the imported plan");
-    let [op, ac] = plan.instances() else {
+    let [ac] = plan.instances() else {
         panic!("{:?}", plan.instances().len());
     };
-    assert!(matches!(op.draft(), AnalysisDraft::OperatingPoint(_)));
     assert!(matches!(ac.draft(), AnalysisDraft::Ac(_)));
-    assert_eq!(ac.dependencies().len(), 1, "the AC analysis binds it");
+    assert!(ac.dependencies().is_empty());
+    assert!(
+        plan.validation_issues().is_empty(),
+        "{:?}",
+        plan.validation_issues()
+    );
 }
 
 /// What a sheet paints, as text: every stroke and every run of lettering.
