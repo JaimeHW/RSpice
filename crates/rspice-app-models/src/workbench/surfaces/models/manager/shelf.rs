@@ -29,6 +29,8 @@ pub(super) struct ShelfRow {
     pub(super) part: LibraryPart,
     /// The holding library's title, or its name where it has none.
     pub(super) title: String,
+    /// The comment paragraph the card is written under, where it has one.
+    pub(super) description: Option<String>,
     /// The file the holding library was read from, when a file backs it.
     pub(super) source: Option<PathBuf>,
     /// The line the card starts at; 0 where the parse recorded none.
@@ -109,7 +111,9 @@ fn shelf_columns(rows: &[ShelfRow]) -> ShelfColumns {
             heading: "Description",
             width: 0.58 - optional,
             mono: false,
-            read: |row| row.title.clone(),
+            // The card's own comment, and nothing where it has none: the
+            // holding library is the Library column's fact, not this one's.
+            read: |row| row.description.clone().unwrap_or_default(),
         },
     ];
     if class_varies {
@@ -262,8 +266,17 @@ fn shelf_page(
                 .models
                 .get(&part.part_id)
                 .or_else(|| library.top_level_models.get(&part.part_id));
+            let description = match part.kind {
+                LibraryPartKind::Subcircuit => library
+                    .subcircuits
+                    .get(&part.part_id)
+                    .and_then(|interface| interface.description.clone()),
+                LibraryPartKind::Model => card.map(|card| card.description.clone()),
+            }
+            .filter(|description| !description.trim().is_empty());
             rows.push(ShelfRow {
                 title: title.to_owned(),
+                description,
                 source: library.root_path.clone(),
                 line: card.and_then(|card| card.source_line).unwrap_or(0),
                 part,
@@ -693,6 +706,7 @@ mod tests {
                 built_in: false,
             },
             title: "Proving parts".to_owned(),
+            description: None,
             source: None,
             line: 1,
         }
@@ -886,6 +900,23 @@ mod tests {
             (widths - 1.0).abs() < 1.0e-4,
             "the columns cover the row exactly: {widths}"
         );
+    }
+
+    /// Description is the card's own comment, never the library the Library
+    /// column already names.
+    #[test]
+    fn a_description_is_the_cards_own_comment() {
+        let mut described = row("RSPICE_DIODE", "diode", LibraryPartKind::Model);
+        described.description = Some("Generic silicon junction diode.".to_owned());
+        let bare = row("RSPICE_ZENER", "diode", LibraryPartKind::Model);
+        let layout = shelf_columns(&[described.clone(), bare.clone()]);
+        let column = layout
+            .columns
+            .iter()
+            .find(|column| column.heading == "Description")
+            .expect("Description is always a column");
+        assert_eq!((column.read)(&described), "Generic silicon junction diode.");
+        assert_eq!((column.read)(&bare), "");
     }
 
     /// A foundation card arms the device its own family is drawn as.
