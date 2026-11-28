@@ -743,7 +743,7 @@ mod tests {
     use super::*;
     use crate::state::{
         ComponentType, Point, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputPolicy, SavedOutputStreaming,
     };
     use crate::workbench::design::test_host::DesignTestHost;
 
@@ -1075,7 +1075,6 @@ mod tests {
                     format!("I({selected_name})"),
                     SavedOutputCompatibility::OpTranAc,
                     SavedOutputPolicy::EveryAcceptedPoint,
-                    SavedOutputPrecision::FullSourcePrecision,
                     SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
                 )
                 .expect("saved output"),

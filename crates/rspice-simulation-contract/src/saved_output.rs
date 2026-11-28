@@ -18,8 +18,8 @@ pub use crate::output_policy::OutputSelectionMode;
 use rspice_results::saved_output::parse_probe_target;
 pub use rspice_results::saved_output::{
     ComplexExpressionPolicy, SavedOutputDisplayIntent, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, device_current_probe, raw_probe_unit,
-    saved_output_references, validate_raw_probe,
+    SavedOutputStreaming, device_current_probe, raw_probe_unit, saved_output_references,
+    validate_raw_probe,
 };
 
 /// Authored authority for a saved output. Probe-owned rows remain in the plan
@@ -71,7 +71,6 @@ pub struct SavedOutput {
     pub complex_policy: ComplexExpressionPolicy,
     pub compatible_analyses: SavedOutputCompatibility,
     pub save_policy: SavedOutputPolicy,
-    pub stored_precision: SavedOutputPrecision,
     pub streaming: SavedOutputStreaming,
 }
 
@@ -82,7 +81,6 @@ impl SavedOutput {
         source_expression: impl Into<String>,
         compatible_analyses: SavedOutputCompatibility,
         save_policy: SavedOutputPolicy,
-        stored_precision: SavedOutputPrecision,
         streaming: SavedOutputStreaming,
     ) -> Result<Self, String> {
         let output = Self {
@@ -100,7 +98,6 @@ impl SavedOutput {
             },
             compatible_analyses,
             save_policy,
-            stored_precision,
             streaming,
         };
         output.validate()?;
@@ -259,7 +256,6 @@ mod tests {
             expression,
             SavedOutputCompatibility::OpTranAc,
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
     }
@@ -346,7 +342,6 @@ mod tests {
             "source_expression": "V(x1.n)",
             "compatible_analyses": { "kind": "op_tran_ac" },
             "save_policy": "every_accepted_point",
-            "stored_precision": "full_source_precision",
             "streaming": "store_only"
         }"#;
         let output: SavedOutput = serde_json::from_str(stored).expect("a stored output loads");

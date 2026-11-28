@@ -26,8 +26,7 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
 
 use crate::state::{
-    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming,
 };
 use crate::ui::widgets::IconButton;
 use crate::workbench::state::{CaptureGroupDraft, CaptureGroupRuleDraft};

@@ -67,7 +67,6 @@ fn filtered_dc_curves_and_derived_aliases_keep_exact_projection_evidence() {
     use crate::simulation::output_contract::retain_plan_saved_outputs;
     use rspice_results::saved_output::SavedOutputKind;
     use rspice_results::saved_output::SavedOutputPolicy;
-    use rspice_results::saved_output::SavedOutputPrecision;
     use rspice_results::saved_output::SavedOutputStreaming;
     use rspice_simulation::output_contract::PreparedSavedOutput;
     use rspice_simulation_contract::analysis_spec::AnalysisSpec;
@@ -107,7 +106,6 @@ fn filtered_dc_curves_and_derived_aliases_keep_exact_projection_evidence() {
         "V(IN)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap();

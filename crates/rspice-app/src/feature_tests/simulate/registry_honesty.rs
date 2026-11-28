@@ -376,7 +376,7 @@ fn an_accepted_variable_expression_clears_the_draft_it_committed() {
 fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
     use rspice_app_state::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputStreaming,
     };
 
     let mut app = RSpiceApp::test_instance();
@@ -388,7 +388,6 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
             "V(out)",
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("a valid saved output");

@@ -1367,7 +1367,6 @@ mod tests {
             complex_policy: crate::state::ComplexExpressionPolicy::LegacyMagnitude,
             output_kind: crate::state::SavedOutputKind::RawVoltageOrCurrent,
             save_policy: crate::state::SavedOutputPolicy::OnDemandFromRetainedState,
-            stored_precision: crate::state::SavedOutputPrecision::FullSourcePrecision,
             streaming: crate::state::SavedOutputStreaming::StoreOnly,
             display_intent: crate::state::SavedOutputDisplayIntent::Plot,
             status: SavedOutputMaterializationStatus::Deferred,

@@ -12,7 +12,7 @@ use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep};
 #[cfg(test)]
 use crate::state::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputMaterializationStatus,
-    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    SavedOutputPolicy, SavedOutputStreaming,
 };
 #[cfg(test)]
 use rspice_simulation::output_contract::{
@@ -130,14 +130,13 @@ mod tests {
         }
     }
 
-    fn output(policy: SavedOutputPolicy, precision: SavedOutputPrecision) -> SavedOutput {
+    fn output(policy: SavedOutputPolicy) -> SavedOutput {
         SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
             "output_voltage",
             "V(out)",
             SavedOutputCompatibility::AllCompatibleAnalyses,
             policy,
-            precision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("valid output")
@@ -156,10 +155,7 @@ mod tests {
     #[test]
     fn every_accepted_materializes_exact_source_and_receipt() {
         let contract = PreparedSavedOutput::prepare(
-            &output(
-                SavedOutputPolicy::EveryAcceptedPoint,
-                SavedOutputPrecision::FullSourcePrecision,
-            ),
+            &output(SavedOutputPolicy::EveryAcceptedPoint),
             AnalysisInstanceId::new(),
             &transient_spec(),
         )
@@ -192,10 +188,7 @@ mod tests {
     #[test]
     fn selected_and_final_uses_configured_grid_and_exact_final() {
         let contract = PreparedSavedOutput::prepare(
-            &output(
-                SavedOutputPolicy::SelectedAndFinalPoints,
-                SavedOutputPrecision::FullSourcePrecision,
-            ),
+            &output(SavedOutputPolicy::SelectedAndFinalPoints),
             AnalysisInstanceId::new(),
             &transient_spec(),
         )
@@ -233,10 +226,7 @@ mod tests {
     #[test]
     fn on_demand_is_deferred_then_materializes_from_retained_source() {
         let contract = PreparedSavedOutput::prepare(
-            &output(
-                SavedOutputPolicy::OnDemandFromRetainedState,
-                SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-            ),
+            &output(SavedOutputPolicy::OnDemandFromRetainedState),
             AnalysisInstanceId::new(),
             &transient_spec(),
         )
@@ -259,10 +249,7 @@ mod tests {
     #[test]
     fn deferred_materialization_is_atomic_when_the_output_name_collides() {
         let contract = PreparedSavedOutput::prepare(
-            &output(
-                SavedOutputPolicy::OnDemandFromRetainedState,
-                SavedOutputPrecision::FullSourcePrecision,
-            ),
+            &output(SavedOutputPolicy::OnDemandFromRetainedState),
             AnalysisInstanceId::new(),
             &transient_spec(),
         )
@@ -295,7 +282,6 @@ mod tests {
             "V(out)",
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
             SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
         )
         .expect("valid live output");
@@ -327,10 +313,7 @@ mod tests {
     #[test]
     fn failure_only_is_suppressed_on_success_and_materializes_partial_failure_data() {
         let contract = PreparedSavedOutput::prepare(
-            &output(
-                SavedOutputPolicy::FailureDiagnosticsOnly,
-                SavedOutputPrecision::FullSourcePrecision,
-            ),
+            &output(SavedOutputPolicy::FailureDiagnosticsOnly),
             AnalysisInstanceId::new(),
             &transient_spec(),
         )
@@ -360,10 +343,7 @@ mod tests {
     #[test]
     fn plan_retention_discards_unselected_engine_waveforms() {
         let contract = PreparedSavedOutput::prepare(
-            &output(
-                SavedOutputPolicy::EveryAcceptedPoint,
-                SavedOutputPrecision::FullSourcePrecision,
-            ),
+            &output(SavedOutputPolicy::EveryAcceptedPoint),
             AnalysisInstanceId::new(),
             &transient_spec(),
         )
@@ -387,11 +367,8 @@ mod tests {
 
     #[test]
     fn retained_output_keeps_save_and_initial_display_intent_separate() {
-        let saved = output(
-            SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
-        )
-        .with_display_intent(crate::state::SavedOutputDisplayIntent::DataBrowserOnly);
+        let saved = output(SavedOutputPolicy::EveryAcceptedPoint)
+            .with_display_intent(crate::state::SavedOutputDisplayIntent::DataBrowserOnly);
         let contract =
             PreparedSavedOutput::prepare(&saved, AnalysisInstanceId::new(), &transient_spec())
                 .expect("prepare")
@@ -426,10 +403,7 @@ mod tests {
 
     #[test]
     fn on_demand_retention_keeps_source_and_reports_plan_level_source_ownership() {
-        let deferred = output(
-            SavedOutputPolicy::OnDemandFromRetainedState,
-            SavedOutputPrecision::FullSourcePrecision,
-        );
+        let deferred = output(SavedOutputPolicy::OnDemandFromRetainedState);
         let analysis_id = AnalysisInstanceId::new();
         let contract = PreparedSavedOutput::prepare(&deferred, analysis_id, &transient_spec())
             .expect("prepare")
@@ -466,7 +440,6 @@ mod tests {
             "S(10,1)",
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("syntactically valid output");

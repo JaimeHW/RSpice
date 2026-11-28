@@ -9,8 +9,8 @@ use egui::{Response, Ui};
 
 use crate::state::{
     ComponentType, OccurrenceProbeSpelling, Point, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, SchematicNetHighlighting, SchematicProbe, Tool, ViewType,
+    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputStreaming,
+    SchematicNetHighlighting, SchematicProbe, Tool, ViewType,
 };
 use crate::workbench::app_state::Model;
 use rspice_design::connectivity::summary::{DesignNet, projection_nets};
@@ -1415,7 +1415,6 @@ fn ensure_plan_probe_output(
         // Transient preparation maps this policy onto the configured output
         // grid and retains the exact final point.
         SavedOutputPolicy::SelectedAndFinalPoints,
-        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
     )?
     .with_origin(origin);

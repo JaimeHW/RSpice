@@ -283,7 +283,6 @@ fn deferred_dc_family_shares_each_exact_source() {
     for spec in [spec(true, false), spec(false, true)] {
         let mut output = output(SavedOutputKind::RawVoltageOrCurrent, "Chosen", "V(out)");
         output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
-        output.stored_precision = SavedOutputPrecision::DisplayCacheWithFullSourcePrecision;
         let run = run(spec, &[output]);
         let mut analysis = run.analyses[0].clone();
         let Some(AnalysisResultPayload::DcSweep { evidence }) = &analysis.result_payload else {
@@ -402,12 +401,11 @@ fn stored(run: SimulationRun) -> crate::io::project_io::ProjectSimulationResults
 
 #[test]
 fn dc_family_receipts_round_trip_every_member() {
-    let mut output = output(
+    let output = output(
         SavedOutputKind::RawVoltageOrCurrent,
         "Current alias",
         "I(V1)",
     );
-    output.stored_precision = SavedOutputPrecision::DisplayCacheWithFullSourcePrecision;
     let run = run(spec(true, false), &[output]);
     let digest = run.analyses[0].result_data_digest();
     let snapshot = stored(run);

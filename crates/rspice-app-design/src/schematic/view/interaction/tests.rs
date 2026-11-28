@@ -13,8 +13,8 @@ use crate::state::{
     DesignNoteKind, DocumentationShapeKind, Junction, NetLabel, PendingDesignNotePlacement,
     PendingDocumentationShapePlacement, PendingPortSequence, PlacementAuthority, PortDirection,
     PortDiscipline, PortSignalType, RetainedTrace, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
-    SheetDefinition, SheetPortPolicy, Tool, Wire,
+    SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming, SchematicProbe, SheetDefinition,
+    SheetPortPolicy, Tool, Wire,
 };
 use crate::workbench::design::test_host::{DesignTestHost, canvas_parts};
 use rspice_design::connectivity::extract_with_hierarchy as extract;
@@ -449,7 +449,6 @@ fn preexisting_equivalent_output_prevents_duplicate_probe_output() {
                 "V(out)",
                 SavedOutputCompatibility::OpTranAc,
                 SavedOutputPolicy::EveryAcceptedPoint,
-                SavedOutputPrecision::FullSourcePrecision,
                 SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
             )
             .expect("valid fixture output"),
@@ -489,7 +488,6 @@ fn unrelated_output_name_collision_gets_a_deterministic_probe_name() {
                 "V(IN)",
                 SavedOutputCompatibility::OpTranAc,
                 SavedOutputPolicy::EveryAcceptedPoint,
-                SavedOutputPrecision::FullSourcePrecision,
                 SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
             )
             .expect("valid fixture output"),

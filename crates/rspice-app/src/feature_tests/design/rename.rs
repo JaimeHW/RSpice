@@ -53,7 +53,6 @@ fn saved_output(name: &str, expression: &str) -> rspice_app_state::state::SavedO
         expression,
         rspice_app_state::state::SavedOutputCompatibility::OpTranAc,
         rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
-        rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
         rspice_app_state::state::SavedOutputStreaming::StoreOnly,
     )
     .expect("a raw probe is a valid saved output")

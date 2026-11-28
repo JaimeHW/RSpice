@@ -340,7 +340,6 @@ fn stage_group_removal(
     let overrides = [
         group.points.map(|points| points.label()),
         group.streaming.map(|streaming| streaming.label()),
-        group.precision.map(|precision| precision.label()),
     ]
     .into_iter()
     .flatten()
@@ -402,7 +401,7 @@ fn row_hover(
     let Some(group) = groups.iter().find(|group| group.id == id) else {
         return format!(
             "{UNGROUPED_NAME} holds every output no group claims. Its members keep the save \
-             policy, precision and streaming their own records declare."
+             policy and streaming their own records declare."
         );
     };
     let mut hover = format!("{} · {}", group.name, group.id);

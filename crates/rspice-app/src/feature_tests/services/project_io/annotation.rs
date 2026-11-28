@@ -5,9 +5,8 @@ use rspice_app_state::state::{
     AnnotationObject, AnnotationPosition, ComponentType, ConfigurationBlackBoxPolicy,
     ConfigurationModelProfile, ConfigurationSetDefinition, LibraryCellInstance, Point,
     ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope, SavedOutput,
-    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, SchematicObjectKey, SchematicProbe, SchematicState,
-    UnresolvedBindingPolicy,
+    SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming,
+    SchematicObjectKey, SchematicProbe, SchematicState, UnresolvedBindingPolicy,
 };
 use std::collections::BTreeMap;
 
@@ -113,7 +112,6 @@ fn pending_annotation() -> PendingAnnotation {
                 expression,
                 SavedOutputCompatibility::OpTranAc,
                 SavedOutputPolicy::EveryAcceptedPoint,
-                SavedOutputPrecision::FullSourcePrecision,
                 SavedOutputStreaming::StoreOnly,
             )
             .unwrap();

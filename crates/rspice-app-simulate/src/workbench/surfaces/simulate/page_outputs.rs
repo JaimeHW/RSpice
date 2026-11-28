@@ -12,8 +12,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroup, CaptureGroupMembership, ComplexExpressionPolicy, SavedOutput,
-    SavedOutputCompatibility, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    UNGROUPED_NAME,
+    SavedOutputCompatibility, SavedOutputPolicy, SavedOutputStreaming, UNGROUPED_NAME,
 };
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
@@ -787,10 +786,6 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
         .iter()
         .map(|policy| policy.label().to_owned())
         .collect();
-    let precisions: Vec<String> = SavedOutputPrecision::ALL
-        .iter()
-        .map(|precision| precision.label().to_owned())
-        .collect();
     let streamings: Vec<String> = SavedOutputStreaming::ALL
         .iter()
         .map(|streaming| streaming.label().to_owned())
@@ -914,21 +909,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                 );
                 field_pair(
                     ui,
-                    ("Stored precision", &mut |ui: &mut Ui, width: f32| {
-                        if let Some(index) = select(
-                            ui,
-                            "simulation.outputs.precision",
-                            "Stored precision",
-                            output.stored_precision.label(),
-                            &precisions,
-                            width,
-                        ) {
-                            edit.set(Some(OutputEdit::Precision(
-                                SavedOutputPrecision::ALL[index],
-                            )));
-                        }
-                    }),
-                    Some(("Streaming", &mut |ui: &mut Ui, width: f32| {
+                    ("Streaming", &mut |ui: &mut Ui, width: f32| {
                         if let Some(index) = select(
                             ui,
                             "simulation.outputs.streaming",
@@ -941,11 +922,8 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                                 SavedOutputStreaming::ALL[index],
                             )));
                         }
-                    })),
-                );
-                field_pair(
-                    ui,
-                    ("Capture group", &mut |ui: &mut Ui, width: f32| {
+                    }),
+                    Some(("Capture group", &mut |ui: &mut Ui, width: f32| {
                         if let Some(index) = select(
                             ui,
                             "simulation.outputs.capture-group",
@@ -961,8 +939,7 @@ fn selected_record(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, payload: &Simu
                                     .map(|group| group.id),
                             ));
                         }
-                    }),
-                    None,
+                    })),
                 );
                 if output.kind == crate::state::SavedOutputKind::RawVoltageOrCurrent {
                     card_note(
@@ -1387,7 +1364,6 @@ enum OutputEdit {
     ComplexPolicy(ComplexExpressionPolicy),
     Scope(SavedOutputCompatibility),
     Policy(SavedOutputPolicy),
-    Precision(SavedOutputPrecision),
     Streaming(SavedOutputStreaming),
 }
 
@@ -1397,7 +1373,6 @@ impl OutputEdit {
             Self::ComplexPolicy(policy) => target.complex_policy = policy,
             Self::Scope(scope) => target.compatible_analyses = scope,
             Self::Policy(policy) => target.save_policy = policy,
-            Self::Precision(precision) => target.stored_precision = precision,
             Self::Streaming(streaming) => target.streaming = streaming,
         }
     }
@@ -1415,9 +1390,6 @@ impl OutputEdit {
                 "Set saved output {name} to capture {}.",
                 policy.label().to_lowercase()
             ),
-            Self::Precision(precision) => {
-                format!("Stored saved output {name} as {}.", precision.label())
-            }
             Self::Streaming(streaming) => format!(
                 "Set saved output {name} to {}.",
                 streaming.label().to_lowercase()

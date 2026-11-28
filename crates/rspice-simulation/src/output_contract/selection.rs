@@ -22,8 +22,7 @@ use rspice_design::projection::DesignProjection;
 use rspice_design::schematic::probe::SchematicProbe;
 use rspice_design_model::port::PortDirection;
 use rspice_results::saved_output::{
-    SavedOutputDisplayIntent, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming,
+    SavedOutputDisplayIntent, SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming,
 };
 use rspice_simulation_contract::capture_group::{CaptureGroup, CaptureGroupMembership};
 use rspice_simulation_contract::output_policy::OutputSelectionMode;
@@ -377,7 +376,6 @@ fn effective_plan_saved_outputs(
             expression,
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
             SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
         )
         .map_err(|error| {
@@ -473,7 +471,6 @@ fn plotted_design_nets(
             probe.clone(),
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
             SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
         )
         .map_err(|error| {

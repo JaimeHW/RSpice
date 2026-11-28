@@ -531,14 +531,13 @@ fn stores_complex_components(kind: SavedOutputKind, run_type: AnalysisRunType) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn output(policy: SavedOutputPolicy, precision: SavedOutputPrecision) -> SavedOutput {
+    fn output(policy: SavedOutputPolicy) -> SavedOutput {
         SavedOutput::new(
             SavedOutputKind::RawVoltageOrCurrent,
             "output_voltage",
             "V(out)",
             SavedOutputCompatibility::AllCompatibleAnalyses,
             policy,
-            precision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("valid output")
@@ -556,10 +555,7 @@ mod tests {
 
     #[test]
     fn preflight_estimates_frequency_storage_from_runtime_grids() {
-        let output = output(
-            SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
-        );
+        let output = output(SavedOutputPolicy::EveryAcceptedPoint);
         let analysis_id = AnalysisInstanceId::new();
         for (start_freq, stop_freq, points_per_unit, sweep, expected_count) in [
             (1.0, 1000.0, 10, FrequencySweep::Decade, 31),
@@ -592,11 +588,8 @@ mod tests {
     /// analysis fixes it is still priced at that grid.
     #[test]
     fn an_automatic_node_voltage_streams_on_a_transient() {
-        let automatic = output(
-            SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-        )
-        .with_origin(rspice_simulation_contract::saved_output::SavedOutputOrigin::Automatic);
+        let automatic = output(SavedOutputPolicy::EveryAcceptedPoint)
+            .with_origin(rspice_simulation_contract::saved_output::SavedOutputOrigin::Automatic);
         let (transient, ac) = (AnalysisInstanceId::new(), AnalysisInstanceId::new());
         let report = preflight_saved_output(&automatic, [(transient, &transient_spec())]);
         assert_eq!(
@@ -625,10 +618,7 @@ mod tests {
     /// nothing to refuse it on.
     #[test]
     fn an_output_at_every_accepted_point_streams_on_a_transient() {
-        let output = output(
-            SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
-        );
+        let output = output(SavedOutputPolicy::EveryAcceptedPoint);
         let (analysis, spec) = (AnalysisInstanceId::new(), transient_spec());
         let report = preflight_saved_output(&output, [(analysis, &spec)]);
         assert_eq!(
@@ -640,10 +630,7 @@ mod tests {
 
     #[test]
     fn preflight_exactly_bounds_default_schematic_probe_grid() {
-        let output = output(
-            SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
-        );
+        let output = output(SavedOutputPolicy::SelectedAndFinalPoints);
         let spec = transient_spec();
         let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &spec)]);
 

@@ -799,7 +799,6 @@ fn deferred_output_app() -> RSpiceApp {
         complex_policy: rspice_app_state::state::ComplexExpressionPolicy::LegacyMagnitude,
         output_kind: rspice_app_state::state::SavedOutputKind::RawVoltageOrCurrent,
         save_policy: rspice_app_state::state::SavedOutputPolicy::OnDemandFromRetainedState,
-        stored_precision: rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
         streaming: rspice_app_state::state::SavedOutputStreaming::StoreOnly,
         display_intent: rspice_app_state::state::SavedOutputDisplayIntent::Plot,
         status: SavedOutputMaterializationStatus::Deferred,

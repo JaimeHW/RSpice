@@ -16,7 +16,7 @@ use rspice_app_state::state::SimulationPage;
 use rspice_app_state::state::{
     CaptureGroup, CaptureGroupRule, DesignVariable, DesignVariableQuantity, InstancePath,
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, SpecEntry,
+    SavedOutputStreaming, SpecEntry,
 };
 
 /// One setup page, rendered with its controls announced so a test can press
@@ -291,7 +291,6 @@ fn seed_output(state: &mut AppState, name: &str, expression: &str) {
         expression,
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("valid saved output");

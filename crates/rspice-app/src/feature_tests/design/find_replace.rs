@@ -45,7 +45,6 @@ fn replace_all_renames_an_instance_as_the_rename_form_does() {
                             "I(R1)",
                             rspice_app_state::state::SavedOutputCompatibility::OpTranAc,
                             rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
-                            rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
                             rspice_app_state::state::SavedOutputStreaming::StoreOnly,
                         )
                         .expect("a raw current is a saved output"),

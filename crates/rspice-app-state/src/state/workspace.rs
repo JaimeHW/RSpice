@@ -61,8 +61,7 @@ pub use materialize::{metadata_value, project_veriloga_binding_for_view};
 pub use rspice_simulation_contract::saved_output::SavedOutputDisplayIntent;
 pub use rspice_simulation_contract::saved_output::{
     ComplexExpressionPolicy, OutputSelectionMode, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming,
+    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputStreaming,
 };
 use serde::{Deserialize, Serialize};
 

@@ -187,7 +187,7 @@ pub(super) fn app_with_a_moded_device(
 pub(super) fn moded_device_on_a_ramp() -> RSpiceApp {
     use rspice_app_state::state::{
         ComponentType, SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputStreaming,
     };
 
     let (mut app, _, _) = moded_device_with("", "drv", "");
@@ -219,7 +219,6 @@ pub(super) fn moded_device_on_a_ramp() -> RSpiceApp {
         "I(V1)",
         SavedOutputCompatibility::OpTranAc,
         SavedOutputPolicy::SelectedAndFinalPoints,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("a current output");

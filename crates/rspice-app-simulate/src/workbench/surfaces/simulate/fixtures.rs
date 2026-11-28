@@ -24,7 +24,7 @@ pub fn plan_id(model: &Model) -> crate::product::SimulationPlanId {
 pub fn seed_capture_group(model: &mut Model) -> crate::product::CaptureGroupId {
     use crate::state::{
         CaptureGroup, CaptureGroupRule, InstancePath, SavedOutput, SavedOutputCompatibility,
-        SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming,
     };
 
     let id = plan_id(model);
@@ -35,7 +35,6 @@ pub fn seed_capture_group(model: &mut Model) -> crate::product::CaptureGroupId {
             expression,
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("valid saved output");

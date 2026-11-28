@@ -75,7 +75,6 @@ fn saved_output() -> SavedOutput {
         "V(out)",
         rspice_app_state::state::SavedOutputCompatibility::AllCompatibleAnalyses,
         rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
-        rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
         rspice_app_state::state::SavedOutputStreaming::StoreOnly,
     )
     .expect("a valid saved output")
@@ -392,7 +391,6 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             complex_policy: output.complex_policy,
             output_kind: output.kind,
             save_policy: output.save_policy,
-            stored_precision: output.stored_precision,
             streaming: output.streaming,
             display_intent: output.display_intent,
             status: SavedOutputMaterializationStatus::Deferred,
@@ -501,7 +499,6 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
         complex_policy: output.complex_policy,
         output_kind: output.kind,
         save_policy: output.save_policy,
-        stored_precision: output.stored_precision,
         streaming: output.streaming,
         display_intent: output.display_intent,
         status: SavedOutputMaterializationStatus::MaterializedDcFamily { members },

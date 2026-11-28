@@ -2614,7 +2614,6 @@ fn snapshot_digest(parts: &SnapshotParts, pvt_points: &[PreparedPvtPoint]) -> Co
             writer.string(contract.name());
             writer.string(contract.source_expression());
             writer.u8(contract.policy().digest_tag());
-            writer.u8(contract.precision().digest_tag());
             writer.u8(contract.streaming().digest_tag());
             writer.option(contract.selection_grid().as_ref(), |writer, grid| {
                 writer.f64(grid.start);

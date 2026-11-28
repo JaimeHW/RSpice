@@ -10,8 +10,8 @@ use crate::simulation::controller::test_host::RunTestHost;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
 use crate::state::{
     ComponentType, OutputSelectionMode, Point, SavedOutput, SavedOutputCompatibility,
-    SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming, SimulationRun, SpecEntry, SpecPointScope, SpecificationDefinition,
+    SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputStreaming,
+    SimulationRun, SpecEntry, SpecPointScope, SpecificationDefinition,
 };
 use rspice_results::run::SimulationRunLifecycle;
 use rspice_results::specification::SpecificationComparison;
@@ -121,7 +121,6 @@ fn output(
         expression,
         SavedOutputCompatibility::AllCompatibleAnalyses,
         policy,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap()

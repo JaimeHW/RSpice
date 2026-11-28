@@ -582,7 +582,6 @@ fn ground_and_spaced_probes_evaluate_after_project_reload() {
         );
         assert_eq!(output.inferred_unit(), "volts");
         output.save_policy = SavedOutputPolicy::OnDemandFromRetainedState;
-        output.stored_precision = SavedOutputPrecision::DisplayCacheWithFullSourcePrecision;
         let run = execute(spec, &[output]);
         run.validate_provenance().unwrap();
         let mut state = crate::state::SimulationState::default();

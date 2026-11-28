@@ -374,10 +374,6 @@ fn unmaterialized_probe_creates_one_plan_owned_output_idempotently() {
         SavedOutputPolicy::SelectedAndFinalPoints
     );
     assert_eq!(
-        outputs[0].stored_precision,
-        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
-    );
-    assert_eq!(
         outputs[0].streaming,
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
     );

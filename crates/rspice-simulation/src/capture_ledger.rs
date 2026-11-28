@@ -382,7 +382,6 @@ mod tests {
     use super::*;
     use rspice_results::saved_output::SavedOutputKind;
     use rspice_results::saved_output::SavedOutputPolicy;
-    use rspice_results::saved_output::SavedOutputPrecision;
     use rspice_results::saved_output::SavedOutputStreaming;
     use rspice_simulation_contract::capture_group::CaptureGroupRule;
     use rspice_simulation_contract::saved_output::SavedOutputCompatibility;
@@ -395,7 +394,6 @@ mod tests {
             expression,
             SavedOutputCompatibility::OpTranAc,
             SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("test output")
@@ -633,10 +631,6 @@ mod tests {
             authored.save_policy,
             SavedOutputPolicy::SelectedAndFinalPoints
         );
-        assert_eq!(
-            authored.stored_precision,
-            SavedOutputPrecision::FullSourcePrecision
-        );
         assert_eq!(authored.streaming, SavedOutputStreaming::StoreOnly);
 
         for points in SavedOutputPolicy::ALL {
@@ -653,29 +647,8 @@ mod tests {
                 "and states nothing about an output it does not hold"
             );
             assert_eq!(
-                (outputs[0].stored_precision, outputs[0].streaming),
-                (authored.stored_precision, authored.streaming),
-                "a point policy is not a precision or a streaming decision"
-            );
-        }
-
-        for precision in SavedOutputPrecision::ALL {
-            let groups = vec![claiming(|group| group.precision = Some(precision))];
-            let mut outputs = vec![output("claimed", "V(x1.n)"), output("free", "V(x2.n)")];
-            project_onto_groups(&groups, &mut outputs);
-
-            assert_eq!(
-                outputs[0].stored_precision, precision,
-                "a group that sets a precision imposes it on its member"
-            );
-            assert_eq!(
-                outputs[1].stored_precision, authored.stored_precision,
-                "and a member whose group sets none keeps its own"
-            );
-            assert_eq!(
-                (outputs[0].save_policy, outputs[0].streaming),
-                (authored.save_policy, authored.streaming),
-                "a precision is not a point policy or a streaming decision"
+                outputs[0].streaming, authored.streaming,
+                "a point policy is not a streaming decision"
             );
         }
 
@@ -693,9 +666,8 @@ mod tests {
                 "and a member whose group sets none keeps its own"
             );
             assert_eq!(
-                (outputs[0].save_policy, outputs[0].stored_precision),
-                (authored.save_policy, authored.stored_precision),
-                "a streaming mode is not a point policy or a precision"
+                outputs[0].save_policy, authored.save_policy,
+                "a streaming mode is not a point policy"
             );
         }
 
@@ -706,16 +678,8 @@ mod tests {
         let membership = project_onto_groups(&groups, &mut outputs);
         assert_eq!(membership.owner(0), groups[0].id);
         assert_eq!(
-            (
-                outputs[0].save_policy,
-                outputs[0].stored_precision,
-                outputs[0].streaming
-            ),
-            (
-                authored.save_policy,
-                authored.stored_precision,
-                authored.streaming
-            )
+            (outputs[0].save_policy, outputs[0].streaming),
+            (authored.save_policy, authored.streaming)
         );
     }
 

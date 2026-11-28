@@ -104,37 +104,6 @@ impl SavedOutputPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SavedOutputPrecision {
-    FullSourcePrecision,
-    DisplayCacheWithFullSourcePrecision,
-}
-
-impl SavedOutputPrecision {
-    /// The byte this value encodes as in result digests and run snapshots.
-    pub const fn digest_tag(self) -> u8 {
-        match self {
-            Self::FullSourcePrecision => 0,
-            Self::DisplayCacheWithFullSourcePrecision => 1,
-        }
-    }
-
-    pub const ALL: [Self; 2] = [
-        Self::FullSourcePrecision,
-        Self::DisplayCacheWithFullSourcePrecision,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::FullSourcePrecision => "f64 / complex128",
-            Self::DisplayCacheWithFullSourcePrecision => {
-                "f32 display cache + full source precision"
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum SavedOutputStreaming {
     LivePlotAdaptiveDisplayDecimation,
     StoreOnly,
@@ -260,7 +229,6 @@ pub struct SavedOutputReceipt {
     pub complex_policy: ComplexExpressionPolicy,
     pub output_kind: SavedOutputKind,
     pub save_policy: SavedOutputPolicy,
-    pub stored_precision: SavedOutputPrecision,
     pub streaming: SavedOutputStreaming,
     #[serde(default)]
     pub display_intent: SavedOutputDisplayIntent,

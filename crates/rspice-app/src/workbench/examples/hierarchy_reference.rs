@@ -33,9 +33,9 @@ use rspice_app_state::state::{
     CrossSheetPortEndpoint, CrossSheetSignalType, InstancePath, Library, LibraryCellInstance,
     MoveBoundaryResolution, MoveSelectionRequest, PendingPortPlacement, Point, PortDirectionType,
     PortDiscipline, PortSpec, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicState, SheetDefinition,
-    SheetId, SheetPortPolicy, SymbolDocument, SymbolEditorMetadata, SymbolShape,
-    UnresolvedBindingPolicy, View, ViewType,
+    SavedOutputPolicy, SavedOutputStreaming, SchematicState, SheetDefinition, SheetId,
+    SheetPortPolicy, SymbolDocument, SymbolEditorMetadata, SymbolShape, UnresolvedBindingPolicy,
+    View, ViewType,
 };
 use rspice_design::symbol::{SymbolTextAlign, SymbolTextSize};
 
@@ -633,7 +633,6 @@ fn install_saved_output(state: &mut AppState) -> SimulationPlanId {
         SAVED_OUTPUT_EXPRESSION,
         SavedOutputCompatibility::OpTranAc,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("a raw node probe is a valid saved output");

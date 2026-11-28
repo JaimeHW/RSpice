@@ -324,7 +324,7 @@ fn an_output_rows_plot_switch_decides_whether_the_plan_plots_it() {
     use rspice_app_simulate::workbench::surfaces::simulate::fixtures::plan_id;
     use rspice_app_state::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputDisplayIntent, SavedOutputKind,
-        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputPolicy, SavedOutputStreaming,
     };
 
     let mut app = RSpiceApp::test_instance();
@@ -335,7 +335,6 @@ fn an_output_rows_plot_switch_decides_whether_the_plan_plots_it() {
         "V(out)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
     )
     .expect("valid saved output");
@@ -463,7 +462,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     use rspice_app_simulate::workbench::state::workflow_drafts::SimulationWorkflowDialog;
     use rspice_app_state::state::{
         CaptureGroup, CaptureGroupRule, InstancePath, SavedOutput, SavedOutputCompatibility,
-        SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming,
     };
 
     let mut app = RSpiceApp::test_instance();
@@ -481,7 +480,6 @@ fn every_capture_group_command_is_reachable_from_the_card() {
             expression,
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("valid saved output");

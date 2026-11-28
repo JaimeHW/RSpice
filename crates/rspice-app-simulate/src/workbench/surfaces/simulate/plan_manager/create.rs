@@ -926,7 +926,6 @@ mod tests {
             "V(out)".to_owned(),
             crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
             crate::state::SavedOutputPolicy::EveryAcceptedPoint,
-            crate::state::SavedOutputPrecision::FullSourcePrecision,
             crate::state::SavedOutputStreaming::StoreOnly,
         )
         .expect("a raw node output is valid")

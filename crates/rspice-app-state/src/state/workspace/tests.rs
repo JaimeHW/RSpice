@@ -87,7 +87,6 @@ fn raw_output(
         expression,
         compatibility,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
     )
     .expect("fixture output is valid")
@@ -527,7 +526,6 @@ fn saved_output_validation_is_kind_specific() {
         "V(out) / V(in)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     );
     assert!(invalid.unwrap_err().contains("raw output"));
@@ -537,7 +535,6 @@ fn saved_output_validation_is_kind_specific() {
         "V(out) / V(in)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::OnDemandFromRetainedState,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("calculator expression is valid");
@@ -2143,7 +2140,6 @@ fn legacy_saved_output_migrates_to_plan_owned_plot_intent() {
         "V(out)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::SelectedAndFinalPoints,
-        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("saved output");

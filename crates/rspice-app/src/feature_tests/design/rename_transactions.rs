@@ -11,7 +11,7 @@ use rspice_app_state::state::{
 use rspice_app_state::state::{
     Component, ConfigurationBlackBoxPolicy, ConfigurationModelProfile, ConfigurationSetDefinition,
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, SchematicProbe, UnresolvedBindingPolicy,
+    SavedOutputStreaming, SchematicProbe, UnresolvedBindingPolicy,
 };
 use rspice_app_workbench::workbench::framework::command_registry::ids;
 
@@ -549,7 +549,6 @@ pub(crate) fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, Simulation
         "I(V1)",
         SavedOutputCompatibility::OpTranAc,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap();

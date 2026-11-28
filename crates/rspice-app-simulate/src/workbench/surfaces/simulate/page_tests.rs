@@ -128,7 +128,7 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     use crate::product::SavedOutputId;
     use crate::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputStreaming,
     };
 
     let mut harness = SimulateTestHost::harness();
@@ -144,7 +144,6 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
         "V(out)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::ALL[0],
-        SavedOutputPrecision::ALL[0],
         SavedOutputStreaming::StoreOnly,
     )
     .expect("valid saved output");
@@ -213,7 +212,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     use crate::product::{ObjectRevision, SavedOutputId};
     use crate::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputStreaming,
     };
 
     let mut harness = SimulateTestHost::harness();
@@ -226,7 +225,6 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
         "V(out)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::ALL[SavedOutputPolicy::ALL.len() - 1],
-        SavedOutputPrecision::ALL[SavedOutputPrecision::ALL.len() - 1],
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
     )
     .expect("valid saved output");
@@ -339,7 +337,7 @@ fn a_duplicate_name_skips_every_name_the_registry_already_holds() {
 fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     use crate::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputStreaming,
     };
 
     let mut harness = SimulateTestHost::harness();
@@ -355,7 +353,6 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
         "V(out)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("valid saved output");
@@ -370,7 +367,6 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
 
     let mut replacement = output.clone();
     replacement.save_policy = SavedOutputPolicy::FailureDiagnosticsOnly;
-    replacement.stored_precision = SavedOutputPrecision::DisplayCacheWithFullSourcePrecision;
     replacement.streaming = SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation;
     let revision = harness
         .model
@@ -396,10 +392,6 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     assert_eq!(
         stored.save_policy,
         SavedOutputPolicy::FailureDiagnosticsOnly
-    );
-    assert_eq!(
-        stored.stored_precision,
-        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision
     );
     assert_eq!(
         stored.streaming,
@@ -430,7 +422,6 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
         "V(in)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("valid saved output");
@@ -474,7 +465,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
 fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
     use crate::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputStreaming,
     };
 
     let mut harness = SimulateTestHost::harness();
@@ -485,7 +476,6 @@ fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
         "V(otu)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("valid saved output");

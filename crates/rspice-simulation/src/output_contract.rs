@@ -2,8 +2,8 @@
 
 use crate::execution_identity::analysis_kind_tag;
 use rspice_results::saved_output::{
-    SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputReceipt, SavedOutputStreaming,
+    SavedOutputKind, SavedOutputMaterializationStatus, SavedOutputPolicy, SavedOutputReceipt,
+    SavedOutputStreaming,
 };
 use rspice_simulation_contract::analysis_run_type::AnalysisRunType;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
@@ -45,7 +45,6 @@ pub struct PreparedSavedOutput {
     source_expression: String,
     complex_policy: rspice_results::saved_output::ComplexExpressionPolicy,
     policy: SavedOutputPolicy,
-    precision: SavedOutputPrecision,
     streaming: SavedOutputStreaming,
     display_intent: rspice_results::saved_output::SavedOutputDisplayIntent,
     selection_grid: Option<TransientSelectionGrid>,
@@ -150,7 +149,6 @@ impl PreparedSavedOutput {
             source_expression: output.source_expression.clone(),
             complex_policy: output.complex_policy,
             policy: output.save_policy,
-            precision: output.stored_precision,
             streaming: output.streaming,
             display_intent: output.display_intent,
             selection_grid,
@@ -183,7 +181,6 @@ impl PreparedSavedOutput {
             complex_policy: self.complex_policy,
             compatible_analyses: SavedOutputCompatibility::AllCompatibleAnalyses,
             save_policy: self.policy,
-            stored_precision: self.precision,
             streaming: self.streaming,
         };
         Self::prepare(&output, analysis_id, spec)?.ok_or_else(|| {
@@ -222,10 +219,6 @@ impl PreparedSavedOutput {
         self.policy
     }
 
-    pub const fn precision(&self) -> SavedOutputPrecision {
-        self.precision
-    }
-
     pub const fn streaming(&self) -> SavedOutputStreaming {
         self.streaming
     }
@@ -260,7 +253,6 @@ impl PreparedSavedOutput {
             source_expression: receipt.source_expression.clone(),
             complex_policy: receipt.complex_policy,
             policy: receipt.save_policy,
-            precision: receipt.stored_precision,
             streaming: receipt.streaming,
             display_intent: receipt.display_intent,
             selection_grid: None,
@@ -284,7 +276,6 @@ impl PreparedSavedOutput {
             complex_policy: self.complex_policy,
             output_kind: self.kind,
             save_policy: self.policy,
-            stored_precision: self.precision,
             streaming: self.streaming,
             display_intent: self.display_intent,
             source_bindings,
@@ -482,7 +473,6 @@ fn output_contract_digest(
     append_string(&mut bytes, &output.name);
     append_string(&mut bytes, &output.source_expression);
     bytes.push(output.save_policy.digest_tag());
-    bytes.push(output.stored_precision.digest_tag());
     bytes.push(output.streaming.digest_tag());
     bytes.push(match output.display_intent {
         rspice_results::saved_output::SavedOutputDisplayIntent::Plot => 0,

@@ -527,6 +527,9 @@ fn announced(node: &Node) -> String {
 /// analysis-catalogue fixtures open the same window the tenth already
 /// contributed, and the Outputs registry's own actions are all disabled over an
 /// empty registry, so its enabled controls are the toolbar's.
+///
+/// The saved output and capture group dialogs each lost their stored precision
+/// picker, which changed nothing a run kept: one control apiece.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Analyses/Transient", 49),
     ("Analyses/Ac", 5),
@@ -559,9 +562,9 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("rename analysis", 4),
     ("run points", 12),
     ("design variable", 8),
-    ("saved output", 9),
+    ("saved output", 8),
     ("clone plan", 8),
-    ("capture group", 7),
+    ("capture group", 6),
     ("design variable import", 12),
 ];
 
@@ -639,8 +642,10 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// analysis no longer needs an operating point before it, so their forms lost
 /// the prerequisite row and its bind control, three presses between them; and
 /// a design variable is plan-wide and nothing implemented its override
-/// policy, so the add-variable dialog's scope and policy selects went (345).
-const PRESSED_FLOOR: usize = 345;
+/// policy, so the add-variable dialog's scope and policy selects went;
+/// and the saved output and capture group dialogs each lost their stored
+/// precision picker, which changed nothing a run kept (343).
+const PRESSED_FLOOR: usize = 343;
 
 /// Controls that are wired to nothing.
 ///

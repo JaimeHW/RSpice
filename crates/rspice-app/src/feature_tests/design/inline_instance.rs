@@ -218,7 +218,6 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
         "I(V1)",
         rspice_app_state::state::SavedOutputCompatibility::OpTranAc,
         rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
-        rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
         rspice_app_state::state::SavedOutputStreaming::StoreOnly,
     )
     .unwrap();

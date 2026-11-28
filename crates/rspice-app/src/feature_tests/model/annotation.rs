@@ -17,8 +17,8 @@ use rspice_app_state::state::{
     AnnotationObject, AnnotationPosition, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
     ConfigurationSetDefinition, ConfigurationSetId, Point, ProtectedReferencePolicy, RenumberOrder,
     RenumberRequest, RenumberScope, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-    SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicObjectKey,
-    SchematicProbe, UnresolvedBindingPolicy,
+    SavedOutputPolicy, SavedOutputStreaming, SchematicObjectKey, SchematicProbe,
+    UnresolvedBindingPolicy,
 };
 
 struct Fixture {
@@ -74,7 +74,6 @@ fn fixture(names: &[&str]) -> Fixture {
             format!("I({name})"),
             SavedOutputCompatibility::OpTranAc,
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .unwrap();

@@ -88,7 +88,6 @@ fn add_current_output(state: &mut AppState) -> rspice_app_state::product::Simula
         "I(R1)",
         rspice_app_state::state::SavedOutputCompatibility::OpTranAc,
         rspice_app_state::state::SavedOutputPolicy::EveryAcceptedPoint,
-        rspice_app_state::state::SavedOutputPrecision::FullSourcePrecision,
         rspice_app_state::state::SavedOutputStreaming::StoreOnly,
     )
     .unwrap();

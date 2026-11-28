@@ -38,9 +38,9 @@
 //!
 //! # Overrides are per axis
 //!
-//! `points`, `streaming` and `precision` are each `Option`. `None` means the
-//! output's own value survives. A group that could only override all three at
-//! once would force an engineer to restate two decisions to change one, and
+//! `points` and `streaming` are each `Option`. `None` means the output's own
+//! value survives. A group that could only override both at once would force
+//! an engineer to restate one decision to change the other, and
 //! the fallback group would need special-casing in the projection instead of
 //! simply being a group that overrides nothing.
 
@@ -49,9 +49,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::saved_output::{
-    SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-};
+use crate::saved_output::{SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming};
 use rspice_vocabulary::hierarchy_path::{InstancePath, ProbeTarget};
 use rspice_vocabulary::product::{
     CaptureGroupId, ObjectRevision, RevisionError, SavedOutputId, SimulationPlanId,
@@ -278,8 +276,6 @@ pub struct CaptureGroup {
     pub points: Option<SavedOutputPolicy>,
     #[serde(default)]
     pub streaming: Option<SavedOutputStreaming>,
-    #[serde(default)]
-    pub precision: Option<SavedOutputPrecision>,
 }
 
 impl CaptureGroup {
@@ -292,7 +288,6 @@ impl CaptureGroup {
             members: Vec::new(),
             points: None,
             streaming: None,
-            precision: None,
         };
         group.validate()?;
         Ok(group)
@@ -320,7 +315,6 @@ impl CaptureGroup {
             members: Vec::new(),
             points: None,
             streaming: None,
-            precision: None,
         }
     }
 
@@ -350,9 +344,6 @@ impl CaptureGroup {
         if let Some(streaming) = self.streaming {
             output.streaming = streaming;
         }
-        if let Some(precision) = self.precision {
-            output.stored_precision = precision;
-        }
     }
 
     /// What the group's policy cell says. A group overriding nothing reports
@@ -366,9 +357,6 @@ impl CaptureGroup {
         }
         if let Some(streaming) = self.streaming {
             parts.push(streaming.label().to_owned());
-        }
-        if let Some(precision) = self.precision {
-            parts.push(precision.label().to_owned());
         }
         if parts.is_empty() {
             "per output".to_owned()
@@ -397,7 +385,6 @@ impl CaptureGroup {
                 .collect(),
             points: self.points,
             streaming: self.streaming,
-            precision: self.precision,
         }
     }
 }
@@ -588,7 +575,6 @@ mod tests {
             expression,
             SavedOutputCompatibility::OpTranAc,
             SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("test output is valid")

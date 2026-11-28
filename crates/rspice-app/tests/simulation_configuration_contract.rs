@@ -1,7 +1,7 @@
 use rspice_app::{
     AnalysisInstanceId, DesignVariable, DesignVariableQuantity, DesignVariableRange,
     ProjectWorkspace, SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, SimulationPlanId, SimulationPlanPayload,
+    SavedOutputStreaming, SimulationPlanId, SimulationPlanPayload,
     SimulationPlanPayloadRecord,
 };
 use rspice_simulation::netlist_gen::design_variable_parameter_lines;
@@ -32,7 +32,6 @@ fn raw_output(
         expression,
         compatible_analyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap()

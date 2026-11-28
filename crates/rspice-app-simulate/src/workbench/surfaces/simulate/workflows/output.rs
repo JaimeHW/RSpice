@@ -43,7 +43,7 @@ pub(super) fn saved_output_dialog(
     );
     let choice = Dialog::new("Add saved output or derived expression", "Add output")
     .description(
-        "Add a validated output contract with explicit analysis compatibility, retention, precision, and streaming behavior.",
+        "Add an output with the analyses it applies to, the points it keeps, and how it streams.",
     )
     .size(DialogSize::SimulationWorkflow)
     .flush_body()
@@ -75,7 +75,7 @@ pub(super) fn saved_output_dialog(
                 &["OP + TRAN + AC", "All compatible analyses", "Selected analysis only"],
             );
         }, |ui| {
-            workflow_section_heading(ui, "Save, precision, and provenance");
+            workflow_section_heading(ui, "Save and streaming");
             workflow_select_field(
                 ui,
                 "saved-output-save-policy",
@@ -86,16 +86,6 @@ pub(super) fn saved_output_dialog(
                     "Selected + final points",
                     "On demand from retained state",
                     "Failure diagnostics only",
-                ],
-            );
-            workflow_select_field(
-                ui,
-                "saved-output-precision",
-                "Stored precision",
-                &mut draft.precision,
-                &[
-                    "f64 / complex128",
-                    "f32 display cache + full source precision",
                 ],
             );
             workflow_select_field(
@@ -120,9 +110,7 @@ pub(super) fn saved_output_from_draft(
     cx: &Cx<'_, SimulateFeature>,
     draft: &SavedOutputDraft,
 ) -> Result<crate::state::SavedOutput, String> {
-    use crate::state::{
-        SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
-    };
+    use crate::state::{SavedOutput, SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming};
     let kind = SavedOutputKind::ALL
         .get(draft.kind)
         .copied()
@@ -132,10 +120,6 @@ pub(super) fn saved_output_from_draft(
         .get(draft.save_policy)
         .copied()
         .ok_or_else(|| "Save policy selection is invalid.".to_owned())?;
-    let stored_precision = SavedOutputPrecision::ALL
-        .get(draft.precision)
-        .copied()
-        .ok_or_else(|| "Stored precision selection is invalid.".to_owned())?;
     let streaming = SavedOutputStreaming::ALL
         .get(draft.streaming)
         .copied()
@@ -146,7 +130,6 @@ pub(super) fn saved_output_from_draft(
         draft.expression.clone(),
         compatible_analyses,
         save_policy,
-        stored_precision,
         streaming,
     )
 }

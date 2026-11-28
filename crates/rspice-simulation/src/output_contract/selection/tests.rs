@@ -248,7 +248,6 @@ fn probe_owned_output_is_effective_only_while_enabled_marker_references_it() {
         "V(out)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::SelectedAndFinalPoints,
-        SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
         SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation,
     )
     .expect("probe output")

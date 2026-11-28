@@ -392,7 +392,6 @@ pub struct CaptureGroupDraft {
     pub rules: Vec<CaptureGroupRuleDraft>,
     pub points: Option<usize>,
     pub streaming: Option<usize>,
-    pub precision: Option<usize>,
     pub validation_error: Option<String>,
 }
 
@@ -496,7 +495,6 @@ pub struct SavedOutputDraft {
     pub expression: String,
     pub compatible_analyses: usize,
     pub save_policy: usize,
-    pub precision: usize,
     pub streaming: usize,
     pub validation_error: Option<String>,
 }

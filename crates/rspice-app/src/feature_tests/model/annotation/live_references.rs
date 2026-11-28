@@ -17,7 +17,6 @@ fn add_output(
         expression,
         SavedOutputCompatibility::OpTranAc,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap();
@@ -637,7 +636,6 @@ fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
         "I(/X1/V9)",
         SavedOutputCompatibility::OpTranAc,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap();
@@ -669,7 +667,6 @@ fn new_saved_outputs_follow_both_directions_of_a_past_component_rename() {
         "I(/X2/V42)",
         SavedOutputCompatibility::OpTranAc,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap();

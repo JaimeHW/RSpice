@@ -54,11 +54,6 @@ pub fn group_draft(group: &crate::state::CaptureGroup) -> CaptureGroupDraft {
                 .iter()
                 .position(|candidate| *candidate == streaming)
         }),
-        precision: group.precision.and_then(|precision| {
-            SavedOutputPrecision::ALL
-                .iter()
-                .position(|candidate| *candidate == precision)
-        }),
         validation_error: None,
     }
 }
@@ -105,10 +100,6 @@ pub(super) fn capture_group_dialog(
     let points_options = SavedOutputPolicy::ALL
         .iter()
         .map(|policy| policy.label())
-        .collect::<Vec<_>>();
-    let precision_options = SavedOutputPrecision::ALL
-        .iter()
-        .map(|precision| precision.label())
         .collect::<Vec<_>>();
     let streaming_options = SavedOutputStreaming::ALL
         .iter()
@@ -225,20 +216,12 @@ pub(super) fn capture_group_dialog(
                     INHERIT_CHOICE,
                     &streaming_options,
                 );
-                optional_choice_field(
-                    ui,
-                    "capture-group-precision",
-                    "Stored precision",
-                    &mut draft.precision,
-                    INHERIT_CHOICE,
-                    &precision_options,
-                );
                 ui.add_space(8.0);
                 property_row_wrapped(
                     ui,
                     "Unset axes",
-                    "keep each member's own contract, so a group can change one decision without \
-                     restating the other two",
+                    "keep each member's own choice, so a group can change one decision without \
+                     restating the other",
                 );
                 property_row_wrapped(
                     ui,
@@ -286,9 +269,6 @@ fn capture_group_from_draft(
     group.streaming = draft
         .streaming
         .and_then(|index| SavedOutputStreaming::ALL.get(index).copied());
-    group.precision = draft
-        .precision
-        .and_then(|index| SavedOutputPrecision::ALL.get(index).copied());
     // Editing keeps the record's identity and the outputs the group names
     // directly: those are membership decisions made elsewhere, and dropping
     // them here would delete work the form never showed. The rules are not in

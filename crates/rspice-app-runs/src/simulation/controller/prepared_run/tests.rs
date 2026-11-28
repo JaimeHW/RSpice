@@ -440,7 +440,6 @@ fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
         "V(1)",
         crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
         crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
-        crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
         crate::state::SavedOutputStreaming::StoreOnly,
     )
     .expect("valid output");
@@ -607,7 +606,6 @@ fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
                 "V(1)",
                 crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
                 crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
-                crate::state::SavedOutputPrecision::DisplayCacheWithFullSourcePrecision,
                 crate::state::SavedOutputStreaming::StoreOnly,
             )
             .expect("valid output"),
@@ -642,7 +640,6 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
                     "V(1)",
                     crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
                     crate::state::SavedOutputPolicy::OnDemandFromRetainedState,
-                    crate::state::SavedOutputPrecision::FullSourcePrecision,
                     crate::state::SavedOutputStreaming::StoreOnly,
                 )
                 .expect("valid deferred output"),

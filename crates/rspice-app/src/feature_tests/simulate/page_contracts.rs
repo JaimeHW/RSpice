@@ -86,7 +86,7 @@ pub(super) fn render_with(
 fn a_selected_record_paints_every_field_of_its_contract() {
     use rspice_app_state::state::{
         DesignVariable, DesignVariableQuantity, SavedOutput, SavedOutputCompatibility,
-        SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming,
     };
 
     let rendered = render_with(SimulationPage::Outputs, 1200.0, |app| {
@@ -97,7 +97,6 @@ fn a_selected_record_paints_every_field_of_its_contract() {
             "V(out)",
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("valid saved output");
@@ -114,14 +113,25 @@ fn a_selected_record_paints_every_field_of_its_contract() {
         "Expression",
         "Applies to",
         "Save policy",
-        "Stored precision",
         "Streaming",
+        "Capture group",
     ] {
         assert!(
             rendered.contains(field),
             "the selected output's {field} control did not reach the screen:\n{rendered}"
         );
     }
+    // A run keeps every value at full precision whatever an output asked, so
+    // no output offers a choice that changes nothing.
+    assert!(
+        !rendered.contains("Stored precision"),
+        "the selected output offers a stored precision:\n{rendered}"
+    );
+    let save = render(SimulationPage::Save, 1200.0);
+    assert!(
+        !save.contains("Stored precision"),
+        "the Save page counts stored precisions:\n{save}"
+    );
 
     let rendered = render_with(SimulationPage::Variables, 1200.0, |app| {
         let id = plan_id(&app.state.model);
@@ -245,7 +255,7 @@ fn seeded_plan_id(state: &AppState) -> rspice_app_state::product::SimulationPlan
 fn seed_three_outputs(state: &mut AppState) {
     use rspice_app_state::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputStreaming,
     };
 
     let id = seeded_plan_id(state);
@@ -264,7 +274,6 @@ fn seed_three_outputs(state: &mut AppState) {
             expression,
             SavedOutputCompatibility::AllCompatibleAnalyses,
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("valid saved output");

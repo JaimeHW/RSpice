@@ -12,9 +12,7 @@ use egui::Ui;
 use crate::product::RunId;
 use crate::state::SimulationPage;
 use crate::state::workspace::SimulationPlanPayload;
-use crate::state::{
-    CaptureGroupMembership, RunRetention, SavedOutputPrecision, SavedOutputStreaming,
-};
+use crate::state::{CaptureGroupMembership, RunRetention, SavedOutputStreaming};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::feature::Cx;
@@ -242,9 +240,9 @@ fn streaming_contract(
     payload: &SimulationPlanPayload,
 ) {
     // What the run will do, not what the rows were authored as. A capture group
-    // rewrites the streaming and precision of every output it owns, and this
-    // card counted the authored records — so a plan whose group overrode both
-    // reported a policy no task would run under. Projected through the ledger's
+    // rewrites the streaming of every output it owns, and this card counted
+    // the authored records — so a plan whose group overrode it reported a
+    // policy no task would run under. Projected through the ledger's
     // own owner, on a copy, so reading the card never rewrites the plan.
     let mut effective = payload.saved_outputs.clone();
     rspice_simulation::capture_ledger::project_onto_groups(&payload.capture_groups, &mut effective);
@@ -257,23 +255,9 @@ fn streaming_contract(
             )
         })
         .count();
-    let precisions = SavedOutputPrecision::ALL
-        .iter()
-        .map(|precision| {
-            (
-                precision.label(),
-                effective
-                    .iter()
-                    .filter(|output| output.stored_precision == *precision)
-                    .count(),
-            )
-        })
-        .filter(|(_, count)| *count > 0)
-        .map(|(label, count)| format!("{count} × {label}"))
-        .collect::<Vec<_>>();
     card(
         ui,
-        "Streaming & precision",
+        "Streaming",
         Some((format!("{streamed} streamed").as_str(), Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
@@ -293,15 +277,6 @@ fn streaming_contract(
                     ui,
                     "Streamed while solving",
                     &format!("{streamed} of {}", effective.len()),
-                );
-                rule_row(
-                    ui,
-                    "Stored precision",
-                    &if precisions.is_empty() {
-                        "no outputs configured".to_owned()
-                    } else {
-                        precisions.join(" · ")
-                    },
                 );
                 rule_row(
                     ui,

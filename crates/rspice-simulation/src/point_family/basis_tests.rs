@@ -74,7 +74,6 @@ fn run_projected(family: AnalysisType, deck: &str, base: CornerBaseMode) -> Simu
     use crate::preparation::QueuedAnalysis;
     use rspice_results::saved_output::SavedOutputKind;
     use rspice_results::saved_output::SavedOutputPolicy;
-    use rspice_results::saved_output::SavedOutputPrecision;
     use rspice_results::saved_output::SavedOutputStreaming;
     use rspice_simulation_contract::analysis_spec::AnalysisSpec;
     use rspice_simulation_contract::saved_output::SavedOutput;
@@ -101,7 +100,6 @@ fn run_projected(family: AnalysisType, deck: &str, base: CornerBaseMode) -> Simu
         "V(B)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap();

@@ -524,7 +524,6 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
                 format!("I(/X1/{name})"),
                 SavedOutputCompatibility::OpTranAc,
                 SavedOutputPolicy::EveryAcceptedPoint,
-                SavedOutputPrecision::FullSourcePrecision,
                 SavedOutputStreaming::StoreOnly,
             )
             .unwrap();

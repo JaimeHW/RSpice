@@ -410,7 +410,6 @@ where
             });
             writer.u8(receipt.output_kind.digest_tag());
             writer.u8(receipt.save_policy.digest_tag());
-            writer.u8(receipt.stored_precision.digest_tag());
             writer.u8(receipt.streaming.digest_tag());
             encode_saved_output_status(&mut writer, &receipt.status);
             writer.option(receipt.source_bindings.as_ref(), |writer, bindings| {

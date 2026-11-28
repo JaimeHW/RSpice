@@ -17,7 +17,7 @@ use crate::workbench::simulate::test_host::SimulateTestHost;
 fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
     use crate::state::{
         SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-        SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputStreaming,
     };
 
     let mut harness = SimulateTestHost::harness();
@@ -29,7 +29,6 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
         "V(x1.m)",
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::SelectedAndFinalPoints,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .expect("valid saved output");

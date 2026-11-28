@@ -15,7 +15,7 @@ mod tests {
     use crate::state::workspace::SimulationConfigurationError;
     use crate::state::{
         InstancePath, ProjectWorkspace, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SimulationPlanPayload,
+        SavedOutputPolicy, SavedOutputStreaming, SimulationPlanPayload,
         SimulationPlanPayloadRecord,
     };
 
@@ -26,7 +26,6 @@ mod tests {
             expression,
             SavedOutputCompatibility::OpTranAc,
             SavedOutputPolicy::SelectedAndFinalPoints,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("saved output")

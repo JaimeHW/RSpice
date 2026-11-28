@@ -2,8 +2,7 @@
 
 pub use crate::simulation::controller::test_execution::saved_outputs::run;
 use crate::state::{
-    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming,
+    SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy, SavedOutputStreaming,
 };
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_simulation_contract::config::FrequencySweep;
@@ -15,7 +14,6 @@ pub fn output(kind: SavedOutputKind, name: &str, expression: &str) -> SavedOutpu
         expression,
         SavedOutputCompatibility::AllCompatibleAnalyses,
         SavedOutputPolicy::EveryAcceptedPoint,
-        SavedOutputPrecision::FullSourcePrecision,
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap()

@@ -326,7 +326,6 @@ fn a_declared_corner_space_round_trips_with_its_base_analysis_tag() {
         "V(out)",
         crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
         crate::state::SavedOutputPolicy::EveryAcceptedPoint,
-        crate::state::SavedOutputPrecision::FullSourcePrecision,
         crate::state::SavedOutputStreaming::StoreOnly,
     )
     .unwrap();

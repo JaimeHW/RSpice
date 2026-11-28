@@ -343,7 +343,7 @@ mod tests {
     use super::*;
     use crate::product::{AnalysisInstanceId, ObjectRevision};
     use crate::simulation::plan::{AnalysisDraft, AnalysisInstance};
-    use crate::state::{SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming};
+    use crate::state::{SavedOutputPolicy, SavedOutputStreaming};
 
     #[test]
     fn semantic_token_matching_does_not_use_substrings() {
@@ -405,7 +405,6 @@ mod tests {
                 analysis_id: first_id,
             },
             SavedOutputPolicy::EveryAcceptedPoint,
-            SavedOutputPrecision::FullSourcePrecision,
             SavedOutputStreaming::StoreOnly,
         )
         .expect("valid saved output");

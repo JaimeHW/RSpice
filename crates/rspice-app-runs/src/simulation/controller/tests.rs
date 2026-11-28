@@ -46,7 +46,6 @@ fn save_all_retains_engine_results_while_explicit_empty_retains_none() {
         "V(out)",
         crate::state::SavedOutputCompatibility::AllCompatibleAnalyses,
         crate::state::SavedOutputPolicy::SelectedAndFinalPoints,
-        crate::state::SavedOutputPrecision::FullSourcePrecision,
         crate::state::SavedOutputStreaming::StoreOnly,
     )
     .expect("selected display output");
