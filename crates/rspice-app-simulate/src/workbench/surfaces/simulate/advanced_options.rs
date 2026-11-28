@@ -463,10 +463,13 @@ pub(super) fn form_rows_with_ownership(
             });
             for row in &mut section.rows {
                 row.held_by = match row.option {
-                    NumericOverrideOption::OutputTimePoints if strobe_stated => {
+                    // Only the unstated half: a record carrying both is the
+                    // engine's syntax error, and holding both would leave the
+                    // reader no field to clear it from.
+                    NumericOverrideOption::OutputTimePoints if strobe_stated && !times_stated => {
                         Some(STROBE_HOLDS_THE_SCHEDULE)
                     }
-                    NumericOverrideOption::StrobeInterval if times_stated => {
+                    NumericOverrideOption::StrobeInterval if times_stated && !strobe_stated => {
                         Some(TIMES_HOLD_THE_SCHEDULE)
                     }
                     _ => None,
@@ -542,6 +545,12 @@ const TIMES_HOLD_THE_SCHEDULE: &str = "The exact report times set this analysis'
 ///
 /// Held rather than hidden: the reader sees both shapes the output schedule
 /// can take, and the one that cannot be used says what to clear first.
+///
+/// The form pairs its fields into two columns by the id of the Ui they are
+/// drawn in, so the held field is drawn in a disabled Ui carrying this Ui's id,
+/// not a child's, and that Ui claims room only when the field opened a row of
+/// its own. The reason hangs off the field's own control, which is the first
+/// widget the field drew that a reader could otherwise click or focus.
 pub(super) fn draw_field(
     ui: &mut egui::Ui,
     row: &AdvancedOptionRow,
@@ -550,9 +559,35 @@ pub(super) fn draw_field(
     let Some(reason) = row.held_by else {
         return field(ui, row);
     };
-    ui.add_enabled_ui(false, |ui| field(ui, row))
-        .response
-        .on_disabled_hover_text(reason);
+    let layer = ui.layer_id();
+    let drawn_before = ui
+        .ctx()
+        .viewport(|viewport| viewport.this_pass.widgets.get_layer(layer).count());
+    let mut held = ui.new_child(
+        egui::UiBuilder::new()
+            .id(ui.id())
+            .max_rect(ui.available_rect_before_wrap())
+            .layout(*ui.layout())
+            .disabled(),
+    );
+    let _ = field(&mut held, row);
+    let claimed = held.min_rect();
+    drop(held);
+    if claimed.is_positive() {
+        ui.advance_cursor_after_rect(claimed);
+    }
+    let control = ui.ctx().viewport(|viewport| {
+        viewport
+            .this_pass
+            .widgets
+            .get_layer(layer)
+            .skip(drawn_before)
+            .find(|widget| widget.sense.senses_click() || widget.sense.is_focusable())
+            .map(|widget| widget.id)
+    });
+    if let Some(response) = control.and_then(|id| ui.ctx().read_response(id)) {
+        response.on_disabled_hover_text(reason);
+    }
     None
 }
 
