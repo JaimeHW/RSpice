@@ -250,7 +250,7 @@ fn an_expressions_entry_converts_and_removes_it() {
         egui::PointerButton::Secondary,
     );
     let menu = run(&ctx, &mut state, Vec::new());
-    let remove = text(&menu, "Remove expression").expect("the entry's menu offers Remove");
+    let remove = text(&menu, "Remove trace").expect("the entry's menu offers Remove");
     click(
         &ctx,
         &mut state,
@@ -312,7 +312,7 @@ fn an_expression_that_fails_is_named_and_removable() {
         egui::PointerButton::Secondary,
     );
     let menu = run(&ctx, &mut state, Vec::new());
-    let remove = text(&menu, "Remove expression").expect("its menu offers Remove");
+    let remove = text(&menu, "Remove trace").expect("its menu offers Remove");
     click(
         &ctx,
         &mut state,
@@ -363,7 +363,7 @@ fn a_logic_expressions_lane_converts_and_removes_it() {
         "an expression's lane is no net to probe"
     );
     assert!(
-        text(&menu, "Remove expression").is_some(),
+        text(&menu, "Remove trace").is_some(),
         "the lane's menu removes its expression"
     );
     let analog = text(&menu, "Analog").expect("the lane's menu offers Analog");
@@ -395,7 +395,7 @@ fn a_logic_expressions_lane_converts_and_removes_it() {
         egui::PointerButton::Secondary,
     );
     let menu = run(&ctx, &mut state, Vec::new());
-    let remove = text(&menu, "Remove expression").expect("the lane's menu offers Remove");
+    let remove = text(&menu, "Remove trace").expect("the lane's menu offers Remove");
     click(
         &ctx,
         &mut state,

@@ -853,7 +853,7 @@ impl<'a> StripHeader<'a> {
                         }
                         if removable.contains(&index) {
                             crate::context_menu::context_menu(&response, |ui| {
-                                if ui.button("Remove expression").clicked() {
+                                if ui.button("Remove trace").clicked() {
                                     out.legend_removed = Some(index);
                                     ui.close();
                                 }

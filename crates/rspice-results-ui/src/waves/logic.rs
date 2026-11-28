@@ -888,7 +888,7 @@ fn lane_menu(
     }
     if expression {
         ui.separator();
-        if ui.button("Remove expression").clicked() {
+        if ui.button("Remove trace").clicked() {
             output.remove_expression = Some(index);
             ui.close();
         }

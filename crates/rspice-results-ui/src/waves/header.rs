@@ -1128,7 +1128,7 @@ fn expression_chip(
             }
         });
         ui.separator();
-        if ui.button("Remove expression").clicked() {
+        if ui.button("Remove trace").clicked() {
             output.remove_expression = Some(expression.slot);
             ui.close();
         }
