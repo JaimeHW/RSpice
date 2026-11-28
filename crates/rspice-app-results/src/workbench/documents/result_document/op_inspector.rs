@@ -579,6 +579,17 @@ mod tests {
         let run = state.model.simulation.active_run().expect("retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     }
+    /// A run kept without its receipt does not say what it was drawn from,
+    /// so it never says the schematic changed, though its rows no longer
+    /// cross-probe.
+    #[test]
+    fn a_run_kept_without_its_receipt_never_says_the_schematic_changed() {
+        let state = op_state(2, 1);
+        let run = state.model.simulation.active_run().expect("retained run");
+        assert!(run.prepared_receipt().is_none());
+        assert!(!result_mapping_is_current(state.results_reads()));
+        assert!(!schematic_changed_since_run(state.results_reads()));
+    }
     #[test]
     fn selection_never_falls_back_to_another_analysis() {
         use crate::state::{AnalysisResult, SimulationRun};
