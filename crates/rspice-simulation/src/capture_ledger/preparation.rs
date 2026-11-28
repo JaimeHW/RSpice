@@ -67,8 +67,10 @@ pub fn plan_capture_workload<'a>(
 /// fold over the same groups the Save page's ledger prints, priced over the
 /// same per-analysis workload. A ceiling never does — an engine's result-value
 /// allowance or a transient's unknown point count says what a run might
-/// write, not what it will. The store counts the bytes the run actually
-/// writes against the same ceiling and stops the run where they cross it.
+/// write, not what it will — and neither does an output whose size only the
+/// run decides, such as an expression: it is left out of the bound and runs.
+/// The store counts the bytes the run actually writes against the same
+/// ceiling and stops the run where they cross it.
 pub fn validate_plan_saved_output_budget<'a>(
     groups: &[CaptureGroup],
     outputs: &[SavedOutput],
@@ -89,17 +91,6 @@ pub fn validate_plan_saved_output_budget<'a>(
         policy.output_selection_mode,
         workload,
     );
-    // An unbounded output is refused before the ceiling is compared: a total
-    // that silently omitted it would be a forecast of a different plan.
-    if let Some(unprovable) = ledger.indeterminate().first() {
-        return Err(PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            format!(
-                "Saved-output storage budget cannot be proven for '{}': {}",
-                unprovable.name, unprovable.reason
-            ),
-        ));
-    }
     let forecast = ledger.proven_bytes();
     if forecast > policy.maximum_storage_bytes {
         return Err(PreparationError::new(

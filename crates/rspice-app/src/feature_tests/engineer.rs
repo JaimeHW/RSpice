@@ -700,6 +700,22 @@ impl Engineer {
                 );
                 return run.clone();
             }
+            // A run Check refused never starts: say why now rather than wait
+            // out the limit for a run that is not coming.
+            let preflight = &self.replay.app.state.runs.preflight;
+            if preflight.checking.is_none()
+                && let Some(report) = &preflight.report
+            {
+                assert!(
+                    report.blockers.is_empty(),
+                    "Run was refused: {:?}",
+                    report
+                        .blockers
+                        .iter()
+                        .map(|blocker| format!("{}: {}", blocker.check, blocker.observed))
+                        .collect::<Vec<_>>()
+                );
+            }
             assert!(started.elapsed() < RUN_LIMIT, "the run did not end");
             // The run is the simulator's: a frame only looks in on it.
             std::thread::sleep(Duration::from_millis(100));

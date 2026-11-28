@@ -59,10 +59,10 @@ pub struct CaptureLedgerRow {
     pub indeterminate: usize,
 }
 
-/// One output whose retained size cannot be bounded before the run.
+/// One output whose retained size only the run decides.
 ///
-/// Retained with its reason because the preparation gate refuses by name: an
-/// engineer told only that "something is indeterminate" has nothing to fix.
+/// Kept with its reason so a page can name the outputs its total leaves out;
+/// such an output never refuses a run.
 pub struct IndeterminateOutput {
     pub name: String,
     pub reason: String,

@@ -225,9 +225,12 @@ fn registry(
         }
         match projected.get(&output.id) {
             Some(Some(bytes)) => (format_bytes(*bytes), Tone::Neutral),
-            // Named rather than dashed: an output whose size cannot be proven
-            // before the solve is the one the budget cannot be checked against.
-            Some(None) => ("indeterminate".to_owned(), Tone::Dim),
+            // An output whose size only the run decides, an expression for
+            // one, runs all the same: what it wrote once a run has written it.
+            Some(None) => written_bytes(cx.model, output.id).map_or_else(
+                || ("after run".to_owned(), Tone::Dim),
+                |bytes| (format_bytes(bytes), Tone::Neutral),
+            ),
             None => ("—".to_owned(), Tone::Neutral),
         }
     };
