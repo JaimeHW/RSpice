@@ -667,7 +667,8 @@ fn a_net_inside_an_instance_is_picked_by_looking_inside_it_and_starts_the_run_th
     }
     assert!(page.app.state.model.sim_setup.options.nodesets.is_empty());
 
-    let (times, volts) = ran(&mut page.app, "/X1/out");
+    // Save all keeps the net under the engine's name for it.
+    let (times, volts) = ran(&mut page.app, "X1.OUT");
     let tau = 1e3 * 159e-9;
     let worst = times
         .iter()

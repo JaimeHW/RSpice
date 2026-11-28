@@ -728,7 +728,7 @@ fn a_run_whose_results_are_on_screen_raises_no_notice() {
         user.app.state.model.simulation.retained.runs[0].elapsed_time,
     );
     assert!(
-        segment.ends_with(&format!("Run 1 complete \u{b7} 1 warning \u{b7} {elapsed}")),
+        segment.ends_with(&format!("Run 1 complete \u{b7} {elapsed}")),
         "{segment}"
     );
     // The bar states the run once: no other segment names it again.
@@ -743,7 +743,7 @@ fn a_run_whose_results_are_on_screen_raises_no_notice() {
     let kept = user.app.state.workbench.toasts.activity();
     assert_eq!(
         kept[0].title(),
-        "Run 1 complete with 1 warning",
+        "Run 1 complete",
         "the bell keeps it"
     );
     assert_eq!(kept[0].action(), None);
