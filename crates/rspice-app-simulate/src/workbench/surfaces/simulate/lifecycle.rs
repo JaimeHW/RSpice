@@ -64,9 +64,7 @@ pub(super) fn selected_analysis(
         .enumerate()
         .find(|(_, instance)| instance.id() == id)
     else {
-        return Err(format!(
-            "selected analysis instance {id} is not present in the stable plan"
-        ));
+        return Err("The selected analysis is no longer in this test.".to_owned());
     };
     let closure_ids = dependency_closure_ids(plan, id);
     let issues = plan
@@ -158,6 +156,12 @@ pub(super) fn selected_analysis(
                 "Add and configure autonomous PSS".to_owned()
             }
         });
+    // The reason the form gives: the first finding about the analysis or what
+    // it uses, else the circuit's objection to the PSS it uses.
+    let reason = issues
+        .first()
+        .map(|issue| format_plan_issue(plan, issue))
+        .or_else(|| contextual_dependency_error.clone());
     Ok(Some(SelectedAnalysis {
         id,
         kind: instance.kind(),
@@ -178,7 +182,7 @@ pub(super) fn selected_analysis(
         position,
         plan_length: plan.instances().len(),
         issues,
-        contextual_dependency_error,
+        contextual_dependency_error: reason,
         repair_label,
         configure_pss_label,
         enabled: instance.enabled(),
@@ -219,8 +223,8 @@ pub(super) fn contextual_dependency_error(
                 .err()
                 .map(|error| {
                     format!(
-                        "PSS prerequisite instance {} does not match the active circuit: {error}",
-                        instance.id()
+                        "{} does not match the circuit: {error}",
+                        analysis_title(plan, instance.id())
                     )
                 })
         })
@@ -336,16 +340,15 @@ pub fn apply_analysis_action(
             cx.model
                 .record_setup_change(SimulationPage::Analyses.label(), step);
             match result {
-                Ok((repair, _)) => {
+                Ok(_) => {
                     refresh_analysis_projections(cx);
-                    cx.model.record_plan_receipt(format!(
-                        "Prerequisites repaired: {} added, {} enabled, {} moved earlier, {} bindings updated, and {} invalid bindings removed.",
-                        repair.inserted().len(),
-                        repair.enabled().len(),
-                        repair.moved().len(),
-                        repair.bound().len(),
-                        repair.removed().len(),
-                    ));
+                    let line = cx
+                        .model
+                        .sim_setup
+                        .stable_analysis_plan()
+                        .map(|plan| now_uses_line(plan, id))
+                        .unwrap_or_default();
+                    cx.model.record_plan_receipt(line);
                 }
                 Err(error) => record_failure(cx, "Repair prerequisites", &error),
             }
@@ -359,9 +362,19 @@ pub fn apply_analysis_action(
                 .and_then(|plan| prepared_autonomous_pss_id(plan, id));
             if let Some(pss_id) = existing {
                 cx.state.active_analysis_instance = Some(pss_id);
-                cx.model.record_plan_receipt(format!(
-                    "Selected the existing autonomous PSS {pss_id} for phase-noise analysis {id}. Complete its oscillator node and remaining settings, enable it, then run dependency repair to link it without creating a duplicate."
-                ));
+                let line = cx
+                    .model
+                    .sim_setup
+                    .stable_analysis_plan()
+                    .map(|plan| {
+                        format!(
+                            "Opened {}, the autonomous PSS {} can use. Enter its oscillator node and enable it.",
+                            analysis_title(plan, pss_id),
+                            analysis_title(plan, id)
+                        )
+                    })
+                    .unwrap_or_default();
+                cx.model.record_plan_receipt(line);
                 return;
             }
             let pss = PssDialogState {
@@ -390,9 +403,19 @@ pub fn apply_analysis_action(
                 Ok((pss_id, _)) => {
                     refresh_analysis_projections(cx);
                     cx.state.active_analysis_instance = Some(pss_id);
-                    cx.model.record_plan_receipt(format!(
-                        "Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete."
-                    ));
+                    let line = cx
+                        .model
+                        .sim_setup
+                        .stable_analysis_plan()
+                        .map(|plan| {
+                            format!(
+                                "Added an autonomous PSS ahead of {}. Enter its oscillator node and enable it, then choose it in the Uses row of {}.",
+                                analysis_title(plan, id),
+                                analysis_title(plan, id)
+                            )
+                        })
+                        .unwrap_or_default();
+                    cx.model.record_plan_receipt(line);
                 }
                 Err(error) => record_failure(cx, "Configure PSS prerequisite", &error),
             }
@@ -422,18 +445,24 @@ pub fn apply_analysis_action(
 
 pub(super) fn validate_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: AnalysisInstanceId) {
     let envelope_sources = build_envelope_source_catalog(cx.model);
+    // What only a damaged file produces is stated plainly on the form and in
+    // full, identities included, in the log.
+    let mut damage = None;
     let result = (|| {
         let plan = cx.model.sim_setup.stable_analysis_plan()?;
-        let instance = plan
-            .instance(id)
-            .ok_or_else(|| format!("analysis instance {id} no longer exists"))?;
+        if plan.instance(id).is_none() {
+            return Err("The analysis is no longer in this test.".to_owned());
+        }
         let closure_ids = dependency_closure_ids(plan, id);
         if let Some(issue) = plan.validation_issues().iter().find(|issue| {
             closure_ids
                 .iter()
                 .any(|closure_id| issue_applies_to(issue, *closure_id))
         }) {
-            return Err(format_plan_issue(issue));
+            if issue_is_damage(issue) {
+                damage = Some(issue.to_string());
+            }
+            return Err(format_plan_issue(plan, issue));
         }
         for closure_instance in plan
             .instances()
@@ -446,22 +475,26 @@ pub(super) fn validate_analysis_instance(cx: &mut Cx<'_, SimulateFeature>, id: A
                 Some(&envelope_sources),
             ) {
                 return Err(format!(
-                    "{} ({}): {error}",
-                    closure_instance.display_name(),
-                    closure_instance.id()
+                    "{}: {error}",
+                    analysis_title(plan, closure_instance.id())
                 ));
             }
         }
-        Ok(instance.display_name().to_owned())
+        Ok(analysis_title(plan, id))
     })();
 
+    if let Some(detail) = damage {
+        cx.model.record(
+            crate::diagnostics::LogSeverity::Warning,
+            crate::diagnostics::LogSource::Plan,
+            detail,
+        );
+    }
     match result {
-        Ok(name) => {
-            cx.model.record_plan_receipt(format!(
-                "Validation passed for {name} ({id}). Dependency identity, order, and enabled state are valid for this instance."
-            ));
-        }
-        Err(error) => record_failure(cx, "Validate", &error),
+        Ok(title) => cx
+            .model
+            .record_plan_receipt(format!("{title} is ready to run.")),
+        Err(error) => record_plan_refusal(cx, error),
     }
 }
 

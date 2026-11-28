@@ -2,15 +2,21 @@
 //!
 //! A graph diagnostic is a shape — a missing prerequisite, a cycle, a
 //! dependency bound to the wrong kind — and a reader needs it as a sentence
-//! that names the fix. This is where that translation lives: the issue wording
-//! every surface prints, the repair action the guided button is labelled with,
-//! and the dependency closure that decides which instance an issue belongs to.
+//! that names the analysis and the fix. The sentences themselves live with the
+//! plan (`plan_dependency::issue_sentence`), so the Check states a finding
+//! exactly as the form does; this is where the form reaches them, with the
+//! repair action an option is labelled with, the line a repair leaves, and the
+//! dependency closure that decides which instance an issue belongs to.
 //!
 //! None of it edits anything and none of it paints a surface. That is the seam:
 //! a route resolves its plan, asks here for the words, and lays them out
 //! itself, so two surfaces reporting one diagnostic cannot word it differently.
 
 use super::*;
+
+pub(super) use rspice_simulation_contract::plan_dependency::{
+    analysis_title, issue_is_damage, prerequisite_need,
+};
 
 #[cfg(test)]
 pub(super) fn dependency_repair_cta(
@@ -25,16 +31,31 @@ pub(super) fn dependency_repair_cta(
     dependency_repair_cta_with_context(plan, issues, dependencies, &context)
 }
 
-/// What an analysis of `kind` hands the analyses built on it, as a reason
-/// names it: "needs a periodic steady state before it".
-pub(super) fn prerequisite_need(kind: AnalysisKind) -> &'static str {
-    match kind {
-        AnalysisKind::Pss => "a periodic steady state",
-        AnalysisKind::HarmonicBalance => "a harmonic-balance steady state",
-        AnalysisKind::Qpss => "a quasi-periodic steady state",
-        AnalysisKind::Transient => "a transient",
-        AnalysisKind::OperatingPoint => "an operating point",
-        _ => "another analysis",
+/// What `id` reads once its prerequisites are repaired, by name: "FFT
+/// spectrum now uses Transient."
+pub(super) fn now_uses_line(
+    plan: &crate::simulation::plan::SimulationPlan,
+    id: AnalysisInstanceId,
+) -> String {
+    let used = plan
+        .instance(id)
+        .map(|instance| {
+            instance
+                .dependencies()
+                .iter()
+                .filter_map(|dependency| plan.instance(dependency.target()))
+                .map(|target| target.display_name().to_owned())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if used.is_empty() {
+        format!("{} needs nothing before it.", analysis_title(plan, id))
+    } else {
+        format!(
+            "{} now uses {}.",
+            analysis_title(plan, id),
+            used.join(" and ")
+        )
     }
 }
 
@@ -149,100 +170,9 @@ pub(super) fn dependency_closure_ids(
     closure
 }
 
-pub(super) fn format_plan_issue(issue: &AnalysisPlanIssue) -> String {
-    match issue {
-        AnalysisPlanIssue::NoEnabledInstances => {
-            "The simulation plan has no enabled analysis instances.".to_owned()
-        }
-        AnalysisPlanIssue::DuplicateInstanceId { id } => {
-            format!("Stable analysis identity {id} is duplicated.")
-        }
-        AnalysisPlanIssue::DuplicateTombstoneId { id } => {
-            format!("Retired analysis identity {id} has duplicate tombstones.")
-        }
-        AnalysisPlanIssue::ReusedTombstonedId { id } => {
-            format!("Retired analysis identity {id} was reused by an active instance.")
-        }
-        AnalysisPlanIssue::KindDraftMismatch {
-            id,
-            expected,
-            actual,
-        } => format!(
-            "Analysis {id} requires a {} draft, but contains {}.",
-            expected.label(),
-            actual.label()
-        ),
-        AnalysisPlanIssue::InvalidInstanceRevision { id } => {
-            format!("Analysis {id} has an invalid revision range.")
-        }
-        AnalysisPlanIssue::InvalidInstanceName { id } => {
-            format!("Analysis {id} carries a name this plan cannot show.")
-        }
-        AnalysisPlanIssue::DuplicateInstanceName { id, name } => {
-            format!("Analysis {id} shares the name \"{name}\" with another analysis.")
-        }
-        AnalysisPlanIssue::InvalidLifecycle { id, state, enabled } => {
-            format!("Analysis {id} lifecycle {state} conflicts with enabled state {enabled}.")
-        }
-        AnalysisPlanIssue::MissingPrerequisite {
-            dependent,
-            prerequisite,
-        } => format!(
-            "Analysis {dependent} requires an earlier enabled {} instance.",
-            prerequisite.label()
-        ),
-        AnalysisPlanIssue::UnexpectedDependencyRole {
-            dependent,
-            prerequisite,
-        } => format!(
-            "Analysis {dependent} does not accept {} as a prerequisite.",
-            prerequisite.label()
-        ),
-        AnalysisPlanIssue::DuplicateDependencyRole {
-            dependent,
-            prerequisite,
-        } => format!(
-            "Analysis {dependent} binds {} more than once.",
-            prerequisite.label()
-        ),
-        AnalysisPlanIssue::SelfDependency { dependent } => {
-            format!("Analysis {dependent} cannot depend on itself.")
-        }
-        AnalysisPlanIssue::DanglingDependency { dependent, target } => {
-            format!("Analysis {dependent} references missing prerequisite instance {target}.")
-        }
-        AnalysisPlanIssue::WrongDependencyKind {
-            dependent,
-            prerequisite,
-            target,
-            actual,
-        } => format!(
-            "Analysis {dependent} requires {} at {target}, but that instance is {}.",
-            prerequisite.label(),
-            actual.label()
-        ),
-        AnalysisPlanIssue::DisabledDependency { dependent, target } => {
-            format!("Analysis {dependent} prerequisite instance {target} is disabled.")
-        }
-        AnalysisPlanIssue::DependencyNotEarlier { dependent, target } => {
-            format!("Analysis {dependent} prerequisite instance {target} must appear earlier.")
-        }
-        AnalysisPlanIssue::IncompatibleDependencyConfiguration {
-            dependent,
-            prerequisite,
-            target,
-            detail,
-        } => format!(
-            "Analysis {dependent} cannot use {} instance {target}: {detail}.",
-            prerequisite.label()
-        ),
-        AnalysisPlanIssue::DependencyCycle { members } => format!(
-            "Analysis dependency cycle contains {} instance{}.",
-            members.len(),
-            if members.len() == 1 { "" } else { "s" }
-        ),
-        AnalysisPlanIssue::InvalidTombstoneRevision { id } => {
-            format!("Retired analysis identity {id} has an invalid revision range.")
-        }
-    }
+pub(super) fn format_plan_issue(
+    plan: &crate::simulation::plan::SimulationPlan,
+    issue: &AnalysisPlanIssue,
+) -> String {
+    rspice_simulation_contract::plan_dependency::issue_sentence(plan, issue)
 }

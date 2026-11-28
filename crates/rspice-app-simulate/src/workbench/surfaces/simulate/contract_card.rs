@@ -195,22 +195,12 @@ pub(super) fn analysis_contract(
             // The dependency graph speaks only when something in it is wrong: a
             // valid graph is the normal state and says nothing.
             let mut evidence = |ui: &mut Ui| {
-                let problem = if let Some(issue) = selected.issues.first() {
-                    Some((
-                        page_kit::Tone::Error,
-                        "Dependency graph blocked",
-                        format_plan_issue(issue),
-                    ))
-                } else if let Some(error) = &selected.contextual_dependency_error {
-                    Some((
-                        page_kit::Tone::Error,
-                        "Dependency graph blocked",
-                        error.clone(),
-                    ))
+                let problem = if let Some(reason) = &selected.contextual_dependency_error {
+                    Some((page_kit::Tone::Error, "Cannot run", reason.clone()))
                 } else if selected.repair_label.is_some() || selected.configure_pss_label.is_some() {
                     Some((
                         page_kit::Tone::Warn,
-                        "Prerequisites not prepared",
+                        "Not ready to run",
                         "Choose what it uses before enabling it.".to_owned(),
                     ))
                 } else {
@@ -226,7 +216,7 @@ pub(super) fn analysis_contract(
                         .icon(Icon::Add)
                         .show(ui)
                         .on_hover_text(
-                            "Select an existing prepared autonomous PSS when one is available; otherwise insert one disabled prerequisite with its inferable dependency chain, then open its complete configuration form.",
+                            "Open the autonomous PSS this analysis can use, adding one, switched off, when the test has none.",
                         )
                         .clicked()
                     {

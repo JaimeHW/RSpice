@@ -284,8 +284,8 @@ fn report_collects_all_independent_blocker_classes() {
             .any(|issue| issue.check == "Design topology")
     );
     assert!(report.blockers.iter().any(|issue| {
-        issue.check == "Analysis-instance graph"
-            && issue.observed == "Enable at least one analysis instance."
+        issue.check == "Analyses"
+            && issue.observed == "No analysis in this test is switched on."
             && issue.remediation == PreflightRemediation::SimulationPlan { analysis: None }
     }));
     assert!(
@@ -303,6 +303,42 @@ fn report_collects_all_independent_blocker_classes() {
             .any(|advisory| advisory.message.starts_with("Technology")),
         "a technology nothing requires is not a finding: {:?}",
         report.advisories
+    );
+}
+
+#[test]
+fn check_names_an_analysis_that_needs_another_and_opens_it() {
+    let mut state = AppState::default();
+    disable_global_process_axis(&mut state);
+    let (pac, _) = state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("current project owns a stable plan")
+        .insert(rspice_app_state::simulation::plan::AnalysisKind::Pac)
+        .expect("Periodic AC inserts");
+
+    let report = collect_report(&state);
+    assert!(
+        report.blockers.iter().any(|issue| {
+            issue.check == "Analyses"
+                && issue.observed == "Periodic AC needs a periodic steady state before it."
+                && issue.remediation
+                    == PreflightRemediation::SimulationPlan {
+                        analysis: Some(pac),
+                    }
+        }),
+        "{:?}",
+        report.blockers
+    );
+    assert!(
+        report
+            .blockers
+            .iter()
+            .all(|issue| !issue.observed.contains(&pac.to_string())),
+        "{:?}",
+        report.blockers
     );
 }
 
@@ -1792,8 +1828,7 @@ fn an_analysis_configuration_finding_opens_the_analysis_it_is_about() {
         .blockers
         .iter()
         .find(|issue| {
-            issue.check.ends_with(" configuration")
-                && issue.observed.starts_with(&transient.to_string())
+            issue.check.ends_with(" configuration") && issue.observed.starts_with("Transient: ")
         })
         .expect("the unfinished stop time blocks the run");
     assert_eq!(

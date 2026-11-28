@@ -407,6 +407,30 @@ fn dependency_repair_cta_describes_the_first_repairable_issue() {
 }
 
 #[test]
+fn a_dependent_with_no_carrier_says_what_it_needs_by_name() {
+    let mut plan = crate::simulation::plan::SimulationPlan::empty();
+    let (pac, _) = plan.insert(AnalysisKind::Pac).expect("PAC inserts");
+    plan.set_instance_name(pac, "Mixer gain").unwrap();
+    let mut harness = SimulateTestHost::harness();
+    harness.model.sim_setup.analysis_plan = Some(plan);
+    harness.state.active_analysis_instance = Some(pac);
+    let sources = build_envelope_source_catalog(&harness.model);
+
+    let selected = selected_analysis(&harness.model, &harness.state, &sources)
+        .expect("selection resolves")
+        .expect("the PAC is selected");
+    assert_eq!(
+        selected.contextual_dependency_error.as_deref(),
+        Some("Mixer gain (Periodic AC) needs a periodic steady state before it.")
+    );
+    validate_analysis_instance(&mut harness.cx(), pac);
+    assert_eq!(
+        harness.model.analysis_lifecycle_status.message(),
+        "Mixer gain (Periodic AC) needs a periodic steady state before it."
+    );
+}
+
+#[test]
 fn every_declared_prerequisite_kind_has_a_contextual_add_action() {
     let dependent_kinds = AnalysisKind::ALL
         .into_iter()
@@ -679,20 +703,12 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
     harness.model.sim_setup.analysis_plan = Some(plan);
     validate_analysis_instance(&mut harness.cx(), pac);
 
+    let message = harness.model.analysis_lifecycle_status.message();
     assert!(
-        harness
-            .model
-            .analysis_lifecycle_status
-            .message()
-            .contains(&pss.to_string())
+        message.contains("Periodic steady state"),
+        "the refusal names the analysis it is about: {message}"
     );
-    assert!(
-        harness
-            .model
-            .analysis_lifecycle_status
-            .message()
-            .starts_with("Validate rejected fail-closed")
-    );
+    assert!(!message.contains(&pss.to_string()), "{message}");
     assert!(
         harness.model.analysis_lifecycle_status.is_refusal(),
         "a rejected validation is a refusal, not a receipt"
@@ -857,7 +873,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
         selected
             .contextual_dependency_error
             .as_deref()
-            .is_some_and(|error| error.contains("active circuit"))
+            .is_some_and(|error| error.contains("does not match the circuit"))
     );
     assert_eq!(
         selected.repair_label.as_deref(),
@@ -906,11 +922,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     assert_eq!(transient.kind(), AnalysisKind::Transient);
     assert!(transient.enabled());
     assert!(
-        harness
-            .model
-            .analysis_lifecycle_status
-            .message()
-            .contains("Prerequisites repaired")
+        harness.model.analysis_lifecycle_status.message() == "FFT spectrum now uses Transient."
     );
 }
 
@@ -963,7 +975,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
             .model
             .analysis_lifecycle_status
             .message()
-            .contains("Enter the oscillator node")
+            .contains("Enter its oscillator node")
     );
 
     harness.state.active_analysis_instance = Some(pnoise);
@@ -994,7 +1006,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
             .model
             .analysis_lifecycle_status
             .message()
-            .contains("without creating a duplicate")
+            .starts_with("Opened ")
     );
 }
 

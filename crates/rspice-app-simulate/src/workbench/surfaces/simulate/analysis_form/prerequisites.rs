@@ -16,7 +16,7 @@ pub(super) fn study_base_row(
     if let Some(id) = *selected_base
         && !choices.iter().any(|(candidate, _)| *candidate == Some(id))
     {
-        choices.push((Some(id), format!("Unavailable analysis ({id})")));
+        choices.push((Some(id), "Missing analysis".to_owned()));
     }
     let mut selected = choices
         .iter()

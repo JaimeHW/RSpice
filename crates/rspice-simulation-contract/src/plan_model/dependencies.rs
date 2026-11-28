@@ -25,15 +25,16 @@ impl SimulationPlan {
         } else {
             AnalysisLifecycleState::Disabled
         };
+        let used = self.instance(target).map_or_else(
+            || prerequisite.label().to_owned(),
+            |target| target.display_name().to_owned(),
+        );
         let ((), receipt) = self.transact(
             AnalysisLifecycleCommand::Dependency,
             dependent,
             Some(target),
             outcome,
-            format!(
-                "{name} ({dependent}) bound {target} as its {} prerequisite.",
-                prerequisite.label()
-            ),
+            format!("{name} uses {used}."),
             move |candidate, revision| {
                 let dependent_index = candidate.index_of(dependent)?;
                 candidate.ensure_editable(dependent_index)?;
@@ -267,9 +268,7 @@ impl SimulationPlan {
             dependent,
             None,
             outcome,
-            format!(
-                "Dependency bindings for {name} ({dependent}) were refreshed from enabled earlier instances."
-            ),
+            format!("{name} uses the matching analyses above it."),
             move |candidate, revision| {
                 let dependent_index = candidate.index_of(dependent)?;
                 candidate.ensure_editable(dependent_index)?;
@@ -354,9 +353,7 @@ impl SimulationPlan {
             dependent,
             None,
             outcome,
-            format!(
-                "The complete prerequisite closure for {name} ({dependent}) was repaired atomically."
-            ),
+            format!("{name} has every analysis it reads."),
             move |candidate, revision| {
                 let dependent_index = candidate.index_of(dependent)?;
                 candidate.ensure_editable(dependent_index)?;
@@ -416,8 +413,10 @@ impl SimulationPlan {
             Some(dependent),
             AnalysisLifecycleState::Disabled,
             format!(
-                "Disabled {} prerequisite {id} was inserted before analysis {dependent} with its inferable dependency closure and is ready for configuration.",
-                prerequisite.label()
+                "Added {}, switched off, ahead of {}; it is ready to configure.",
+                prerequisite.label(),
+                self.instance(dependent)
+                    .map_or("its analysis", |instance| instance.display_name())
             ),
             move |candidate, revision| {
                 candidate.ensure_identity_available(id)?;

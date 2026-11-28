@@ -527,6 +527,21 @@ fn conclude(
     state
         .model_mut()
         .record(severity, LogSource::Studio, message);
+    // The Problems page says only that an analysis is damaged; the log keeps
+    // exactly how.
+    if blocked {
+        let damage = state
+            .model()
+            .sim_setup
+            .stable_analysis_plan()
+            .map(rspice_simulation_contract::plan_dependency::damage_details)
+            .unwrap_or_default();
+        for detail in damage {
+            state
+                .model_mut()
+                .record(LogSeverity::Warning, LogSource::Plan, detail);
+        }
+    }
 
     if blocked {
         state.show_problem_findings();
@@ -802,10 +817,11 @@ fn collect(state: &impl RunHost) -> PreflightReport {
         Ok(plan) => {
             for issue in plan.validation_issues() {
                 blockers.push(PreflightIssue {
-                    check: "Analysis-instance graph".to_owned(),
-                    observed: issue.to_string(),
-                    required: "Stable enabled identities with resolved, ordered prerequisites"
-                        .to_owned(),
+                    check: "Analyses".to_owned(),
+                    observed: rspice_simulation_contract::plan_dependency::issue_sentence(
+                        plan, &issue,
+                    ),
+                    required: "Each analysis switched on has what it reads above it".to_owned(),
                     remediation: PreflightRemediation::SimulationPlan {
                         analysis: issue_analysis(&issue),
                     },
@@ -823,7 +839,13 @@ fn collect(state: &impl RunHost) -> PreflightReport {
                 {
                     blockers.push(PreflightIssue {
                         check: format!("{} configuration", instance.kind().label()),
-                        observed: format!("{}: {error}", instance.id()),
+                        observed: format!(
+                            "{}: {error}",
+                            rspice_simulation_contract::plan_dependency::analysis_title(
+                                plan,
+                                instance.id()
+                            )
+                        ),
                         required: "A complete, numerically valid analysis configuration".to_owned(),
                         remediation: PreflightRemediation::SimulationPlan {
                             analysis: Some(instance.id()),

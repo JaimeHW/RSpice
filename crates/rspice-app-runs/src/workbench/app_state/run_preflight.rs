@@ -44,7 +44,7 @@ pub fn run_preflight_block_reason(
         .filter(|instance| instance.enabled())
         .collect::<Vec<_>>();
     if enabled.is_empty() {
-        return Some("Enable at least one analysis instance in the simulation plan".to_owned());
+        return Some("No analysis in this test is switched on.".to_owned());
     }
     // The design the plan runs: a plan naming a configuration the project no
     // longer holds is refused here, before anything is prepared or solved.

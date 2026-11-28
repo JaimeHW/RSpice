@@ -2,6 +2,7 @@
 
 mod repair;
 mod validation;
+mod wording;
 
 pub use repair::{
     PlanDependencySourceContext, dependency_candidate_context_issue, prerequisite_draft_for,
@@ -10,6 +11,10 @@ pub use repair::{
 pub use validation::{
     DependencyConfigurationIssue, dependency_configuration_issue, fourier_requirement,
     periodic_state_requirement,
+};
+
+pub use wording::{
+    analysis_title, damage_details, issue_is_damage, issue_sentence, prerequisite_need,
 };
 
 use rspice_vocabulary::product::AnalysisInstanceId;
