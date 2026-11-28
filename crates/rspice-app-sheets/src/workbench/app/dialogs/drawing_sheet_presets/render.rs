@@ -418,12 +418,9 @@ fn library_column_widths(
 fn library_verb_width(ui: &mut Ui) -> f32 {
     const GAP: f32 = 6.0;
     let labels = ["Use\u{2026}", "Duplicate", "Rename", "Delete"];
-    // `measured_width` takes a mutable `Ui` only to lay the label out through
-    // the font cache; this child allocates nothing and paints nothing.
-    let mut probe = ui.new_child(egui::UiBuilder::new().max_rect(ui.max_rect()).invisible());
     let labelled: f32 = labels
         .iter()
-        .map(|label| Button::new(label).compact().measured_width(&mut probe))
+        .map(|label| Button::new(label).compact().measured_width(ui))
         .sum();
     labelled + GAP * (labels.len() - 1) as f32
 }
