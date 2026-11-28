@@ -103,7 +103,7 @@ pub trait WaveInstrumentHost {
     /// tooltips give: with several strips on the sheet, that is where the
     /// reader learns which one they will move.
     fn active_strip(&self) -> Option<String>;
-    /// What the bar's strip tools (+ Expression, log X and maximize) read,
+    /// What the bar's strip tools (+ Trace, log X and maximize) read,
     /// on a sheet of strips; `None` where the sheet draws none.
     fn strip_tools(&self) -> Option<StripTools> {
         None
@@ -225,7 +225,7 @@ pub fn show_plot_tools(ui: &mut Ui, host: &mut impl WaveInstrumentHost) {
 /// cursor tools, and zoom and fit.
 const CURSOR_GROUP: u8 = 0;
 const ZOOM_GROUP: u8 = 2;
-/// The active strip's tools, + Expression and log X, after the display
+/// The active strip's tools, + Trace and log X, after the display
 /// toggles; then maximize, with the restore of closed strips beside it.
 const STRIP_GROUP: u8 = 5;
 const WINDOW_GROUP: u8 = 6;

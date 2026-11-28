@@ -1013,7 +1013,7 @@ pub fn show(
                     let window_slots = 1 + usize::from(closable);
                     // No row of its own stands over a strip: its analysis
                     // tag starts its top pane's legend row, and its tools,
-                    // + Calculated trace, log X and maximize, stand on the bar,
+                    // + Trace, log X and maximize, stand on the bar,
                     // where they act on the active strip. The expression
                     // editor opens over the strip it adds to.
                     host.edit_expression(ui, model);
@@ -1099,7 +1099,7 @@ pub fn show(
 }
 
 /// Open the expression editor on `analysis`' strip, empty and taking the
-/// keys: the bar's "+ Calculated trace" does, for the active strip.
+/// keys: the bar's "+ Trace" does, for the active strip.
 pub fn open_expression_editor(session: &mut ResultViewerState, analysis: AnalysisPresentationKey) {
     session.expr_editor = Some(ExprEditor {
         analysis,

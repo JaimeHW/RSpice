@@ -40,7 +40,7 @@ pub(crate) const X_SCALE_LABEL: &str = "log X";
 
 /// The chip that returns a zoomed strip to its automatic view.
 pub(crate) const FIT_LABEL: &str = "Fit";
-pub(crate) const EXPRESSION_ACTION_LABEL: &str = "+ Calculated trace";
+pub(crate) const EXPRESSION_ACTION_LABEL: &str = "+ Trace";
 /// What the expression action's hover says.
 pub(crate) const EXPRESSION_ACTION_TIP: &str =
     "Add a trace calculated from the run's signals, e.g. V(out)/V(in), dB(V(out)) or deriv(V(out))";
@@ -65,7 +65,7 @@ pub(crate) fn scale_chip_right(rect: Rect, slots: usize) -> f32 {
     window_control_rect(rect, slots.max(1) - 1).left() - WINDOW_CONTROL_GAP
 }
 
-/// A text control of a strip or pane header ("Fit", "log X", "+ Calculated trace"):
+/// A text control of a strip or pane header ("Fit", "log X", "+ Trace"):
 /// the kit's bordered button at the compact height, since the header row is
 /// shorter than a control. Every text control on the Results bars and pane
 /// headers is that one button, so none of them reads as the row's own
@@ -539,7 +539,7 @@ pub struct StripHeaderResponse {
     pub close_clicked: bool,
     /// The FIT action (shown while zoomed) was clicked.
     pub fit_clicked: bool,
-    /// The "+ Calculated trace" action was clicked.
+    /// The "+ Trace" action was clicked.
     pub add_expr_clicked: bool,
     /// Where the header left room for the caller's own field, when it asked
     /// for one.
@@ -660,7 +660,7 @@ impl<'a> StripHeader<'a> {
         self
     }
 
-    /// Show the "+ Calculated trace" action after the legend.
+    /// Show the "+ Trace" action after the legend.
     pub fn expr_action(mut self, on: bool) -> Self {
         self.expr_action = on;
         self
