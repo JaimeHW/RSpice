@@ -11,7 +11,7 @@ pub(super) fn design_variable_dialog(
     let enabled = draft.validation_error.is_none();
     let consumer_summary = design_variable_consumers(cx, &draft);
     let resolved_value = design_variable_from_draft(cx.model, cx.state, &draft)
-        .and_then(|variable| variable.resolved_value_si())
+        .and_then(|variable| resolved_in_plan(cx.model, variable))
         .map_or_else(
             |_| "unresolved".to_owned(),
             // Engineering notation: `1.00000000e4 SI` spent eight mantissa
@@ -101,6 +101,26 @@ pub(super) fn design_variable_dialog(
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
     finish_workflow_choice(cx, choice, draft, commit_design_variable);
+}
+
+/// The value `variable` resolves to beside the plan's other variables, as the
+/// run would resolve it.
+fn resolved_in_plan(model: &Model, variable: crate::state::DesignVariable) -> Result<f64, String> {
+    let mut variables = model
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| model.workspace.content.plan_data(plan.id()))
+        .map(|payload| payload.design_variables.clone())
+        .unwrap_or_default();
+    variables.push(variable);
+    let resolved = rspice_simulation_contract::design_variable_resolution::resolve_design_variables(
+        &variables,
+    );
+    resolved
+        .value(variables.len() - 1)
+        .cloned()
+        .unwrap_or_else(|| Err("unresolved".to_owned()))
 }
 
 pub(crate) fn design_variable_from_draft(

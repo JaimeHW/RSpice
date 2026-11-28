@@ -77,9 +77,9 @@ fn typed_values_emit_canonical_deterministic_parameter_lines() {
     assert_eq!(
         lines,
         [
-            ".param ALOAD=1.00000000000000000e4",
-            ".param ANALYSIS_ONLY=4.00000000000000000e4",
-            ".param ZLOAD=2.00000000000000000e4",
+            ".param ALOAD={1.00000000000000000e4}",
+            ".param ANALYSIS_ONLY={4.00000000000000000e4}",
+            ".param ZLOAD={2.00000000000000000e4}",
         ]
     );
 }

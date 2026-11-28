@@ -27,7 +27,7 @@ use super::page_kit::{
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
-const REGISTRY_COLUMNS: [f32; 7] = [0.16, 0.12, 0.17, 0.12, 0.14, 0.14, 0.15];
+const REGISTRY_COLUMNS: [f32; 8] = [0.11, 0.10, 0.14, 0.19, 0.12, 0.10, 0.12, 0.12];
 
 pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     let Some((plan_id, payload)) = plan_payload(cx.model) else {
@@ -67,6 +67,17 @@ fn registry(
     payload: &SimulationPlanPayload,
 ) {
     let variables = &payload.design_variables;
+    // Every value is resolved the way the run resolves it, so the number
+    // beside the text is the number the deck gives the engine.
+    let resolved =
+        rspice_simulation_contract::design_variable_resolution::resolve_design_variables(variables);
+    let digits = usize::from(
+        cx.model
+            .preferences
+            .result_presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    );
     let selected = cx.state.selected_design_variable.clone();
     let selected_index = selected
         .as_ref()
@@ -129,6 +140,7 @@ fn registry(
                     "Name",
                     "Quantity",
                     "Expression",
+                    "Resolved",
                     "Bounds",
                     "Scope",
                     "Used by",
@@ -141,6 +153,7 @@ fn registry(
                     &REGISTRY_COLUMNS,
                     &[
                         ("No design variables", Tone::Neutral),
+                        ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
@@ -171,13 +184,22 @@ fn registry(
                         _ => None,
                     },
                 );
-                if ledger_row(
+                let (value, value_tone) = match resolved.value(index) {
+                    Some(Ok(value)) => (
+                        resolved_text(*value, variable.quantity, digits),
+                        Tone::Neutral,
+                    ),
+                    Some(Err(error)) => (error.clone(), Tone::Error),
+                    None => (String::new(), Tone::Neutral),
+                };
+                let row = ledger_row(
                     ui,
                     &REGISTRY_COLUMNS,
                     &[
                         (variable.name.as_str(), Tone::Text),
                         (variable.quantity.label(), Tone::Neutral),
                         (variable.expression.as_str(), Tone::Neutral),
+                        (value.as_str(), value_tone),
                         (bounds.as_str(), Tone::Neutral),
                         (variable.scope.label(), Tone::Neutral),
                         (used_by.as_str(), Tone::Neutral),
@@ -185,9 +207,15 @@ fn registry(
                     ],
                     selected_index == Some(index),
                     RowPress::Taken,
-                )
-                .clicked()
-                {
+                );
+                // An error is longer than its cell; the whole sentence is one
+                // hover away.
+                let row = if value_tone == Tone::Error {
+                    row.on_hover_text(format!("{}: {value}", variable.name))
+                } else {
+                    row
+                };
+                if row.clicked() {
                     pick = Some(variable.name.clone());
                 }
             }
@@ -289,6 +317,25 @@ fn registry(
         {
             cx.state.selected_design_variable = None;
         }
+    }
+}
+
+/// A resolved value as the Resolved column reads it: the reader's significant
+/// digits, an SI prefix, and the unit the variable's label names, if any.
+fn resolved_text(value: f64, quantity: DesignVariableQuantity, digits: usize) -> String {
+    use rspice_results::number_format::{fmt_column_reading, fmt_register_reading};
+    let unit = match quantity {
+        DesignVariableQuantity::Resistance => "\u{3a9}",
+        DesignVariableQuantity::Capacitance => "F",
+        DesignVariableQuantity::Voltage => "V",
+        DesignVariableQuantity::Current => "A",
+        DesignVariableQuantity::Temperature => "\u{b0}C",
+        DesignVariableQuantity::Dimensionless => "",
+    };
+    if unit.is_empty() {
+        fmt_register_reading(value, unit, digits)
+    } else {
+        fmt_column_reading(value, unit, digits)
     }
 }
 

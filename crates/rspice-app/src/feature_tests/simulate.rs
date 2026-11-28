@@ -42,6 +42,7 @@ mod statement;
 mod studio;
 mod transient_checkpoint_exchange;
 mod variable_import;
+mod variables_resolve;
 mod verify;
 mod verify_fixtures;
 mod verify_yield;

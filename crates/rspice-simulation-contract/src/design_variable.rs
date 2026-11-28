@@ -119,8 +119,8 @@ pub struct DesignVariable {
 pub enum DesignVariableDefect {
     /// The name is not a usable parameter identifier.
     Identifier,
-    /// A value does not read as the quantity it is declared in — the
-    /// expression itself, or one end of the allowed range.
+    /// A value the engine cannot read: the expression itself, or one end of
+    /// the allowed range.
     Dimension,
     /// The allowed range is inconsistent, or the resolved value falls outside
     /// it.
@@ -208,41 +208,43 @@ impl DesignVariable {
         validate_parameter_name(&self.name).map_err(tag(Defect::Identifier))?;
         validate_single_line_expression("expression", &self.expression)
             .map_err(tag(Defect::Dimension))?;
-        let value = self.resolved_value_si().map_err(tag(Defect::Dimension))?;
+        let value = standalone_value(&self.expression, self.quantity)
+            .map_err(|error| format!("the value {} does not read: {error}", self.expression))
+            .map_err(tag(Defect::Dimension))?;
         if let Some(range) = &self.allowed_range {
             validate_single_line_expression("allowed-range minimum", &range.minimum)
                 .map_err(tag(Defect::Bounds))?;
             validate_single_line_expression("allowed-range maximum", &range.maximum)
                 .map_err(tag(Defect::Bounds))?;
-            let minimum = parse_design_quantity(&range.minimum, self.quantity)
-                .map_err(|error| {
-                    format!(
-                        "allowed-range minimum is invalid for {}: {error}",
-                        self.quantity.label()
-                    )
-                })
+            let minimum = standalone_value(&range.minimum, self.quantity)
+                .map_err(|error| format!("the minimum {} does not read: {error}", range.minimum))
                 .map_err(tag(Defect::Dimension))?;
-            let maximum = parse_design_quantity(&range.maximum, self.quantity)
-                .map_err(|error| {
-                    format!(
-                        "allowed-range maximum is invalid for {}: {error}",
-                        self.quantity.label()
-                    )
-                })
+            let maximum = standalone_value(&range.maximum, self.quantity)
+                .map_err(|error| format!("the maximum {} does not read: {error}", range.maximum))
                 .map_err(tag(Defect::Dimension))?;
-            if minimum > maximum {
-                return Err((
-                    Defect::Bounds,
-                    "allowed-range minimum exceeds its maximum".to_owned(),
-                ));
-            }
-            if value < minimum || value > maximum {
-                return Err((
-                    Defect::Bounds,
-                    format!(
-                        "resolved value {value} is outside the inclusive allowed range {minimum}..={maximum}"
-                    ),
-                ));
+            // A bound or a value that names another variable is checked
+            // where the plan resolves them all; one that stands alone is
+            // checked here, so a typed number outside its range is refused
+            // as it is typed.
+            if let (Some(minimum), Some(maximum)) = (minimum, maximum) {
+                if minimum > maximum {
+                    return Err((
+                        Defect::Bounds,
+                        format!(
+                            "the minimum {} is above the maximum {}",
+                            range.minimum, range.maximum
+                        ),
+                    ));
+                }
+                if value.is_some_and(|value| value < minimum || value > maximum) {
+                    return Err((
+                        Defect::Bounds,
+                        format!(
+                            "the value {} is outside its range {} \u{2026} {}",
+                            self.expression, range.minimum, range.maximum
+                        ),
+                    ));
+                }
             }
         }
         validate_bounded_text("description", &self.description, 1_024, true)
@@ -255,22 +257,19 @@ impl DesignVariable {
         Ok(())
     }
 
-    pub fn resolved_value_si(&self) -> Result<f64, String> {
-        parse_design_quantity(&self.expression, self.quantity).map_err(|error| {
-            format!(
-                "expression is invalid for {}: {error}",
-                self.quantity.label()
-            )
-        })
+    /// The expression the deck's `.param` card carries, which the engine
+    /// resolves: the value as typed, with a number written with its unit read
+    /// as that number.
+    pub fn deck_expression(&self) -> String {
+        deck_text(&self.expression, self.quantity)
     }
 
-    /// Canonical top-level SPICE statement. Validation is intentionally kept
-    /// separate so callers can aggregate every project diagnostic at once.
+    /// The deck's card for this variable. The engine resolves the expression
+    /// against the plan's other variables, so a variable that names another
+    /// moves with it. Validation is kept separate so callers can aggregate
+    /// every project diagnostic at once.
     pub fn netlist_statement(&self) -> String {
-        let value = self
-            .resolved_value_si()
-            .expect("validated design variables always resolve to finite SI values");
-        format!(".param {}={value:.17e}", self.name)
+        format!(".param {}={{{}}}", self.name, self.deck_expression())
     }
 
     pub fn cloned_for_new_plan(
@@ -287,6 +286,43 @@ impl DesignVariable {
                 .ok_or(*analysis_id)?;
         }
         Ok(cloned)
+    }
+}
+
+/// `text` as the engine reads it for a variable labelled `quantity`: a number
+/// written with the label's unit is that number, and anything else is an
+/// expression, without the braces a deck would wrap it in.
+pub(crate) fn deck_text(text: &str, quantity: DesignVariableQuantity) -> String {
+    match parse_design_quantity(text, quantity) {
+        Ok(value) => format!("{value:.17e}"),
+        Err(_) => expression_text(text),
+    }
+}
+
+/// `text` without surrounding blanks or the one pair of braces a deck wraps
+/// an expression in.
+fn expression_text(text: &str) -> String {
+    let text = text.trim();
+    text.strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .unwrap_or(text)
+        .trim()
+        .to_owned()
+}
+
+/// What `text` resolves to with no other variable known: the number, `None`
+/// when it names another variable (the plan resolves those), or why the
+/// engine cannot read it.
+fn standalone_value(text: &str, quantity: DesignVariableQuantity) -> Result<Option<f64>, String> {
+    use rspice_core::netlist::expr::{ExprError, ParamContext, evaluate, parse_expression};
+
+    let expression =
+        parse_expression(&deck_text(text, quantity)).map_err(|error| error.to_string())?;
+    match evaluate(&expression, &ParamContext::new()) {
+        Ok(value) if value.is_finite() => Ok(Some(value)),
+        Ok(_) => Err("it is not a finite number".to_owned()),
+        Err(ExprError::UndefinedParam(_)) => Ok(None),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -315,22 +351,34 @@ mod tests {
         .expect("fixture variable is valid")
     }
 
+    /// The deck's card is the one the engine resolves to the typed value,
+    /// and a typed value outside its own range is refused as it is typed.
     #[test]
-    fn typed_design_variable_enforces_units_range_and_canonical_netlist_value() {
+    fn a_typed_value_reaches_the_deck_and_one_outside_its_range_is_refused() {
         let variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
-        assert_eq!(variable.resolved_value_si().unwrap(), 10_000.0);
-        assert_eq!(
-            variable.netlist_statement(),
-            ".param RLOAD=1.00000000000000000e4"
-        );
-
-        let mut wrong_unit = variable.clone();
-        wrong_unit.expression = "10 V".to_owned();
-        assert!(wrong_unit.validate().unwrap_err().contains("resistance"));
+        let statement = variable.netlist_statement();
+        assert!(statement.starts_with(".param RLOAD={"), "{statement}");
+        let deck = format!("card\n{statement}\n.end\n");
+        let parsed = rspice_core::Netlist::parse(&deck).expect("the card parses");
+        assert_eq!(parsed.params.get("RLOAD"), Some(10_000.0));
 
         let mut outside = variable;
         outside.expression = "2 Mohm".to_owned();
         assert!(outside.validate().unwrap_err().contains("outside"));
+    }
+
+    /// A value that names another variable cannot be resolved alone, so the
+    /// record is accepted and the plan resolves it; one the engine cannot
+    /// read at all is refused.
+    #[test]
+    fn an_expression_naming_another_variable_is_accepted_and_a_garbled_one_refused() {
+        let mut variable = resistance_variable("RLOAD", "10 kohm", DesignVariableScope::Project);
+        variable.expression = "2*RBASE".to_owned();
+        variable.validate().expect("the plan resolves RBASE");
+        assert_eq!(variable.netlist_statement(), ".param RLOAD={2*RBASE}");
+
+        variable.expression = "2*(RBASE".to_owned();
+        assert!(variable.validate().is_err());
     }
 
     #[test]

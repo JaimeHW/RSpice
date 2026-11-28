@@ -221,22 +221,23 @@ pub fn generate_netlist_hierarchical_with_variables(
     generator.finish(analysis_lines, &parameter_lines)
 }
 
-/// Canonical parameter lines sorted by case-insensitive SPICE identifier.
-/// Reordering equivalent project rows therefore cannot perturb executable
-/// source or its content digest.
+/// The plan's `.param` cards, each after every variable it names and
+/// otherwise in case-insensitive name order, so reordering equivalent project
+/// rows cannot perturb executable source or its content digest. A variable
+/// with no value (a name no variable defines, a loop, a value outside its
+/// range) refuses the deck and says why.
 pub fn design_variable_parameter_lines(
     variables: &[DesignVariable],
     context: DesignVariableNetlistContext<'_>,
 ) -> Result<Vec<String>, Vec<String>> {
     let mut errors = Vec::new();
-    let mut ordered = BTreeMap::<String, &DesignVariable>::new();
+    let mut names = std::collections::HashSet::<String>::new();
     for (index, variable) in variables.iter().enumerate() {
         if let Err(error) = variable.validate() {
             errors.push(format!("design variable {} is invalid: {error}", index + 1));
             continue;
         }
-        let canonical = variable.name.to_ascii_lowercase();
-        if ordered.insert(canonical, variable).is_some() {
+        if !names.insert(variable.name.to_ascii_lowercase()) {
             errors.push(format!(
                 "design variable '{}' duplicates another case-insensitive parameter name",
                 variable.name
@@ -247,8 +248,20 @@ pub fn design_variable_parameter_lines(
         return Err(errors);
     }
 
-    Ok(ordered
-        .into_values()
+    let resolved =
+        rspice_simulation_contract::design_variable_resolution::resolve_design_variables(variables);
+    let errors = resolved
+        .errors()
+        .map(|(index, error)| format!("design variable {}: {error}", variables[index].name))
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    Ok(resolved
+        .deck_order()
+        .iter()
+        .map(|&index| &variables[index])
         .filter(|variable| design_variable_applies(variable, context))
         .map(DesignVariable::netlist_statement)
         .collect())
@@ -830,10 +843,45 @@ mod tests {
         assert_eq!(
             lines,
             [
-                ".param ALOAD=1.00000000000000000e4",
-                ".param ANALYSIS_ONLY=4.00000000000000000e4",
-                ".param ZLOAD=2.00000000000000000e4",
+                ".param ALOAD={1.00000000000000000e4}",
+                ".param ANALYSIS_ONLY={4.00000000000000000e4}",
+                ".param ZLOAD={2.00000000000000000e4}",
             ]
+        );
+    }
+
+    /// A variable that names another is written after it, whatever the
+    /// names' order, and a loop refuses the deck naming both variables.
+    #[test]
+    fn a_variable_is_written_after_the_variables_it_names() {
+        let active_cell = CellViewRef::default_top();
+        let context = DesignVariableNetlistContext {
+            active_cell: &active_cell,
+            analysis_instances: &[],
+        };
+        let lines = design_variable_parameter_lines(
+            &[
+                variable("A_LOAD", "2*Z_BASE", DesignVariableScope::Testbench),
+                variable("Z_BASE", "1k", DesignVariableScope::Testbench),
+            ],
+            context,
+        )
+        .unwrap();
+        assert_eq!(lines, [".param Z_BASE={1k}", ".param A_LOAD={2*Z_BASE}"]);
+
+        let errors = design_variable_parameter_lines(
+            &[
+                variable("A", "B", DesignVariableScope::Testbench),
+                variable("B", "A", DesignVariableScope::Testbench),
+            ],
+            context,
+        )
+        .unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.ends_with("A and B name each other")),
+            "{errors:?}"
         );
     }
 
