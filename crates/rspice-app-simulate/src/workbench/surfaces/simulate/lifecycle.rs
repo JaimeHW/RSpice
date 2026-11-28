@@ -127,7 +127,7 @@ pub(super) fn selected_analysis(
             .or_else(|| {
                 contextual_dependency_error
                     .is_some()
-                    .then(|| "Repair PSS prerequisite".to_owned())
+                    .then(|| "Repair the periodic steady state".to_owned())
             })
             .or(disabled_prerequisite_label);
     // The visible quick action must be executable for the selected root, not

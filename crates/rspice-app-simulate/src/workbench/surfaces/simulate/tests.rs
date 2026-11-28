@@ -877,7 +877,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
     );
     assert_eq!(
         selected.repair_label.as_deref(),
-        Some("Repair PSS prerequisite")
+        Some("Repair the periodic steady state")
     );
 
     let unavailable_sources = EnvelopeSourceCatalog {
