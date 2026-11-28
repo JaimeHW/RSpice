@@ -5,7 +5,7 @@ use super::*;
 
 pub(super) fn document_kind_label(kind: HardcopyDocumentKind) -> &'static str {
     match kind {
-        HardcopyDocumentKind::SchematicOrSymbol => "Schematic / symbol",
+        HardcopyDocumentKind::SchematicOrSymbol => "Schematic",
         HardcopyDocumentKind::LayoutWithLayerLegend => "Layout + layer legend",
         HardcopyDocumentKind::PlotOrWorksheet => "Plot / worksheet",
         HardcopyDocumentKind::Report => "Report",
