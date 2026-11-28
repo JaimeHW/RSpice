@@ -416,3 +416,73 @@ fn lowering_datasets_kept_asks_before_it_deletes_runs() {
     );
     assert_eq!(state(e), (5, 50));
 }
+
+/// The plan's output check is built once for the plan as it stands: two frames
+/// of Outputs build it once, Save reads the same one, and an edit builds it
+/// again. The two pages count what a run captures from the same ledger.
+#[test]
+fn the_output_check_is_built_once_until_the_plan_changes() {
+    use rspice_app_simulate::workbench::surfaces::simulate::page_outputs::{
+        forget_output_check, output_check, take_output_checks_built,
+    };
+
+    let mut engineer = Engineer::new_project("checked");
+    let e = &mut engineer;
+    divider(e);
+    add_output(e, "Raw voltage / current", "vout", "V(out)", None);
+    e.setup_page("Outputs & expressions");
+    forget_output_check();
+    take_output_checks_built();
+    let outputs_page = e.painted();
+    e.painted();
+    assert_eq!(
+        take_output_checks_built(),
+        1,
+        "two frames with no edit build the check once"
+    );
+
+    e.setup_page("Save, streaming & retention policy");
+    let save_page = e.painted();
+    assert_eq!(
+        take_output_checks_built(),
+        0,
+        "Save reads the check Outputs built"
+    );
+    let check = output_check(
+        &e.replay.app.state.model,
+        &e.replay.app.simulation_controller,
+    )
+    .expect("the plan resolves");
+    let captured = check.ledger.output_count();
+    let count = format!(
+        "{captured} output{} \u{b7} {} streamed",
+        if captured == 1 { "" } else { "s" },
+        check.ledger.streamed_count()
+    );
+    assert!(
+        outputs_page.contains(&count) && save_page.contains(&count),
+        "both pages say {count}:\n{outputs_page}\n----\n{save_page}"
+    );
+
+    e.press("Plan output selection mode", Role::ComboBox);
+    e.press("Selected only", Role::ListBoxOption);
+    assert_eq!(
+        e.replay
+            .app
+            .state
+            .model
+            .sim_setup
+            .save_policy
+            .output_selection_mode,
+        rspice_app_state::state::OutputSelectionMode::ExplicitOnly
+    );
+    e.painted();
+    assert_eq!(take_output_checks_built(), 1, "an edit builds it again");
+    e.painted();
+    e.painted();
+    assert_eq!(
+        take_output_checks_built(),
+        0,
+        "and the frames after read it"
+    );
+}

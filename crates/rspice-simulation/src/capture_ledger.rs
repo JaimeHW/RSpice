@@ -350,6 +350,12 @@ impl CaptureLedger {
     pub const fn streamed_count(&self) -> usize {
         self.streamed
     }
+
+    /// Outputs a run captures, over every group.
+    #[must_use]
+    pub fn output_count(&self) -> usize {
+        self.rows.iter().map(|row| row.outputs).sum()
+    }
 }
 
 /// Project one plan's effective outputs onto its capture groups.

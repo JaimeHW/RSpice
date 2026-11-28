@@ -366,10 +366,8 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
         .expect("payload");
     let ledger = page_capture_ledger(&app);
     let registry = page_outputs::projected_output_bytes_for(
-        &app.state.model,
-        &app.simulation_controller,
-        &payload,
-        &page_save::capture_workload(&app.state.model).0,
+        &page_outputs::output_check(&app.state.model, &app.simulation_controller)
+            .expect("the plan resolves"),
     );
     assert!(
         !registry.is_empty(),

@@ -58,23 +58,19 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     // no outputs to forecast, and the registry that would list them has to say
     // so in its own words rather than paint the empty table an authored plan
     // with nothing saved in it paints.
-    let payload = match plan_payload(cx.model) {
-        Ok(payload) => payload,
+    let check = match output_check(cx.model, cx.handles.run_controller) {
+        Ok(check) => check,
         Err(reason) => {
             unresolved_plan(ui, &reason);
             return;
         }
     };
-    // Priced once for the route. Pricing the capture workload expands the
-    // declared space, and both halves of this page price against it: the
-    // registry to give each row its size, the storage card to total them.
-    let (workload, _) = super::page_save::capture_workload(cx.model);
-    registry(ui, cx, &payload, &workload);
+    registry(ui, cx, &check);
     card_row(
         ui,
         cx,
-        |ui, cx| selected_record(ui, cx, &payload),
-        |ui, cx| storage_read(ui, cx.model, cx.handles.run_controller, &payload, &workload),
+        |ui, cx| selected_record(ui, cx, &check.payload),
+        |ui, _| storage_read(ui, &check),
     );
 }
 
@@ -89,14 +85,199 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
 /// "author an output", the other is "this plan is broken", and a page that
 /// spells them the same way states a fact about a plan when in truth nothing
 /// here is known about it at all.
-pub(super) fn plan_payload(model: &Model) -> Result<SimulationPlanPayload, String> {
+fn plan_payload(model: &Model) -> Result<&SimulationPlanPayload, String> {
     let plan_id = model.sim_setup.stable_analysis_plan()?.id();
     model
         .workspace
         .content
         .plan_data(plan_id)
-        .cloned()
         .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
+}
+
+/// The plan's output check: what each authored output resolves to, the set a
+/// run captures with what each of those resolves to, what the plan's queue
+/// costs, and the ledger that totals it. Every count and total the Outputs and
+/// Save pages state is read from one of these.
+///
+/// Building one freezes the plan, seals the model sources (reading and hashing
+/// every external model file) and builds the task list, so it is built when
+/// the plan, the design, the model libraries or the save policy change and
+/// every frame between reads the one held.
+pub struct OutputCheck {
+    /// The plan payload the check was built from.
+    pub payload: SimulationPlanPayload,
+    /// One report per authored output, in the payload's order.
+    pub reports: Vec<SavedOutputPreflightReport>,
+    /// What each authored output names that the design lacks, in the
+    /// payload's order: "No net outt in ota2s".
+    pub unknown: Vec<Option<String>>,
+    /// The outputs a run captures, with their reports and the groups that own
+    /// them, or why they cannot be resolved.
+    pub captured: Result<
+        (
+            Vec<SavedOutput>,
+            Vec<SavedOutputPreflightReport>,
+            CaptureGroupMembership,
+        ),
+        String,
+    >,
+    /// What the plan's queue costs the ledger, with the reason it is a
+    /// ceiling when the queue could not be resolved.
+    pub workload: (capture_ledger::CaptureWorkload, Option<String>),
+    /// The captured outputs priced against their groups.
+    pub ledger: capture_ledger::CaptureLedger,
+}
+
+/// What an [`OutputCheck`] was built from, in the cheapest exact form each
+/// has: the plan by the revision every committed output, group, analysis, run
+/// set and save-policy edit advances, the design by its projection key and the
+/// model libraries by their catalogue key. The payload is compared as well, so
+/// a plan reopened at a revision it held before is not taken for it.
+#[derive(PartialEq)]
+struct OutputCheckKey {
+    plan: Option<(
+        crate::product::SimulationPlanId,
+        crate::product::ObjectRevision,
+    )>,
+    design: crate::state::workspace::DesignProjectionKey,
+    models: u64,
+    save: crate::workbench::app_state::SimulationSavePolicy,
+}
+
+impl OutputCheckKey {
+    /// `None` where the design has no key, which builds the check every time.
+    fn of(model: &Model) -> Option<Self> {
+        Some(Self {
+            plan: model.active_plan_revision(),
+            design: model.workspace.design_projection_key(
+                &model.library_manager,
+                &model.workspace.content.active_view,
+                &model.schematic,
+            )?,
+            models: model.model_library_manager.design_inspection_catalog_key(),
+            save: model.sim_setup.save_policy,
+        })
+    }
+}
+
+thread_local! {
+    /// The check last built, with what it was built from.
+    static HELD_CHECK: std::cell::RefCell<Option<(OutputCheckKey, std::sync::Arc<OutputCheck>)>> =
+        const { std::cell::RefCell::new(None) };
+    /// The output last checked for the Add output dialog, with its report.
+    static HELD_DRAFT: std::cell::RefCell<
+        Option<(OutputCheckKey, SavedOutput, SavedOutputPreflightReport)>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    static CHECKS_BUILT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The plan's output check, built when what it reads changed since the last
+/// one and read otherwise. `Err` is why the plan has no outputs to check.
+pub fn output_check(
+    model: &Model,
+    controller: &SimulationController,
+) -> Result<std::sync::Arc<OutputCheck>, String> {
+    let payload = plan_payload(model)?;
+    let key = OutputCheckKey::of(model);
+    if let Some(key) = &key {
+        let held = HELD_CHECK.with_borrow(|slot| {
+            slot.as_ref()
+                .filter(|(at, check)| at == key && check.payload == *payload)
+                .map(|(_, check)| std::sync::Arc::clone(check))
+        });
+        if let Some(held) = held {
+            return Ok(held);
+        }
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    CHECKS_BUILT.with(|built| built.set(built.get().saturating_add(1)));
+    let reports = controller.saved_outputs_preflight(model, &payload.saved_outputs);
+    let occurrences = model.simulation_occurrence_nets().ok();
+    let design = model.plan_root_reference().cell;
+    let unknown = payload
+        .saved_outputs
+        .iter()
+        .map(|output| {
+            occurrences.as_deref().and_then(|occurrences| {
+                rspice_simulation::output_contract::selection::unknown_signal(
+                    output,
+                    occurrences,
+                    &design,
+                )
+            })
+        })
+        .collect();
+    let captured = controller
+        .effective_saved_outputs_preflight(model, &payload.saved_outputs, &payload.capture_groups)
+        .map_err(|error| error.to_string());
+    let workload = super::page_save::capture_workload(model);
+    let unresolved = CaptureGroupMembership::default();
+    let (outputs, output_reports, membership) = match &captured {
+        Ok((outputs, reports, membership)) => (outputs.as_slice(), reports.as_slice(), membership),
+        Err(_) => (&[][..], &[][..], &unresolved),
+    };
+    let ledger = capture_ledger::CaptureLedger::resolve(
+        &payload.capture_groups,
+        outputs,
+        output_reports,
+        membership,
+        model.sim_setup.save_policy.output_selection_mode,
+        &workload.0,
+    );
+    let check = std::sync::Arc::new(OutputCheck {
+        payload: payload.clone(),
+        reports,
+        unknown,
+        captured,
+        workload,
+        ledger,
+    });
+    if let Some(key) = key {
+        HELD_CHECK.set(Some((key, std::sync::Arc::clone(&check))));
+    }
+    Ok(check)
+}
+
+/// One output the plan does not hold yet, checked against it: the Add output
+/// dialog asks twice a frame, and is answered from the last check while
+/// neither the output nor what it is checked against changed.
+pub(super) fn checked_draft(
+    model: &Model,
+    controller: &SimulationController,
+    output: &SavedOutput,
+) -> SavedOutputPreflightReport {
+    let key = OutputCheckKey::of(model);
+    if let Some(key) = &key {
+        let held = HELD_DRAFT.with_borrow(|slot| {
+            slot.as_ref()
+                .filter(|(at, checked, _)| at == key && checked == output)
+                .map(|(_, _, report)| report.clone())
+        });
+        if let Some(held) = held {
+            return held;
+        }
+    }
+    let report = controller.saved_output_preflight(model, output);
+    if let Some(key) = key {
+        HELD_DRAFT.set(Some((key, output.clone(), report.clone())));
+    }
+    report
+}
+
+/// Output checks built on this thread since this was last asked.
+#[cfg(any(test, feature = "test-support"))]
+pub fn take_output_checks_built() -> u64 {
+    CHECKS_BUILT.with(|built| built.replace(0))
+}
+
+/// Drop the held output check, so the next reader builds one.
+#[cfg(any(test, feature = "test-support"))]
+pub fn forget_output_check() {
+    HELD_CHECK.set(None);
 }
 
 /// What the page says instead of a registry when the plan will not resolve.
@@ -138,21 +319,19 @@ fn unresolved_plan(ui: &mut Ui, reason: &str) {
 /// the authored one: schematic probes are appended to it, and Save all adds
 /// the nets a run plots.
 pub fn projected_output_bytes_for(
-    model: &Model,
-    controller: &SimulationController,
-    payload: &SimulationPlanPayload,
-    workload: &rspice_simulation::capture_ledger::CaptureWorkload,
+    check: &OutputCheck,
 ) -> std::collections::HashMap<crate::product::SavedOutputId, Option<u64>> {
-    controller
-        .effective_saved_outputs_preflight(model, &payload.saved_outputs, &payload.capture_groups)
+    check
+        .captured
+        .as_ref()
         .map(|(effective, reports, _)| {
             effective
                 .iter()
-                .zip(&reports)
+                .zip(reports)
                 .map(|(output, report)| {
                     (
                         output.id,
-                        capture_ledger::priced_output_bytes(report, workload),
+                        capture_ledger::priced_output_bytes(report, &check.workload.0),
                     )
                 })
                 .collect()
@@ -182,39 +361,18 @@ fn written_bytes(model: &Model, output: crate::product::SavedOutputId) -> Option
     Some(samples.saturating_mul(2 * std::mem::size_of::<f64>() as u64))
 }
 
-fn registry(
-    ui: &mut Ui,
-    cx: &mut Cx<'_, SimulateFeature>,
-    payload: &SimulationPlanPayload,
-    workload: &rspice_simulation::capture_ledger::CaptureWorkload,
-) {
+fn registry(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, check: &OutputCheck) {
+    let payload = &check.payload;
     let outputs = &payload.saved_outputs;
-    let reports = cx
-        .handles
-        .run_controller
-        .saved_outputs_preflight(cx.model, outputs);
+    let reports = &check.reports;
     let query = cx.state.saved_output_filter.clone();
-    // A name the design lacks is said on its row, ahead of what the analyses
-    // make of the output: the run goes on and finds nothing under it.
-    let occurrences = cx.model.simulation_occurrence_nets().ok();
-    let design = cx.model.plan_root_reference().cell;
-    let unknown = |output: &SavedOutput| {
-        occurrences.as_deref().and_then(|occurrences| {
-            rspice_simulation::output_contract::selection::unknown_signal(
-                output,
-                occurrences,
-                &design,
-            )
-        })
-    };
     // Which group holds each output, and what it will cost. Both were readable
     // only after selecting a row, so the registry could not be scanned for the
     // one output that dominates the forecast or for the one that landed in the
     // wrong group. Membership comes from the resolver the Save page's ledger
     // uses.
     let membership = CaptureGroupMembership::resolve(&payload.capture_groups, outputs);
-    let projected =
-        projected_output_bytes_for(cx.model, cx.handles.run_controller, payload, workload);
+    let projected = projected_output_bytes_for(check);
     let group_name = |index: usize| -> String {
         let owner = membership.owner(index);
         payload
@@ -250,7 +408,10 @@ fn registry(
         .iter()
         .enumerate()
         .map(|(index, output)| {
-            let (status, status_tone) = unknown(output).map_or_else(
+            // A name the design lacks is said on its row, ahead of what the
+            // analyses make of the output: the run goes on and finds nothing
+            // under it.
+            let (status, status_tone) = check.unknown.get(index).cloned().flatten().map_or_else(
                 || status_cell(reports.get(index)),
                 |reason| (reason, Tone::Warn),
             );
@@ -1527,32 +1688,14 @@ fn replace_output(
 /// Outputs whose size is indeterminate are still listed rather than folded in
 /// as zero: a total that silently omitted them would understate the budget by
 /// exactly the outputs the plan knows least about.
-fn storage_read(
-    ui: &mut Ui,
-    model: &Model,
-    controller: &SimulationController,
-    payload: &SimulationPlanPayload,
-    workload: &rspice_simulation::capture_ledger::CaptureWorkload,
-) {
-    let selection = controller.effective_saved_outputs_preflight(
-        model,
-        &payload.saved_outputs,
-        &payload.capture_groups,
-    );
-    let (exact_bytes, indeterminate, tasks) = match selection {
-        Ok((effective, reports, membership)) => {
+fn storage_read(ui: &mut Ui, check: &OutputCheck) {
+    let ledger = &check.ledger;
+    let (exact_bytes, indeterminate, tasks) = match &check.captured {
+        Ok((_, reports, _)) => {
             let tasks = reports
                 .iter()
                 .map(SavedOutputPreflightReport::compatible_analysis_count)
                 .sum::<usize>();
-            let ledger = capture_ledger::CaptureLedger::resolve(
-                &payload.capture_groups,
-                &effective,
-                &reports,
-                &membership,
-                model.sim_setup.save_policy.output_selection_mode,
-                workload,
-            );
             let named = ledger
                 .indeterminate()
                 .iter()
@@ -1575,6 +1718,7 @@ fn storage_read(
                     "Prepared retention forecast",
                     &format_bytes(exact_bytes),
                 );
+                rule_row(ui, "Captured by a run", &capture_count(ledger));
                 rule_row(
                     ui,
                     "Compatible tasks",
@@ -1599,6 +1743,17 @@ fn storage_read(
             );
         },
     );
+}
+
+/// How many outputs a run captures and how many of them stream, as Outputs
+/// and Save both state it: "18 outputs · 17 streamed".
+pub(super) fn capture_count(ledger: &capture_ledger::CaptureLedger) -> String {
+    let captured = ledger.output_count();
+    format!(
+        "{captured} output{} \u{b7} {} streamed",
+        if captured == 1 { "" } else { "s" },
+        ledger.streamed_count()
+    )
 }
 
 #[cfg(test)]

@@ -11,8 +11,7 @@ use egui::Ui;
 
 use crate::product::RunId;
 use crate::state::SimulationPage;
-use crate::state::workspace::SimulationPlanPayload;
-use crate::state::{CaptureGroupMembership, RunRetention, SavedOutputStreaming};
+use crate::state::{CaptureGroupMembership, RunRetention};
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_history::SetupParts;
 use crate::workbench::framework::feature::Cx;
@@ -36,52 +35,36 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     // states a save policy, a group ledger and a forecast for a plan it could
     // not resolve — numbers that read as "this run keeps nothing" rather than
     // "there is no run to price".
-    let payload = match super::page_outputs::plan_payload(cx.model) {
-        Ok(payload) => payload,
+    let check = match super::page_outputs::output_check(cx.model, cx.handles.run_controller) {
+        Ok(check) => check,
         Err(reason) => {
             unresolved_plan(ui, &reason);
             return;
         }
     };
-    let selection = cx.handles.run_controller.effective_saved_outputs_preflight(
-        cx.model,
-        &payload.saved_outputs,
-        &payload.capture_groups,
-    );
-    let (effective_outputs, reports, membership, selection_error) = match selection {
-        Ok((outputs, reports, membership)) => (outputs, reports, membership, None::<String>),
-        Err(error) => (
-            Vec::new(),
-            Vec::new(),
-            CaptureGroupMembership::default(),
-            Some(error.to_string()),
-        ),
+    let payload = &check.payload;
+    let unresolved = CaptureGroupMembership::default();
+    let (effective_outputs, membership, selection_error) = match &check.captured {
+        Ok((outputs, _, membership)) => (outputs.as_slice(), membership, None::<String>),
+        Err(error) => (&[][..], &unresolved, Some(error.clone())),
     };
     // The page states one forecast, and this is where it comes from: the same
     // fold `validate_plan_saved_output_budget` prices the run with, over the
     // same participation-aware workload. The page adds nothing to it.
-    let (workload, workload_error) = capture_workload(cx.model);
-    let ledger = CaptureLedger::resolve(
-        &payload.capture_groups,
-        &effective_outputs,
-        &reports,
-        &membership,
-        cx.model.sim_setup.save_policy.output_selection_mode,
-        &workload,
-    );
+    let ledger = &check.ledger;
     // A forecast whose basis changed has to say so. Over-pricing is the safe
     // direction, but a number that quietly means something else is not a
     // forecast a reader can act on.
-    let selection_error = selection_error.or(workload_error);
+    let selection_error = selection_error.or_else(|| check.workload.1.clone());
     // The card reports what was asked of it and the page acts on it, so the
     // card needs only the state it draws from — every command it can raise is
     // a plan transaction, and those belong to the frame that owns preflight.
     let command = groups::capture_groups(
         ui,
         cx,
-        &effective_outputs,
-        &ledger,
-        &membership,
+        effective_outputs,
+        ledger,
+        membership,
         selection_error.as_deref(),
     );
     if let Some(command) = command {
@@ -90,7 +73,7 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     card_row(
         ui,
         cx,
-        |ui, cx| streaming_contract(ui, cx, &payload),
+        |ui, cx| streaming_contract(ui, cx, ledger),
         retention_contract,
     );
 }
@@ -234,27 +217,11 @@ fn unresolved_plan(ui: &mut Ui, reason: &str) {
     );
 }
 
-fn streaming_contract(
-    ui: &mut Ui,
-    cx: &mut Cx<'_, SimulateFeature>,
-    payload: &SimulationPlanPayload,
-) {
-    // What the run will do, not what the rows were authored as. A capture group
-    // rewrites the streaming of every output it owns, and this card counted
-    // the authored records — so a plan whose group overrode it reported a
-    // policy no task would run under. Projected through the ledger's
-    // own owner, on a copy, so reading the card never rewrites the plan.
-    let mut effective = payload.saved_outputs.clone();
-    rspice_simulation::capture_ledger::project_onto_groups(&payload.capture_groups, &mut effective);
-    let streamed = effective
-        .iter()
-        .filter(|output| {
-            matches!(
-                output.streaming,
-                SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation
-            )
-        })
-        .count();
+fn streaming_contract(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>, ledger: &CaptureLedger) {
+    // What the run will do, counted where the groups card and Outputs count
+    // it: the ledger over the outputs a run captures, after each group has
+    // rewritten the streaming of the outputs it owns.
+    let streamed = ledger.streamed_count();
     card(
         ui,
         "Streaming",
@@ -275,8 +242,8 @@ fn streaming_contract(
                 );
                 rule_row(
                     ui,
-                    "Streamed while solving",
-                    &format!("{streamed} of {}", effective.len()),
+                    "Captured by a run",
+                    &super::page_outputs::capture_count(ledger),
                 );
                 rule_row(
                     ui,

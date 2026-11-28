@@ -12,9 +12,7 @@ pub(super) fn saved_output_dialog(
     let enabled = draft.validation_error.is_none();
     let candidate = saved_output_from_draft(cx, &draft).ok();
     let preflight = candidate.as_ref().map(|output| {
-        cx.handles
-            .run_controller
-            .saved_output_preflight(cx.model, output)
+        super::super::page_outputs::checked_draft(cx.model, cx.handles.run_controller, output)
     });
     let inferred_unit = candidate.as_ref().map_or_else(
         || inferred_output_unit(&draft.expression),
@@ -139,10 +137,8 @@ pub(super) fn validate_saved_output_draft(
     draft: &SavedOutputDraft,
 ) -> Result<(), String> {
     let output = saved_output_from_draft(cx, draft)?;
-    let report = cx
-        .handles
-        .run_controller
-        .saved_output_preflight(cx.model, &output);
+    let report =
+        super::super::page_outputs::checked_draft(cx.model, cx.handles.run_controller, &output);
     if let SavedOutputSemanticStatus::Invalid { reason } = report.semantic_status() {
         return Err(reason.clone());
     }
