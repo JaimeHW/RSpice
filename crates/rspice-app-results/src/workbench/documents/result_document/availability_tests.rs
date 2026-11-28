@@ -889,9 +889,9 @@ fn every_tab_the_strip_draws_can_be_opened() {
     }
 }
 
-/// The labels the quick view's chrome publishes, each with whether it is a
-/// tab, on the frame after the one that settles its sheet.
-fn quick_view_labels(state: &mut ResultsTestHost) -> Vec<(bool, String)> {
+/// The accessibility nodes the quick view publishes, on the frame after the
+/// one that settles its sheet.
+fn quick_view_nodes(state: &mut ResultsTestHost) -> Vec<egui::accesskit::Node> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -917,20 +917,25 @@ fn quick_view_labels(state: &mut ResultsTestHost) -> Vec<(bool, String)> {
         .and_then(|output| output.platform_output.accesskit_update)
         .expect("the quick view publishes an accessibility tree")
         .nodes
+        .into_iter()
+        .map(|(_, node)| node)
+        .collect()
+}
+
+/// The labels the quick view's chrome publishes, each with whether it is a
+/// tab.
+fn quick_view_labels(state: &mut ResultsTestHost) -> Vec<(bool, String)> {
+    quick_view_nodes(state)
         .iter()
-        .filter_map(|(_, node)| {
+        .filter_map(|node| {
             let tab = node.role() == egui::accesskit::Role::Tab;
             node.label().map(|label| (tab, label.to_owned()))
         })
         .collect()
 }
 
-/// A dataset with one view to offer draws no strip of one tab: the sheet's
-/// one bar carries the document's actions, the row goes to the sheet, and
-/// the view is named by its pane header alone. A dataset that feeds two
-/// views keeps its strip, with the actions on it once.
-#[test]
-fn one_view_draws_no_tab_strip_and_its_bar_carries_the_document() {
+/// A pole-zero run, whose one view is the pole-zero plane.
+fn pole_zero_state() -> ResultsTestHost {
     use crate::state::{ComplexResultValue, PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
     let evidence = |count: u64| PoleZeroRootSetEvidence::Qualified {
         certificate: PoleZeroSpectrumCertificate {
@@ -946,7 +951,7 @@ fn one_view_draws_no_tab_strip_and_its_bar_carries_the_document() {
         real,
         imaginary: 0.0,
     };
-    let mut state = state_with_analysis(
+    state_with_analysis(
         AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
             AnalysisResultPayload::PoleZero {
                 poles: vec![root(-1.0e3)],
@@ -956,7 +961,92 @@ fn one_view_draws_no_tab_strip_and_its_bar_carries_the_document() {
                 gain: Some(2.0),
             },
         ),
-    );
+    )
+}
+
+/// An operating point of two nodes, whose one view is its sheet.
+fn operating_point_state() -> ResultsTestHost {
+    let value = |name: &str, value: f64| crate::state::OperatingPointValue {
+        name: name.to_owned(),
+        value,
+        unit: "V".to_owned(),
+    };
+    let mut analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
+    analysis.dc_op = Some(crate::state::DcOpResult {
+        node_voltages: vec![value("V(in)", 0.72), value("V(out)", 0.9125)],
+        branch_currents: Vec::new(),
+        power_dissipation: Vec::new(),
+    });
+    state_with_analysis(analysis)
+}
+
+/// Every control of the view strip, and of the sheet bar a strip of one tab
+/// folded into, stands centred above the row's rule: its painted rect leaves
+/// a whole, equal gap above and below it, as the accessibility tree places
+/// it.
+#[test]
+fn the_strip_and_the_folded_bar_centre_every_control_above_their_rule() {
+    use egui::accesskit::Role;
+    for (scene, mut state, bar, folded) in [
+        ("pole-zero", pole_zero_state(), "Result sheet controls", true),
+        (
+            "operating point",
+            operating_point_state(),
+            "Structured result controls",
+            true,
+        ),
+        ("transient", transient_state(), "Result views", false),
+    ] {
+        let nodes = quick_view_nodes(&mut state);
+        let tabs = nodes.iter().filter(|node| node.role() == Role::Tab).count();
+        assert_eq!(tabs == 0, folded, "{scene}: the strip folds only for one view");
+        let rows: Vec<_> = nodes
+            .iter()
+            .filter(|node| node.role() == Role::Toolbar && node.label() == Some(bar))
+            .collect();
+        assert_eq!(rows.len(), 1, "{scene}: one {bar}");
+        let row = rows[0].bounds().expect("the row has bounds");
+        let controls: Vec<_> = nodes
+            .iter()
+            .filter(|node| {
+                matches!(
+                    node.role(),
+                    Role::Button
+                        | Role::Tab
+                        | Role::RadioButton
+                        | Role::CheckBox
+                        | Role::TextInput
+                        | Role::ComboBox
+                )
+            })
+            .filter_map(|node| Some((node.label().unwrap_or_default(), node.bounds()?)))
+            .filter(|(_, bounds)| {
+                bounds.x0 >= row.x0
+                    && bounds.x1 <= row.x1
+                    && bounds.y0 >= row.y0
+                    && bounds.y1 <= row.y1
+            })
+            .collect();
+        assert!(controls.len() >= 2, "{scene}: {controls:?}");
+        for (label, bounds) in controls {
+            // The row's last point is its rule.
+            let above = bounds.y0 - row.y0;
+            let below = row.y1 - 1.0 - bounds.y1;
+            assert!(
+                above == below && above.fract() == 0.0 && above >= 1.0,
+                "{scene}: {label:?} stands {above} below the top and {below} above the rule"
+            );
+        }
+    }
+}
+
+/// A dataset with one view to offer draws no strip of one tab: the sheet's
+/// one bar carries the document's actions, the row goes to the sheet, and
+/// the view is named by its pane header alone. A dataset that feeds two
+/// views keeps its strip, with the actions on it once.
+#[test]
+fn one_view_draws_no_tab_strip_and_its_bar_carries_the_document() {
+    let mut state = pole_zero_state();
     let count = |labels: &[(bool, String)], wanted: &str| {
         labels.iter().filter(|(_, label)| label == wanted).count()
     };
