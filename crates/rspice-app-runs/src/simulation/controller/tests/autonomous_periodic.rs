@@ -51,7 +51,7 @@ fn response_source(
     config: QpssConfig,
 ) -> (Engine, rspice_core::Netlist, QpssOperatingPoint) {
     let netlist = rspice_core::Netlist::parse(deck).unwrap();
-    let mut settings = rspice_simulation::netlist_preparation::build_engine_config(&netlist, None);
+    let mut settings = rspice_simulation::netlist_preparation::build_engine_config(&netlist);
     settings.tolerance = config.solver.relative_tolerance;
     let engine = Engine::try_new_with_resolved_config(settings).unwrap();
     let point = engine.run_qpss(&netlist, config).unwrap();

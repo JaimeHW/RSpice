@@ -387,18 +387,14 @@ pub fn append_project_veriloga_directive(
     *source = splice_before_terminal_end_card(source, &directive);
 }
 
-pub fn build_engine_config(
-    netlist: &rspice_core::Netlist,
-    options: Option<&rspice_simulation_contract::options::SimulationOptions>,
-) -> SimulationConfig {
-    match options {
-        Some(opts) => opts.resolve_simulation_config(Some(&netlist.options)),
-        None => resolve_simulation_config(
-            &SimulationConfig::default(),
-            Some(&netlist.options),
-            &SimulationConfigOverrides::default(),
-        ),
-    }
+/// The engine configuration a deck states. A plan's options reach it on the
+/// deck's own `.OPTIONS` card, so this is the one route.
+pub fn build_engine_config(netlist: &rspice_core::Netlist) -> SimulationConfig {
+    resolve_simulation_config(
+        &SimulationConfig::default(),
+        Some(&netlist.options),
+        &SimulationConfigOverrides::default(),
+    )
 }
 
 #[cfg(test)]

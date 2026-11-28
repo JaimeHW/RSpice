@@ -187,7 +187,7 @@ mod tests {
     fn optimization_expressions_use_signed_current_power_parameters_and_functions() {
         let deck = "Objective expressions\n.param RLOAD=2k gain=4\nV1 in 0 1\nR1 in 0 {RLOAD}\n.save V(in)\n.end\n";
         let netlist = parse_runner_netlist_with_abort(deck, None, &NoAbort).unwrap();
-        let dc = Engine::new(build_engine_config(&netlist, None))
+        let dc = Engine::new(build_engine_config(&netlist))
             .run_dc_op_with_abort(&netlist, &NoAbort)
             .unwrap();
         for (expression, expected) in [

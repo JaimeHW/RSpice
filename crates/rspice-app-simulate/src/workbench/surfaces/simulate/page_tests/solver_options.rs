@@ -64,7 +64,7 @@ fn the_current_tolerance_is_one_stored_number_the_engine_reads() {
     assert_eq!(stated, ["+ IABSTOL=1e-10"], "{deck}");
     let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
     assert_eq!(
-        rspice_simulation::netlist_preparation::build_engine_config(&parsed, None)
+        rspice_simulation::netlist_preparation::build_engine_config(&parsed)
             .convergence_config
             .current_abstol,
         1e-10
@@ -89,7 +89,7 @@ fn a_plan_states_no_step_ceiling_until_one_is_typed() {
     );
     assert!(!deck.contains("MAXTIMESTEP"), "{deck}");
     let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
-    let config = rspice_simulation::netlist_preparation::build_engine_config(&parsed, None);
+    let config = rspice_simulation::netlist_preparation::build_engine_config(&parsed);
     assert!(
         config.max_timestep.is_infinite(),
         "the engine's ceiling is the transient's own step, got {}",
@@ -108,7 +108,7 @@ fn a_plan_states_no_step_ceiling_until_one_is_typed() {
     );
     let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
     assert_eq!(
-        rspice_simulation::netlist_preparation::build_engine_config(&parsed, None).max_timestep,
+        rspice_simulation::netlist_preparation::build_engine_config(&parsed).max_timestep,
         2e-3
     );
 }
@@ -144,7 +144,7 @@ fn the_plan_temperature_is_the_run_sets_reference_alone() {
     );
     let parsed = rspice_core::Netlist::parse(&deck).expect("the deck parses");
     assert_eq!(
-        rspice_simulation::netlist_preparation::build_engine_config(&parsed, None).temperature,
+        rspice_simulation::netlist_preparation::build_engine_config(&parsed).temperature,
         85.0 + 273.15
     );
 }
@@ -303,7 +303,7 @@ fn simulation_compatibility_commits_through_the_solver_transaction() {
     );
     let parsed = rspice_core::Netlist::parse(&deck).unwrap();
     assert_eq!(
-        rspice_simulation::netlist_preparation::build_engine_config(&parsed, None).spice_dialect,
+        rspice_simulation::netlist_preparation::build_engine_config(&parsed).spice_dialect,
         rspice_core::SpiceDialect::Xyce
     );
     harness.model.sim_setup.session.options_draft.itl1 = "81".into();

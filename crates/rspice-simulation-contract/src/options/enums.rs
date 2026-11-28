@@ -190,8 +190,7 @@ impl DampingStrategy {
 
     /// The studio's spelling of a resolved engine value.
     ///
-    /// The inverse of `options::model`'s `core_damping_strategy`, for the one
-    /// reader that reports what a resolved `SimulationConfig` holds rather
+    /// For the one reader that reports what a resolved `SimulationConfig` holds rather
     /// than what someone authored: the advanced-options panel, when the
     /// analysis's accuracy tier assigned the strategy after the deck.
     #[must_use]
@@ -224,8 +223,6 @@ pub enum MatrixSolver {
     Lu,
     /// General supernodal sparse LU.
     SparseLu,
-    /// Retired legacy serialized value; no longer presented by the UI.
-    Gmres,
     /// RSpice's circuit-specialized sparse LU solver.
     Klu,
 }
@@ -235,7 +232,6 @@ impl MatrixSolver {
         match self {
             MatrixSolver::Lu => "Automatic (Circuit/Supernodal LU)",
             MatrixSolver::SparseLu => "Supernodal Sparse LU",
-            MatrixSolver::Gmres => "Automatic (legacy GMRES setting)",
             MatrixSolver::Klu => "RSpice Circuit LU",
         }
     }
@@ -247,11 +243,10 @@ impl MatrixSolver {
     /// Return the explicit core-backend override selected by the user.
     ///
     /// `Lu` is the UI's automatic setting, so it must leave backend selection
-    /// to the simulation dialect and matrix profile. The retired `Gmres`
-    /// value is treated the same way when loading older settings.
+    /// to the simulation dialect and matrix profile.
     pub fn core_backend_override(self) -> Option<rspice_core::solver::RealSolverBackend> {
         match self {
-            MatrixSolver::Lu | MatrixSolver::Gmres => None,
+            MatrixSolver::Lu => None,
             MatrixSolver::SparseLu => Some(rspice_core::solver::RealSolverBackend::Faer),
             MatrixSolver::Klu => Some(rspice_core::solver::RealSolverBackend::Klu),
         }

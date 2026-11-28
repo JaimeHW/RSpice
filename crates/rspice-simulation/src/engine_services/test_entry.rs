@@ -41,7 +41,7 @@ pub(crate) fn driven_pss_config(
     harmonics: usize,
     tolerance: Value,
 ) -> PssRunConfig {
-    let tones = rspice_core::engine::Engine::new(super::build_engine_config(netlist, None))
+    let tones = rspice_core::engine::Engine::new(super::build_engine_config(netlist))
         .transient_source_names_with_abort(netlist, &NoAbort)
         .expect("the deck's sources elaborate");
     PssRunConfig::new(fundamental, tones, harmonics, tolerance)

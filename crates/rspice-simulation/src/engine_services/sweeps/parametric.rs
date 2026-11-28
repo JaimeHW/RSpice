@@ -63,7 +63,7 @@ pub fn run_parametric_analysis_with_base_and_source_path_and_abort(
         })?;
 
     let is_data_sweep = matches!(step_cmd.sweep, StepSweep::Data { .. });
-    let engine_config = super::super::build_engine_config(&netlist, None);
+    let engine_config = super::super::build_engine_config(&netlist);
     let values = if is_data_sweep {
         Vec::new()
     } else {

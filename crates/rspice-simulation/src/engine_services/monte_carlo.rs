@@ -624,7 +624,7 @@ R2 out 0 1k
             // running any other.
             let netlist =
                 parse_sampled(MODEL_CARD_STATISTICS_DECK, seed).expect("the trial deck reparses");
-            let engine = Engine::new(build_engine_config(&netlist, None));
+            let engine = Engine::new(build_engine_config(&netlist));
             let solved = engine
                 .run_dc_op_with_abort(&netlist, &NoAbort)
                 .expect("the trial re-solves");

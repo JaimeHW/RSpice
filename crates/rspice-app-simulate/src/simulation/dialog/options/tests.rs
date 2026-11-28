@@ -58,23 +58,16 @@ fn simulation_compatibility_survives_draft_persistence_and_execution_routes() {
         // Inherited source policy must survive; each explicit choice must
         // override it through both the prepared deck and direct API path.
         let source = "compatibility\nV1 in 0 1\nR1 in 0 1k\n.options RSPICE_DIALECT=XYCE\n.end\n";
-        let authored = rspice_core::Netlist::parse(source).unwrap();
         let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
             source,
             &restored.to_spice_options(27.0),
         );
         let parsed = rspice_core::Netlist::parse(&deck).unwrap();
-        let engine = rspice_simulation::netlist_preparation::build_engine_config(&parsed, None);
+        let engine = rspice_simulation::netlist_preparation::build_engine_config(&parsed);
         let expected = compatibility
             .core_override()
             .unwrap_or(rspice_core::SpiceDialect::Xyce);
         assert_eq!(engine.spice_dialect, expected);
-        assert_eq!(
-            restored
-                .resolve_simulation_config(Some(&authored.options))
-                .spice_dialect,
-            expected
-        );
         assert_eq!(
             restored.preset_name(),
             SimulationOptions::default().preset_name()

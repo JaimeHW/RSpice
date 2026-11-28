@@ -22,82 +22,40 @@ fn a_project_saved_with_a_retired_gear_method_still_opens() {
     }
 }
 
+/// The options record names only what the engine reads. A key it does not
+/// name, a retired control among them, is refused rather than dropped, and the
+/// retired matrix value names no solver.
 #[test]
-fn a_project_saved_with_the_retired_controls_still_opens() {
-    // The shape refuses unknown fields so a typo in a project file is
-    // caught rather than dropped, which means every retired key has to be
-    // named explicitly for older projects to keep opening.
-    let mut persisted = serde_json::to_value(SimulationOptions::default()).expect("options encode");
-    let object = persisted.as_object_mut().expect("options are an object");
-    object.insert("itl2".to_owned(), serde_json::json!(50));
-    object.insert("timestep_factor".to_owned(), serde_json::json!(16.0));
-    object.insert("verbose".to_owned(), serde_json::json!(true));
-    object.insert("save_internals".to_owned(), serde_json::json!(true));
-
-    let restored: SimulationOptions = serde_json::from_value(persisted)
-        .expect("a project written before these controls were retired decodes");
-
-    assert_eq!(
-        serde_json::to_value(&restored).expect("restored options re-encode"),
-        serde_json::to_value(SimulationOptions::default()).expect("options encode"),
-        "a retired key must decode away, not resurface on the next save"
-    );
-}
-
-#[test]
-fn matrix_selection_and_pivrel_reach_core_configuration() {
-    for (solver, expected) in [
-        (MatrixSolver::Lu, None),
-        (
-            MatrixSolver::SparseLu,
-            Some(rspice_core::solver::RealSolverBackend::Faer),
-        ),
-        (
-            MatrixSolver::Klu,
-            Some(rspice_core::solver::RealSolverBackend::Klu),
-        ),
-        (MatrixSolver::Gmres, None),
+fn a_retired_control_or_matrix_value_is_refused() {
+    for (key, value) in [
+        ("itl2", serde_json::json!(50)),
+        ("timestep_factor", serde_json::json!(16.0)),
+        ("verbose", serde_json::json!(true)),
+        ("save_internals", serde_json::json!(true)),
+        ("solver", serde_json::json!("Gmres")),
     ] {
-        let options = SimulationOptions {
-            solver,
-            pivrel: 0.125,
-            pivtol: 2.5e-14,
-            ..SimulationOptions::default()
-        };
-        let config = options.resolve_simulation_config(None);
-        assert_eq!(config.matrix_solver, expected);
-        assert_eq!(config.matrix_pivot_tolerance, 0.125);
-        assert_eq!(config.matrix_absolute_pivot_tolerance, 2.5e-14);
+        let mut persisted =
+            serde_json::to_value(SimulationOptions::default()).expect("options encode");
+        persisted
+            .as_object_mut()
+            .expect("options are an object")
+            .insert(key.to_owned(), value);
+        assert!(
+            serde_json::from_value::<SimulationOptions>(persisted).is_err(),
+            "{key} decoded"
+        );
     }
 }
 
 #[test]
-fn truncation_error_controls_reach_the_core_configuration() {
-    let options = SimulationOptions {
-        trtol: 1.5,
-        transient_lte_reltol: Some(2.5e-4),
-        transient_lte_abstol: Some(3.5e-9),
-        ..SimulationOptions::default()
-    };
-
-    let overrides = options.simulation_config_overrides();
-
-    assert_eq!(overrides.transient_trtol, Some(1.5));
-    assert_eq!(overrides.transient_lte_reltol, Some(2.5e-4));
-    assert_eq!(overrides.transient_lte_abstol, Some(3.5e-9));
-}
-
-#[test]
 fn an_unset_truncation_bound_leaves_the_engines_own_in_force() {
-    let overrides = SimulationOptions::default().simulation_config_overrides();
-
-    assert_eq!(
-        overrides.transient_trtol,
-        Some(7.0),
-        "TRTOL always has a value, and it is the SPICE default"
-    );
-    assert_eq!(overrides.transient_lte_reltol, None);
-    assert_eq!(overrides.transient_lte_abstol, None);
+    let card = SimulationOptions::default().to_spice_options(27.0);
+    for key in ["TRTOL", "RELTOL", "ABSTOL"] {
+        assert!(
+            !card.contains(key),
+            "the default plan states {key}:\n{card}"
+        );
+    }
 }
 
 #[test]
@@ -237,10 +195,6 @@ fn a_new_project_integrates_trapezoidally_and_an_explicit_switch_is_written() {
     // is a choice the deck then states.
     let options = SimulationOptions::default();
     assert_eq!(options.method, IntegrationMethod::Trap);
-    assert_eq!(
-        options.simulation_config_overrides().integration_method,
-        Some(rspice_core::numerics::integration::IntegrationMethod::Trapezoidal)
-    );
     assert!(!options.to_spice_options(27.0).contains("METHOD"));
 
     let switched = SimulationOptions {
